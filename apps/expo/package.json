@@ -1,0 +1,42 @@
+{
+  "name": "@medusapos/expo",
+  "version": "0.1.0",
+  "private": true,
+  "main": "expo-router/entry",
+  "scripts": {
+    "dev": "expo start",
+    "build:web": "expo export --platform web",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "expo": "~54.0.0",
+    "expo-router": "~6.0.0",
+    "expo-status-bar": "~3.0.0",
+    "expo-sqlite": "~16.0.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-native": "0.81.0",
+    "react-native-web": "~0.21.2",
+    "react-native-screens": "~4.11.0",
+    "react-native-safe-area-context": "~5.4.0",
+    "@tallyui/core": "^0.2.0",
+    "@tallyui/components": "^1.0.0",
+    "@tallyui/theme": "^0.2.0",
+    "@tallyui/pos": "^0.1.0",
+    "@tallyui/database": "^1.0.0",
+    "@tallyui/storage-sqlite": "^0.2.0",
+    "@tallyui/connector-medusa": "^1.0.0",
+    "rxdb": "^16.21.1",
+    "rxjs": "^7.8.2",
+    "tailwindcss": "^4.1.18",
+    "uniwind": "^1.2.2"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.0",
+    "typescript": "~5.8.3"
+  }
+}

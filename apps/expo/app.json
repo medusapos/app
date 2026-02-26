@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "MedusaPOS",
+    "slug": "medusapos",
+    "version": "0.1.0",
+    "scheme": "medusapos",
+    "web": {
+      "bundler": "metro",
+      "output": "single",
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
