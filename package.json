@@ -1,0 +1,25 @@
+{
+  "private": true,
+  "name": "@medusapos/monorepo",
+  "packageManager": "pnpm@10.28.2",
+  "scripts": {
+    "dev": "turbo dev",
+    "dev:expo": "turbo dev --filter=@medusapos/expo",
+    "dev:desktop": "turbo dev --filter=@medusapos/desktop",
+    "build": "turbo build",
+    "test": "vitest run",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "clean": "turbo clean"
+  },
+  "dependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "~5.8.3"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.18"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["rxdb", "esbuild"]
+  }
+}
