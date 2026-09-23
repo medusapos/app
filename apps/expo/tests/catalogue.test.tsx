@@ -136,13 +136,13 @@ describe('replicated catalogue recovery', () => {
         return { documents: [], checkpoint: { id: 'done' } };
       },
     } } } };
-    const credentials = { api_token: 'test' };
+    const headers = { Authorization: 'Bearer test' };
     const onUnauthorized = vi.fn();
     const db = await createTallyDatabase({ connector,
       name: productCacheName(connector.id, baseUrl), storage: productCacheStorage() });
     await db.products.insert({ ...products[0], handle: 'blue-hat' });
     await db.close();
-    const { result, unmount } = renderHook(() => useReplicatedProducts(connector, credentials, baseUrl, onUnauthorized));
+    const { result, unmount } = renderHook(() => useReplicatedProducts(connector, headers, baseUrl, onUnauthorized));
     try {
       await waitFor(() => expect(result.current.state).toBe('offline'));
       expect(result.current.products.map((product) => product.id)).toEqual(['hat']);

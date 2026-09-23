@@ -72,8 +72,8 @@ function SettingsScreen(props: SignedInProps) {
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus }: SignedInProps & {
   settings: StoreSettings; settingsStatus: string | null;
 }) {
-  const credentials = useMemo(() => ({ api_token: session.token }), [session.token]);
-  const { products, state, error } = useReplicatedProducts(connector, credentials, session.baseUrl, onUnauthorized);
+  const headers = useMemo(() => ({ Authorization: 'Bearer ' + session.token }), [session.token]);
+  const { products, state, error } = useReplicatedProducts(connector, headers, session.baseUrl, onUnauthorized);
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
   const { record, state: outboxState, recent } = useOutboxContext();
   const attentionCount = needsAttention(recent).length;
