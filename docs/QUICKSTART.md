@@ -11,10 +11,11 @@ The POS does not charge cards itself.
 - A Medusa 2.21 store and access to its configuration.
 - An admin user's email and password, without multi-factor authentication (MFA).
 - An HTTPS backend URL. For local testing, `http://localhost:9100` or
-  `http://127.0.0.1:9100` also works; use your store's port. An HTTPS POS cannot
+  `http://127.0.0.1:9100` also works; use your store's port. Chrome then asks
+  to let the POS access devices on your local network: choose **Allow**, or
+  sign-in reports that it could not reach the backend. An HTTPS POS cannot
   connect to a plain-HTTP backend on another machine.
-- The hosted app URL shared with you (initially a `*.vercel.app` URL, later
-  `https://app.medusapos.com`) and one browser tab for the POS.
+- The hosted app, `https://app.medusapos.com`, and one browser tab for the POS.
 
 ## Install the plugin
 
@@ -48,10 +49,9 @@ npx medusa db:migrate
 
 ## Configure your store
 
-1. Add the POS origin to both `ADMIN_CORS` and `AUTH_CORS`, keeping existing
-   origins. An origin is the app's scheme and hostname (and port if present),
-   without a path or trailing slash: for example, `https://your-pos.vercel.app`.
-   Use the actual hosted app URL you received, then restart the backend.
+1. Add the POS origin `https://app.medusapos.com` to both `ADMIN_CORS` and
+   `AUTH_CORS`, keeping existing origins. Write it exactly like that, without
+   a path or trailing slash, then restart the backend.
 2. Make sure the default sales channel has a stock location with an address.
    Tax follows that address. If you set `salesChannelId` or `locationId`,
    configure the selected channel and location instead.
@@ -70,7 +70,7 @@ npx medusa db:migrate
 
 ## Sign in
 
-Open the hosted app URL. Enter your backend URL, admin email and password,
+Open `https://app.medusapos.com`. Enter your backend URL, admin email and password,
 then sign in. Let the catalogue load while you are online before selling
 offline. Keep just one POS tab open in this browser.
 
@@ -110,6 +110,10 @@ while a rejected order needs investigation.
 - **CORS errors:** check that both `ADMIN_CORS` and `AUTH_CORS` include the
   exact origin you opened, including HTTPS and any port. Restart the backend
   after changing them.
+- **Sign-in says "Could not reach the backend":** check the backend URL and
+  that the backend is running. With a `localhost` backend, Chrome also needs
+  the POS's permission to access your local network: allow it from the
+  prompt, or from the site settings (the icon left of the address bar).
 - **"Missing shipping option":** configure a shipping option at the POS stock
   location, or set `shippingOptionId` in the plugin options and restart.
 - **Sign-in says "not supported yet":** multi-factor sign-in is not supported;
