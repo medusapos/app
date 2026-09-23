@@ -8,6 +8,7 @@
     "dev:desktop": "turbo dev --filter=@medusapos/desktop",
     "build": "turbo build",
     "test": "vitest run",
+    "e2e": "playwright test -c e2e/playwright.config.ts",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"
@@ -17,6 +18,7 @@
     "typescript": "~5.8.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@testing-library/react": "^16.3.3",
     "jsdom": "^28.1.0",
     "react-native-web": "~0.21.2",
