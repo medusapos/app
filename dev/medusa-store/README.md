@@ -46,6 +46,12 @@ channel, warehouse, four sample products). It adds:
 - A "Dev Store Sale" price list: 20% off roughly one product in eight.
 - 2,000 customers (`customer0001@tally.test`…), most with an address.
 - 300 completed historical orders.
+- Each Europe tax region gets its standard VAT rate as the default via
+  `seed-tax-rates.ts`: DE 19%, DK 25%, GB 20%, SE 25%, FR 20%, ES 21%, IT 22%.
+  The warehouse (and so walk-in POS sales) is in Copenhagen, DK. On an existing
+  store, apply this once after `scripts/deploy.sh` by running
+  `npx medusa exec ./src/scripts/seed-tax-rates.ts` from
+  `~/Projects/medusa-dev/apps/backend`.
 - The fixture product `tally-fixture-mug` (SKU `TLY-FIXTURE-MUG`): simple,
   inventory not managed, always sellable. Tests can depend on it, like
   `woo-belt` on the WooCommerce dev sites.
