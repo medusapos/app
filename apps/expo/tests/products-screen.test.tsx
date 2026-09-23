@@ -185,7 +185,8 @@ describe('ProductsScreen session routing', () => {
   });
   it('signs out when product replication reports unauthorized', async () => {
     await mount();
-    const [, , baseUrl, onUnauthorized] = vi.mocked(useReplicatedProducts).mock.calls[0];
+    const [, headers, baseUrl, onUnauthorized] = vi.mocked(useReplicatedProducts).mock.calls[0];
+    expect(headers).toEqual({ Authorization: 'Bearer ' + JSON.parse(localStorage.getItem('medusapos.session')!).token });
     expect(baseUrl).toBe('https://store.test');
     act(() => onUnauthorized());
     expect(localStorage.getItem('medusapos.session')).toBeNull();
