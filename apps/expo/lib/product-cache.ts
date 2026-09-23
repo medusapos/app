@@ -1,11 +1,12 @@
 import { removeRxDatabase, type RxStorage } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
+import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 
 const openCaches = new Map<string, { remove(): Promise<unknown> }>();
 
-/** RxDB storage for the product cache (in-memory until A7 persists it). */
+/** Persistent browser storage, with memory storage for environments without IndexedDB. */
 export function productCacheStorage(): RxStorage<any, any> {
-  return getRxStorageMemory();
+  return globalThis.indexedDB ? getRxStorageDexie() : getRxStorageMemory();
 }
 
 /** Names one backend using an injective encoding of its exact UTF-16 base URL. */
