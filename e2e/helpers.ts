@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 
-const backend = 'http://localhost:9100';
-const credentials = { email: 'e2e@tally.test', password: 'e2e-password' };
+const backend = process.env.E2E_BACKEND_URL ?? 'http://localhost:9100';
+const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 
 export async function signIn(page: Page) {
   await page.goto('/login');
@@ -19,7 +19,11 @@ export async function signIn(page: Page) {
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled({ timeout: 1000 });
   }).toPass({ timeout: 20000 });
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
+  if (process.env.E2E_BACKEND_URL !== undefined) {
+    await expect(page.getByText(/Up to date · [\d,.  ]+ products/)).toBeVisible({ timeout: 5 * 60_000 });
+  } else {
+    await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
+  }
 }
 
 // Numeric cash is in EUR major units. Return the displayed receipt total before New sale.
@@ -104,7 +108,8 @@ export async function ordersByClientId(token: string): Promise<AdminOrder[]> {
 }
 
 export async function stockBySku(token: string): Promise<Record<string, number>> {
-  const response = await fetch(`${backend}/admin/inventory-items?limit=100&fields=sku,location_levels.stocked_quantity`, {
+  const skus = ['E2E-1', 'E2E-2', 'E2E-3', 'E2E-4', 'E2E-5'].map(sku => `sku[]=${sku}`).join('&');
+  const response = await fetch(`${backend}/admin/inventory-items?limit=100&fields=sku,location_levels.stocked_quantity&${skus}`, {
     headers: { Authorization: `Bearer ${token}` },
   });
   expect(response.ok, await response.clone().text()).toBeTruthy();
