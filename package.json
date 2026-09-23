@@ -17,6 +17,9 @@
     "typescript": "~5.8.3"
   },
   "devDependencies": {
+    "@testing-library/react": "^16.3.3",
+    "jsdom": "^28.1.0",
+    "react-native-web": "~0.21.2",
     "vitest": "^4.0.18"
   },
   "pnpm": {

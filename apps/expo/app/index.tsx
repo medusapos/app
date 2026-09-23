@@ -1,25 +1,25 @@
-import { useDeferredValue, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Text, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { Redirect, router, Stack } from 'expo-router';
 
 import { ConnectorProvider } from '@tallyui/core';
-import {
-  ProductImage,
-  ProductPrice,
-  ProductSku,
-  ProductStockBadge,
-  ProductTitle,
-  SearchInput,
-} from '@tallyui/components';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { searchProducts } from '@tallyui/pos';
 
-import { storeConfig } from '../lib/config';
+import { Catalogue } from '../components/catalogue';
+import { Cart } from '../components/cart';
+import { Tender } from '../components/tender';
+import { Receipt } from '../components/receipt';
+import { SyncStatus } from '../components/sync-status';
+import { needsAttention } from '../lib/order-store';
+import { useOutboxContext } from '../lib/outbox-context';
+import { getRegisterId } from '../lib/register';
+import { defaultStorage, type Session } from '../lib/session';
+import { useSession } from '../lib/session-context';
+import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
+import { useSale } from '../lib/use-sale';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 
 const connector = medusaConnector;
-const credentials = { api_token: storeConfig.apiKey };
-const traitContext = { currency: storeConfig.currency };
 const traits = connector.traits.product;
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -27,79 +27,95 @@ const STATE_LABEL: Record<SyncState, string> = {
   syncing: 'Syncing',
   synced: 'Up to date',
   error: 'Sync error',
+  offline: 'Offline · cached catalogue',
 };
 
-/**
- * Product lookup: every product replicated from the store, searchable by
- * name, SKU or barcode. The screen only composes TallyUI pieces; swapping
- * `connector` for another backend's connector is the only backend-specific
- * line.
- */
 export default function ProductsScreen() {
-  const { products, state, error } = useReplicatedProducts(connector, credentials, storeConfig.baseUrl);
-  const [query, setQuery] = useState('');
-  const deferredQuery = useDeferredValue(query);
+  const { session, signOut, reportUnauthorized } = useSession();
+  if (!session) return <Redirect href="/login" />;
+  return <SettingsScreen key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized} />;
+}
+
+type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void };
+
+function SettingsScreen(props: SignedInProps) {
+  const { session, onUnauthorized } = props;
+  const [settings, setSettings] = useState(() => loadCachedSettings(defaultStorage(), session.baseUrl));
+  const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void fetchStoreSettings(session).then((next) => {
+      if (!active) return;
+      saveCachedSettings(defaultStorage(), session.baseUrl, next);
+      setSettings(next);
+      setOffline(false);
+    }).catch((error: Error) => {
+      if (!active) return;
+      if (error instanceof StoreSettingsError && error.code === 'unauthorized') onUnauthorized();
+      else {
+        setError(error.message);
+        setOffline(error instanceof StoreSettingsError && error.code === 'unreachable');
+      }
+    });
+    return () => { active = false; };
+  }, [session, onUnauthorized, attempt]);
+  if (!settings) return <View dataSet={{ print: 'hide' }} className="flex-1 items-center justify-center gap-4">
+    <Text>{error ?? 'Loading store settings…'}</Text>
+    {error ? <Pressable accessibilityRole="button" onPress={() => setAttempt(attempt + 1)}><Text>Retry</Text></Pressable> : null}
+  </View>;
+  return <SignedInProducts {...props} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
+}
+
+function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus }: SignedInProps & {
+  settings: StoreSettings; settingsStatus: string | null;
+}) {
+  const credentials = useMemo(() => ({ api_token: session.token }), [session.token]);
+  const { products, state, error } = useReplicatedProducts(connector, credentials, session.baseUrl, onUnauthorized);
+  const [registerId] = useState(() => getRegisterId(defaultStorage()));
+  const { record, state: outboxState, recent } = useOutboxContext();
+  const attentionCount = needsAttention(recent).length;
+  const sale = useSale(settings, { registerId, cashierRef: session.email, onSaleCompleted: record });
+  const { width } = useWindowDimensions();
+  const traitContext = useMemo(() => ({ currency: settings.currency }), [settings.currency]);
 
   const sorted = useMemo(
     () => products.filter(traits.isSellable).sort((a, b) => traits.getName(a).localeCompare(traits.getName(b))),
     [products],
   );
   const sellableCount = sorted.length;
-  const results = useMemo(
-    () => searchProducts(sorted, deferredQuery, traits),
-    [sorted, deferredQuery],
-  );
+  const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
+    + (error ? ` · ${error}` : '');
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: 'Products' }} />
-      <View className="flex-1 bg-bg">
-        <View className="gap-2 border-b border-border bg-card px-4 pb-3 pt-3">
-          <SearchInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search name, SKU or barcode"
-            autoFocus
-          />
-          <View className="flex-row items-center gap-2">
-            {state === 'syncing' || state === 'connecting' ? (
-              <ActivityIndicator size="small" />
-            ) : null}
-            <Text className={state === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
-              {connector.name} · {STATE_LABEL[state]} · {sellableCount.toLocaleString()} products
-              {deferredQuery.trim() ? ` · ${results.length.toLocaleString()} matching` : ''}
-              {error ? ` · ${error}` : ''}
-            </Text>
-          </View>
+      <Stack.Screen options={{ title: 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
+        <View dataSet={{ print: 'hide' }} className="flex-row gap-4">
+        <Pressable accessibilityRole="button" onPress={() => router.push('/orders')}>
+          <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }}>
+          <Text className="text-foreground">Sign out</Text>
+        </Pressable>
         </View>
-
-        <FlatList
-          data={results}
-          keyExtractor={(item) => traits.getId(item)}
-          initialNumToRender={20}
-          keyboardShouldPersistTaps="handled"
-          renderItem={({ item }) => (
-            <View className="flex-row items-center gap-3 border-b border-border bg-card px-4 py-2.5">
-              <ProductImage doc={item} size={48} showPlaceholder className="rounded-md" />
-              <View className="flex-1 gap-0.5">
-                <ProductTitle doc={item} className="text-[15px] font-semibold" numberOfLines={2} />
-                <ProductSku doc={item} />
-              </View>
-              <View className="items-end gap-1">
-                <ProductPrice doc={item} className="text-[15px]" />
-                <ProductStockBadge doc={item} showQuantity className="self-end bg-transparent px-0 py-0" />
-              </View>
+      ) }} />
+      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} settings={settings}
+        cashier={session.email} registerId={registerId} newSale={sale.newSale} /> :
+        <View dataSet={{ print: 'hide' }} className="flex-1 bg-bg">
+          {settingsStatus ? <Text>{settingsStatus}</Text> : null}
+          <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
+            <View className="flex-1">
+              <Catalogue products={sorted} traits={traits} currency={settings.currency}
+                onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
+              <SyncStatus state={outboxState} />
             </View>
-          )}
-          ListEmptyComponent={
-            state === 'synced' ? (
-              <Text className="mt-10 text-center text-sm text-muted-foreground">
-                {deferredQuery.trim() ? `No products match "${deferredQuery.trim()}".` : 'No products yet.'}
-              </Text>
-            ) : null
-          }
-        />
-      </View>
+            <View className="flex-1 border-t border-border bg-card">
+              {sale.stage.kind === 'cart' ? <Cart sale={sale} /> : <Tender sale={sale} />}
+            </View>
+          </View>
+        </View>}
     </ConnectorProvider>
   );
 }
