@@ -1,6 +1,6 @@
 import { useDeferredValue, useMemo, useState } from 'react';
-import { ActivityIndicator, FlatList, Text, View } from 'react-native';
-import { Stack } from 'expo-router';
+import { ActivityIndicator, FlatList, Pressable, Text, View } from 'react-native';
+import { Redirect, router, Stack } from 'expo-router';
 
 import { ConnectorProvider } from '@tallyui/core';
 import {
@@ -15,10 +15,11 @@ import { medusaConnector } from '@tallyui/connector-medusa';
 import { searchProducts } from '@tallyui/pos';
 
 import { storeConfig } from '../lib/config';
+import type { Session } from '../lib/session';
+import { useSession } from '../lib/session-context';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 
 const connector = medusaConnector;
-const credentials = { api_token: storeConfig.apiKey };
 const traitContext = { currency: storeConfig.currency };
 const traits = connector.traits.product;
 
@@ -36,7 +37,14 @@ const STATE_LABEL: Record<SyncState, string> = {
  * line.
  */
 export default function ProductsScreen() {
-  const { products, state, error } = useReplicatedProducts(connector, credentials, storeConfig.baseUrl);
+  const { session, signOut, reportUnauthorized } = useSession();
+  if (!session) return <Redirect href="/login" />;
+  return <SignedInProducts session={session} signOut={signOut} onUnauthorized={reportUnauthorized} />;
+}
+
+function SignedInProducts({ session, signOut, onUnauthorized }: { session: Session; signOut: () => void; onUnauthorized: () => void }) {
+  const credentials = useMemo(() => ({ api_token: session.token }), [session.token]);
+  const { products, state, error } = useReplicatedProducts(connector, credentials, session.baseUrl, onUnauthorized);
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
 
@@ -52,7 +60,11 @@ export default function ProductsScreen() {
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: 'Products' }} />
+      <Stack.Screen options={{ title: 'Products', headerRight: () => (
+        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }}>
+          <Text className="text-foreground">Sign out</Text>
+        </Pressable>
+      ) }} />
       <View className="flex-1 bg-bg">
         <View className="gap-2 border-b border-border bg-card px-4 pb-3 pt-3">
           <SearchInput

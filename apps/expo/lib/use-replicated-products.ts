@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 
 import { createTallyDatabase, startReplication } from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
+import { isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache } from './product-cache';
 
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error';
 
@@ -14,6 +15,7 @@ export function useReplicatedProducts(
   connector: TallyConnector,
   credentials: Record<string, string>,
   baseUrl: string,
+  onUnauthorized: () => void,
 ) {
   const [products, setProducts] = useState<any[]>([]);
   const [state, setState] = useState<SyncState>('connecting');
@@ -29,11 +31,14 @@ export function useReplicatedProducts(
 
     let cancelled = false;
     let failed = false;
+    let unauthorizedReported = false;
     const cleanup: Array<() => unknown> = [];
 
     (async () => {
       try {
-        const db = await createTallyDatabase({ connector, name: `medusapos_${connector.id}` });
+        const name = productCacheName(connector.id, baseUrl);
+        const db = await createTallyDatabase({ connector, name, storage: productCacheStorage() });
+        cleanup.push(registerOpenCache(name, db));
         cleanup.push(() => db.close());
         const context: SyncContext = {
           connectorId: connector.id,
@@ -53,6 +58,10 @@ export function useReplicatedProducts(
           failed = true;
           setState('error');
           setError(String(err?.parameters?.errors?.[0]?.message ?? err?.message ?? err));
+          if (!unauthorizedReported && isUnauthorizedError(err)) {
+            unauthorizedReported = true;
+            onUnauthorized();
+          }
         });
 
         setState('syncing');
@@ -70,7 +79,7 @@ export function useReplicatedProducts(
       cancelled = true;
       for (const fn of cleanup) fn();
     };
-  }, [connector, baseUrl, credentials]);
+  }, [connector, baseUrl, credentials, onUnauthorized]);
 
   return { products, state, error };
 }

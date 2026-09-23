@@ -40,12 +40,13 @@ Run the app against the dev store (start the store with
 
 ```bash
 cp apps/expo/.env.example apps/expo/.env.local
-# set EXPO_PUBLIC_MEDUSA_API_KEY to the contents of ~/Projects/medusa-dev/.pos-api-key
 pnpm --filter @medusapos/expo web   # http://localhost:8081 (the store's CORS allows this port)
 ```
 
-The API key is inlined into the web bundle, which is acceptable only for the
-localhost dev store. A real register needs a user sign-in flow.
+Sign in with the store's backend URL and an admin user. For the dev store,
+use `http://localhost:9000` and `admin@tally.test`; the password is in
+`dev/medusa-store/scripts/lib.sh`. The backend's `AUTH_CORS` and `ADMIN_CORS`
+must include the app's origin (`http://localhost:8081` for local development).
 
 ## Tech Stack
 
