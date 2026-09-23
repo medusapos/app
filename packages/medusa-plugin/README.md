@@ -1,7 +1,7 @@
 # Medusa POS plugin
 
 Medusa 2.21 plugin for `POST /tally/v1/commands` to ingest POS orders exactly once.
-The endpoint is not built yet. This is a standalone npm package outside the pnpm workspace.
+This is a standalone npm package outside the pnpm workspace.
 
 Run from this directory:
 ```sh
@@ -16,8 +16,49 @@ npm run build
 Module integration tests need local Postgres; set `DB_HOST`, `DB_USERNAME`, and `DB_PASSWORD`.
 The test helper defaults to role `postgres`; use `DB_USERNAME=claude` if that is your local role.
 Set `MEDUSA_DISABLE_TELEMETRY=true` and `XDG_CONFIG_HOME=$PWD/.medusa/xdg` for Medusa commands.
-HTTP integration tests boot the minimal app in `integration-tests/app` on a random port
-and create/drop their own temporary database; they do not use the dev store.
+HTTP integration tests boot the apps in `integration-tests/app` and `integration-tests/plugin-app`
+on random ports and create/drop their own temporary databases; they do not use the dev store.
+The HTTP test script builds the plugin first so `plugin-app` loads its published output.
+
+## Command endpoint
+
+Register the plugin in the tester's `medusa-config.ts`:
+
+```ts
+plugins: [{
+  resolve: '@medusapos/medusa-plugin',
+  options: {
+    // Optional: salesChannelId, locationId, shippingOptionId
+  },
+}]
+```
+
+Run `npx medusa db:migrate`. Add the hosted POS origin to both `ADMIN_CORS` and
+`AUTH_CORS`. Have a shipping option at the POS stock location, or set `shippingOptionId`.
+The optional `salesChannelId` and `locationId` select the POS sales channel and stock location.
+Sign in as a Medusa admin user through `/auth/user/emailpass` and send its JWT as
+`Authorization: Bearer <jwt>` (an authenticated admin session is also accepted).
+
+Send `POST /tally/v1/commands` with `X-Tally-Protocol: 1` and JSON
+`{ commands: CommandEnvelope[] }` containing 1–50 `order.create` version 1 commands.
+Every envelope includes `id` (1–64 characters), object `payload`, string `createdAt`
+and `deviceId`, and a safe integer `attempt` of at least 1.
+A `200 { results: CommandResult[] }` returns one result per command in the same order:
+`applied`, `duplicate` with the original `serverRefs` and warnings, or `rejected`.
+Reusing an id with a different payload rejects it with
+`idempotency_mismatch`; a stored rejection replays as rejected.
+`invalid_payload` rejects malformed payload shapes before claiming, with validation errors in the message; it is not stored in the ledger.
+
+- `400`: unsupported protocol (`{ code: 'unsupported_protocol' }`) or invalid envelope.
+- `401`: no valid admin authentication.
+- `413`: more than 50 commands (or the JSON body exceeds the 1 MB request limit).
+- `409 { code: 'in_progress', id }`: this command is already being processed.
+- `503 { code: 'transient', id, message }`: execution failed; its claim is released for retry.
+
+A `409` or `503` stops the batch at that command. Retry the whole batch; earlier
+completed commands replay as duplicates. Network errors, `5xx`, and `429` are also
+retryable. Preflight `OPTIONS` needs no authentication; CORS uses `ADMIN_CORS` and
+allows `Authorization`, `Content-Type`, and `X-Tally-Protocol`.
 
 ## Order creation workflow
 
@@ -51,7 +92,6 @@ Outcomes are `result` (applied, duplicate with original references and warnings,
 `in_progress` (retryable 409), and `transient` (503 with the thrown error's message).
 Failures release the claim for retry; a completed order is deduplicated on the next run.
 The connection is always unlocked and released; a process crash drops the lock.
-The HTTP endpoint remains for A4.
 
 ## Ledger module
 
