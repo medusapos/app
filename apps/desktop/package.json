@@ -5,8 +5,7 @@
   "main": "main.js",
   "scripts": {
     "dev": "electron .",
-    "build": "echo 'TODO: add electron-builder or electron-forge'",
-    "typecheck": "tsc --noEmit"
+    "build": "echo 'TODO: add electron-builder or electron-forge'"
   },
   "dependencies": {
     "electron-serve": "^2.1.1"
