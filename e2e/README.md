@@ -34,6 +34,7 @@ stock, so either file can run first; Playwright uses one worker.
 
 CI runs both tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.
+Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.
 
 Every fresh harness start destroys only `medusapos_e2e`. It never touches the
 shared dev store. Playwright stops the servers it starts. Outside CI, already
