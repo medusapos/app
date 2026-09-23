@@ -51,7 +51,7 @@ Reusing an id with a different payload rejects it with
 
 - `400`: unsupported protocol (`{ code: 'unsupported_protocol' }`) or invalid envelope.
 - `401`: no valid admin authentication.
-- `413`: more than 50 commands (or the JSON body exceeds Medusa's body limit).
+- `413`: more than 50 commands (or the JSON body exceeds the 1 MB request limit).
 - `409 { code: 'in_progress', id }`: this command is already being processed.
 - `503 { code: 'transient', id, message }`: execution failed; its claim is released for retry.
 

@@ -1,4 +1,5 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core'
 import { executeOrderCreate } from '../../../../workflows/tally-order-create/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
@@ -48,7 +49,10 @@ export async function processBatch(
       return { status: 409, body: { code: 'in_progress', id: outcome.id } }
     }
     if (outcome.kind === 'transient') {
-      return { status: 503, body: { code: 'transient', id: outcome.id, message: outcome.message } }
+      const { id, message } = outcome
+      const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
+      logger.error(`Command ${id} failed transiently: ${message}`)
+      return { status: 503, body: { code: 'transient', id, message: 'Temporary failure, retry later.' } }
     }
     results.push(outcome.result)
   }

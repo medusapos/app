@@ -167,6 +167,17 @@ medusaIntegrationTestRunner({
       expect(await ledger.listTallyCommands({ id: malformed.id }, { withDeleted: true })).toHaveLength(0)
     })
 
+    it('rejects a missing clientOrderId before claiming or taking the advisory lock', async () => {
+      const malformed = command()
+      const { clientOrderId, ...payload } = malformed.payload
+      const response = await post([{ ...malformed, payload }])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([{ id: malformed.id, status: 'rejected', error: {
+        code: 'invalid_payload', message: expect.stringContaining('clientOrderId'),
+      } }])
+      expect(await ledger.listTallyCommands({ id: malformed.id }, { withDeleted: true })).toHaveLength(0)
+    })
+
     it('stops at a fresh claim with 409 and replays the preceding sale on retry', async () => {
       const sales = [command(), command(), command()]
       const claim = await ledger.claim({ id: sales[1].id, type: sales[1].type, fingerprint: commandFingerprint(sales[1]) })
@@ -194,10 +205,13 @@ medusaIntegrationTestRunner({
       const original = run.runOrderCreate
       const spy = jest.spyOn(run, 'runOrderCreate').mockImplementationOnce(original)
         .mockRejectedValueOnce(new Error('Temporary workflow failure'))
+      const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
       const sales = [command(), command(), command()]
       const response = await post(sales)
       expect(response.status).toBe(503)
-      expect(response.data).toEqual({ code: 'transient', id: sales[1].id, message: 'Temporary workflow failure' })
+      expect(response.data).toEqual({ code: 'transient', id: sales[1].id, message: 'Temporary failure, retry later.' })
+      expect(JSON.stringify(response.data)).not.toContain('Temporary workflow failure')
+      expect(log).toHaveBeenCalledWith(`Command ${sales[1].id} failed transiently: Temporary workflow failure`)
       expect(spy).toHaveBeenCalledTimes(2)
       expect(spy.mock.calls[1][1]).toEqual(sales[1])
       expect(spy.mock.calls[1][2]).toBe(ledger.getPluginOptions())
@@ -217,6 +231,31 @@ medusaIntegrationTestRunner({
       const response = await post([sale, { ...command(), deviceId: undefined }])
       expect(response.status).toBe(400)
       expect(response.data.message).toContain('commands[1].deviceId')
+      expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
+    })
+
+    it('accepts 50 commands in a roughly 200 kB body', async () => {
+      const sales = Array.from({ length: 50 }, () => {
+        const sale = command()
+        const { lines, ...payload } = sale.payload
+        return { ...sale, payload: { ...payload, padding: 'x'.repeat(4000) } }
+      })
+      const bodySize = Buffer.byteLength(JSON.stringify({ commands: sales }))
+      expect(bodySize).toBeGreaterThan(100 * 1024)
+      expect(bodySize).toBeLessThan(250 * 1024)
+      const response = await post(sales)
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual(sales.map(sale => ({
+        id: sale.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: expect.stringContaining('lines'),
+        },
+      })))
+    })
+
+    it('rejects a JSON body over 1 MB with 413', async () => {
+      const sale = command()
+      const oversized = { ...sale, payload: { ...sale.payload, padding: 'x'.repeat(1024 * 1024) } }
+      expect((await post([oversized])).status).toBe(413)
       expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
     })
 
