@@ -3,12 +3,15 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 
 const root = resolve('apps/expo/dist');
+const config = JSON.parse(await readFile('apps/expo/vercel.json', 'utf8'));
+const headers = config.headers.find(({ source }) => source === '/(.*)').headers;
 const types = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
 };
 createServer(async (req, res) => {
+  for (const { key, value } of headers) res.setHeader(key, value);
   try {
     let file = resolve(root, '.' + decodeURIComponent(new URL(req.url, 'http://localhost:8099').pathname));
     if (file !== root && !file.startsWith(root + sep)) {

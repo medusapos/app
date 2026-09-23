@@ -30,6 +30,8 @@ and those two resolver hooks.
 
 ## Getting Started
 
+Testing the hosted app? Follow the [tester quick-start](docs/QUICKSTART.md).
+
 ```bash
 git clone https://github.com/TallyUI/tallyui.git ../tallyui   # once
 pnpm install

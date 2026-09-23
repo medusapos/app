@@ -1,0 +1,87 @@
+name: Deploy web app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false
+
+env:
+  # Bump the Vercel CLI version deliberately.
+  VERCEL_CLI_VERSION: 59.26.0
+  # Keep TALLYUI_REF equal to .github/workflows/ci.yml.
+  TALLYUI_REF: 3996453ef752f246167075d06ca3dcda0b3098fd
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check Vercel secrets
+        id: vercel
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [[ -n "$VERCEL_TOKEN" && -n "$VERCEL_ORG_ID" && -n "$VERCEL_PROJECT_ID" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::Deploy skipped: Vercel secrets not configured"
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v5
+        if: steps.vercel.outputs.enabled == 'true'
+        with:
+          path: app
+      - uses: actions/checkout@v5
+        if: steps.vercel.outputs.enabled == 'true'
+        with:
+          repository: TallyUI/tallyui
+          ref: ${{ env.TALLYUI_REF }}
+          path: tallyui
+      - uses: pnpm/action-setup@v4
+        if: steps.vercel.outputs.enabled == 'true'
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v5
+        if: steps.vercel.outputs.enabled == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        if: steps.vercel.outputs.enabled == 'true'
+        working-directory: app
+      - run: pnpm --filter @medusapos/expo build:web
+        if: steps.vercel.outputs.enabled == 'true'
+        working-directory: app
+        env:
+          EXPO_PUBLIC_MEDUSA_URL: ''
+          CI: '1'
+      - run: bash scripts/check-web-bundle.sh apps/expo/dist
+        if: steps.vercel.outputs.enabled == 'true'
+        working-directory: app
+      - run: cp apps/expo/vercel.json apps/expo/dist/
+        if: steps.vercel.outputs.enabled == 'true'
+        working-directory: app
+      - name: Deploy to Vercel
+        # Intentionally deploy apps/expo/dist, the export built and checked in this job.
+        # Vercel serves it as static files with the copied vercel.json;
+        # no vercel build / --prebuilt output is needed.
+        if: steps.vercel.outputs.enabled == 'true'
+        working-directory: app
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          deployment_url=$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy apps/expo/dist --prod --yes --token "$VERCEL_TOKEN")
+          printf 'Deployment URL: %s\n' "$deployment_url" >> "$GITHUB_STEP_SUMMARY"
