@@ -1,4 +1,8 @@
 {
+  "framework": null,
+  "installCommand": "bash ../../scripts/vercel-install.sh",
+  "buildCommand": "EXPO_PUBLIC_MEDUSA_URL= CI=1 pnpm run build:web && bash ../../scripts/check-web-bundle.sh dist",
+  "outputDirectory": "dist",
   "cleanUrls": true,
   "rewrites": [
     { "source": "/((?!_expo/|assets/).*)", "destination": "/index.html" }
