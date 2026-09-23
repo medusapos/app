@@ -1,19 +1,22 @@
-import { useMemo, useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 
 import { ConnectorProvider } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 
 import { Catalogue } from '../components/catalogue';
-import { variantPriceLabel, type CatalogueEntry } from '../lib/catalogue';
-import { storeConfig } from '../lib/config';
-import type { Session } from '../lib/session';
+import { Cart } from '../components/cart';
+import { Tender } from '../components/tender';
+import { Receipt } from '../components/receipt';
+import { getRegisterId } from '../lib/register';
+import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
+import { useSale } from '../lib/use-sale';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 
 const connector = medusaConnector;
-const traitContext = { currency: storeConfig.currency };
 const traits = connector.traits.product;
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -24,22 +27,55 @@ const STATE_LABEL: Record<SyncState, string> = {
   offline: 'Offline · cached catalogue',
 };
 
-/**
- * Product lookup: every product replicated from the store, searchable by
- * name, SKU or barcode. The screen only composes TallyUI pieces; swapping
- * `connector` for another backend's connector is the only backend-specific
- * line.
- */
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized } = useSession();
   if (!session) return <Redirect href="/login" />;
-  return <SignedInProducts session={session} signOut={signOut} onUnauthorized={reportUnauthorized} />;
+  return <SettingsScreen key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized} />;
 }
 
-function SignedInProducts({ session, signOut, onUnauthorized }: { session: Session; signOut: () => void; onUnauthorized: () => void }) {
+type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void };
+
+function SettingsScreen(props: SignedInProps) {
+  const { session, onUnauthorized } = props;
+  const [settings, setSettings] = useState(() => loadCachedSettings(defaultStorage(), session.baseUrl));
+  const [error, setError] = useState<string | null>(null);
+  const [offline, setOffline] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setError(null);
+    void fetchStoreSettings(session).then((next) => {
+      if (!active) return;
+      saveCachedSettings(defaultStorage(), session.baseUrl, next);
+      setSettings(next);
+      setOffline(false);
+    }).catch((error: Error) => {
+      if (!active) return;
+      if (error instanceof StoreSettingsError && error.code === 'unauthorized') onUnauthorized();
+      else {
+        setError(error.message);
+        setOffline(error instanceof StoreSettingsError && error.code === 'unreachable');
+      }
+    });
+    return () => { active = false; };
+  }, [session, onUnauthorized, attempt]);
+  if (!settings) return <View dataSet={{ print: 'hide' }} className="flex-1 items-center justify-center gap-4">
+    <Text>{error ?? 'Loading store settings…'}</Text>
+    {error ? <Pressable accessibilityRole="button" onPress={() => setAttempt(attempt + 1)}><Text>Retry</Text></Pressable> : null}
+  </View>;
+  return <SignedInProducts {...props} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
+}
+
+function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus }: SignedInProps & {
+  settings: StoreSettings; settingsStatus: string | null;
+}) {
   const credentials = useMemo(() => ({ api_token: session.token }), [session.token]);
   const { products, state, error } = useReplicatedProducts(connector, credentials, session.baseUrl, onUnauthorized);
-  const [selected, setSelected] = useState<CatalogueEntry<any> | null>(null);
+  const [registerId] = useState(() => getRegisterId(defaultStorage()));
+  // A9 will wire onSaleCompleted to persistence and sync.
+  const sale = useSale(settings, { registerId, cashierRef: session.email });
+  const { width } = useWindowDimensions();
+  const traitContext = useMemo(() => ({ currency: settings.currency }), [settings.currency]);
 
   const sorted = useMemo(
     () => products.filter(traits.isSellable).sort((a, b) => traits.getName(a).localeCompare(traits.getName(b))),
@@ -51,22 +87,23 @@ function SignedInProducts({ session, signOut, onUnauthorized }: { session: Sessi
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: 'Products', headerRight: () => (
-        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }}>
+      <Stack.Screen options={{ title: 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
+        <Pressable dataSet={{ print: 'hide' }} accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }}>
           <Text className="text-foreground">Sign out</Text>
         </Pressable>
       ) }} />
-      <View className="flex-1 bg-bg">
-        <Catalogue products={sorted} traits={traits} currency={storeConfig.currency}
-          onSelect={setSelected} statusText={statusText} />
-        {selected ? (
-          <View className="border-t border-border bg-card p-4">
-            <Text className="text-foreground">
-              Selected: {traits.getName(selected.product)} · {selected.variant.title} · {variantPriceLabel(selected.variant, storeConfig.currency)}
-            </Text>
+      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} settings={settings}
+        cashier={session.email} registerId={registerId} newSale={sale.newSale} /> :
+        <View dataSet={{ print: 'hide' }} className="flex-1 bg-bg">
+          {settingsStatus ? <Text>{settingsStatus}</Text> : null}
+          <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
+            <Catalogue products={sorted} traits={traits} currency={settings.currency}
+              onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
+            <View className="flex-1 border-t border-border bg-card">
+              {sale.stage.kind === 'cart' ? <Cart sale={sale} /> : <Tender sale={sale} />}
+            </View>
           </View>
-        ) : null}
-      </View>
+        </View>}
     </ConnectorProvider>
   );
 }
