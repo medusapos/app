@@ -148,6 +148,25 @@ medusaIntegrationTestRunner({
       expect(await liveOrders(sales[1].payload.clientOrderId)).toHaveLength(0)
     })
 
+    it('rejects an invalid payload without storing it and continues the batch on replay', async () => {
+      const malformed = command()
+      const { lines, ...payload } = malformed.payload
+      const sales = [{ ...malformed, payload }, command()]
+      const first = await post(sales)
+      expect(first.status).toBe(200)
+      expect(first.data.results).toEqual([
+        { id: malformed.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: expect.stringContaining('lines'),
+        } },
+        expect.objectContaining({ id: sales[1].id, status: 'applied' }),
+      ])
+      expect(await ledger.listTallyCommands({ id: malformed.id }, { withDeleted: true })).toHaveLength(0)
+      const replay = await post(sales)
+      expect(replay.status).toBe(200)
+      expect(replay.data.results).toEqual([first.data.results[0], { ...first.data.results[1], status: 'duplicate' }])
+      expect(await ledger.listTallyCommands({ id: malformed.id }, { withDeleted: true })).toHaveLength(0)
+    })
+
     it('stops at a fresh claim with 409 and replays the preceding sale on retry', async () => {
       const sales = [command(), command(), command()]
       const claim = await ledger.claim({ id: sales[1].id, type: sales[1].type, fingerprint: commandFingerprint(sales[1]) })

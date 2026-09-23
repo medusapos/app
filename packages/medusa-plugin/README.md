@@ -47,6 +47,7 @@ A `200 { results: CommandResult[] }` returns one result per command in the same 
 `applied`, `duplicate` with the original `serverRefs` and warnings, or `rejected`.
 Reusing an id with a different payload rejects it with
 `idempotency_mismatch`; a stored rejection replays as rejected.
+`invalid_payload` rejects malformed payload shapes before claiming, with validation errors in the message; it is not stored in the ledger.
 
 - `400`: unsupported protocol (`{ code: 'unsupported_protocol' }`) or invalid envelope.
 - `401`: no valid admin authentication.
