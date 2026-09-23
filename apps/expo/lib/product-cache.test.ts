@@ -1,8 +1,21 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createRxDatabase } from 'rxdb';
+import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
+import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import {
   clearProductCache, isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache,
 } from './product-cache';
+
+describe('productCacheStorage', () => {
+  it.each([false, true])('uses IndexedDB when available: %s', (available) => {
+    vi.stubGlobal('indexedDB', available ? {} : undefined);
+    try {
+      expect(productCacheStorage().name).toBe(
+        available ? getRxStorageDexie().name : getRxStorageMemory().name,
+      );
+    } finally { vi.unstubAllGlobals(); }
+  });
+});
 
 describe('productCacheName', () => {
   it('encodes the exact URL into an RxDB name', () => {
