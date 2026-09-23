@@ -8,6 +8,7 @@
     "dev:desktop": "turbo dev --filter=@medusapos/desktop",
     "build": "turbo build",
     "test": "vitest run",
+    "e2e": "playwright test -c e2e/playwright.config.ts",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"
