@@ -59,6 +59,14 @@ npx medusa db:migrate
    the plugin's `shippingOptionId` to the option you want to use.
 4. Configure tax rates for the location's country. Prices include or exclude
    tax according to your currency's price preference in Medusa.
+5. If you do not have an admin user without MFA, create one from your store's
+   backend directory, replacing the email and password below with your own:
+
+   ```sh
+   npx medusa user -e you@example.com -p '<a strong password>'
+   ```
+
+   The POS signs in with that email and password.
 
 ## Sign in
 

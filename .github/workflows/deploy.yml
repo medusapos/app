@@ -13,6 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 env:
+  # Bump the Vercel CLI version deliberately.
+  VERCEL_CLI_VERSION: 59.26.0
   # Keep TALLYUI_REF equal to .github/workflows/ci.yml.
   TALLYUI_REF: 3996453ef752f246167075d06ca3dcda0b3098fd
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
@@ -71,6 +73,9 @@ jobs:
         if: steps.vercel.outputs.enabled == 'true'
         working-directory: app
       - name: Deploy to Vercel
+        # Intentionally deploy apps/expo/dist, the export built and checked in this job.
+        # Vercel serves it as static files with the copied vercel.json;
+        # no vercel build / --prebuilt output is needed.
         if: steps.vercel.outputs.enabled == 'true'
         working-directory: app
         env:
@@ -78,5 +83,5 @@ jobs:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          deployment_url=$(npx --yes vercel@latest deploy apps/expo/dist --prod --yes --token "$VERCEL_TOKEN")
+          deployment_url=$(npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy apps/expo/dist --prod --yes --token "$VERCEL_TOKEN")
           printf 'Deployment URL: %s\n' "$deployment_url" >> "$GITHUB_STEP_SUMMARY"

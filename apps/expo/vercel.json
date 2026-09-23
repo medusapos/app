@@ -1,7 +1,7 @@
 {
   "cleanUrls": true,
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!_expo/|assets/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {
