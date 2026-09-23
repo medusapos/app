@@ -94,12 +94,6 @@ export async function runOrderCreate(
         orderId = result.orderId
         stockWarnings = stock.warnings
       } catch (error) {
-        if (MedusaError.isMedusaError(error) && error.type === MedusaError.Types.NOT_ALLOWED && (
-          error.code === 'INSUFFICIENT_INVENTORY' || error.message.includes('does not have the required inventory') ||
-          error.message.includes('Not enough stock')
-        )) {
-          return { id: command.id, status: 'rejected', error: { code: 'insufficient_stock', message: error.message } }
-        }
         throw error
       }
     }
