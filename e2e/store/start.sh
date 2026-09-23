@@ -22,8 +22,8 @@ export PGUSER="${DB_USERNAME:-claude}"
 export PGPASSWORD="${DB_PASSWORD:-}"
 export PGHOST="${DB_HOST:-localhost}"
 export PGPORT=5432
-dropdb --if-exists medusapos_e2e
-createdb medusapos_e2e
+dropdb -U "$PGUSER" -h "$PGHOST" --if-exists medusapos_e2e
+createdb -U "$PGUSER" -h "$PGHOST" medusapos_e2e
 export DATABASE_URL="$(node -e 'const e = process.env; const u = new URL("postgres://localhost:5432/medusapos_e2e"); u.username = e.PGUSER; u.password = e.PGPASSWORD; u.hostname = e.PGHOST; process.stdout.write(u.href)')"
 export TALLY_E2E_PLUGIN=1
 export JWT_SECRET=e2e-jwt-secret COOKIE_SECRET=e2e-cookie-secret

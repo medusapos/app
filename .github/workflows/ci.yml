@@ -47,6 +47,63 @@ jobs:
       - run: pnpm test
         working-directory: app
 
+  e2e:
+    name: End-to-end (web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: app
+      - uses: actions/checkout@v5
+        with:
+          repository: TallyUI/tallyui
+          ref: ${{ env.TALLYUI_REF }}
+          path: tallyui
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: npm ci
+        working-directory: app/packages/medusa-plugin
+      - run: npm ci
+        working-directory: app/dev/medusa-store
+      - run: pnpm exec playwright install --with-deps chromium
+        working-directory: app
+      - run: pnpm e2e
+        working-directory: app
+        env:
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+          CI: 'true'
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-failure
+          path: |
+            app/test-results
+            app/playwright-report
+
   web-export:
     name: Web export
     runs-on: ubuntu-latest

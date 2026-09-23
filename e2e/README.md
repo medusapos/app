@@ -24,9 +24,19 @@ The web export is built with backend URL `http://localhost:9100` and served on
 `http://localhost:8099`, with SPA fallback. The smoke test signs in, sells
 E2E-1 and E2E-4 for exact cash, reads the EUR 15 receipt (including 25% VAT),
 then checks the completed, captured Medusa order and inventory decrement.
+The offline test makes 25 sales (5 online, 20 offline), including cash with
+change and a terminal sale of 3 × E2E-5 against stock of 2. It checks growing
+pending counts, reconnects without reloading, then verifies exactly one paid,
+completed Medusa order per captured client ID, POS totals, exact payment
+amounts, inventory deltas (E2E-5 ends at −1), and the stock warning under
+Orders → Needs attention. Both tests use their own client IDs and starting
+stock, so either file can run first; Playwright uses one worker.
+
+CI runs both tests on every PR in **End-to-end (web)** with Postgres 17 and
+Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 
 Every fresh harness start destroys only `medusapos_e2e`. It never touches the
 shared dev store. Playwright stops the servers it starts. Outside CI, already
-running e2e servers are reused: stop those yourself before a fresh run, since
-the smoke test expects a freshly seeded database. Traces are saved on first retry;
+running e2e servers are reused: stop those yourself before repeating the full
+suite, since the short-sale scenario requires E2E-5 to start at 2. Traces are saved on first retry;
 results and temporary build/pack artifacts are ignored by Git.

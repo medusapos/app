@@ -5,6 +5,7 @@ export default defineConfig({
   workers: 1,
   timeout: 90_000,
   expect: { timeout: 30_000 },
+  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { baseURL: 'http://localhost:8099', trace: 'on-first-retry' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
