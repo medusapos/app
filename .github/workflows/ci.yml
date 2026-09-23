@@ -87,16 +87,23 @@ jobs:
       MEDUSA_DISABLE_TELEMETRY: 'true'
     steps:
       - uses: actions/checkout@v5
+        with:
+          path: app
+      - uses: actions/checkout@v5
+        with:
+          repository: TallyUI/tallyui
+          ref: ${{ env.TALLYUI_REF }}
+          path: tallyui
       - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: packages/medusa-plugin/package-lock.json
+          cache-dependency-path: app/packages/medusa-plugin/package-lock.json
       - run: npm ci
-        working-directory: packages/medusa-plugin
+        working-directory: app/packages/medusa-plugin
       - run: npm run typecheck
-        working-directory: packages/medusa-plugin
+        working-directory: app/packages/medusa-plugin
       - run: npm run test:integration:modules -- --maxWorkers=1
-        working-directory: packages/medusa-plugin
+        working-directory: app/packages/medusa-plugin
       - run: npm run build
-        working-directory: packages/medusa-plugin
+        working-directory: app/packages/medusa-plugin

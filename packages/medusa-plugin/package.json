@@ -18,6 +18,11 @@
     "./*": "./.medusa/server/src/*.js"
   },
   "scripts": {
+    "tallyui-types": "tsc -p tsconfig.tallyui-types.json",
+    "pretypecheck": "npm run tallyui-types",
+    "prebuild": "npm run tallyui-types",
+    "pretest:integration:modules": "npm run tallyui-types",
+    "pretest:unit": "npm run tallyui-types",
     "build": "medusa plugin:build",
     "dev": "medusa plugin:develop",
     "prepublishOnly": "medusa plugin:build",
