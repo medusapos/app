@@ -10,6 +10,9 @@ Open source, modular point of sale for [MedusaJS](https://medusajs.com). Built o
   lookup. Every product is replicated from a Medusa store into a local RxDB
   database, listed with price and stock, and searchable by name, SKU or barcode.
 - `apps/desktop` — Electron desktop wrapper
+- `packages/medusa-plugin` — the Medusa 2.21 plugin that ingests POS orders;
+  outside the pnpm workspace with its own npm lockfile, like the dev store. See
+  its README.
 - `dev/medusa-store` — a Medusa 2.21 dev store with a deterministic seed
   (2,000 products, 2,000 customers, 300 orders). It sits outside the pnpm
   workspace and has its own npm lockfile. See its README.

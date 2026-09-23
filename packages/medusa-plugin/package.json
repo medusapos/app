@@ -1,0 +1,46 @@
+{
+  "name": "@medusapos/medusa-plugin",
+  "version": "0.0.1",
+  "description": "Tally POS commands for Medusa: idempotent order ingestion from offline registers.",
+  "license": "MIT",
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "keywords": ["medusa-plugin", "medusa-v2", "pos"],
+  "files": [".medusa/server"],
+  "exports": {
+    "./package.json": "./package.json",
+    "./workflows": "./.medusa/server/src/workflows/index.js",
+    "./.medusa/server/src/modules/*": "./.medusa/server/src/modules/*/index.js",
+    "./modules/*": "./.medusa/server/src/modules/*/index.js",
+    "./providers/*": "./.medusa/server/src/providers/*/index.js",
+    "./*": "./.medusa/server/src/*.js"
+  },
+  "scripts": {
+    "build": "medusa plugin:build",
+    "dev": "medusa plugin:develop",
+    "prepublishOnly": "medusa plugin:build",
+    "db:generate": "medusa plugin:db:generate",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "TEST_TYPE=unit NODE_OPTIONS=--experimental-vm-modules jest --silent --forceExit",
+    "test:integration:modules": "TEST_TYPE=integration:modules NODE_OPTIONS=--experimental-vm-modules jest --silent=false --forceExit"
+  },
+  "devDependencies": {
+    "@medusajs/cli": "2.21.0",
+    "@medusajs/framework": "2.21.0",
+    "@medusajs/medusa": "2.21.0",
+    "@medusajs/test-utils": "2.21.0",
+    "@swc/core": "^1.7.28",
+    "@swc/jest": "^0.2.36",
+    "@types/jest": "^29.5.13",
+    "@types/node": "^20.12.11",
+    "jest": "^29.7.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.6.2"
+  },
+  "peerDependencies": {
+    "@medusajs/framework": "2.21.0",
+    "@medusajs/medusa": "2.21.0"
+  }
+}
