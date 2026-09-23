@@ -40,8 +40,18 @@ and completion on the same order, never cancelling or deleting it; resume errors
 The stock rejection mapping remains as a fallback for other Medusa refusals.
 Known limit: a channel with several stock locations may reserve at another location than
 the sale's; the dev store has one. See [the stock ADR](../../docs/adr/0003-offline-sale-stock.md).
-The HTTP endpoint and ledger claim/complete calls remain for A4; callers must serialize
-concurrent commands until that ledger wiring is in place.
+
+## Command execution
+
+`executeOrderCreate(container, command, options?)` in `workflows/tally-order-create` fingerprints
+and claims the command, then holds a Postgres session advisory lock for its `clientOrderId`
+on a dedicated connection through the run and completion. It re-checks the claim token
+after acquiring the lock, so an expired worker cannot start after a re-claim.
+Outcomes are `result` (applied, duplicate with original references and warnings, or rejected),
+`in_progress` (retryable 409), and `transient` (503 with the thrown error's message).
+Failures release the claim for retry; a completed order is deduplicated on the next run.
+The connection is always unlocked and released; a process crash drops the lock.
+The HTTP endpoint remains for A4.
 
 ## Ledger module
 

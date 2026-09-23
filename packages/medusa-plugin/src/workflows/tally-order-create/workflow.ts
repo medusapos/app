@@ -22,16 +22,20 @@ const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: st
   const orders = container.resolve(Modules.ORDER)
   const order = await orders.retrieveOrder(orderId)
   const topUps = order.metadata!.tally_stock_topups as StockTopUp[]
-  await container.resolve(Modules.INVENTORY).adjustInventory(topUps.map(topUp => ({
-    inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: -topUp.shortfall,
-  })))
+  await container.resolve(Modules.LOCKING).execute(Array.from(new Set(topUps.map(topUp => topUp.inventory_item_id))), async () => {
+    await container.resolve(Modules.INVENTORY).adjustInventory(topUps.map(topUp => ({
+      inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: -topUp.shortfall,
+    })))
+  })
   await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_topups_reversed: true } })
   return new StepResponse(undefined, { orderId, topUps, flag: order.metadata!.tally_stock_topups_reversed ?? null })
 }, async (data, { container }) => {
   if (!data) return
-  await container.resolve(Modules.INVENTORY).adjustInventory(data.topUps.map(topUp => ({
-    inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: topUp.shortfall,
-  })))
+  await container.resolve(Modules.LOCKING).execute(Array.from(new Set(data.topUps.map(topUp => topUp.inventory_item_id))), async () => {
+    await container.resolve(Modules.INVENTORY).adjustInventory(data.topUps.map(topUp => ({
+      inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: topUp.shortfall,
+    })))
+  })
   const orders = container.resolve(Modules.ORDER)
   const order = await orders.retrieveOrder(data.orderId)
   await orders.updateOrders(data.orderId, { metadata: { ...order.metadata, tally_stock_topups_reversed: data.flag } })
