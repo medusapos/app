@@ -9,7 +9,7 @@ export type SaleStage = { kind: 'cart' } | { kind: 'tender'; method: 'cash' | 'e
   | { kind: 'receipt'; order: Order; posOrder: PosOrder };
 
 export function useSale(settings: StoreSettings, opts: {
-  registerId: string; cashierRef: string; onSaleCompleted?: (posOrder: PosOrder) => void;
+  registerId: string; cashierRef: string; onSaleCompleted?: (posOrder: PosOrder) => Promise<void> | void;
 }) {
   const [builder, setBuilder] = useState(() => createOrderBuilder({
     currency: settings.currency, taxContext: taxContextFor(settings),
@@ -50,7 +50,7 @@ export function useSale(settings: StoreSettings, opts: {
     },
     setTender,
     cancelTender() { setTender(null); setStage({ kind: 'cart' }); },
-    complete() {
+    async complete() {
       const current = builder.getSnapshot();
       let posOrder: PosOrder;
       try {
@@ -59,9 +59,14 @@ export function useSale(settings: StoreSettings, opts: {
         setError((error as Error).message);
         return;
       }
+      try {
+        await opts.onSaleCompleted?.(posOrder);
+      } catch (error) {
+        setError(`The sale could not be saved: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
       setError(null);
       setStage({ kind: 'receipt', order: current, posOrder });
-      opts.onSaleCompleted?.(posOrder);
     },
     newSale() {
       const next = createOrderBuilder({ currency: settings.currency, taxContext: taxContextFor(settings) });
