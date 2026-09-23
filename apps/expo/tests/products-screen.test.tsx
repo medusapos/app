@@ -6,7 +6,7 @@ import { router } from 'expo-router';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
-import ProductsScreen from './index';
+import ProductsScreen from '../app/index';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
