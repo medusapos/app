@@ -62,3 +62,41 @@ jobs:
         working-directory: dev/medusa-store
       - run: npm run test:unit
         working-directory: dev/medusa-store/apps/backend
+
+  medusa-plugin:
+    name: Medusa plugin
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DB_HOST: localhost
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres
+      MEDUSA_DISABLE_TELEMETRY: 'true'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: packages/medusa-plugin/package-lock.json
+      - run: npm ci
+        working-directory: packages/medusa-plugin
+      - run: npm run typecheck
+        working-directory: packages/medusa-plugin
+      - run: npm run test:integration:modules -- --maxWorkers=1
+        working-directory: packages/medusa-plugin
+      - run: npm run build
+        working-directory: packages/medusa-plugin
