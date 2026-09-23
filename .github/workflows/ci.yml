@@ -14,7 +14,7 @@ concurrency:
 
 env:
   # TallyUI commit the app builds against (root pnpm.overrides use file:../tallyui); bump deliberately.
-  TALLYUI_REF: a71590f4204193150e0f34f0574e9bcd4dec8457
+  TALLYUI_REF: 7281e16705c81b73999912f454cca97b6b882d46
   # The desktop wrapper is not built in CI.
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
