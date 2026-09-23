@@ -30,8 +30,16 @@ Payments use the system provider, which moves no money. Later failures compensat
 the order and inventory; capture itself has no refund compensation.
 Options `salesChannelId`, `locationId`, and `shippingOptionId` override the store/channel
 defaults and the location's earliest shipping option; payload `locationId` takes precedence.
-Replays reuse a non-canceled order with the same `metadata.tally_client_id`; leftover drafts
-are deleted before retrying. Insufficient stock returns a rejection; other workflow errors throw.
+Stock never rejects an offline sale: availability is checked at the sale location, shortfalls
+are temporarily added before the draft and taken back after fulfillment, with compensation.
+Stock ends at original minus sold and may go negative. Each short variant gets an
+`insufficient_stock` warning whose quantity is the shortfall, after any `total_mismatch`.
+Replays trust only completed live orders with the same `metadata.tally_client_id`.
+Half-made orders resume conversion, payment, remaining fulfillment, recorded stock take-back,
+and completion on the same order, never cancelling or deleting it; resume errors throw for retry.
+The stock rejection mapping remains as a fallback for other Medusa refusals.
+Known limit: a channel with several stock locations may reserve at another location than
+the sale's; the dev store has one. See [the stock ADR](../../docs/adr/0003-offline-sale-stock.md).
 The HTTP endpoint and ledger claim/complete calls remain for A4; callers must serialize
 concurrent commands until that ledger wiring is in place.
 

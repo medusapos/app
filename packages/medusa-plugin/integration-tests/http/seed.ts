@@ -63,11 +63,12 @@ export async function seed(container: MedusaContainer) {
   const { result: [product] } = await createProductsWorkflow(container).run({ input: { products: [{
     title: 'POS test product', handle: 'pos-test-product', status: ProductStatus.PUBLISHED,
     shipping_profile_id: profile.id, sales_channels: [{ id: channel.id }],
-    options: [{ title: 'Variant', values: ['A', 'B', 'C'] }],
+    options: [{ title: 'Variant', values: ['A', 'B', 'C', 'D'] }],
     variants: [
       { title: 'A', sku: 'A', manage_inventory: true, options: { Variant: 'A' }, prices: [{ currency_code: 'eur', amount: 10 }] },
       { title: 'B', sku: 'B', manage_inventory: false, options: { Variant: 'B' }, prices: [{ currency_code: 'eur', amount: 5 }] },
       { title: 'C', sku: 'C', manage_inventory: true, options: { Variant: 'C' }, prices: [{ currency_code: 'eur', amount: 3 }] },
+      { title: 'D', sku: 'D', manage_inventory: true, options: { Variant: 'D' }, prices: [{ currency_code: 'eur', amount: 3 }] },
     ],
   }] } })
   const { data: inventoryItems } = await query.graph({ entity: 'inventory_item', fields: ['id', 'sku'] })
@@ -80,9 +81,11 @@ export async function seed(container: MedusaContainer) {
   return {
     channelId: channel.id, regionId: region.id, berlinId: berlin.id, spareId: spare.id,
     berlinShippingOptionId: shippingOptionIds[locations.indexOf(berlin)],
-    spareShippingOptionId: shippingOptionIds[locations.indexOf(spare)], inventoryA,
+    spareShippingOptionId: shippingOptionIds[locations.indexOf(spare)], inventoryA, inventoryC,
+    inventoryD: inventoryItems.find(item => item.sku === 'D')!.id,
     variantA: product.variants.find(variant => variant.sku === 'A')!.id,
     variantB: product.variants.find(variant => variant.sku === 'B')!.id,
     variantC: product.variants.find(variant => variant.sku === 'C')!.id,
+    variantD: product.variants.find(variant => variant.sku === 'D')!.id,
   }
 }
