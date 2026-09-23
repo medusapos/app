@@ -9,6 +9,9 @@ import { Catalogue } from '../components/catalogue';
 import { Cart } from '../components/cart';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
+import { SyncStatus } from '../components/sync-status';
+import { needsAttention } from '../lib/order-store';
+import { useOutboxContext } from '../lib/outbox-context';
 import { getRegisterId } from '../lib/register';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -72,8 +75,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const credentials = useMemo(() => ({ api_token: session.token }), [session.token]);
   const { products, state, error } = useReplicatedProducts(connector, credentials, session.baseUrl, onUnauthorized);
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
-  // A9 will wire onSaleCompleted to persistence and sync.
-  const sale = useSale(settings, { registerId, cashierRef: session.email });
+  const { record, state: outboxState, recent } = useOutboxContext();
+  const attentionCount = needsAttention(recent).length;
+  const sale = useSale(settings, { registerId, cashierRef: session.email, onSaleCompleted: record });
   const { width } = useWindowDimensions();
   const traitContext = useMemo(() => ({ currency: settings.currency }), [settings.currency]);
 
@@ -88,17 +92,25 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{ title: 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
-        <Pressable dataSet={{ print: 'hide' }} accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }}>
+        <View dataSet={{ print: 'hide' }} className="flex-row gap-4">
+        <Pressable accessibilityRole="button" onPress={() => router.push('/orders')}>
+          <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }}>
           <Text className="text-foreground">Sign out</Text>
         </Pressable>
+        </View>
       ) }} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} settings={settings}
         cashier={session.email} registerId={registerId} newSale={sale.newSale} /> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-bg">
           {settingsStatus ? <Text>{settingsStatus}</Text> : null}
           <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
-            <Catalogue products={sorted} traits={traits} currency={settings.currency}
-              onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
+            <View className="flex-1">
+              <Catalogue products={sorted} traits={traits} currency={settings.currency}
+                onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
+              <SyncStatus state={outboxState} />
+            </View>
             <View className="flex-1 border-t border-border bg-card">
               {sale.stage.kind === 'cart' ? <Cart sale={sale} /> : <Tender sale={sale} />}
             </View>

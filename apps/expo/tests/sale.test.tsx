@@ -40,6 +40,9 @@ vi.mock('@tallyui/components', () => ({
 }));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
+vi.mock('../lib/outbox-context', () => ({
+  useOutboxContext: () => ({ record: vi.fn(), state: { pending: 0, sending: false }, recent: [] }),
+}));
 vi.mock('../lib/use-replicated-products', () => ({
   useReplicatedProducts: () => ({ products: [], state: 'synced', error: null }),
 }));
@@ -61,7 +64,7 @@ const product = {
 };
 const entries = catalogueEntries([product], traits);
 let sale: ReturnType<typeof useSale>;
-function SaleHarness({ onSaleCompleted }: { onSaleCompleted?: (order: PosOrder) => void }) {
+function SaleHarness({ onSaleCompleted }: { onSaleCompleted?: (order: PosOrder) => Promise<void> | void }) {
   sale = useSale(settings, { registerId: 'register-1', cashierRef: session.email, onSaleCompleted });
   if (sale.stage.kind === 'receipt') return <Receipt order={sale.stage.order} settings={settings}
     cashier={session.email} registerId="register-1" newSale={sale.newSale} />;
@@ -120,7 +123,7 @@ describe('sale', () => {
     expect(sale.stage.kind).toBe('cart');
   });
 
-  it('completes cash with builder change and a finalized payment, prints, then starts a fresh sale', () => {
+  it('completes cash with builder change and a finalized payment, prints, then starts a fresh sale', async () => {
     const completed = vi.fn();
     const print = vi.spyOn(window, 'print').mockImplementation(() => {});
     render(<SaleHarness onSaleCompleted={completed} />);
@@ -130,7 +133,7 @@ describe('sale', () => {
     click('Cash');
     typeCash('50');
     expect(screen.getByText(`Change due: ${money(sale.order.changeDueMinor)}`)).toBeTruthy();
-    click('Complete sale');
+    await act(async () => { click('Complete sale'); });
     expect(sale.stage.kind).toBe('receipt');
     expect(screen.getByText(`Change: ${money(625)}`)).toBeTruthy();
     expect(screen.getByText(`Cash tendered: ${money(5000)}`)).toBeTruthy();
@@ -155,7 +158,7 @@ describe('sale', () => {
     expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
   });
 
-  it('keeps an underpaid tender on finalize failure, replaces amounts and removes it on Back', () => {
+  it('keeps an underpaid tender on finalize failure, replaces amounts and removes it on Back', async () => {
     const completed = vi.fn();
     render(<SaleHarness onSaleCompleted={completed} />);
     addSaleLines();
@@ -164,7 +167,7 @@ describe('sale', () => {
     expect(screen.getByText(`Balance due: ${money(sale.order.balanceDueMinor)}`)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Complete sale' }).getAttribute('aria-disabled')).toBe('true');
     const tender = sale.order.payments[0];
-    act(() => sale.complete());
+    await act(async () => { await sale.complete(); });
     expect(screen.getByRole('alert').textContent).toBe('finalize: underpaid');
     expect(sale.stage).toEqual({ kind: 'tender', method: 'cash' });
     expect(sale.order.payments).toEqual([tender]);
@@ -182,7 +185,7 @@ describe('sale', () => {
     expect(sale.order.balanceDueMinor).toBe(sale.order.totalMinor);
   });
 
-  it('records quick cash amounts through the same single pending payment', () => {
+  it('records quick cash amounts through the same single pending payment', async () => {
     render(<SaleHarness />);
     addSaleLines();
     click('Cash');
@@ -190,11 +193,11 @@ describe('sale', () => {
     expect(sale.order.payments).toHaveLength(1);
     expect(sale.order.payments[0].amountMinor).toBe(sale.order.totalMinor);
     expect(sale.order.balanceDueMinor).toBe(0);
-    click('Complete sale');
+    await act(async () => { click('Complete sale'); });
     expect(sale.stage.kind).toBe('receipt');
   });
 
-  it('completes a card terminal payment with its optional reference', () => {
+  it('completes a card terminal payment with its optional reference', async () => {
     const completed = vi.fn();
     render(<SaleHarness onSaleCompleted={completed} />);
     addSaleLines();
@@ -203,10 +206,37 @@ describe('sale', () => {
     expect(sale.order.payments[0]).toMatchObject({ method: 'external', amountMinor: sale.order.totalMinor });
     fireEvent.change(screen.getByRole('textbox', { name: 'Terminal reference' }), { target: { value: 'A1B2' } });
     expect(sale.order.payments).toHaveLength(1);
-    click('Payment approved on terminal');
+    await act(async () => { click('Payment approved on terminal'); });
     expect(screen.getByText(`Card terminal: ${money(4375)} · A1B2`)).toBeTruthy();
     expect(completed.mock.calls[0][0].payments).toEqual([expect.objectContaining({ method: 'external', amountMinor: 4375, reference: 'A1B2' })]);
     expect(document.querySelectorAll('#pos-print-style')).toHaveLength(1);
+  });
+
+  it('waits for the sale to be saved before showing the receipt', async () => {
+    let saved!: () => void;
+    const completed = vi.fn(() => new Promise<void>((resolve) => { saved = resolve; }));
+    render(<SaleHarness onSaleCompleted={completed} />);
+    addSaleLines();
+    click('Card terminal');
+    let completion!: Promise<void>;
+    act(() => { completion = sale.complete(); });
+    expect(completed).toHaveBeenCalledTimes(1);
+    expect(sale.stage.kind).toBe('tender');
+    expect(screen.queryByRole('button', { name: 'Print receipt' })).toBeNull();
+    await act(async () => { saved(); await completion; });
+    expect(sale.stage.kind).toBe('receipt');
+  });
+
+  it('keeps the tender and reports a saving failure', async () => {
+    render(<SaleHarness onSaleCompleted={async () => { throw new Error('Storage full'); }} />);
+    addSaleLines();
+    click('Card terminal');
+    const before = sale.order;
+    await act(async () => { await sale.complete(); });
+    expect(sale.stage).toEqual({ kind: 'tender', method: 'external' });
+    expect(sale.order).toEqual(before);
+    expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
+    expect(screen.queryByRole('button', { name: 'Print receipt' })).toBeNull();
   });
 
   it('reports CartError without adding an unpriced line', () => {

@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ComponentProps, ReactNode } from 'react';
 import type { ProductCard, ProductGrid, SearchInput, CartPanelProps, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import type { LineItem } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, type LineItem, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { saveSession } from '../lib/session';
@@ -11,13 +11,17 @@ import { SessionProvider } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../lib/store-settings';
 import ProductsScreen from '../app/index';
+import OrdersScreen from '../app/orders';
+import { useOutboxContext } from '../lib/outbox-context';
+import { SyncStatus } from '../components/sync-status';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
-  router: { replace: vi.fn() },
+  router: { replace: vi.fn(), push: vi.fn() },
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() },
 }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
+vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
@@ -56,6 +60,7 @@ beforeEach(() => {
   saveCachedSettings(localStorage, 'https://store.test', settings);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [], state: 'synced', error: null });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -70,13 +75,42 @@ describe('ProductsScreen catalogue', () => {
     });
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Sign out', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Sign out', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
+    expect(screen.getByLabelText('Sync status').textContent).toBe('All sales synced');
     fireEvent.click(screen.getByRole('button', { name: 'Apple' }));
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText('Search or scan barcode / SKU'), { target: { value: 'z' } });
     fireEvent.keyDown(screen.getByPlaceholderText('Search or scan barcode / SKU'), { key: 'Enter' });
     expect(screen.getByText('Zebra: €12.50 × 1 = €12.50')).toBeTruthy();
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
+  });
+
+  it('shows the outbox status and attention count and pushes Orders without replacing the route', async () => {
+    const order = savedSale();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(),
+      state: { pending: 2, sending: true }, recent: [order, { ...order, id: 'rejected', syncStatus: 'rejected' },
+        { ...order, id: 'warned', syncStatus: 'applied', warnings: [{ code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }],
+    });
+    await mount();
+    expect(screen.getByLabelText('Sync status').textContent).toBe('2 sales waiting to sync · sending');
+    fireEvent.click(screen.getByRole('button', { name: 'Orders (2)' }));
+    expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders');
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it('records the finalized sale through the shared outbox', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue({ state: 'synced', error: null, products: [{
+      id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
+        prices: [{ amount: 12, currency_code: 'eur' }] }],
+    }] });
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    expect(useOutboxContext().record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      syncStatus: 'pending', totalMinor: 1500, cashierRef: 'admin@store.test',
+    }));
+    expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
   });
 });
 afterEach(() => {
@@ -85,13 +119,56 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function mount(signedIn = true) {
+async function mount(signedIn = true, orders = false) {
   if (signedIn) saveSession(localStorage, {
     baseUrl: 'https://store.test', email: 'admin@store.test',
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
-  await act(async () => { render(<SessionProvider><ProductsScreen /></SessionProvider>); });
+  await act(async () => { render(<SessionProvider>{orders ? <OrdersScreen /> : <ProductsScreen />}</SessionProvider>); });
 }
+
+function savedSale(): PosOrder {
+  const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+  builder.addLine({ productId: 'shirt', variantId: 'blue', name: 'Blue shirt', unitPrice: { amount: 1200, currency: 'EUR' } });
+  builder.addPayment({ method: 'cash', amountMinor: 1200 });
+  return finalizeOrder(builder.getSnapshot());
+}
+
+describe('Orders screen and sync status', () => {
+  it('lists attention first, including errors, both warnings, totals and server display IDs', async () => {
+    const order = savedSale();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
+      { ...order, id: 'rejected', syncStatus: 'rejected', error: { code: 'invalid', message: 'Unknown variant' } },
+      { ...order, id: 'warned', syncStatus: 'applied', serverRefs: { orderId: 'server', displayId: '42', totalMinor: 1000 },
+        warnings: [{ code: 'insufficient_stock', variantId: 'blue', quantity: 2 },
+          { code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }, order,
+    ] });
+    await mount(true, true);
+    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Recent']);
+    for (const label of ['invalid: Unknown variant', 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'applied · 42']) {
+      expect(screen.getAllByText(label)).toHaveLength(2);
+    }
+    expect(screen.getByText('pending')).toBeTruthy();
+    expect(screen.getAllByText(`${new Date(order.createdAt).toLocaleString()} · €12.00`)).toHaveLength(5);
+  });
+
+  it('redirects Orders to login when signed out', async () => {
+    await mount(false, true);
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+    expect(screen.queryByText('Recent')).toBeNull();
+  });
+
+  it('shows retry seconds and updates the countdown', () => {
+    vi.useFakeTimers();
+    try {
+      render(<SyncStatus state={{ pending: 1, sending: false, lastRetryReason: 'network', nextAttemptAt: Date.now() + 3000 }} />);
+      expect(screen.getByLabelText('Sync status').textContent).toBe('1 sale waiting to sync · retrying (network) in 3s');
+      act(() => { vi.advanceTimersByTime(1000); });
+      expect(screen.getByLabelText('Sync status').textContent).toBe('1 sale waiting to sync · retrying (network) in 2s');
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+});
 
 describe('ProductsScreen session routing', () => {
   it('redirects to login without a session', async () => {
