@@ -37,7 +37,7 @@ Stock ends at original minus sold and may go negative. Each short variant gets a
 Replays trust only completed live orders with the same `metadata.tally_client_id`.
 Half-made orders resume conversion, payment, remaining fulfillment, recorded stock take-back,
 and completion on the same order, never cancelling or deleting it; resume errors throw for retry.
-The stock rejection mapping remains as a fallback for other Medusa refusals.
+A stock refusal from Medusa is treated as a race and retried, never a rejection.
 Known limit: a channel with several stock locations may reserve at another location than
 the sale's; the dev store has one. See [the stock ADR](../../docs/adr/0003-offline-sale-stock.md).
 

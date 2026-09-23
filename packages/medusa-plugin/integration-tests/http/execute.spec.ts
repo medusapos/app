@@ -124,6 +124,42 @@ medusaIntegrationTestRunner({
       expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
     })
 
+    it('a stock race on the first attempt is retried and applies', async () => {
+      const sale = shortSale()
+      const inventory = container.resolve(Modules.INVENTORY)
+      const filter = { inventory_item_id: data.inventoryC, location_id: data.berlinId }
+      await inventory.updateInventoryLevels({ ...filter, stocked_quantity: 1 })
+      const listLevels = inventory.listInventoryLevels.bind(inventory)
+      const [before] = await listLevels(filter)
+      expect(before).toMatchObject({ stocked_quantity: 1, reserved_quantity: 0 })
+      jest.spyOn(inventory, 'listInventoryLevels').mockImplementationOnce(async (...args) => {
+        const levels = await listLevels(...args)
+        // Another register takes two units after our stock read, before the planned one-unit top-up.
+        await inventory.adjustInventory(data.inventoryC, data.berlinId, -2)
+        return levels
+      })
+      expect(await executeOrderCreate(container, sale)).toEqual({
+        kind: 'transient', id: sale.id,
+        message: expect.stringMatching(/does not have the required inventory|Not enough stock/),
+      })
+      expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+      expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      const [compensated] = await listLevels(filter)
+      expect(compensated).toMatchObject({ stocked_quantity: Number(before.stocked_quantity) - 2, reserved_quantity: 0 })
+
+      const retried = result(await executeOrderCreate(container, sale))
+      expect(retried).toMatchObject({ id: sale.id, status: 'applied' })
+      expect(retried.warnings).toEqual([
+        { code: 'insufficient_stock', variantId: data.variantC, quantity: 2 - Number(compensated.stocked_quantity) },
+      ])
+      expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result: retried })
+      const orders = await liveOrders(sale.payload.clientOrderId)
+      expect(orders).toHaveLength(1)
+      expect(orders[0]).toMatchObject({ id: retried.serverRefs!.orderId, status: 'completed' })
+      const [after] = await listLevels(filter)
+      expect(after).toMatchObject({ stocked_quantity: Number(compensated.stocked_quantity) - 2, reserved_quantity: 0 })
+    })
+
     it('serializes concurrent command ids for one sale and deduplicates the retry', async () => {
       const first = command()
       const sales = [first, { ...first, id: randomUUID() }]
