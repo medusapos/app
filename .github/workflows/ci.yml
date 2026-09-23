@@ -107,5 +107,7 @@ jobs:
         working-directory: app/packages/medusa-plugin
       - run: npm run test:integration:modules -- --maxWorkers=1
         working-directory: app/packages/medusa-plugin
+      - run: npm run test:integration:http -- --maxWorkers=1
+        working-directory: app/packages/medusa-plugin
       - run: npm run build
         working-directory: app/packages/medusa-plugin

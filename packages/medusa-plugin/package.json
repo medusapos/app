@@ -22,6 +22,7 @@
     "pretypecheck": "npm run tallyui-types",
     "prebuild": "npm run tallyui-types",
     "pretest:integration:modules": "npm run tallyui-types",
+    "pretest:integration:http": "npm run tallyui-types",
     "pretest:unit": "npm run tallyui-types",
     "build": "medusa plugin:build",
     "dev": "medusa plugin:develop",
@@ -29,7 +30,8 @@
     "db:generate": "medusa plugin:db:generate",
     "typecheck": "tsc --noEmit",
     "test:unit": "TEST_TYPE=unit NODE_OPTIONS=--experimental-vm-modules jest --silent --forceExit",
-    "test:integration:modules": "TEST_TYPE=integration:modules NODE_OPTIONS=--experimental-vm-modules jest --silent=false --forceExit"
+    "test:integration:modules": "TEST_TYPE=integration:modules NODE_OPTIONS=--experimental-vm-modules jest --silent=false --forceExit",
+    "test:integration:http": "TEST_TYPE=integration:http NODE_OPTIONS=--experimental-vm-modules jest --silent=false --forceExit"
   },
   "devDependencies": {
     "@medusajs/cli": "2.21.0",

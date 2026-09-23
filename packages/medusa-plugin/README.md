@@ -9,11 +9,31 @@ npm ci
 npm run typecheck
 npm run test:unit -- --maxWorkers=2
 npm run test:integration:modules -- --maxWorkers=1
+npm run test:integration:http -- --maxWorkers=1
 npm run db:generate
 npm run build
 ```
 Module integration tests need local Postgres; set `DB_HOST`, `DB_USERNAME`, and `DB_PASSWORD`.
 The test helper defaults to role `postgres`; use `DB_USERNAME=claude` if that is your local role.
+Set `MEDUSA_DISABLE_TELEMETRY=true` and `XDG_CONFIG_HOME=$PWD/.medusa/xdg` for Medusa commands.
+HTTP integration tests boot the minimal app in `integration-tests/app` on a random port
+and create/drop their own temporary database; they do not use the dev store.
+
+## Order creation workflow
+
+`runOrderCreate(container, command, options?)` is exported from `@medusapos/medusa-plugin/workflows`.
+It resolves Medusa data, validates with the pure planner, and runs `tallyOrderCreateWorkflow`:
+draft → convert → collect the POS total → mark paid → fulfill → complete.
+The payment collection uses `totalMinor` exactly, including when Medusa's unrounded
+tax total differs; the result reports the rounded server total and any `total_mismatch` warning.
+Payments use the system provider, which moves no money. Later failures compensate
+the order and inventory; capture itself has no refund compensation.
+Options `salesChannelId`, `locationId`, and `shippingOptionId` override the store/channel
+defaults and the location's earliest shipping option; payload `locationId` takes precedence.
+Replays reuse a non-canceled order with the same `metadata.tally_client_id`; leftover drafts
+are deleted before retrying. Insufficient stock returns a rejection; other workflow errors throw.
+The HTTP endpoint and ledger claim/complete calls remain for A4; callers must serialize
+concurrent commands until that ledger wiring is in place.
 
 ## Ledger module
 
