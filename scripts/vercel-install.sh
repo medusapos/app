@@ -3,10 +3,13 @@
 # Fetch TallyUI for the root package.json file:../tallyui overrides.
 set -euo pipefail
 
-# Keep equal to TALLYUI_REF in .github/workflows/ci.yml.
-TALLYUI_REF=3996453ef752f246167075d06ca3dcda0b3098fd
-
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+# The TallyUI ref lives in .github/workflows/ci.yml.
+ref=$(sed -n 's/^  TALLYUI_REF: *//p' "$repo_root/.github/workflows/ci.yml")
+if [[ ! "$ref" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'error: TALLYUI_REF not found in .github/workflows/ci.yml\n' >&2
+  exit 1
+fi
 target="$(dirname "$repo_root")/tallyui"
 
 if [[ -e "$target" ]]; then
@@ -15,7 +18,7 @@ if [[ -e "$target" ]]; then
 fi
 
 mkdir "$target"
-curl -fsSL "https://codeload.github.com/TallyUI/tallyui/tar.gz/$TALLYUI_REF" | tar -xz --strip-components=1 -C "$target"
+curl -fsSL "https://codeload.github.com/TallyUI/tallyui/tar.gz/$ref" | tar -xz --strip-components=1 -C "$target"
 
 cd "$repo_root"
 pnpm install --frozen-lockfile
