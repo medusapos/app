@@ -1,2 +1,5 @@
-@import "tailwindcss";
-@import "@tallyui/theme/src/tokens.css";
+@import 'tailwindcss';
+@import 'uniwind';
+@import '@tallyui/theme/tokens.css';
+
+@source './node_modules/@tallyui/components/src';

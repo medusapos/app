@@ -1,160 +1,105 @@
-import { useState, useRef, useMemo } from 'react';
-import { View, Text, Pressable } from 'react-native';
-import { useRouter } from 'expo-router';
-import { useProductTraits } from '@tallyui/core';
+import { useDeferredValue, useMemo, useState } from 'react';
+import { ActivityIndicator, FlatList, Text, View } from 'react-native';
+import { Stack } from 'expo-router';
+
+import { ConnectorProvider } from '@tallyui/core';
 import {
-  ProductGrid,
-  ProductCard,
+  ProductImage,
+  ProductPrice,
+  ProductSku,
+  ProductStockBadge,
+  ProductTitle,
   SearchInput,
-  FilterChipGroup,
-  CartPanel,
-  CartLine,
-  CartTotal,
 } from '@tallyui/components';
-import type { CartLineItem, ChipItem } from '@tallyui/components';
-import { useCurrencyFormatter } from '@tallyui/pos';
-import { useProducts } from '../lib/hooks/use-products';
-import { useOrderBuilder, useOrder } from '../lib/hooks/use-order-builder';
+import { medusaConnector } from '@tallyui/connector-medusa';
+import { searchProducts } from '@tallyui/pos';
 
-export default function POSScreen() {
-  const router = useRouter();
-  const traits = useProductTraits();
-  const builder = useOrderBuilder();
-  const order = useOrder();
-  const formatMoney = useCurrencyFormatter();
-  const docMap = useRef<Map<string, any>>(new Map());
+import { storeConfig } from '../lib/config';
+import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 
-  const [search, setSearch] = useState('');
-  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+const connector = medusaConnector;
+const credentials = { api_token: storeConfig.apiKey };
+const traitContext = { currency: storeConfig.currency };
+const traits = connector.traits.product;
 
-  const allProducts = useProducts(search || undefined);
+const STATE_LABEL: Record<SyncState, string> = {
+  connecting: 'Connecting',
+  syncing: 'Syncing',
+  synced: 'Up to date',
+  error: 'Sync error',
+};
 
-  // Filter by category
-  const products = activeCategory
-    ? allProducts.filter((doc) =>
-        traits.getCategoryNames(doc).includes(activeCategory)
-      )
-    : allProducts;
+/**
+ * Product lookup: every product replicated from the store, searchable by
+ * name, SKU or barcode. The screen only composes TallyUI pieces; swapping
+ * `connector` for another backend's connector is the only backend-specific
+ * line.
+ */
+export default function ProductsScreen() {
+  const { products, state, error } = useReplicatedProducts(connector, credentials, storeConfig.baseUrl);
+  const [query, setQuery] = useState('');
+  const deferredQuery = useDeferredValue(query);
 
-  // Build category chips from all products
-  const categoryChips: ChipItem[] = useMemo(() => {
-    const cats = new Set<string>();
-    allProducts.forEach((doc) => {
-      traits.getCategoryNames(doc).forEach((c) => cats.add(c));
-    });
-    return [
-      { id: 'all', label: 'All', active: !activeCategory },
-      ...Array.from(cats).map((c) => ({
-        id: c,
-        label: c,
-        active: activeCategory === c,
-      })),
-    ];
-  }, [allProducts, activeCategory, traits]);
-
-  // Map order line items to CartLineItems
-  const cartItems: CartLineItem[] = order.lineItems
-    .map((item) => {
-      const doc = docMap.current.get(item.productId);
-      return doc ? { doc, quantity: item.quantity } : null;
-    })
-    .filter(Boolean) as CartLineItem[];
-
-  function handleAddProduct(doc: any) {
-    const id = traits.getId(doc);
-    docMap.current.set(id, doc);
-    builder.addProduct(doc, traits);
-  }
-
-  function handleChipPress(chip: ChipItem) {
-    setActiveCategory(chip.id === 'all' ? null : chip.id);
-  }
+  const sorted = useMemo(
+    () => products.filter(traits.isSellable).sort((a, b) => traits.getName(a).localeCompare(traits.getName(b))),
+    [products],
+  );
+  const sellableCount = sorted.length;
+  const results = useMemo(
+    () => searchProducts(sorted, deferredQuery, traits),
+    [sorted, deferredQuery],
+  );
 
   return (
-    <View style={{ flex: 1, flexDirection: 'row', backgroundColor: '#f8f9fa' }}>
-      {/* Left: Product Grid */}
-      <View style={{ flex: 1, borderRightWidth: 1, borderRightColor: '#e5e7eb' }}>
-        <ProductGrid
-          items={products}
-          numColumns={3}
-          searchSlot={
-            <SearchInput
-              value={search}
-              onChangeText={setSearch}
-              placeholder="Search products..."
-            />
-          }
-          filterSlot={
-            <FilterChipGroup chips={categoryChips} onChipPress={handleChipPress} />
-          }
-          renderItem={(doc) => (
-            <ProductCard doc={doc} onPress={() => handleAddProduct(doc)} />
-          )}
-          emptyState={
-            <View style={{ padding: 40, alignItems: 'center' }}>
-              <Text style={{ color: '#6b7280' }}>No products found</Text>
-            </View>
-          }
-        />
-      </View>
-
-      {/* Right: Cart */}
-      <View style={{ width: 360 }}>
-        <View
-          style={{
-            flexDirection: 'row',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: 16,
-            borderBottomWidth: 1,
-            borderBottomColor: '#e5e7eb',
-          }}
-        >
-          <Text style={{ fontSize: 18, fontWeight: 'bold' }}>Cart</Text>
-          <Pressable onPress={() => router.push('/orders')}>
-            <Text style={{ color: '#6366f1', fontWeight: '600' }}>Orders</Text>
-          </Pressable>
+    <ConnectorProvider connector={connector} traitContext={traitContext}>
+      <Stack.Screen options={{ title: 'Products' }} />
+      <View className="flex-1 bg-bg">
+        <View className="gap-2 border-b border-border bg-card px-4 pb-3 pt-3">
+          <SearchInput
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search name, SKU or barcode"
+            autoFocus
+          />
+          <View className="flex-row items-center gap-2">
+            {state === 'syncing' || state === 'connecting' ? (
+              <ActivityIndicator size="small" />
+            ) : null}
+            <Text className={state === 'error' ? 'text-xs text-destructive' : 'text-xs text-muted-foreground'}>
+              {connector.name} · {STATE_LABEL[state]} · {sellableCount.toLocaleString()} products
+              {deferredQuery.trim() ? ` · ${results.length.toLocaleString()} matching` : ''}
+              {error ? ` · ${error}` : ''}
+            </Text>
+          </View>
         </View>
-        <CartPanel
-          items={cartItems}
-          renderItem={(item) => <CartLine item={item} />}
-          footer={
-            <View style={{ padding: 16 }}>
-              <CartTotal items={cartItems} taxRate={0.1} />
-              <Pressable
-                onPress={() => router.push('/checkout')}
-                disabled={order.lineItems.length === 0}
-                style={{
-                  marginTop: 12,
-                  backgroundColor:
-                    order.lineItems.length === 0 ? '#d1d5db' : '#6366f1',
-                  paddingVertical: 14,
-                  borderRadius: 8,
-                  alignItems: 'center',
-                }}
-              >
-                <Text
-                  style={{ color: '#fff', fontWeight: 'bold', fontSize: 16 }}
-                >
-                  Checkout — {formatMoney(order.total)}
-                </Text>
-              </Pressable>
+
+        <FlatList
+          data={results}
+          keyExtractor={(item) => traits.getId(item)}
+          initialNumToRender={20}
+          keyboardShouldPersistTaps="handled"
+          renderItem={({ item }) => (
+            <View className="flex-row items-center gap-3 border-b border-border bg-card px-4 py-2.5">
+              <ProductImage doc={item} size={48} showPlaceholder className="rounded-md" />
+              <View className="flex-1 gap-0.5">
+                <ProductTitle doc={item} className="text-[15px] font-semibold" numberOfLines={2} />
+                <ProductSku doc={item} />
+              </View>
+              <View className="items-end gap-1">
+                <ProductPrice doc={item} className="text-[15px]" />
+                <ProductStockBadge doc={item} showQuantity className="self-end bg-transparent px-0 py-0" />
+              </View>
             </View>
-          }
-          emptyState={
-            <View
-              style={{
-                flex: 1,
-                justifyContent: 'center',
-                alignItems: 'center',
-                padding: 40,
-              }}
-            >
-              <Text style={{ color: '#6b7280' }}>Tap a product to add it</Text>
-            </View>
+          )}
+          ListEmptyComponent={
+            state === 'synced' ? (
+              <Text className="mt-10 text-center text-sm text-muted-foreground">
+                {deferredQuery.trim() ? `No products match "${deferredQuery.trim()}".` : 'No products yet.'}
+              </Text>
+            ) : null
           }
         />
       </View>
-    </View>
+    </ConnectorProvider>
   );
 }

@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # TallyUI commit the app builds against (root pnpm.overrides use file:../tallyui); bump deliberately.
+  TALLYUI_REF: a71590f4204193150e0f34f0574e9bcd4dec8457
+  # The desktop wrapper is not built in CI.
+  ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+
+jobs:
+  app:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: app
+      - uses: actions/checkout@v5
+        with:
+          repository: TallyUI/tallyui
+          ref: ${{ env.TALLYUI_REF }}
+          path: tallyui
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm typecheck
+        working-directory: app
+      - run: pnpm test
+        working-directory: app
+
+  dev-store:
+    name: Dev store unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dev/medusa-store/package-lock.json
+      - run: npm ci
+        working-directory: dev/medusa-store
+      - run: npm run test:unit
+        working-directory: dev/medusa-store/apps/backend
