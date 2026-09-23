@@ -10,6 +10,7 @@ import {
 } from '@medusajs/framework/utils'
 import { TallyCommand } from './models/tally-command'
 import { parseCommandResult } from './command-result'
+import type { TallyPluginOptions } from '../../workflows/tally-order-create'
 
 export type TallyCommandRecord = InferTypeOf<typeof TallyCommand>
 
@@ -20,6 +21,30 @@ export type TallyCommandRecord = InferTypeOf<typeof TallyCommand>
 export const CLAIM_LEASE_SECONDS = 120
 
 export default class TallyLedgerModuleService extends MedusaService({ TallyCommand }) {
+  private readonly options: TallyPluginOptions
+
+  constructor(container: Record<string, unknown>, options: TallyPluginOptions = {}) {
+    super(...arguments)
+    this.options = options
+  }
+
+  getPluginOptions(): TallyPluginOptions {
+    return this.options
+  }
+
+  @InjectManager()
+  async assertClaim(
+    id: string,
+    claimToken: string,
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<void> {
+    const rows = await (sharedContext.manager as EntityManager).execute(
+      `select "id" from "tally_command" where "id" = ? and "status" = 'in_progress' and "claim_token" = ?`,
+      [id, claimToken]
+    )
+    if (rows.length === 0) throw new MedusaError(MedusaError.Types.CONFLICT, 'claim lost')
+  }
+
   @InjectManager()
   async claim(
     input: { id: string; type: string; fingerprint: string },

@@ -20,6 +20,35 @@ moduleIntegrationTestRunner<TallyLedgerModuleService>({
     }
     afterEach(() => jest.restoreAllMocks())
 
+    it('asserts the current in-progress claim', async () => {
+      const { command: claim } = await service.claim(input)
+      await expect(service.assertClaim(input.id, claim.claim_token)).resolves.toBeUndefined()
+    })
+
+    it('rejects an old token after a lease re-claim', async () => {
+      const { command: first } = await service.claim(input)
+      await MikroOrmWrapper.forkManager().execute(
+        `update tally_command set updated_at = now() - make_interval(secs => ?) where id = ?`,
+        [CLAIM_LEASE_SECONDS + 1, input.id]
+      )
+      const { command: next } = await service.claim(input)
+      await expect(service.assertClaim(input.id, first.claim_token))
+        .rejects.toMatchObject({ type: MedusaError.Types.CONFLICT, message: 'claim lost' })
+      await expect(service.assertClaim(input.id, next.claim_token)).resolves.toBeUndefined()
+    })
+
+    it('rejects a claim assertion for a completed command', async () => {
+      const { command: claim } = await service.claim(input)
+      await service.complete(input.id, claim.claim_token, result)
+      await expect(service.assertClaim(input.id, claim.claim_token))
+        .rejects.toMatchObject({ type: MedusaError.Types.CONFLICT, message: 'claim lost' })
+    })
+
+    it('rejects a claim assertion for an unknown id', async () => {
+      await expect(service.assertClaim('unknown', 'unknown-token'))
+        .rejects.toMatchObject({ type: MedusaError.Types.CONFLICT, message: 'claim lost' })
+    })
+
     it('claims a new id with its initial values and timestamp', async () => {
       const claimed = await service.claim(input)
 
