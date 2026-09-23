@@ -40,6 +40,21 @@ top-up as pending, and adding items through Medusa's draft-edit flow with
 price overrides; or by recording the intended top-up in the ledger row,
 which exists before the top-up.
 
+A stock refusal from Medusa during the workflow is now a race (another
+register sold the same item between our stock read and the reservation),
+so it is rethrown as a transient failure and the retry recomputes the
+top-up; it is never a final rejection.
+
+Also post-MVP (from the #12 review, not blocking):
+
+- Write the take-back and its reversed flag atomically (see the second
+  window above).
+- A payment collection left `authorized` (not `completed`) by a crash
+  makes resume fail on every retry; resume should capture or cancel the
+  authorisation.
+- Each in-flight sale holds one pooled Postgres connection for its advisory
+  lock, so concurrent sales are bounded by the pool size.
+
 ## Consequences
 
 Negative stock is visible to the merchant. A sales channel with several stock
