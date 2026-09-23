@@ -82,12 +82,12 @@ export default function ProductsScreen() {
             <View className="flex-row items-center gap-3 border-b border-border bg-card px-4 py-2.5">
               <ProductImage doc={item} size={48} showPlaceholder className="rounded-md" />
               <View className="flex-1 gap-0.5">
-                <ProductTitle doc={item} className="text-[15px] font-semibold" numberOfLines={1} />
+                <ProductTitle doc={item} className="text-[15px] font-semibold" numberOfLines={2} />
                 <ProductSku doc={item} />
               </View>
               <View className="items-end gap-1">
                 <ProductPrice doc={item} className="text-[15px]" />
-                <ProductStockBadge doc={item} showQuantity />
+                <ProductStockBadge doc={item} showQuantity className="self-end bg-transparent px-0 py-0" />
               </View>
             </View>
           )}

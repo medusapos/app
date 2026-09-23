@@ -1,9 +1,15 @@
 # Medusa dev store
 
-A local Medusa v2 store for developing and testing TallyUI against a real
+A local Medusa v2 store for developing and testing MedusaPOS against a real
 backend: the Medusa counterpart of the WooCommerce dev sites. It is a dev
 fixture, not a workspace package. It has its own npm lockfile and sits
 outside the pnpm workspace globs.
+
+It moved here from TallyUI (fe44431). The database, credentials and key title
+keep their `tally`/`tallyui` names, so the running store at
+`~/Projects/medusa-dev` works unchanged. Run `scripts/deploy.sh` from this
+directory to update that store; it rsyncs this tree over the deployed copy and
+restarts the server.
 
 - Medusa 2.21.0 (the default `create-medusa-app` backend plus the admin dashboard)
 - Postgres 17 and Redis from Homebrew services
