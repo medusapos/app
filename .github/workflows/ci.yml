@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # TallyUI commit the app builds against (root pnpm.overrides use file:../tallyui); bump deliberately.
+  # TallyUI commit the app builds against (root pnpm.overrides use file:../tallyui); bump deliberately and keep scripts/vercel-install.sh equal.
   TALLYUI_REF: 3996453ef752f246167075d06ca3dcda0b3098fd
   # The desktop wrapper is not built in CI.
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
