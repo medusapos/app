@@ -5,6 +5,7 @@ import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'
 import { commandFingerprint } from './fingerprint'
+import { payloadShapeErrors } from './payload-shape'
 import { runOrderCreate, type TallyPluginOptions } from './run'
 
 export type ExecuteOutcome =
@@ -17,6 +18,12 @@ export async function executeOrderCreate(
   command: CommandEnvelope<OrderCreatePayload>,
   options?: TallyPluginOptions
 ): Promise<ExecuteOutcome> {
+  const errors = payloadShapeErrors(command.payload)
+  if (errors.length > 0) {
+    return { kind: 'result', result: { id: command.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: errors.join('; '),
+    } } }
+  }
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
   const { id } = command
   try {

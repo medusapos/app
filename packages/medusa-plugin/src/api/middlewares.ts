@@ -21,6 +21,8 @@ export default defineMiddlewares({
     {
       matcher: '/tally/v1/commands',
       method: 'POST',
+      // Allow 50 commands of up to ~20 kB each.
+      bodyParser: { sizeLimit: '1mb' },
       middlewares: [authenticate('user', ['bearer', 'session'])],
     },
   ],
