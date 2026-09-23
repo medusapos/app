@@ -32,10 +32,11 @@ from the CLI, and a long-lived token in Actions is one more secret to rotate.
   through `setup-node`'s `node-version-file`.
 - **Project settings outside the repo:** only the Root Directory
   (`apps/expo`). Everything else comes from the repo.
-- **Domain:** `app.medusapos.com` is attached to the project. It goes live
-  once the Squarespace DNS for `medusapos.com` has a CNAME `app` pointing to
-  Vercel and a `_vercel` TXT record proving ownership to the WCPOS team
-  (both still pending on 2026-09-23).
+- **Domain:** `https://app.medusapos.com`, live since 2026-09-23. The
+  Squarespace DNS for `medusapos.com` has a CNAME `app` to
+  `fc1c92f7c405b05b.vercel-dns-016.com` and a `_vercel` TXT record proving
+  ownership to the WCPOS team. Squarespace has no DNS API; records are edited
+  in its web dashboard.
 
 ## Consequences
 
@@ -44,6 +45,8 @@ from the CLI, and a long-lived token in Actions is one more secret to rotate.
 - `vercel.json` does not use `cleanUrls`: with it, Vercel redirects
   `/index.html` to `/` and the SPA fallback rewrite returns 404 on reload.
 - Preview deployments sit behind Vercel's deployment protection; testers use
-  the production URL (`https://medusapos.vercel.app`, then
-  `https://app.medusapos.com`).
+  `https://app.medusapos.com`.
+- The app is served from a public HTTPS origin, so a browser signing in to a
+  backend on `localhost` goes through Chrome's Local Network Access check:
+  the tester must allow the "access devices on your local network" prompt.
 - Changing the Root Directory is a Vercel dashboard change, not a PR.
