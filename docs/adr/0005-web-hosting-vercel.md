@@ -29,9 +29,10 @@ from the CLI, and a long-lived token in Actions is one more secret to rotate.
   `scripts/check-web-bundle.sh`, so a leaked secret fails the deployment.
 - **Project settings outside the repo:** Root Directory `apps/expo` and
   Node.js 22.x (matching CI). Everything else comes from `vercel.json`.
-- **Domain:** `app.medusapos.com` is a CNAME to Vercel in the Squarespace
-  DNS for `medusapos.com`, with a `_vercel` TXT record proving ownership to
-  the WCPOS team.
+- **Domain:** `app.medusapos.com` is attached to the project. It goes live
+  once the Squarespace DNS for `medusapos.com` has a CNAME `app` pointing to
+  Vercel and a `_vercel` TXT record proving ownership to the WCPOS team
+  (both still pending on 2026-09-23).
 
 ## Consequences
 
