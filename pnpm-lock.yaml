@@ -51,7 +51,7 @@ importers:
         version: 6.1.2(expo@54.0.33)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
       '@tallyui/components':
         specifier: file:../../../tallyui/packages/components
-        version: file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+        version: file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native-svg@15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
       '@tallyui/connector-medusa':
         specifier: file:../../../tallyui/connectors/medusa
         version: file:../tallyui/connectors/medusa(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))
@@ -97,6 +97,9 @@ importers:
       react-native-screens:
         specifier: ~4.11.0
         version: 4.11.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+      react-native-svg:
+        specifier: 15.12.1
+        version: 15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
       react-native-web:
         specifier: ~0.21.2
         version: 0.21.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -1855,6 +1858,7 @@ packages:
       '@tallyui/theme': workspace:*
       react: '>=18'
       react-native: '>=0.74'
+      react-native-svg: '>=15'
 
   '@tallyui/connector-medusa@file:../tallyui/connectors/medusa':
     resolution: {directory: ../tallyui/connectors/medusa, type: directory}
@@ -2259,6 +2263,9 @@ packages:
     resolution: {integrity: sha512-Pu9LnLdNIpUI6nSSTSJW1IlmTmPVMCJHqr/atIigdeJYTDAI/198AvnAbxuSrCxiJLoTCNiPBzdpHEJMjOZiAQ==}
     engines: {node: '>=16'}
 
+  boolbase@1.0.0:
+    resolution: {integrity: sha512-JZOSA7Mo9sNGB8+UjSgzdLtokWAky1zbztM3WRLCbZ70/3cTANmQmOdR7y2g+J0e2WXywy1yS468tY+IruqEww==}
+
   boolean@3.2.0:
     resolution: {integrity: sha512-d0II/GO9uf9lfUHH2BQsjxzRJZBdsjgsBiW4BvhWk/3qoKwQFjIDVN19PfX8F2D/r9PCMTtLWjYVCFrpeYUzsw==}
     deprecated: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
@@ -2485,6 +2492,17 @@ packages:
   css-in-js-utils@3.1.0:
     resolution: {integrity: sha512-fJAcud6B3rRu+KHYk+Bwf+WFL2MDCJJ1XG9x137tJQ0xYxor7XziQtuGFbWNdqrvF4Tk26O3H73nfVqXt/fW1A==}
 
+  css-select@5.2.2:
+    resolution: {integrity: sha512-TizTzUddG/xYLA3NXodFM0fSbNizXjOKhqiQQwvhlspadZokn1KDy0NZFS0wuEubIYAV5/c1/lAr0TaaFXEXzw==}
+
+  css-tree@1.1.3:
+    resolution: {integrity: sha512-tRpdppF7TRazZrjJ6v3stzv93qxRcSsFmW6cX0Zm2NVKpxE1WV1HblnghVv9TreireHkqI/VDEsfolRF1p6y7Q==}
+    engines: {node: '>=8.0.0'}
+
+  css-what@6.2.2:
+    resolution: {integrity: sha512-u/O3vwbptzhMs3L1fQE82ZSLHQQfto5gyZzwteVIEyeaY5Fc7R4dapF/BvRoSYFeqfBk4m0V1Vafq5Pjv25wvA==}
+    engines: {node: '>= 6'}
+
   csstype@3.2.3:
     resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
@@ -2580,6 +2598,19 @@ packages:
   dexie@4.0.10:
     resolution: {integrity: sha512-eM2RzuR3i+M046r2Q0Optl3pS31qTWf8aFuA7H9wnsHTwl8EPvroVLwvQene/6paAs39Tbk6fWZcn2aZaHkc/w==}
 
+  dom-serializer@2.0.0:
+    resolution: {integrity: sha512-wIkAryiqt/nV5EQKqQpo3SToSOV9J0DnbJqwK7Wv/Trc92zIAYZ4FlMu+JPFW1DfGFt81ZTCGgDEabffXeLyJg==}
+
+  domelementtype@2.3.0:
+    resolution: {integrity: sha512-OLETBj6w0OsagBwdXnPdN0cnMfF9opN69co+7ZrbfPGrdpPVNBUj02spi6B1N7wChLQiPn4CSH/zJvXw56gmHw==}
+
+  domhandler@5.0.3:
+    resolution: {integrity: sha512-cgwlv/1iFQiFnU96XXgROh8xTeetsnJiDsTc7TYCLFd9+/WNkIqPTxiM/8pSd8VIrhXGTf1Ny1q1hquVqDJB5w==}
+    engines: {node: '>= 4'}
+
+  domutils@3.2.2:
+    resolution: {integrity: sha512-6kZKyUajlDuqlHKVX1w7gyslj9MPIXzIFiz/rGu35uC1wMi+kMhQwGhl4lt9unC9Vb9INnY9Z3/ZA3+FhASLaw==}
+
   dotenv-expand@11.0.7:
     resolution: {integrity: sha512-zIHwmZPRshsCdpMDyVsqGmgyP0yT8GAgXUnkdAoJisxvf33k7yO6OuoKmcTGuXPWSsm8Oh88nZicRLA9Y0rUeA==}
     engines: {node: '>=12'}
@@ -2624,6 +2655,10 @@ packages:
   enhanced-resolve@5.19.0:
     resolution: {integrity: sha512-phv3E1Xl4tQOShqSte26C7Fl84EwUdZsyOuSSk9qtAGyyQs2s3jJzComh+Abf4g187lUUAvH+H26omrqia2aGg==}
     engines: {node: '>=10.13.0'}
+
+  entities@4.5.0:
+    resolution: {integrity: sha512-V0hjH4dGPh9Ao5p0MoRY6BVqtwCjhz6vI5LT8AJ55H+4g9/4vbHx1I54fS0XuclLhDHArPQCiMjDxjaL8fPxhw==}
+    engines: {node: '>=0.12'}
 
   env-editor@0.4.2:
     resolution: {integrity: sha512-ObFo8v4rQJAE59M69QzwloxPZtd33TpYEIjtKD1rrFDcM1Gd7IkDxEBU+HriziN6HSHQnBJi8Dmy+JWkav5HKA==}
@@ -3556,6 +3591,9 @@ packages:
     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
     engines: {node: '>= 0.4'}
 
+  mdn-data@2.0.14:
+    resolution: {integrity: sha512-dn6wd0uw5GsdswPFfsgMp5NSB0/aDe6fK94YJV/AJDYXL6HVLWBsxeq7js7Ad+mU2K9LAlwpk6kN2D5mwCPVow==}
+
   memoize-one@5.2.1:
     resolution: {integrity: sha512-zYiwtZUcYyXKo/np96AGZAckk+FWWsUdJ3cHGGmld7+AhvcWmQyGCYUh1hc4Q/pkOhb65dQR/pqCyK0cOaHz4Q==}
 
@@ -3850,6 +3888,9 @@ packages:
     resolution: {integrity: sha512-sHGJy8sOC1YraBywpzQlIKBE4pBbGbiF95U6Auspzyem956E0+FtDtsx1ZxlOJkQCZ1AFXAY/yuvtFYrOxF+Bw==}
     engines: {node: ^16.14.0 || >=18.0.0}
 
+  nth-check@2.1.1:
+    resolution: {integrity: sha512-lqjrjmaOoAnWfMmBPL+XNnynZh2+swxiX3WUE0s4yEHI6m+AwrK2UZOimIRl3X/4QctVqS8AiZjFqyOGrMXb/w==}
+
   nullthrows@1.1.1:
     resolution: {integrity: sha512-2vPPEi+Z7WqML2jZYddDIfy5Dqb0r2fze2zTxNNknZaFpVHU3mFB3R+DWeJWGVx0ecvttSGlJTI+WG+8Z4cDWw==}
 
@@ -4121,6 +4162,12 @@ packages:
 
   react-native-screens@4.11.1:
     resolution: {integrity: sha512-F0zOzRVa3ptZfLpD0J8ROdo+y1fEPw+VBFq1MTY/iyDu08al7qFUO5hLMd+EYMda5VXGaTFCa8q7bOppUszhJw==}
+    peerDependencies:
+      react: '*'
+      react-native: '*'
+
+  react-native-svg@15.12.1:
+    resolution: {integrity: sha512-vCuZJDf8a5aNC2dlMovEv4Z0jjEUET53lm/iILFnFewa15b4atjVxU6Wirm6O9y6dEsdjDZVD7Q3QM4T1wlI8g==}
     peerDependencies:
       react: '*'
       react-native: '*'
@@ -7110,7 +7157,7 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.1.17
       '@tailwindcss/oxide-win32-x64-msvc': 4.1.17
 
-  '@tallyui/components@file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)':
+  '@tallyui/components@file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native-svg@15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)':
     dependencies:
       '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)
       '@tallyui/primitives': file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
@@ -7118,6 +7165,7 @@ snapshots:
       class-variance-authority: 0.7.1
       react: 19.2.4
       react-native: 0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4)
+      react-native-svg: 15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
 
   '@tallyui/connector-medusa@file:../tallyui/connectors/medusa(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))':
     dependencies:
@@ -7617,6 +7665,8 @@ snapshots:
 
   binary-decision-diagram@3.2.0: {}
 
+  boolbase@1.0.0: {}
+
   boolean@3.2.0:
     optional: true
 
@@ -7868,6 +7918,21 @@ snapshots:
     dependencies:
       hyphenate-style-name: 1.1.0
 
+  css-select@5.2.2:
+    dependencies:
+      boolbase: 1.0.0
+      css-what: 6.2.2
+      domhandler: 5.0.3
+      domutils: 3.2.2
+      nth-check: 2.1.1
+
+  css-tree@1.1.3:
+    dependencies:
+      mdn-data: 2.0.14
+      source-map: 0.6.1
+
+  css-what@6.2.2: {}
+
   csstype@3.2.3: {}
 
   culori@4.0.2: {}
@@ -7932,6 +7997,24 @@ snapshots:
 
   dexie@4.0.10: {}
 
+  dom-serializer@2.0.0:
+    dependencies:
+      domelementtype: 2.3.0
+      domhandler: 5.0.3
+      entities: 4.5.0
+
+  domelementtype@2.3.0: {}
+
+  domhandler@5.0.3:
+    dependencies:
+      domelementtype: 2.3.0
+
+  domutils@3.2.2:
+    dependencies:
+      dom-serializer: 2.0.0
+      domelementtype: 2.3.0
+      domhandler: 5.0.3
+
   dotenv-expand@11.0.7:
     dependencies:
       dotenv: 16.4.7
@@ -7972,6 +8055,8 @@ snapshots:
     dependencies:
       graceful-fs: 4.2.11
       tapable: 2.3.0
+
+  entities@4.5.0: {}
 
   env-editor@0.4.2: {}
 
@@ -8923,6 +9008,8 @@ snapshots:
 
   math-intrinsics@1.1.0: {}
 
+  mdn-data@2.0.14: {}
+
   memoize-one@5.2.1: {}
 
   memoize-one@6.0.0: {}
@@ -9389,6 +9476,10 @@ snapshots:
       semver: 7.7.4
       validate-npm-package-name: 5.0.1
 
+  nth-check@2.1.1:
+    dependencies:
+      boolbase: 1.0.0
+
   nullthrows@1.1.1: {}
 
   ob1@0.83.3:
@@ -9648,6 +9739,14 @@ snapshots:
       react-freeze: 1.0.4(react@19.2.4)
       react-native: 0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4)
       react-native-is-edge-to-edge: 1.2.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+      warn-once: 0.1.1
+
+  react-native-svg@15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4):
+    dependencies:
+      css-select: 5.2.2
+      css-tree: 1.1.3
+      react: 19.2.4
+      react-native: 0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4)
       warn-once: 0.1.1
 
   react-native-web@0.21.2(react-dom@19.2.4(react@19.2.4))(react@19.2.4):
