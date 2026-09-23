@@ -27,8 +27,11 @@ from the CLI, and a long-lived token in Actions is one more secret to rotate.
   that the root `pnpm.overrides` expect, then runs
   `pnpm install --frozen-lockfile`. The build runs `expo export` and then
   `scripts/check-web-bundle.sh`, so a leaked secret fails the deployment.
-- **Project settings outside the repo:** Root Directory `apps/expo` and
-  Node.js 22.x (matching CI). Everything else comes from `vercel.json`.
+- **Node.js version:** `engines.node` in `apps/expo/package.json` (22.x).
+  Vercel reads it from the project's root directory and every CI job reads it
+  through `setup-node`'s `node-version-file`.
+- **Project settings outside the repo:** only the Root Directory
+  (`apps/expo`). Everything else comes from the repo.
 - **Domain:** `app.medusapos.com` is attached to the project. It goes live
   once the Squarespace DNS for `medusapos.com` has a CNAME `app` pointing to
   Vercel and a `_vercel` TXT record proving ownership to the WCPOS team
@@ -36,11 +39,11 @@ from the CLI, and a long-lived token in Actions is one more secret to rotate.
 
 ## Consequences
 
-- `TALLYUI_REF` now appears in `.github/workflows/ci.yml` and
-  `scripts/vercel-install.sh`; bump both together.
+- `TALLYUI_REF` lives only in `.github/workflows/ci.yml`;
+  `scripts/vercel-install.sh` reads it from there, so one edit bumps both.
 - `vercel.json` does not use `cleanUrls`: with it, Vercel redirects
   `/index.html` to `/` and the SPA fallback rewrite returns 404 on reload.
 - Preview deployments sit behind Vercel's deployment protection; testers use
-  the production domain only.
-- Changing the Root Directory or Node version is a Vercel dashboard change,
-  not a PR.
+  the production URL (`https://medusapos.vercel.app`, then
+  `https://app.medusapos.com`).
+- Changing the Root Directory is a Vercel dashboard change, not a PR.
