@@ -16,11 +16,11 @@ export function classifyReplicationError(err: unknown): 'unauthorized' | 'http' 
 /**
  * Replicates a connector's products into a local RxDB database and keeps a
  * live list of them. Nothing here is backend-specific: the connector
- * supplies the schema, auth headers and pull handler.
+ * supplies the schema and pull handler; the caller supplies auth headers.
  */
 export function useReplicatedProducts(
   connector: TallyConnector,
-  credentials: Record<string, string>,
+  headers: Record<string, string>,
   baseUrl: string,
   onUnauthorized: () => void,
 ) {
@@ -49,7 +49,8 @@ export function useReplicatedProducts(
         const context: SyncContext = {
           connectorId: connector.id,
           baseUrl,
-          headers: connector.auth.getHeaders(credentials),
+          // Connector credentials use Basic for secret API keys; a signed-in user's JWT needs Bearer.
+          headers,
         };
 
         const subscription = db.products.find().$.subscribe((docs) => {
@@ -99,7 +100,7 @@ export function useReplicatedProducts(
       cancelled = true;
       for (const fn of cleanup) fn();
     };
-  }, [connector, baseUrl, credentials, onUnauthorized]);
+  }, [connector, baseUrl, headers, onUnauthorized]);
 
   return { products, state, error };
 }
