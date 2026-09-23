@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": ".tallyui-types",
+    "rootDir": "../../../tallyui/packages/core/src/types",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "target": "ES2021",
+    "skipLibCheck": true,
+    "strict": true
+  },
+  "files": ["../../../tallyui/packages/core/src/types/commands.ts"]
+}
