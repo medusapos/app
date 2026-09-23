@@ -37,14 +37,14 @@ const STATE_LABEL: Record<SyncState, string> = {
  * line.
  */
 export default function ProductsScreen() {
-  const { session, signOut } = useSession();
+  const { session, signOut, reportUnauthorized } = useSession();
   if (!session) return <Redirect href="/login" />;
-  return <SignedInProducts session={session} signOut={signOut} />;
+  return <SignedInProducts session={session} signOut={signOut} onUnauthorized={reportUnauthorized} />;
 }
 
-function SignedInProducts({ session, signOut }: { session: Session; signOut: () => void }) {
+function SignedInProducts({ session, signOut, onUnauthorized }: { session: Session; signOut: () => void; onUnauthorized: () => void }) {
   const credentials = useMemo(() => ({ api_token: session.token }), [session.token]);
-  const { products, state, error } = useReplicatedProducts(connector, credentials, session.baseUrl);
+  const { products, state, error } = useReplicatedProducts(connector, credentials, session.baseUrl, onUnauthorized);
   const [query, setQuery] = useState('');
   const deferredQuery = useDeferredValue(query);
 

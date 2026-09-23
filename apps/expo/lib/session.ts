@@ -1,5 +1,5 @@
 export type Session = { baseUrl: string; email: string; token: string };
-export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error';
+export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error' | 'invalid_url' | 'insecure_url';
 export class LoginError extends Error {
   constructor(readonly code: LoginErrorCode, message: string) { super(message); }
 }
@@ -9,13 +9,32 @@ export const REFRESH_WINDOW_MS = 6 * 60 * 60 * 1000;
 const STORAGE_KEY = 'medusapos.session';
 export type SessionStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+export function isPrivateHost(hostname: string): boolean {
+  if (hostname === 'localhost' || hostname.endsWith('.localhost') || hostname === '[::1]') return true;
+  if (!/^\d+\.\d+\.\d+\.\d+$/.test(hostname)) return false;
+  const octets = hostname.split('.').map(Number);
+  if (octets.some((octet) => octet > 255)) return false;
+  const [a, b] = octets;
+  return a === 127 || a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
 export function normalizeBaseUrl(input: string): string {
   const baseUrl = input.trim().replace(/\/+$/, '');
+  let url: URL;
   try {
-    const { protocol } = new URL(baseUrl);
-    if (protocol === 'http:' || protocol === 'https:') return baseUrl;
-  } catch { /* Invalid URLs use the same error as unsupported protocols. */ }
-  throw new LoginError('unreachable', 'Enter an HTTP or HTTPS backend URL.');
+    url = new URL(baseUrl);
+  } catch { throw new LoginError('invalid_url', 'Enter a valid backend URL starting with https://.'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new LoginError('invalid_url', 'Enter a valid backend URL starting with https://.');
+  }
+  if (url.protocol === 'http:' && !isPrivateHost(url.hostname)) {
+    throw new LoginError('insecure_url', 'Use https://. Plain http:// is only allowed for localhost and private network addresses.');
+  }
+  return baseUrl;
 }
 
 export async function login(baseUrl: string, email: string, password: string, fetchImpl = globalThis.fetch): Promise<Session> {
@@ -29,11 +48,11 @@ export async function login(baseUrl: string, email: string, password: string, fe
   } catch { throw new LoginError('unreachable', 'Could not reach the backend.'); }
   if (response.status === 401) throw new LoginError('invalid_credentials', 'Incorrect email or password.');
   if (!response.ok) throw new LoginError('server_error', 'The backend could not sign you in.');
-  const body = await response.json().catch(() => null);
-  if (body?.mfa_required === true || body?.verification_required === true || body?.location !== undefined) {
+  const body: unknown = await response.json().catch(() => null);
+  if (isRecord(body) && (body.mfa_required === true || body.verification_required === true || body.location !== undefined)) {
     throw new LoginError('unsupported_account', 'This account requires an unsupported sign-in flow.');
   }
-  if (typeof body?.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
+  if (!isRecord(body) || typeof body.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
   return { baseUrl, email, token: body.token };
 }
 
@@ -46,8 +65,8 @@ export async function refreshSession(session: Session, fetchImpl = globalThis.fe
   } catch { throw new LoginError('unreachable', 'Could not reach the backend.'); }
   if (response.status === 401) throw new LoginError('invalid_credentials', 'Please sign in again.');
   if (!response.ok) throw new LoginError('server_error', 'The backend could not refresh the session.');
-  const body = await response.json().catch(() => null);
-  if (typeof body?.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
+  const body: unknown = await response.json().catch(() => null);
+  if (!isRecord(body) || typeof body.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
   return { ...session, token: body.token };
 }
 
@@ -56,7 +75,9 @@ export function tokenExpiresAt(token: string): number | null {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
     const payload = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-    const { exp } = JSON.parse(atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, '=')));
+    const value: unknown = JSON.parse(atob(payload.padEnd(Math.ceil(payload.length / 4) * 4, '=')));
+    if (!isRecord(value)) return null;
+    const { exp } = value;
     return typeof exp === 'number' && Number.isFinite(exp * 1000) ? exp * 1000 : null;
   } catch { return null; }
 }
@@ -72,8 +93,8 @@ export function defaultStorage(): SessionStorage | null {
 
 export function loadSession(storage: SessionStorage | null): Session | null {
   try {
-    const value = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null');
-    if (typeof value?.baseUrl !== 'string' || typeof value?.email !== 'string' || typeof value?.token !== 'string') return null;
+    const value: unknown = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null');
+    if (!isRecord(value) || typeof value.baseUrl !== 'string' || typeof value.email !== 'string' || typeof value.token !== 'string') return null;
     return { baseUrl: value.baseUrl, email: value.email, token: value.token };
   } catch { return null; }
 }

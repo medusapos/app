@@ -10,6 +10,8 @@ const ERROR_MESSAGES: Record<LoginErrorCode, string> = {
   unsupported_account: 'This account needs multi-factor authentication or verification, which the POS does not support yet.',
   unreachable: 'Could not reach the backend. Check the URL and your connection.',
   server_error: 'The backend could not sign you in. Please try again.',
+  invalid_url: 'Enter a valid backend URL starting with https://.',
+  insecure_url: 'Use https://. Plain http:// is only allowed for localhost and private network addresses.',
 };
 
 export default function LoginScreen() {

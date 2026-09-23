@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  clearSession, defaultStorage, loadSession, login, LoginError, normalizeBaseUrl,
+  clearSession, defaultStorage, isPrivateHost, loadSession, login, LoginError, normalizeBaseUrl,
   REFRESH_WINDOW_MS, refreshSession, saveSession, shouldRefresh, tokenExpiresAt,
   type SessionStorage,
 } from './session';
@@ -27,11 +27,40 @@ describe('normalizeBaseUrl', () => {
   });
   it.each(['ftp://store.test', 'store.test', '', 'https://'])('rejects %j', (url) => {
     expect(() => normalizeBaseUrl(url)).toThrow(LoginError);
-    expect(() => normalizeBaseUrl(url)).toThrow(expect.objectContaining({ code: 'unreachable' }));
+    expect(() => normalizeBaseUrl(url)).toThrow(expect.objectContaining({ code: 'invalid_url' }));
   });
+  it.each([
+    'https://shop.example.com', 'http://localhost:9000', 'http://store.localhost',
+    'http://127.0.0.1', 'http://127.255.255.255', 'http://10.20.30.40',
+    'http://172.16.0.1', 'http://172.31.255.254', 'http://192.168.1.2', 'http://[::1]:9000',
+  ])('allows %s', (url) => {
+    expect(normalizeBaseUrl(url)).toBe(url);
+  });
+  it.each(['http://172.32.0.1', 'http://172.15.255.255', 'http://shop.example.com', 'http://8.8.8.8'])(
+    'requires HTTPS for %s', (url) => {
+      expect(() => normalizeBaseUrl(url)).toThrow(expect.objectContaining({ code: 'insecure_url' }));
+    },
+  );
+});
+
+describe('isPrivateHost', () => {
+  it.each(['localhost', 'store.localhost', '127.0.0.1', '127.2.3.4', '10.0.0.1',
+    '172.16.0.1', '172.31.255.255', '192.168.0.1', '[::1]'])('recognizes %s', (hostname) => {
+    expect(isPrivateHost(hostname)).toBe(true);
+  });
+  it.each(['172.32.0.1', '172.15.0.1', '192.169.0.1', '8.8.8.8', '10.0.0.256',
+    'shop.example.com', 'localhost.example.com', 'notlocalhost', '[::2]', 'garbage'])(
+    'rejects %s', (hostname) => { expect(isPrivateHost(hostname)).toBe(false); },
+  );
 });
 
 describe('login', () => {
+  it('rejects public HTTP before sending the password', async () => {
+    const fetchImpl = response({ token: 'jwt' });
+    await expect(login('http://shop.example.com', session.email, 'secret', fetchImpl))
+      .rejects.toMatchObject({ code: 'insecure_url' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
   it('posts credentials and returns a session with a normalized URL', async () => {
     const fetchImpl = response({ token: 'jwt' });
     await expect(login(` ${session.baseUrl}/ `, session.email, 'secret', fetchImpl)).resolves.toEqual(session);

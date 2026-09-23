@@ -1,4 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { medusaConnector } from '@tallyui/connector-medusa';
+import { clearProductCache } from './product-cache';
 import {
   clearSession, defaultStorage, loadSession, login, LoginError, refreshSession,
   saveSession, shouldRefresh, type Session,
@@ -8,6 +10,7 @@ type SessionContextValue = {
   session: Session | null;
   signIn(baseUrl: string, email: string, password: string): Promise<void>;
   signOut(): void;
+  reportUnauthorized(): void;
 };
 const SessionContext = createContext<SessionContextValue | null>(null);
 
@@ -15,9 +18,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState(() => loadSession(defaultStorage()));
   const currentSession = useRef(session);
   const signOut = useCallback(() => {
+    const ended = currentSession.current;
     clearSession(defaultStorage());
     currentSession.current = null;
     setSession(null);
+    if (ended) void clearProductCache(medusaConnector.id, ended.baseUrl);
   }, []);
   async function signIn(baseUrl: string, email: string, password: string) {
     const next = await login(baseUrl, email, password);
@@ -48,7 +53,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => { active = false; clearInterval(timer); };
   }, [signedIn, signOut]);
 
-  return <SessionContext.Provider value={{ session, signIn, signOut }}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={{ session, signIn, signOut, reportUnauthorized: signOut }}>{children}</SessionContext.Provider>;
 }
 
 export function useSession(): SessionContextValue {
