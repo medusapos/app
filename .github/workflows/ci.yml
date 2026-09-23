@@ -47,6 +47,36 @@ jobs:
       - run: pnpm test
         working-directory: app
 
+  web-export:
+    name: Web export
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: app
+      - uses: actions/checkout@v5
+        with:
+          repository: TallyUI/tallyui
+          ref: ${{ env.TALLYUI_REF }}
+          path: tallyui
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm --filter @medusapos/expo build:web
+        env:
+          CI: '1'
+        working-directory: app
+      - run: bash scripts/check-web-bundle.sh apps/expo/dist
+        working-directory: app
+
   dev-store:
     name: Dev store unit tests
     runs-on: ubuntu-latest
