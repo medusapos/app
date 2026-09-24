@@ -43,6 +43,22 @@ if [[ "$backend_logs" != *'redisUrl not found'* ]]; then
   echo 'smoke: in-memory Redis fallback log not found' >&2
   exit 1
 fi
+deadline=$((SECONDS + 60))
+while true; do
+  backend_logs=$(docker logs mpdemo-smoke-backend 2>&1)
+  if [[ "$backend_logs" == *'Failed to seed'* ]]; then
+    echo 'smoke: search seeding failed' >&2
+    exit 1
+  fi
+  if [[ "$backend_logs" == *'[Search] Seeded "product"'* || "$backend_logs" == *'[Search] Seeded \"product\"'* ]]; then
+    break
+  fi
+  if (( SECONDS >= deadline )); then
+    echo 'smoke: product search seeding timed out after 60 seconds' >&2
+    exit 1
+  fi
+  sleep 1
+done
 
 docker stop mpdemo-smoke-backend
 docker exec mpdemo-smoke-pg psql -U postgres -d postgres -v ON_ERROR_STOP=1 \

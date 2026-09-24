@@ -97,25 +97,30 @@ function toDocument(
   };
 }
 
-/**
- * A row that returns no document leaves
- * the index: the helpers turn it into a delete on `consume` and on the
- * catch-up pass.
- */
-const source = {
-  fields: PRODUCT_GRAPH_FIELDS,
-  transform: async (
-    rows: ProductRow[],
-    context: SearchTypes.SearchIngestionContext,
-  ) => {
-    const pricing = await loadPricing(
-      rows.map((row) => row.id),
-      context,
-    );
-
-    return rows.map((row) => toDocument(row, pricing.get(row.id)));
-  },
-};
+// 2.21's transform and resolve_ids are synchronous, so resolve ids and prices
+// around the graph helpers instead.
+async function priceMutations(
+  mutations: SearchTypes.SearchIndexSeedMutation<typeof productFields>[],
+  context: SearchTypes.SearchIngestionContext,
+) {
+  return Promise.all(
+    mutations.map(async (mutation) => {
+      if (mutation.action === "delete") {
+        return mutation;
+      }
+      // Without transform, the helpers return raw rows despite their document type.
+      const rows = mutation.documents as unknown as ProductRow[];
+      const pricing = await loadPricing(
+        rows.map((row) => row.id),
+        context,
+      );
+      return {
+        ...mutation,
+        documents: rows.map((row) => toDocument(row, pricing.get(row.id))),
+      };
+    }),
+  );
+}
 
 /**
  * Everything a document is built from, so a change to any of it re-indexes the
@@ -156,10 +161,20 @@ export default defineSearchIndex({
     typo_tolerance: { enabled: true },
   },
   events: PRODUCT_EVENTS,
-  consume: graphConsume<typeof productFields, ProductRow>({
-    ...source,
-    resolve_ids: resolveProductIds,
-    is_delete: (event) => event.name === "product.deleted",
-  }),
-  seed: graphSeed<typeof productFields, ProductRow>(source),
+  consume: async (event, context) => {
+    const ids = await resolveProductIds(event, context);
+    const mutations = await graphConsume<typeof productFields, ProductRow>({
+      fields: PRODUCT_GRAPH_FIELDS,
+      resolve_ids: () => ids,
+      is_delete: (event) => event.name === "product.deleted",
+    })(event, context);
+    return priceMutations(mutations, context);
+  },
+  seed: async function* (context) {
+    for await (const mutations of graphSeed<typeof productFields, ProductRow>({
+      fields: PRODUCT_GRAPH_FIELDS,
+    })(context)) {
+      yield await priceMutations(mutations, context);
+    }
+  },
 });
