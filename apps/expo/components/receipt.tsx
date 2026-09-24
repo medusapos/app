@@ -4,6 +4,7 @@ import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, type Order } from '@tallyui/pos';
 import type { StoreSettings } from '../lib/store-settings';
 import { injectPrintStyle } from './print-style';
+import { formatDate } from '../lib/format-date';
 
 export function Receipt({ order, settings, cashier, registerId, newSale }: {
   order: Order; settings: StoreSettings; cashier: string; registerId: string; newSale: () => void;
@@ -21,9 +22,8 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
     <Text className="text-lg font-semibold text-foreground">{receipt.header.storeName}</Text>
     {receipt.header.storeAddress ? <Text className="text-muted-foreground">{receipt.header.storeAddress}</Text> : null}
     <Text className="text-foreground">Order {receipt.header.orderNumber.slice(-8)}</Text>
-    <Text className="text-muted-foreground">{receipt.header.date}</Text>
+    <Text className="text-muted-foreground">{formatDate(receipt.header.date)}</Text>
     <Text className="text-muted-foreground">Cashier: {receipt.header.cashier}</Text>
-    <Text className="text-muted-foreground">Register: {receipt.header.register}</Text>
     {receipt.lineItems.map((line, index) => <View key={index}>
       <Text className="text-foreground">{line.name}</Text>
       {row(`${line.quantity} × ${money(line.unitPriceMinor)}`, money(line.lineTotalMinor))}

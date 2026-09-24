@@ -102,7 +102,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </View>
       ) }} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} settings={settings}
-        cashier={session.email} registerId={registerId} newSale={sale.newSale} /> :
+        cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>

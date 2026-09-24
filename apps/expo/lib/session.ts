@@ -1,6 +1,6 @@
 import { authHeaders } from './pos-connector';
 
-export type Session = { baseUrl: string; email: string; token: string };
+export type Session = { baseUrl: string; email: string; token: string; name?: string };
 export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error' | 'invalid_url' | 'insecure_url';
 export class LoginError extends Error {
   constructor(readonly code: LoginErrorCode, message: string) { super(message); }
@@ -55,7 +55,25 @@ export async function login(baseUrl: string, email: string, password: string, fe
     throw new LoginError('unsupported_account', 'This account requires an unsupported sign-in flow.');
   }
   if (!isRecord(body) || typeof body.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
-  return { baseUrl, email, token: body.token };
+  const session: Session = { baseUrl, email, token: body.token };
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const profile: unknown = await Promise.race([
+      fetchImpl(`${baseUrl}/admin/users/me`, {
+        method: 'GET', headers: authHeaders(session.token),
+      }).then((response) => response.ok ? response.json() : null),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), 3000); }),
+    ]);
+    if (profile) {
+      if (isRecord(profile) && isRecord(profile.user)) {
+        const name = [profile.user.first_name, profile.user.last_name]
+          .filter((part) => typeof part === 'string').join(' ').trim();
+        if (name) session.name = name;
+      }
+    }
+  } catch { /* The cashier name is optional; keep the successful login. */ }
+  finally { clearTimeout(timer); }
+  return session;
 }
 
 export async function refreshSession(session: Session, fetchImpl = globalThis.fetch): Promise<Session> {
@@ -97,14 +115,15 @@ export function loadSession(storage: SessionStorage | null): Session | null {
   try {
     const value: unknown = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null');
     if (!isRecord(value) || typeof value.baseUrl !== 'string' || typeof value.email !== 'string' || typeof value.token !== 'string') return null;
-    return { baseUrl: value.baseUrl, email: value.email, token: value.token };
+    return { baseUrl: value.baseUrl, email: value.email, token: value.token,
+      name: typeof value.name === 'string' ? value.name : undefined };
   } catch { return null; }
 }
 
 export function saveSession(storage: SessionStorage | null, session: Session): void {
   try {
-    const { baseUrl, email, token } = session;
-    storage?.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, email, token }));
+    const { baseUrl, email, token, name } = session;
+    storage?.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, email, token, name }));
   } catch { /* Keep the in-memory session when web storage is unavailable. */ }
 }
 

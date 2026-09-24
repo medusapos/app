@@ -55,6 +55,47 @@ describe('isPrivateHost', () => {
 });
 
 describe('login', () => {
+  it('signs in without a name after a user request hangs for three seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = response({ token: 'jwt' })
+        .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));
+      const resolved = vi.fn();
+      const result = login(session.baseUrl, session.email, 'secret', fetchImpl).then(resolved);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(resolved).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(resolved).toHaveBeenCalledWith(session);
+      await result;
+    } finally { vi.useRealTimers(); }
+  });
+  it('reads the signed-in user name and preserves it in session storage', async () => {
+    const fetchImpl = response({ user: { first_name: ' Alex', last_name: 'Shopkeeper ' } })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })));
+    const result = await login(session.baseUrl, session.email, 'secret', fetchImpl);
+    expect(result).toEqual({ ...session, name: 'Alex Shopkeeper' });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenNthCalledWith(2, `${session.baseUrl}/admin/users/me`, {
+      method: 'GET', headers: { Authorization: 'Bearer jwt' },
+    });
+    const storage = memoryStorage();
+    saveSession(storage, result);
+    expect(loadSession(storage)).toEqual(result);
+  });
+  it.each([
+    new TypeError('offline'), new Response('{}', { status: 500 }),
+    new Response('not json'), new Response('{}'), new Response('{"user":{}}'),
+    new Response('{"user":{"first_name":" ","last_name":null}}'),
+  ])('still signs in without a name when the user read fails or has no name: %s', async (result) => {
+    const fetchImpl = response({ token: 'jwt' });
+    fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })));
+    if (result instanceof Error) fetchImpl.mockRejectedValueOnce(result);
+    else fetchImpl.mockResolvedValueOnce(result);
+    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual(session);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
   it('rejects public HTTP before sending the password', async () => {
     const fetchImpl = response({ token: 'jwt' });
     await expect(login('http://shop.example.com', session.email, 'secret', fetchImpl))

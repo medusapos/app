@@ -92,7 +92,8 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
   expect(shortOrder.status).toBe('completed');
   await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
   const attention = page.getByRole('heading', { name: 'Needs attention', exact: true }).locator('..');
-  const row = attention.getByText(`applied · ${shortOrder.display_id}`, { exact: true }).locator('..');
+  const row = attention.getByText(`Order #${shortOrder.display_id} ·`, { exact: false }).locator('..');
   await expect(row).toBeVisible();
+  await expect(row.getByText(/· Synced$/)).toBeVisible();
   await expect(row.getByText('Stock short by 1 for E2E product 5', { exact: true })).toBeVisible();
 });

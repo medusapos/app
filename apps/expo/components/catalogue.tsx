@@ -1,10 +1,12 @@
 import { useMemo, useState } from 'react';
-import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, Text, View } from 'react-native';
 import type { ProductTraits } from '@tallyui/core';
 import { ProductCard, ProductGrid, SearchInput } from '@tallyui/components';
 import { searchProducts } from '@tallyui/pos';
 import { catalogueEntries, findEntryByCode, variantPriceLabel, type CatalogueEntry } from '../lib/catalogue';
 
+// Keep product names readable and touch targets at least 160 px wide where two columns fit.
+const MIN_TILE_WIDTH = 160;
 const STOCK_LABEL = {
   in_stock: 'In Stock', out_of_stock: 'Out of Stock', backorder: 'On Backorder', unknown: 'Unknown',
 };
@@ -18,7 +20,9 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
 }) {
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<CatalogueEntry<Doc>[]>([]);
-  const { width } = useWindowDimensions();
+  const [width, setWidth] = useState(0);
+  // ProductGrid has 4 px padding on each side of the content and each cell.
+  const columns = Math.max(2, Math.min(6, Math.floor((width - 8) / (MIN_TILE_WIDTH + 8))));
   const entries = useMemo(() => catalogueEntries(products, traits), [products, traits]);
   const results = useMemo(() => searchProducts(products, query, traits), [products, query, traits]);
 
@@ -28,7 +32,7 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
   }
 
   return (
-    <View className="flex-1">
+    <View className="flex-1" onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
       <View className="gap-2 border-b border-border bg-card px-4 pb-3 pt-3">
         <SearchInput value={query} onChangeText={setQuery} placeholder="Search or scan barcode / SKU" autoFocus
           onSubmitEditing={() => {
@@ -55,7 +59,7 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
           </View>
         ) : null}
       </View>
-      <ProductGrid items={results} numColumns={width < 600 ? 2 : width < 1024 ? 4 : 6}
+      <ProductGrid items={results} numColumns={columns}
         renderItem={(product: Doc) => (
           <ProductCard doc={product} onPress={() => {
             const variants = entries.filter((entry) => entry.product === product);
