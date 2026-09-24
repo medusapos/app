@@ -24,8 +24,10 @@ afterEach(async () => {
 
 it('sends the admin JWT as Bearer, never Basic, when replicating products', async () => {
   vi.stubGlobal('crypto', webcrypto);
-  const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-    new Response(JSON.stringify({ products: [], count: 0, offset: 0, limit: 100 }), { status: 200 }));
+  // The stock reconcile after the first sync reads an empty inventory page.
+  const fetchMock = vi.fn(async (url: string, _init?: RequestInit) => new Response(JSON.stringify(
+    new URL(url).pathname === '/admin/inventory-items' ? { inventory_items: [], count: 0 }
+      : { products: [], count: 0, offset: 0, limit: 100 }), { status: 200 }));
   // A pass starts with a high-water-mark read, then requests the product page.
   fetchMock.mockResolvedValueOnce(
     new Response(JSON.stringify({ products: [], count: 0 }), { status: 200 }),

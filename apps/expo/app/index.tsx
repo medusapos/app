@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 
 import { ConnectorProvider } from '@tallyui/core';
+import { withStockOverlay } from '@tallyui/pos';
 
 import { Catalogue } from '../components/catalogue';
 import { Cart } from '../components/cart';
@@ -73,17 +74,28 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   settings: StoreSettings; settingsStatus: string | null;
 }) {
   const headers = useMemo(() => authHeaders(session.token), [session.token]);
-  const { products, state, error, lastSyncedAt } = useReplicatedProducts(connector, headers, session.baseUrl, onUnauthorized);
+  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock } =
+    useReplicatedProducts(connector, headers, session.baseUrl, onUnauthorized);
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
   const { record, state: outboxState, recent } = useOutboxContext();
+  const stockWarned = useRef(new Set<string>());
+  useEffect(() => {
+    const fresh = recent.filter((order) => order.syncStatus === 'applied' && !stockWarned.current.has(order.id)
+      && order.warnings?.some((warning) => warning.code === 'insufficient_stock'));
+    for (const order of fresh) stockWarned.current.add(order.id);
+    // The store was short, so local stock is stale.
+    if (fresh.length) void reconcileStock();
+  }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
   const sale = useSale(settings, { registerId, cashierRef: session.email, onSaleCompleted: record });
   const { width } = useWindowDimensions();
   const traitContext = useMemo(() => ({ currency: settings.currency }), [settings.currency]);
 
+  // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
   const sorted = useMemo(
-    () => products.filter(traits.isSellable).sort((a, b) => traits.getName(a).localeCompare(traits.getName(b))),
-    [products],
+    () => products.map((doc) => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay))
+      .filter(traits.isSellable).sort((a, b) => traits.getName(a).localeCompare(traits.getName(b))),
+    [products, stockOverlay],
   );
   const sellableCount = sorted.length;
   const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
@@ -108,6 +120,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
             <View className="flex-1">
               <Catalogue products={sorted} traits={traits} currency={settings.currency} lastSyncedAt={lastSyncedAt}
+                lastStockCheckAt={lastStockCheckAt}
                 onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
               <SyncStatus state={outboxState} />
             </View>

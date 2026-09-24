@@ -48,9 +48,10 @@ const products = [
 
 afterEach(() => { cleanup(); localization.uses24hourClock = null; });
 
-function mount(items = products, lastSyncedAt: Date | null = null) {
+function mount(items = products, lastSyncedAt: Date | null = null, lastStockCheckAt: Date | null = null) {
   const onSelect = vi.fn();
-  render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced" lastSyncedAt={lastSyncedAt} />);
+  render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced"
+    lastSyncedAt={lastSyncedAt} lastStockCheckAt={lastStockCheckAt} />);
   const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
   return { input, onSelect };
 }
@@ -81,6 +82,15 @@ describe('Catalogue', () => {
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();
     expect(chooser.getByText(`Out of Stock · as of ${expected}`)).toBeTruthy();
+  });
+  it('dates stock by the last completed stock check over the catalogue sync', () => {
+    const synced = new Date('2026-09-24T09:15:00Z');
+    const checked = new Date('2026-09-24T10:42:00Z');
+    mount(products, synced, checked);
+    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    const chooser = within(screen.getByLabelText('Choose variant'));
+    expect(chooser.getByText(`In Stock · as of ${formatStockSyncTime(checked)}`)).toBeTruthy();
+    expect(chooser.queryByText(`In Stock · as of ${formatStockSyncTime(synced)}`)).toBeNull();
   });
   it('filters products through search and shows matching counts', () => {
     const { input } = mount();
@@ -164,7 +174,8 @@ describe('replicated catalogue recovery', () => {
     const baseUrl = 'https://catalogue-recovery.test';
     const stream = new Subject<'RESYNC'>();
     let failure: Error | null = new TypeError('Failed to fetch');
-    const connector = { ...medusaConnector, replication: { products: { pull: {
+    // No stock reconcile: this test is about replication recovery and must not reach the network.
+    const connector = { ...medusaConnector, reconcile: undefined, replication: { products: { pull: {
       stream$: stream,
       handler: async () => {
         if (failure) throw failure;
