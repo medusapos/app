@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 # ADR-060 evidence: deleting a variant in Medusa 2.21 does not bump the
-# product's updated_at, so an incremental pull correctly filtered on
-# updated_at (updated_at[$gte], as TallyUI's replication pull queries it)
-# would not see the change — the product's updated_at is unchanged.
+# product's updated_at. A pull correctly filtered on updated_at
+# (updated_at[$gte]) would therefore miss the change. TallyUI's current
+# replication pull instead sends the plain updated_at[gte] form, which
+# Medusa silently ignores (see updated-at-filter.sh), so today it re-reads
+# everything and picks the change up by accident.
 # Creates and deletes a throwaway product — only ever point this at the
 # disposable e2e store (bash e2e/store/start.sh from the repo root). Never
 # run it against a shared or production store.
