@@ -10,6 +10,7 @@ import { Cart } from '../components/cart';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
 import { SyncStatus } from '../components/sync-status';
+import { markBusy } from '../lib/live-tab';
 import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, posConnector } from '../lib/pos-connector';
@@ -88,6 +89,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
   const sale = useSale(settings, { registerId, cashierRef: session.email, onSaleCompleted: record });
+  useEffect(() => {
+    markBusy('payment', sale.stage.kind === 'tender');
+    return () => markBusy('payment', false);
+  }, [sale.stage.kind]);
   const { width } = useWindowDimensions();
   const traitContext = useMemo(() => ({ currency: settings.currency }), [settings.currency]);
 

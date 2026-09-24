@@ -2,7 +2,13 @@ import { removeRxDatabase, type RxStorage } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 
-const openCaches = new Map<string, { remove(): Promise<unknown> }>();
+type CachedDb = { remove(): Promise<unknown>; close(): Promise<unknown> };
+
+const openCaches = new Map<string, CachedDb>();
+// Close promises already started (by the function `registerOpenCache` returns, or by
+// `closeProductCaches` itself), kept until they settle so a close started by one is
+// still awaited by the other even after its cache is gone from `openCaches`.
+const pendingCloses = new Set<Promise<void>>();
 
 /** Persistent browser storage, with memory storage for environments without IndexedDB. */
 export function productCacheStorage(): RxStorage<any, any> {
@@ -15,10 +21,33 @@ export function productCacheName(connectorId: string, baseUrl: string): string {
   return `medusapos_${connectorId}_${encoded}`;
 }
 
-/** Registers an open cache so sign-out can remove it. */
-export function registerOpenCache(name: string, db: { remove(): Promise<unknown> }): () => void {
+function startClose(name: string, db: CachedDb): Promise<void> {
+  if (openCaches.get(name) === db) openCaches.delete(name);
+  const closing = Promise.resolve(db.close()).then(() => undefined);
+  pendingCloses.add(closing);
+  void closing.finally(() => pendingCloses.delete(closing));
+  return closing;
+}
+
+/**
+ * Registers an open cache so sign-out can remove it, and returns a once-only
+ * close: every call unregisters and closes the database, and every call
+ * returns the same promise.
+ */
+export function registerOpenCache(name: string, db: CachedDb): () => Promise<void> {
   openCaches.set(name, db);
-  return () => { if (openCaches.get(name) === db) openCaches.delete(name); };
+  let closing: Promise<void> | undefined;
+  return () => (closing ??= startClose(name, db));
+}
+
+/**
+ * Closes every registered cache through that same once-close, and also
+ * awaits closes already started (by the function above) that have not
+ * finished yet.
+ */
+export async function closeProductCaches(): Promise<void> {
+  for (const [name, db] of openCaches) startClose(name, db);
+  await Promise.all(pendingCloses);
 }
 
 /** Removes an open or closed backend cache without throwing. */

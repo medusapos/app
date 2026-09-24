@@ -91,8 +91,8 @@ export function useReplicatedProducts(
           await db.close();
           return;
         }
-        cleanup.push(registerOpenCache(name, db));
-        cleanup.push(() => db.close());
+        const closeCache = registerOpenCache(name, db);
+        cleanup.push(() => { void closeCache(); });
         const context: SyncContext = {
           connectorId: connector.id,
           baseUrl,

@@ -3,7 +3,7 @@ import { createRxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import {
-  clearProductCache, isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache,
+  clearProductCache, closeProductCaches, isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache,
 } from './product-cache';
 
 describe('productCacheStorage', () => {
@@ -53,26 +53,26 @@ describe('isUnauthorizedError', () => {
 
 describe('clearProductCache', () => {
   it('removes a registered open cache', async () => {
-    const db = { remove: vi.fn().mockResolvedValue(undefined) };
+    const db = { remove: vi.fn().mockResolvedValue(undefined), close: vi.fn().mockResolvedValue(undefined) };
     const unregister = registerOpenCache(productCacheName('medusa', 'https://open.test'), db);
     try {
       await clearProductCache('medusa', 'https://open.test');
       expect(db.remove).toHaveBeenCalledOnce();
-    } finally { unregister(); }
+    } finally { await unregister(); }
   });
   it('unregisters a cache and tolerates an absent cache', async () => {
-    const db = { remove: vi.fn() };
+    const db = { remove: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
     const unregister = registerOpenCache(productCacheName('medusa', 'https://absent.test'), db);
-    unregister();
+    await unregister();
     await expect(clearProductCache('medusa', 'https://absent.test')).resolves.toBeUndefined();
     expect(db.remove).not.toHaveBeenCalled();
   });
   it('does not throw when removal fails', async () => {
-    const db = { remove: vi.fn().mockRejectedValue(new Error('removal failed')) };
+    const db = { remove: vi.fn().mockRejectedValue(new Error('removal failed')), close: vi.fn().mockResolvedValue(undefined) };
     const unregister = registerOpenCache(productCacheName('medusa', 'https://failure.test'), db);
     try {
       await expect(clearProductCache('medusa', 'https://failure.test')).resolves.toBeUndefined();
-    } finally { unregister(); }
+    } finally { await unregister(); }
   });
   it.each([true, false])('removes actual RxDB data (open: %s)', async (open) => {
     const baseUrl = `https://data-${open}.test`;
@@ -84,13 +84,62 @@ describe('clearProductCache', () => {
     const db = await createRxDatabase(options);
     await db.addCollections(collections);
     await db.products.insert({ id: 'product-from-old-session' });
-    const unregister = open ? registerOpenCache(options.name, db) : () => {};
+    const unregister = open ? registerOpenCache(options.name, db) : async () => {};
     if (!open) await db.close();
-    try { await clearProductCache('medusa', baseUrl); } finally { unregister(); }
+    try { await clearProductCache('medusa', baseUrl); } finally { await unregister(); }
     const reopened = await createRxDatabase(options);
     try {
       await reopened.addCollections(collections);
       expect(await reopened.products.find().exec()).toEqual([]);
     } finally { await reopened.remove(); }
+  });
+});
+
+describe('registerOpenCache once-close', () => {
+  it('unregisters and closes once, returning the same promise on every call', async () => {
+    let resolveClose!: () => void;
+    const db = {
+      remove: vi.fn(),
+      close: vi.fn(() => new Promise<void>((resolve) => { resolveClose = resolve; })),
+    };
+    const name = productCacheName('medusa', 'https://once.test');
+    const close = registerOpenCache(name, db);
+    const first = close();
+    const second = close();
+    expect(second).toBe(first);
+    expect(db.close).toHaveBeenCalledOnce();
+    resolveClose();
+    await expect(first).resolves.toBeUndefined();
+    await clearProductCache('medusa', 'https://once.test');
+    expect(db.remove).not.toHaveBeenCalled();
+  });
+});
+
+describe('closeProductCaches', () => {
+  it('closes every registered cache through the once-close', async () => {
+    const first = { remove: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
+    const second = { remove: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
+    registerOpenCache(productCacheName('medusa', 'https://close-a.test'), first);
+    registerOpenCache(productCacheName('medusa', 'https://close-b.test'), second);
+    await closeProductCaches();
+    expect(first.close).toHaveBeenCalledOnce();
+    expect(second.close).toHaveBeenCalledOnce();
+  });
+
+  it('awaits a close already started by the returned function, without closing again', async () => {
+    let resolveClose!: () => void;
+    const db = { remove: vi.fn(), close: vi.fn(() => new Promise<void>((resolve) => { resolveClose = resolve; })) };
+    const close = registerOpenCache(productCacheName('medusa', 'https://in-flight.test'), db);
+    const started = close();
+    const all = closeProductCaches();
+    let settled = false;
+    void all.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    resolveClose();
+    await all;
+    await started;
+    expect(settled).toBe(true);
+    expect(db.close).toHaveBeenCalledOnce();
   });
 });
