@@ -128,3 +128,34 @@ export async function stockBySku(token: string): Promise<Record<string, number>>
   return Object.fromEntries(inventory_items.map((item: { sku: string; location_levels: { stocked_quantity: number }[] }) =>
     [item.sku, item.location_levels.reduce((total, level) => total + Number(level.stocked_quantity), 0)]));
 }
+
+// A single SKU's inventory level at its (single) e2e stock location, for tests that flip one
+// variant's stock status server-side and need to restore it afterwards.
+export async function inventoryLevel(token: string, sku: string): Promise<{ inventoryItemId: string; locationId: string; stockedQuantity: number }> {
+  const response = await fetch(`${backend}/admin/inventory-items?limit=1&sku[]=${sku}&fields=id,sku,location_levels.location_id,location_levels.stocked_quantity`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  const { inventory_items } = await response.json();
+  const [item] = inventory_items as { id: string; location_levels: { location_id: string; stocked_quantity: number }[] }[];
+  const [level] = item.location_levels;
+  return { inventoryItemId: item.id, locationId: level.location_id, stockedQuantity: Number(level.stocked_quantity) };
+}
+
+export async function setInventoryLevel(token: string, inventoryItemId: string, locationId: string, stockedQuantity: number): Promise<void> {
+  const response = await fetch(`${backend}/admin/inventory-items/${inventoryItemId}/location-levels/${locationId}`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ stocked_quantity: stockedQuantity }),
+  });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+}
+
+export async function variantIdBySku(token: string, sku: string): Promise<string> {
+  const response = await fetch(`${backend}/admin/product-variants?limit=1&sku[]=${sku}&fields=id,sku`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  const { variants } = await response.json();
+  const [variant] = variants as { id: string }[];
+  return variant.id;
+}

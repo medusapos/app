@@ -1,7 +1,8 @@
 import type { ExecArgs } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules, ProductStatus } from "@medusajs/framework/utils"
 import {
-  createInventoryLevelsWorkflow, createProductsWorkflow, createRegionsWorkflow,
+  createAndLinkProductOptionsToProductWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
+  createProductVariantsWorkflow, createRegionsWorkflow,
   createSalesChannelsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow,
   createStockLocationsWorkflow, createStoresWorkflow, createTaxRegionsWorkflow,
   linkSalesChannelsToStockLocationWorkflow,
@@ -80,22 +81,51 @@ export default async function seedE2e({ container }: ExecArgs) {
   const pricing = container.resolve(Modules.PRICING)
   const [preference] = await pricing.listPricePreferences({ attribute: "currency_code", value: "eur" })
   if (preference.is_tax_inclusive) await pricing.updatePricePreferences(preference.id, { is_tax_inclusive: false })
-  const products = await container.resolve(Modules.PRODUCT).listProducts({
-    handle: ["e2e-1", "e2e-2", "e2e-3", "e2e-4", "e2e-5"],
-  })
+  const productService = container.resolve(Modules.PRODUCT)
+  const products = await productService.listProducts(
+    { handle: ["e2e-1", "e2e-2", "e2e-3", "e2e-4", "e2e-5"] },
+    { relations: ["options", "options.values", "variants"] },
+  )
+  // E2E product 4 gets a second variant (SKU E2E-4B) so the variant chooser — the app's only
+  // stock display, which opens only for a product with more than one variant — has a product
+  // to exercise. Existing SKUs, barcodes, prices and stock are untouched.
   const missingProducts = [2, 3.5, 4.25, 10, 12.99].map((amount, i) => ({
     title: `E2E product ${i + 1}`, handle: `e2e-${i + 1}`, status: ProductStatus.PUBLISHED,
     shipping_profile_id: profile.id, sales_channels: [{ id: channel.id }],
-    options: [{ title: "Variant", values: ["Default"] }],
-    variants: [{
-      title: "Default", sku: `E2E-${i + 1}`, barcode: `20000000000${i + 1}${i + 1}`,
-      manage_inventory: true, options: { Variant: "Default" },
-      prices: [{ currency_code: "eur", amount }],
-    }],
+    options: [{ title: "Variant", values: i === 3 ? ["Default", "B"] : ["Default"] }],
+    variants: [
+      {
+        title: "Default", sku: `E2E-${i + 1}`, barcode: `20000000000${i + 1}${i + 1}`,
+        manage_inventory: true, options: { Variant: "Default" },
+        prices: [{ currency_code: "eur", amount }],
+      },
+      ...(i === 3 ? [{
+        title: "B", sku: "E2E-4B", barcode: "2000000000046",
+        manage_inventory: true, options: { Variant: "B" },
+        prices: [{ currency_code: "eur", amount: 11 }],
+      }] : []),
+    ],
   })).filter(product => !products.some(existing => existing.handle === product.handle))
   if (missingProducts.length) await createProductsWorkflow(container).run({ input: { products: missingProducts } })
+
+  // e2e-4 may already exist from a seed run before this fixture change, with only its Default
+  // variant: add the B variant to it non-destructively (new products already got both above).
+  const product4 = products.find(product => product.handle === "e2e-4")
+  if (product4 && !product4.variants!.some(variant => variant.sku === "E2E-4B")) {
+    const [variantOption] = product4.options!
+    await createAndLinkProductOptionsToProductWorkflow(container).run({ input: {
+      product_id: product4.id,
+      update: [{ product_option_id: variantOption.id, add: [{ value: "B" }] }],
+    } })
+    await createProductVariantsWorkflow(container).run({ input: { product_variants: [{
+      product_id: product4.id, title: "B", sku: "E2E-4B", barcode: "2000000000046",
+      manage_inventory: true, options: { Variant: "B" },
+      prices: [{ currency_code: "eur", amount: 11 }],
+    }] } })
+  }
+
   const inventoryService = container.resolve(Modules.INVENTORY)
-  const inventory = await inventoryService.listInventoryItems({ sku: ["E2E-1", "E2E-2", "E2E-3", "E2E-4", "E2E-5"] })
+  const inventory = await inventoryService.listInventoryItems({ sku: ["E2E-1", "E2E-2", "E2E-3", "E2E-4", "E2E-4B", "E2E-5"] })
   const levels = await inventoryService.listInventoryLevels({ location_id: location.id })
   const missingLevels = inventory.filter(item => !levels.some(level => level.inventory_item_id === item.id))
   if (missingLevels.length) await createInventoryLevelsWorkflow(container).run({ input: { inventory_levels: missingLevels.map(item => ({

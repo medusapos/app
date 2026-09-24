@@ -32,6 +32,20 @@ amounts, inventory deltas (E2E-5 ends at −1), and the stock warning under
 Orders → Needs attention. Both tests use their own client IDs and starting
 stock, so either file can run first; Playwright uses one worker.
 
+`E2E product 4` has a second variant (`E2E-4B`, alongside `E2E-4`) so the
+variant chooser — the app's only stock display, which opens only for a
+product with more than one variant — has something to exercise. `live-stock.spec.ts`
+signs in, opens the chooser and, using the admin API directly (restoring the
+level in `finally`), proves the app's ADR-060 stock reconcile reaches the
+chooser without a catalogue pull: one test flips `E2E-4B`'s stock and
+triggers a reconcile pass via a visibility change (overriding
+`document.visibilityState` and dispatching `visibilitychange`, since the
+app's `AppState` on web follows page visibility); the other sells `E2E-1`
+while route-intercepting `/tally/v1/commands` to add an `insufficient_stock`
+warning to the result, which the app treats as its own trigger for a pass,
+with no visibility change needed. Neither test sells `E2E-5` or leaves stock
+changed.
+
 CI runs both tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.
