@@ -10,11 +10,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BehaviorSubject } from 'rxjs';
 import type { LiveTabHandle, LiveTabOptions, LiveTabState } from '@tallyui/database';
 import { LiveTabGate } from '../components/live-tab-gate';
-import { closeDatabases, isBusy, markBusy } from '../lib/live-tab';
+import { closeDatabases, isBusy, markBusy, storageNeedsReload } from '../lib/live-tab';
 
 vi.mock('../lib/live-tab', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, closeDatabases: vi.fn() };
+  return { ...actual, closeDatabases: vi.fn(), storageNeedsReload: vi.fn(() => false) };
 });
 
 // react-dom/client has no bundled types reachable here (no @types/react-dom in
@@ -77,10 +77,13 @@ function Marker({ onMount, text }: { onMount: () => void; text: string }) {
 }
 
 const closeDatabasesMock = vi.mocked(closeDatabases);
+const storageNeedsReloadMock = vi.mocked(storageNeedsReload);
 
 beforeEach(() => {
   closeDatabasesMock.mockReset();
   closeDatabasesMock.mockResolvedValue(undefined);
+  storageNeedsReloadMock.mockReset();
+  storageNeedsReloadMock.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -130,6 +133,29 @@ describe('LiveTabGate', () => {
     act(() => instance.subject.next('blocked'));
     expect(screen.getByText('MedusaPOS is open in another tab. Close that tab to use it here, or reload this one.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
+  });
+
+  it('shows Reload instead of Use here on the parked screen when storageNeedsReload() is true', () => {
+    storageNeedsReloadMock.mockReturnValue(true);
+    // jsdom's `location.reload` is non-writable and non-configurable on its own object, so the
+    // whole `window.location` property (which is configurable) is swapped out instead.
+    const reload = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', { configurable: true, value: { ...originalLocation, reload } });
+    try {
+      const { startLiveTab, instances } = fakeStartLiveTab();
+      render(<LiveTabGate scope="store-needs-reload" startLiveTab={startLiveTab}><Text>children-rendered</Text></LiveTabGate>);
+      const instance = instances[0];
+
+      act(() => instance.subject.next('live'));
+      act(() => instance.subject.next('parked'));
+
+      expect(screen.getByText('Reload this tab to use MedusaPOS here.')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Use here' })).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+      expect(instance.takeOver).not.toHaveBeenCalled();
+      expect(reload).toHaveBeenCalledOnce();
+    } finally { Object.defineProperty(window, 'location', { configurable: true, value: originalLocation }); }
   });
 
   it('passes isBusy to the coordinator, following markBusy', () => {

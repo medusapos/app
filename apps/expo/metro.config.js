@@ -23,6 +23,17 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     const filePath = path.join(packageDir, 'src/index.ts');
     return { type: 'sourceFile', filePath };
   }
+  // A subpath import (e.g. `@tallyui/storage-sqlite/web`) resolves through
+  // that package's own `exports["./<subpath>"].source`, the same way Metro
+  // can't resolve the bare-name `exports["."].source` on its own above.
+  const subpathMatch = /^(@tallyui\/[^/]+)\/(.+)$/.exec(moduleName);
+  if (subpathMatch) {
+    const [, pkgName, subpath] = subpathMatch;
+    const packageDir = fs.realpathSync(path.join(projectRoot, 'node_modules', pkgName));
+    const pkgJson = JSON.parse(fs.readFileSync(path.join(packageDir, 'package.json'), 'utf8'));
+    const source = pkgJson.exports?.[`./${subpath}`]?.source;
+    if (source) return { type: 'sourceFile', filePath: path.join(packageDir, source) };
+  }
   return context.resolveRequest(context, moduleName, platform);
 };
 

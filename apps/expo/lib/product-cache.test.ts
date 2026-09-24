@@ -1,27 +1,35 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRxDatabase } from 'rxdb';
-import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
+
+vi.mock('./web-storage', () => {
+  const webStorageStub = { name: 'web-storage-stub' };
+  return { webStorageAvailable: vi.fn(() => false), getWebStorage: vi.fn(() => webStorageStub) };
+});
+
+import { webStorageAvailable, getWebStorage } from './web-storage';
 import {
-  clearProductCache, closeProductCaches, isUnauthorizedError, openProductCache, productCacheName, productCacheStorage,
-  registerOpenCache,
+  clearProductCache, closeProductCaches, deleteLegacyProductCache, isUnauthorizedError, legacyDexieName,
+  openProductCache, productCacheName, productCacheStorage, registerOpenCache,
 } from './product-cache';
 
+afterEach(() => { vi.mocked(webStorageAvailable).mockReturnValue(false); });
+
 describe('productCacheStorage', () => {
-  it.each([false, true])('uses IndexedDB when available: %s', (available) => {
-    vi.stubGlobal('indexedDB', available ? {} : undefined);
-    try {
-      expect(productCacheStorage().name).toBe(
-        available ? getRxStorageDexie().name : getRxStorageMemory().name,
-      );
-    } finally { vi.unstubAllGlobals(); }
+  it('uses memory storage when the web SQLite storage is unavailable (native, and jsdom tests)', () => {
+    vi.mocked(webStorageAvailable).mockReturnValue(false);
+    expect(productCacheStorage().name).toBe(getRxStorageMemory().name);
+  });
+  it('uses the web SQLite storage when available', () => {
+    vi.mocked(webStorageAvailable).mockReturnValue(true);
+    expect(productCacheStorage()).toBe(getWebStorage());
   });
 });
 
 describe('productCacheName', () => {
   it('encodes the exact URL into an RxDB name', () => {
     expect(productCacheName('medusa', 'http://localhost:9000'))
-      .toBe('medusapos_medusa_http_3a__2f__2f_localhost_3a_9000');
+      .toBe('medusapos_sqlite_medusa_http_3a__2f__2f_localhost_3a_9000');
   });
   it('keeps punctuation, case, underscores and UTF-16 code units distinct', () => {
     const urls = ['https://shop-a.example.com', 'https://shop.a.example.com',
@@ -32,6 +40,55 @@ describe('productCacheName', () => {
     for (const name of names) expect(name).toMatch(/^[a-z][_$a-z0-9\-]*$/);
     expect(names[2]).toContain('_53_');
     expect(names[5]).toContain('_d83d__de00_');
+  });
+});
+
+describe('legacyDexieName', () => {
+  it('uses the pre-SQLite prefix with the same injective encoding', () => {
+    expect(legacyDexieName('medusa', 'http://localhost:9000'))
+      .toBe('medusapos_medusa_http_3a__2f__2f_localhost_3a_9000');
+    expect(legacyDexieName('medusa', 'http://localhost:9000'))
+      .not.toBe(productCacheName('medusa', 'http://localhost:9000'));
+  });
+});
+
+describe('deleteLegacyProductCache', () => {
+  function fakeIndexedDb(names: string[]) {
+    const deleteDatabase = vi.fn((name: string) => {
+      const request = {} as IDBOpenDBRequest;
+      queueMicrotask(() => request.onsuccess?.({} as Event));
+      return request;
+    });
+    vi.stubGlobal('indexedDB', {
+      databases: vi.fn().mockResolvedValue(names.map((name) => ({ name, version: 1 }))),
+      deleteDatabase,
+    });
+    return deleteDatabase;
+  }
+
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('deletes only the databases matching this backend\'s legacy prefix', async () => {
+    const legacy = legacyDexieName('medusa', 'https://legacy-delete.test');
+    const other = legacyDexieName('medusa', 'https://other-backend.test');
+    const deleteDatabase = fakeIndexedDb([
+      `rxdb-dexie-${legacy}--0--pos_products`,
+      `rxdb-dexie-${legacy}--internal`,
+      `rxdb-dexie-${other}--0--pos_products`,
+      'unrelated-database',
+    ]);
+    await deleteLegacyProductCache('medusa', 'https://legacy-delete.test');
+    expect(deleteDatabase).toHaveBeenCalledTimes(2);
+    expect(deleteDatabase).toHaveBeenCalledWith(`rxdb-dexie-${legacy}--0--pos_products`);
+    expect(deleteDatabase).toHaveBeenCalledWith(`rxdb-dexie-${legacy}--internal`);
+  });
+
+  it('never throws: no indexedDB.databases, and a rejecting one', async () => {
+    vi.stubGlobal('indexedDB', undefined);
+    await expect(deleteLegacyProductCache('medusa', 'https://no-idb.test')).resolves.toBeUndefined();
+
+    vi.stubGlobal('indexedDB', { databases: vi.fn().mockRejectedValue(new Error('boom')) });
+    await expect(deleteLegacyProductCache('medusa', 'https://rejects.test')).resolves.toBeUndefined();
   });
 });
 

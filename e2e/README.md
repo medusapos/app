@@ -56,6 +56,17 @@ graceful hand-over, frees a waiting tab within 5 s; and a `pagehide`/
 reopens both the product cache and the order store fresh, checked with a
 sale of `E2E-1`. It uses the shared sign-in fixture and sells only `E2E-1`.
 
+`storage.spec.ts` proves the SQLite-wasm storage switch (ADR-061 part A): one
+test sells `E2E-1` with `/tally/v1/commands` route-blocked (the sale stays
+pending), then reloads with `/admin/products` also blocked — the catalogue
+still shows the 5 products and the pending sale from the SQLite-wasm cache,
+not the network — before unrouting both and checking the sale syncs. The
+other seeds one pending `E2E-1` order into the pre-SQLite Dexie order
+database via `window.__medusaposSeedLegacyOrder` (an `EXPO_PUBLIC_E2E_DEBUG`
+hook, like `__medusaposCatalogue`) before signing in, then checks the order
+carries over, syncs, and the legacy Dexie database is gone afterwards. Both
+sell only `E2E-1` and check its stock delta, like `smoke.spec.ts`.
+
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.

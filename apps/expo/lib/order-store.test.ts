@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
-import { addRxPlugin } from 'rxdb';
+import { describe, expect, it, vi } from 'vitest';
+import { addRxPlugin, createRxDatabase, type RxCollection } from 'rxdb';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
-import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
-import { closeOrderStores, needsAttention, openOrderStore, orderDatabaseName } from './order-store';
+import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
+import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
+import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
+import { createOrderBuilder, finalizeOrder, posOrderSchema, type PosOrder } from '@tallyui/pos';
+import { carryOverOrders, closeOrderStores, needsAttention, openOrderStore, orderDatabaseName } from './order-store';
 
 addRxPlugin(RxDBDevModePlugin);
+addRxPlugin(RxDBLocalDocumentsPlugin);
 
 function sale(): PosOrder {
   const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
@@ -19,8 +23,8 @@ describe('order store', () => {
       'https://shop.test', 'https://shop_2d_a.test', 'https://shop.test/😀'];
     const names = urls.map(orderDatabaseName);
     expect(new Set(names).size).toBe(urls.length);
-    for (const name of names) expect(name).toMatch(/^medusapos_orders_[a-z0-9_$-]+$/);
-    expect(orderDatabaseName('http://localhost:9000')).toBe('medusapos_orders_http_3a__2f__2f_localhost_3a_9000');
+    for (const name of names) expect(name).toMatch(/^medusapos_sqlite_orders_[a-z0-9_$-]+$/);
+    expect(orderDatabaseName('http://localhost:9000')).toBe('medusapos_sqlite_orders_http_3a__2f__2f_localhost_3a_9000');
     expect(names[2]).toContain('_53_');
     expect(names[5]).toContain('_d83d__de00_');
   });
@@ -70,5 +74,94 @@ describe('order store', () => {
       { ...base, syncStatus: 'applied' }, { ...base, warnings: warned.warnings }];
     expect(needsAttention(orders)).toEqual([warned, rejected]);
     expect(orders[0]).toBe(rejected);
+  });
+});
+
+async function memoryOrdersDb(name: string, localDocuments = false) {
+  // RxDBDevModePlugin (registered above) requires a schema validator at the top level.
+  const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
+    name, storage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), multiInstance: false, localDocuments,
+  });
+  await db.addCollections({ pos_orders: { schema: posOrderSchema } });
+  return db;
+}
+
+describe('carryOverOrders', () => {
+  it('copies every document with its syncStatus, writes the marker, then removes the source', async () => {
+    const fromName = 'legacy-carry-basic';
+    const legacy = await memoryOrdersDb(fromName);
+    const pending = sale();
+    const rejected: PosOrder = { ...sale(), syncStatus: 'rejected' };
+    await legacy.pos_orders.bulkInsert([pending, rejected]);
+    await legacy.close();
+
+    const to = await memoryOrdersDb('target-carry-basic', true);
+    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
+
+    const copied = (await to.pos_orders.find().exec()).map((doc) => doc.toJSON());
+    expect(copied.sort((a, b) => a.id.localeCompare(b.id)))
+      .toEqual([pending, rejected].sort((a, b) => a.id.localeCompare(b.id)));
+    const marker = await to.getLocal('legacy-orders-migrated');
+    expect(marker?.toJSON().data).toMatchObject({ count: 2 });
+
+    const reopenedLegacy = await memoryOrdersDb(fromName);
+    expect(await reopenedLegacy.pos_orders.find().exec()).toEqual([]);
+    await reopenedLegacy.remove();
+    await to.remove();
+  });
+
+  it('is crash-safe: a failure keeps the source, and a retry ends with no duplicates and no marker loss', async () => {
+    const fromName = 'legacy-carry-crash';
+    const legacy = await memoryOrdersDb(fromName);
+    const orders = [sale(), sale(), sale(), sale()];
+    await legacy.pos_orders.bulkInsert(orders);
+    await legacy.close();
+
+    const to = await memoryOrdersDb('target-carry-crash', true);
+    const realBulkUpsert = to.pos_orders.bulkUpsert.bind(to.pos_orders);
+    const spy = vi.spyOn(to.pos_orders, 'bulkUpsert').mockImplementationOnce(async (docs: Partial<PosOrder>[]) => {
+      // Applies half for real, then crashes before the rest and before the marker.
+      await realBulkUpsert(docs.slice(0, docs.length / 2));
+      throw new Error('simulated crash mid carry-over');
+    });
+
+    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
+    expect(await to.getLocal('legacy-orders-migrated')).toBeNull();
+    expect(await to.pos_orders.find().exec()).toHaveLength(2);
+
+    const legacyStillThere = await memoryOrdersDb(fromName);
+    expect(await legacyStillThere.pos_orders.find().exec()).toHaveLength(4);
+    await legacyStillThere.close();
+
+    spy.mockRestore();
+    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
+
+    const finalIds = (await to.pos_orders.find().exec()).map((doc) => doc.id);
+    expect(new Set(finalIds).size).toBe(finalIds.length);
+    expect(finalIds.sort()).toEqual(orders.map((o) => o.id).sort());
+    expect(await to.getLocal('legacy-orders-migrated')).not.toBeNull();
+
+    const legacyGone = await memoryOrdersDb(fromName);
+    expect(await legacyGone.pos_orders.find().exec()).toEqual([]);
+    await legacyGone.remove();
+    await to.remove();
+  });
+
+  it('skips the copy and removes a leftover source when the marker is already present', async () => {
+    const fromName = 'legacy-carry-marker';
+    const legacy = await memoryOrdersDb(fromName);
+    await legacy.pos_orders.insert(sale());
+    await legacy.close();
+
+    const to = await memoryOrdersDb('target-carry-marker', true);
+    await to.insertLocal('legacy-orders-migrated', { count: 0, at: new Date(0).toISOString() });
+
+    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
+    expect(await to.pos_orders.find().exec()).toEqual([]);
+
+    const legacyGone = await memoryOrdersDb(fromName);
+    expect(await legacyGone.pos_orders.find().exec()).toEqual([]);
+    await legacyGone.remove();
+    await to.remove();
   });
 });

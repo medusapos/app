@@ -5,7 +5,7 @@ import {
   type LiveTabHandle, type LiveTabOptions, type LiveTabState,
 } from '@tallyui/database';
 import { LiveTabScreen } from '@tallyui/components';
-import { closeDatabases, isBusy } from '../lib/live-tab';
+import { closeDatabases, isBusy, storageNeedsReload } from '../lib/live-tab';
 
 export interface LiveTabGateProps {
   /** Store scope for the coordinator; no scope (signed out) starts nothing. */
@@ -133,14 +133,19 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
   const owned = ownerScopeRef.current === scope;
   if (owned && state === 'live' && showChildren) return <>{children}</>;
   if (owned && (state === 'parked' || state === 'blocked')) {
+    // A prior park's closes outran PARK_CLOSE_LIMIT_MS (live-tab.ts): this tab's
+    // database names are stuck taken, so "Use here" would only hang; reload instead.
+    const parkedNeedsReload = state === 'parked' && storageNeedsReload();
     return (
       <LiveTabScreen
         state={state}
-        onUseHere={() => { void handleRef.current?.takeOver(); }}
+        onUseHere={parkedNeedsReload ? () => window.location.reload() : () => { void handleRef.current?.takeOver(); }}
         onReload={() => window.location.reload()}
         parkedTitle="MedusaPOS is open in another tab"
-        parkedBody="This tab stopped so the other one can take sales. Use MedusaPOS here instead?"
-        useHereLabel="Use here"
+        parkedBody={parkedNeedsReload
+          ? 'Reload this tab to use MedusaPOS here.'
+          : 'This tab stopped so the other one can take sales. Use MedusaPOS here instead?'}
+        useHereLabel={parkedNeedsReload ? 'Reload' : 'Use here'}
         blockedBody="MedusaPOS is open in another tab. Close that tab to use it here, or reload this one."
         reloadLabel="Reload"
       />

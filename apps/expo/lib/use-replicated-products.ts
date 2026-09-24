@@ -7,7 +7,9 @@ import {
 } from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
 import { stockOverlay$ } from '@tallyui/pos';
-import { isUnauthorizedError, openProductCache, productCacheName, productCacheStorage } from './product-cache';
+import {
+  deleteLegacyProductCache, isUnauthorizedError, openProductCache, productCacheName, productCacheStorage,
+} from './product-cache';
 
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error' | 'offline';
 
@@ -175,6 +177,9 @@ export function useReplicatedProducts(
           setState('synced');
           setLastSyncedAt(new Date());
           setError(null);
+          // One-time cleanup of the pre-SQLite Dexie cache, now that this mount's
+          // first pull has landed in the new store; never blocks rendering on it.
+          void deleteLegacyProductCache(connector.id, baseUrl);
           void reconcileStock();
           idRunner?.reconcileIds().then((result) => {
             if (cancelled) return; // a start pass that finishes after cleanup must not record anything

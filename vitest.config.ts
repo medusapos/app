@@ -12,6 +12,7 @@ export default defineConfig({
       ...Object.fromEntries(['core', 'components', 'database', 'pos', 'primitives', 'theme', 'connector-medusa'].map(
         (name) => [`@tallyui/${name}`, path.resolve(__dirname, `apps/expo/node_modules/@tallyui/${name}/src/index.ts`)],
       )),
+      '@tallyui/storage-sqlite/web': path.resolve(__dirname, 'apps/expo/node_modules/@tallyui/storage-sqlite/src/web/index.ts'),
     },
   },
   test: {
