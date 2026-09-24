@@ -35,8 +35,8 @@ async function recordStockTopUps(input: RecordStockTopUps, { container }: StepEx
   return new StepResponse(undefined, input)
 }
 async function restoreStockTopUps(data: RecordStockTopUps | undefined, { container }: StepExecutionContext) {
-  if (data?.ledger) await container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE).recordStockTopUps(
-    data.ledger.commandId, data.ledger.claimToken, data.previous.applied, data.previous.pending)
+  if (data?.ledger) await container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE).restoreStockTopUps(
+    data.ledger.commandId, data.previous.applied, data.previous.pending)
 }
 // Two steps, one before and one after the top-up (ADR 0003 amendment, window 1).
 const recordStockTopUpIntentStep = createStep('tally-record-stock-topup-intent', recordStockTopUps, restoreStockTopUps)

@@ -119,6 +119,18 @@ export default class TallyLedgerModuleService extends MedusaService({ TallyComma
   }
 
   @InjectManager()
+  async restoreStockTopUps(
+    id: string, applied: StockTopUp[], pending: StockTopUp[] | null,
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<void> {
+    await (sharedContext.manager as EntityManager).execute(
+      `update "tally_command" set "stock_topups_applied" = ?::jsonb, "stock_topups_pending" = ?::jsonb, "updated_at" = now()
+       where "id" = ? and "status" = 'in_progress'`,
+      [applied.length ? JSON.stringify(applied) : null, pending?.length ? JSON.stringify(pending) : null, id]
+    )
+  }
+
+  @InjectManager()
   async release(
     id: string,
     claimToken: string,

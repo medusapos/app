@@ -33,6 +33,25 @@ moduleIntegrationTestRunner<TallyLedgerModuleService>({
       expect(await service.retrieveTallyCommand(input.id)).toMatchObject({ stock_topups_applied: applied, stock_topups_pending: null })
     })
 
+    it('restores top-ups after a token change only while the command is in progress', async () => {
+      const { command: first } = await service.claim(input)
+      const applied = [{ inventory_item_id: 'i', location_id: 'berlin', shortfall: 1 }]
+      const pending = [{ inventory_item_id: 'j', location_id: 'berlin', shortfall: 2 }]
+      await service.recordStockTopUps(input.id, first.claim_token, applied, null)
+      await service.release(input.id, first.claim_token)
+      const { command: next } = await service.claim(input)
+      expect(next.claim_token).not.toBe(first.claim_token)
+      await service.restoreStockTopUps(input.id, [], pending)
+      expect(await service.retrieveTallyCommand(input.id)).toMatchObject({
+        status: 'in_progress', claim_token: next.claim_token, stock_topups_applied: null, stock_topups_pending: pending,
+      })
+      await service.restoreStockTopUps(input.id, applied, null)
+      const completed = await service.complete(input.id, next.claim_token, result)
+      expect(completed).toMatchObject({ stock_topups_applied: applied, stock_topups_pending: null })
+      await service.restoreStockTopUps(input.id, [], pending)
+      expect(await service.retrieveTallyCommand(input.id)).toEqual(completed)
+    })
+
     it('keeps applied top-ups on release and permits an immediate re-claim', async () => {
       const { command: claim } = await service.claim(input)
       const applied = [{ inventory_item_id: 'i', location_id: 'berlin', shortfall: 1 }]
