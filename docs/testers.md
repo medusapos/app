@@ -10,14 +10,16 @@ browser — the queue of unsynced sales (the outbox) supports only one tab.
 
 ## Use the hosted demo store
 
-> **Placeholder (front desk fills this in when the demo is live):**
->
-> - Backend URL: `<TBD>`
-> - Email: `<TBD>`
-> - Password: `<TBD>`
+The hosted demo store is coming soon — check back here for the backend URL
+and demo login to sign in at `https://app.medusapos.com` without setting up
+your own Medusa store.
 
-Enter these at `https://app.medusapos.com` to sign in without setting up your
-own Medusa store.
+<!--
+Placeholder for the front desk to fill in when the demo is live:
+Backend URL: <TBD>
+Email: <TBD>
+Password: <TBD>
+-->
 
 ## Use your own Medusa backend
 
@@ -25,13 +27,14 @@ You'll need:
 
 - A Medusa 2.21 store with the POS plugin installed.
 - An admin user's email and password, without multi-factor authentication (MFA).
-- An HTTPS backend URL (plain `http://` only works for `localhost` or a
-  private network address).
+- An HTTPS backend URL — see QUICKSTART's ["What you need"](QUICKSTART.md#what-you-need)
+  for when plain `http://` is allowed.
 
 Add the POS origin to your backend's CORS settings, keeping any existing
-origins, with no path or trailing slash:
+origins, with no path or trailing slash, in your backend's `.env`, then
+restart the backend:
 
-```sh
+```env
 # Append to your existing origins — don't replace them.
 ADMIN_CORS=<your existing origins>,https://app.medusapos.com
 AUTH_CORS=<your existing origins>,https://app.medusapos.com
@@ -56,6 +59,21 @@ online. The sync status shows how many sales are waiting.
 You do need a connection for your first sign-in and for the initial
 catalogue load — let the catalogue load while online before you start
 selling offline.
+
+There's no offline page cache (no service worker), so keep the POS tab open
+while you're offline: reloading or reopening the app while offline fails.
+
+## Orders that need attention
+
+Open **Orders** → **Needs attention** to see sales that need a look:
+
+- A sale the store rejected shows a **Retry** button, which sends it again.
+- Some rejections instead say the sale needs checking against the store
+  before it can be sent again — there's no Retry for those; check the sale
+  against the store first.
+- A "*N* sales not accepted · Details" strip at the top of the screen means
+  the store is refusing the whole batch: those sales stay safely on the
+  register, and **Try again** resends them once the store is fixed.
 
 ## Known limitations
 

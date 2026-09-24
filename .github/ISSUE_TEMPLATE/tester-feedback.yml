@@ -2,6 +2,11 @@ name: Tester feedback
 description: Report a problem or share feedback from testing MedusaPOS.
 labels: [tester-feedback]
 body:
+  - type: markdown
+    attributes:
+      value: >-
+        **This issue will be public.** Everything you enter below, including
+        the backend host, is visible to anyone on GitHub.
   - type: input
     id: app-version
     attributes:
