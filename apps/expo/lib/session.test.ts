@@ -111,27 +111,38 @@ describe('login', () => {
     });
   });
   it.each([
-    [401, {}, 'invalid_credentials'],
-    [200, { mfa_required: true, token: 'unusable' }, 'unsupported_account'],
-    [200, { verification_required: true, token: 'unusable' }, 'unsupported_account'],
-    [200, { location: '/verify', token: 'unusable' }, 'unsupported_account'],
-    [500, {}, 'server_error'],
-    [200, {}, 'server_error'],
-    [200, { token: 123 }, 'server_error'],
-    [200, null, 'server_error'],
-  ])('maps status %s and body %j to %s', async (status, body, code) => {
+    [401, {}, 'invalid_credentials', 'Incorrect email or password.'],
+    [200, { mfa_required: true, token: 'unusable' }, 'unsupported_account', 'This account requires an unsupported sign-in flow.'],
+    [200, { verification_required: true, token: 'unusable' }, 'unsupported_account', 'This account requires an unsupported sign-in flow.'],
+    [200, { location: '/verify', token: 'unusable' }, 'unsupported_account', 'This account requires an unsupported sign-in flow.'],
+    [500, {}, 'server_error', 'The backend could not sign you in (HTTP 500).'],
+    [200, {}, 'server_error', undefined],
+    [200, { token: 123 }, 'server_error', undefined],
+    [200, null, 'server_error', undefined],
+  ])('maps status %s and body %j to %s', async (status, body, code, message) => {
+    const expectation: Record<string, unknown> = { code };
+    if (message !== undefined) expectation.message = message;
     await expect(login(session.baseUrl, session.email, 'secret', response(body, status)))
-      .rejects.toMatchObject({ code });
+      .rejects.toMatchObject(expectation);
   });
   it('maps a thrown fetch to unreachable', async () => {
     const fetchImpl = vi.fn<() => Promise<Response>>().mockRejectedValue(new TypeError('offline'));
     await expect(login(session.baseUrl, session.email, 'secret', fetchImpl))
-      .rejects.toMatchObject({ code: 'unreachable' });
+      .rejects.toMatchObject({ code: 'unreachable', message: 'Could not reach the backend.' });
   });
   it('maps malformed JSON to server_error', async () => {
     const fetchImpl = vi.fn<() => Promise<Response>>().mockResolvedValue(new Response('not json'));
     await expect(login(session.baseUrl, session.email, 'secret', fetchImpl))
       .rejects.toMatchObject({ code: 'server_error' });
+  });
+  it('stores tokenExpiresAt from the JWT exp the connector returns', async () => {
+    const expiry = 1_800_000_000_000;
+    const token = jwt({ exp: expiry / 1000 });
+    const fetchImpl = vi.fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token })))
+      .mockResolvedValueOnce(new Response('not json'));
+    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl))
+      .resolves.toEqual({ ...session, token, tokenExpiresAt: expiry });
   });
 });
 
@@ -154,6 +165,12 @@ describe('refreshSession', () => {
     const fetchImpl = vi.fn<() => Promise<Response>>().mockRejectedValue(new TypeError('offline'));
     await expect(refreshSession(session, fetchImpl)).rejects.toMatchObject({ code: 'unreachable' });
   });
+  it('clears tokenExpiresAt, since the refresh response carries no new expiry', async () => {
+    const withExpiry = { ...session, tokenExpiresAt: 1_800_000_000_000 };
+    const result = await refreshSession(withExpiry, response({ token: 'new-jwt' }));
+    expect(result.tokenExpiresAt).toBeUndefined();
+    expect(result.token).toBe('new-jwt');
+  });
 });
 
 describe('token expiry', () => {
@@ -174,6 +191,11 @@ describe('token expiry', () => {
     expect(shouldRefresh(jwt({ exp: (now - 1000) / 1000 }), now)).toBe(true);
     expect(shouldRefresh('garbage', now)).toBe(true);
   });
+  it('prefers an explicit expiresAt over the token, falling back to the token when absent', () => {
+    const farToken = jwt({ exp: (now + REFRESH_WINDOW_MS + 100_000) / 1000 });
+    expect(shouldRefresh(farToken, now, now - 1000)).toBe(true);
+    expect(shouldRefresh(farToken, now)).toBe(false);
+  });
 });
 
 describe('session storage', () => {
@@ -187,6 +209,14 @@ describe('session storage', () => {
     clearSession(storage);
     expect(storage.getItem('medusapos.session')).toBeNull();
     expect(loadSession(storage)).toBeNull();
+  });
+  it('round-trips tokenExpiresAt when present, and stored sessions without it keep working', () => {
+    const storage = memoryStorage();
+    const withExpiry = { ...session, tokenExpiresAt: 1_800_000_000_000 };
+    saveSession(storage, withExpiry);
+    expect(loadSession(storage)).toEqual(withExpiry);
+    saveSession(storage, session);
+    expect(loadSession(storage)).toEqual(session);
   });
   it.each(['not json', 'null', '{}', '[]', '{"baseUrl":1,"email":"a","token":"b"}'])(
     'ignores malformed stored data: %s', (data) => {

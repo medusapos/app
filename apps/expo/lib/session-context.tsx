@@ -36,7 +36,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     let active = true;
     async function check() {
       const current = currentSession.current;
-      if (!current || !shouldRefresh(current.token, Date.now())) return;
+      if (!current || !shouldRefresh(current.token, Date.now(), current.tokenExpiresAt)) return;
       try {
         const next = await refreshSession(current);
         if (!active || currentSession.current !== current) return;
