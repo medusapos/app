@@ -50,6 +50,10 @@ use `http://localhost:9000` and `admin@tally.test`; the password is in
 `dev/medusa-store/scripts/lib.sh`. The backend's `AUTH_CORS` and `ADMIN_CORS`
 must include the app's origin (`http://localhost:8081` for local development).
 
+## Known limitations
+
+- Replicated stock levels and prices are a snapshot from the first sync and are not refreshed when only stock or prices change. Do not treat the stock shown in the POS as live. Sales are still recorded correctly: the server checks and tops up stock when recording each sale (see [ADR 0003](docs/adr/0003-offline-sale-stock.md)). A TallyUI fix is in progress under ADR-060.
+
 ## Tech Stack
 
 - [Expo](https://expo.dev) + [expo-router](https://docs.expo.dev/router/introduction/)
