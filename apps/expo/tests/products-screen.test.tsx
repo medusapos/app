@@ -21,6 +21,8 @@ vi.mock('expo-router', () => ({
   router: { replace: vi.fn(), push: vi.fn() },
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() },
 }));
+// expo-localization's native module isn't available under vitest.
+vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
@@ -60,7 +62,7 @@ beforeEach(() => {
   });
   saveCachedSettings(localStorage, 'https://store.test', settings);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
-  vi.mocked(useReplicatedProducts).mockReturnValue({ products: [], state: 'synced', error: null });
+  vi.mocked(useReplicatedProducts).mockReturnValue({ products: [], state: 'synced', error: null, lastSyncedAt: null });
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
 });
 
@@ -134,7 +136,7 @@ describe('ProductsScreen catalogue', () => {
     });
     vi.mocked(useReplicatedProducts).mockReturnValue({
       products: [product('z', 'Zebra'), product('draft', 'Draft', 'draft'), product('a', 'Apple')],
-      state: 'offline', error: 'Failed to fetch',
+      state: 'offline', error: 'Failed to fetch', lastSyncedAt: null,
     });
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
@@ -162,7 +164,7 @@ describe('ProductsScreen catalogue', () => {
   });
 
   it.each([undefined, 'Alex Shopkeeper'])('records the cashier email and shows the receipt with name %s', async (name) => {
-    vi.mocked(useReplicatedProducts).mockReturnValue({ state: 'synced', error: null, products: [{
+    vi.mocked(useReplicatedProducts).mockReturnValue({ state: 'synced', error: null, lastSyncedAt: null, products: [{
       id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
         prices: [{ amount: 12, currency_code: 'eur' }] }],
     }] });

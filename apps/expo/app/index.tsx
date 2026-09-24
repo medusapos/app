@@ -73,7 +73,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   settings: StoreSettings; settingsStatus: string | null;
 }) {
   const headers = useMemo(() => authHeaders(session.token), [session.token]);
-  const { products, state, error } = useReplicatedProducts(connector, headers, session.baseUrl, onUnauthorized);
+  const { products, state, error, lastSyncedAt } = useReplicatedProducts(connector, headers, session.baseUrl, onUnauthorized);
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
   const { record, state: outboxState, recent } = useOutboxContext();
   const attentionCount = needsAttention(recent).length;
@@ -107,7 +107,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
             <View className="flex-1">
-              <Catalogue products={sorted} traits={traits} currency={settings.currency}
+              <Catalogue products={sorted} traits={traits} currency={settings.currency} lastSyncedAt={lastSyncedAt}
                 onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
               <SyncStatus state={outboxState} />
             </View>

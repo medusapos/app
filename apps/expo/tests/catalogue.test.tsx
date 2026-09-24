@@ -6,7 +6,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import type { ProductCard, ProductGrid, SearchInput } from '@tallyui/components';
-import { Catalogue } from '../components/catalogue';
+import { Catalogue, formatStockSyncTime } from '../components/catalogue';
 import { createTallyDatabase } from '@tallyui/database';
 import { clearProductCache, productCacheName, productCacheStorage } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
@@ -26,6 +26,11 @@ vi.mock('@tallyui/components', () => ({
     <button onClick={onPress}>{doc.title as ReactNode}</button>
   ),
 }));
+// expo-localization's native module isn't available under vitest; mock it with a controllable clock preference.
+const localization = vi.hoisted(() => ({ uses24hourClock: null as boolean | null }));
+vi.mock('expo-localization', () => ({
+  getCalendars: () => [{ uses24hourClock: localization.uses24hourClock }],
+}));
 
 const traits = medusaConnector.traits.product;
 const products = [
@@ -41,16 +46,42 @@ const products = [
   ] },
 ];
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localization.uses24hourClock = null; });
 
-function mount(items = products) {
+function mount(items = products, lastSyncedAt: Date | null = null) {
   const onSelect = vi.fn();
-  render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced" />);
+  render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced" lastSyncedAt={lastSyncedAt} />);
   const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
   return { input, onSelect };
 }
 
 describe('Catalogue', () => {
+  it('follows a 24-hour device clock and drops AM/PM', () => {
+    const time = new Date(2026, 8, 24, 10, 42);
+    expect(formatStockSyncTime(time, 'en-US', false)).toBe('10:42');
+  });
+  it('follows a 12-hour device clock and keeps AM/PM', () => {
+    const time = new Date(2026, 8, 24, 10, 42);
+    expect(formatStockSyncTime(time, 'en-US', true)).toMatch(/^10:42[  ]?AM$/);
+  });
+  it('keeps the locale default when the device reports no clock preference', () => {
+    const time = new Date(2026, 8, 24, 10, 42);
+    expect(formatStockSyncTime(time, 'en-US')).toMatch(/^10:42[  ]?AM$/);
+  });
+  it.each([
+    [true, false] as const, // device is 24-hour -> hour12 forced off
+    [false, true] as const, // device is 12-hour -> hour12 forced on
+    [null, undefined] as const, // device reports no preference -> locale default
+  ])('shows the last successful sync time with each stock label (uses24hourClock=%s)', (uses24hourClock, hour12) => {
+    localization.uses24hourClock = uses24hourClock;
+    const time = new Date('2026-09-24T10:42:00Z');
+    const expected = formatStockSyncTime(time, undefined, hour12);
+    mount(products, time);
+    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    const chooser = within(screen.getByLabelText('Choose variant'));
+    expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();
+    expect(chooser.getByText(`Out of Stock · as of ${expected}`)).toBeTruthy();
+  });
   it('filters products through search and shows matching counts', () => {
     const { input } = mount();
     expect(document.activeElement).toBe(input);
@@ -94,7 +125,8 @@ describe('Catalogue', () => {
     expect(chooser.getByText('Small')).toBeTruthy();
     expect(chooser.getByText('SHIRT-L')).toBeTruthy();
     expect(chooser.getByText('€25.00')).toBeTruthy();
-    expect(chooser.getByText('Out of Stock')).toBeTruthy();
+    expect(chooser.getByText('Out of Stock · not yet synced')).toBeTruthy();
+    expect(chooser.getByText('In Stock · not yet synced')).toBeTruthy();
     fireEvent.click(chooser.getByRole('button', { name: /Large/ }));
     expect(onSelect).toHaveBeenCalledExactlyOnceWith({
       product: products[1], variant: traits.getVariants!(products[1])[1],
@@ -150,9 +182,14 @@ describe('replicated catalogue recovery', () => {
       await waitFor(() => expect(result.current.state).toBe('offline'));
       expect(result.current.products.map((product) => product.id)).toEqual(['hat']);
       expect(result.current.error).toBe('Failed to fetch');
+      expect(result.current.lastSyncedAt).toBeNull();
+      const initialSyncStarted = Date.now();
       failure = null;
       await waitFor(() => expect(result.current.state).toBe('synced'), { timeout: 7000 });
       expect(result.current.error).toBeNull();
+      const initialSyncedAt = result.current.lastSyncedAt;
+      expect(initialSyncedAt).toBeInstanceOf(Date);
+      expect(initialSyncedAt!.getTime()).toBeGreaterThanOrEqual(initialSyncStarted);
       failure = new Error('Medusa API error: 503');
       act(() => stream.next('RESYNC'));
       await waitFor(() => expect(result.current.state).toBe('error'));
@@ -160,6 +197,7 @@ describe('replicated catalogue recovery', () => {
       failure = null;
       await waitFor(() => expect(result.current.state).toBe('synced'), { timeout: 7000 });
       expect(result.current.error).toBeNull();
+      expect(result.current.lastSyncedAt!.getTime()).toBeGreaterThan(initialSyncedAt!.getTime());
       expect(onUnauthorized).not.toHaveBeenCalled();
     } finally {
       await clearProductCache(connector.id, baseUrl);
