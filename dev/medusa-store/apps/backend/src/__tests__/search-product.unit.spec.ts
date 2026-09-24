@@ -1,6 +1,6 @@
 import type { SearchTypes } from "@medusajs/framework/types";
 import "@medusajs/framework/modules-sdk";
-import productIndex from "../product";
+import productIndex from "../search/product";
 
 describe("product search ingestion", () => {
   it("seeds and consumes the same priced documents in batches", async () => {
