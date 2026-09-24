@@ -10,6 +10,7 @@ const idle: OutboxState = { pending: 0, sending: false };
 export function useOutbox(session: Session | null, registerId: string): {
   orders: RxCollection<PosOrder> | null; state: OutboxState; recent: PosOrder[];
   record(posOrder: PosOrder): Promise<void>;
+  flush(): Promise<void>;
 } {
   const baseUrl = session?.baseUrl;
   const tokenRef = useRef(session?.token);
@@ -52,6 +53,10 @@ export function useOutbox(session: Session | null, registerId: string): {
 
   const ready = current.current?.baseUrl === baseUrl && !!baseUrl;
   return { orders: ready ? orders : null, state: ready ? state : idle, recent: ready ? recent : [],
+    async flush() {
+      const opened = current.current;
+      if (opened && opened.baseUrl === baseUrl) await opened.outbox.flush();
+    },
     async record(posOrder) {
       const opened = current.current;
       if (!opened || opened.baseUrl !== baseUrl) throw openingError.current ?? new Error('Orders are not ready.');

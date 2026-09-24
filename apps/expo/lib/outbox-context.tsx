@@ -10,7 +10,9 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   const { session } = useSession();
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
   const outbox = useOutbox(session, registerId);
-  return <OutboxContext.Provider value={outbox}>{children}</OutboxContext.Provider>;
+  return <OutboxContext.Provider value={outbox}>
+    {children}
+  </OutboxContext.Provider>;
 }
 
 export function useOutboxContext() {
