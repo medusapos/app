@@ -51,8 +51,9 @@ export async function login(baseUrl: string, email: string, password: string, fe
     if (error.code === 'invalid_credentials') throw new LoginError('invalid_credentials', 'Incorrect email or password.');
     if (error.code === 'failed') throw new LoginError('unreachable', 'Could not reach the backend.');
     if (error.code === 'unsupported') throw new LoginError('unsupported_account', 'This account requires an unsupported sign-in flow.');
-    throw new LoginError('server_error', error.status !== undefined
-      ? `The backend could not sign you in (HTTP ${error.status}).` : 'The backend could not sign you in.');
+    if (error.status === undefined) throw new LoginError('server_error', 'The backend could not sign you in.');
+    if (error.status >= 200 && error.status < 300) throw new LoginError('server_error', 'The backend returned no token.');
+    throw new LoginError('server_error', `The backend could not sign you in (HTTP ${error.status}).`);
   }
   const session: Session = { baseUrl, email, token: result.token };
   const expiresAt = result.expiresAt !== undefined ? Date.parse(result.expiresAt) : NaN;
