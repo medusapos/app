@@ -70,6 +70,32 @@ afterEach(async () => {
 });
 
 describe('Sign in again with the real session and outbox', () => {
+  it('floats above the screen in both collapsed and expanded states', async () => {
+    await pause();
+    const banner = screen.getByText('1 sale saved, waiting to send ·').parentElement!.parentElement!;
+    expect(getComputedStyle(banner).position).toBe('absolute');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(screen.getByLabelText('Password')).toBeTruthy();
+    expect(getComputedStyle(banner).position).toBe('absolute');
+  }, 10000);
+
+  it('collapses with Later without signing in or sending anything', async () => {
+    await pause();
+    const flush = vi.spyOn(outbox, 'flush');
+    const requests = fetchStub.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).toBeNull();
+    expect(screen.getByText('1 sale saved, waiting to send ·')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+    expect(fetchStub).toHaveBeenCalledTimes(requests);
+    expect(flush).not.toHaveBeenCalled();
+    expect(sends()).toHaveLength(3);
+    expect(outbox.state.authRequired).toBe(true);
+  }, 10000);
+
   it('prompts after three 401s, allows selling, then flushes with the new token', async () => {
     await pause();
     const collection = outbox.orders;

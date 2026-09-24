@@ -1,6 +1,7 @@
 import '../global.css';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { SessionProvider } from '../lib/session-context';
@@ -20,7 +21,9 @@ export default function RootLayout() {
       <OutboxProvider><Stack
         screenLayout={({ children, options }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
-          <SignInAgain />{children}
+          <View style={{ flex: 1 }}>
+            {children}<SignInAgain />
+          </View>
         </SafeAreaView>}
         screenOptions={{
           headerStyle: { backgroundColor: card as string },
