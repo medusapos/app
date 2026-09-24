@@ -83,8 +83,17 @@ Window 1, top-up before the draft:
   `insufficient_stock` warning cover both.
 - A pending top-up without applied on a retry is the ambiguous case: it is
   assumed not applied and ignored. Stock is then too high by that
-  shortfall at worst, as before this amendment, but the pending list stays
-  on the row to show by how much.
+  shortfall at worst, as before this amendment. The pending list stays on
+  the row as a record only if the retry needs no new top-up; a retry with
+  its own shortfall overwrites it with its own intent.
+- Compensation restores the ledger lists by command id while the row is
+  `in_progress`, without the claim-token check the forward writes use.
+  Otherwise an attempt that overran its lease would find its token
+  replaced, skip the restore, and leave a top-up listed as applied after
+  Medusa's own compensation had already taken it out of stock; the next
+  retry would carry it and stock would be taken back twice. This is safe
+  because the advisory lock on the sale's client order ID means only the
+  compensating attempt can be running for that sale.
 - A failed attempt used to delete its ledger row on release. A row with
   applied top-ups is now kept on release and made reclaimable at once,
   so a transient failure does not lose them.
