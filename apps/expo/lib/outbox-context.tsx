@@ -1,6 +1,4 @@
 import { createContext, useContext, useState, type ReactNode } from 'react';
-import { View } from 'react-native';
-import { SignInAgain } from '../components/sign-in-again';
 import { getRegisterId } from './register';
 import { defaultStorage } from './session';
 import { useSession } from './session-context';
@@ -13,7 +11,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
   const outbox = useOutbox(session, registerId);
   return <OutboxContext.Provider value={outbox}>
-    <View className="flex-1"><SignInAgain />{children}</View>
+    {children}
   </OutboxContext.Provider>;
 }
 

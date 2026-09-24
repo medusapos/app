@@ -6,6 +6,7 @@ import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 import { saveSession, type Session } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
+import { SignInAgain } from '../components/sign-in-again';
 
 let outbox: ReturnType<typeof useOutboxContext>;
 let session: Session;
@@ -25,7 +26,7 @@ function sale(): PosOrder {
 const sends = () => fetchStub.mock.calls.filter(([url]) => String(url).endsWith(COMMANDS_PATH));
 async function mount(signedIn = true) {
   if (signedIn) saveSession(localStorage, session);
-  render(<SessionProvider><OutboxProvider><Harness /></OutboxProvider></SessionProvider>);
+  render(<SessionProvider><OutboxProvider><SignInAgain /><Harness /></OutboxProvider></SessionProvider>);
   if (signedIn) await waitFor(() => expect(outbox.orders).not.toBeNull());
 }
 async function pause() {
@@ -72,13 +73,18 @@ describe('Sign in again with the real session and outbox', () => {
   it('prompts after three 401s, allows selling, then flushes with the new token', async () => {
     await pause();
     const collection = outbox.orders;
-    expect(screen.getByRole('heading', { name: 'Sign in again' })).toBeTruthy();
-    expect(screen.getByText(`Your sign-in has expired, so 1 sale is waiting to be sent. Enter the password for ${session.email} to send them.`)).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Sign in' }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByLabelText('Password').getAttribute('type')).toBe('password');
+    const strip = screen.getByText('1 sale saved, waiting to send ·');
+    expect(strip.parentElement?.parentElement?.getAttribute('data-print')).toBe('hide');
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Sell another' }));
     await waitFor(() => expect(outbox.state).toMatchObject({ pending: 2, sending: false, authRequired: true }));
+    expect(screen.getByText('2 sales saved, waiting to send ·')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(screen.getByRole('heading', { name: 'Sign in again' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign in' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByLabelText('Password').getAttribute('type')).toBe('password');
     expect(screen.getByText(`Your sign-in has expired, so 2 sales are waiting to be sent. Enter the password for ${session.email} to send them.`)).toBeTruthy();
     let respond!: (response: Response) => void;
     fetchStub.mockImplementationOnce(() => new Promise((resolve) => { respond = resolve; }));
@@ -87,6 +93,7 @@ describe('Sign in again with the real session and outbox', () => {
     expect(screen.getByRole('button', { name: 'Sign in' }).getAttribute('aria-disabled')).toBe('true');
     await act(async () => { respond(new Response(JSON.stringify({ token: newToken }))); });
     await waitFor(() => expect(outbox.recent.map((order) => order.syncStatus)).toEqual(['applied', 'applied']));
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
     expect(outbox.orders).toBe(collection);
     expect(screen.queryByRole('heading', { name: 'Sign in again' })).toBeNull();
     const login = fetchStub.mock.calls.find(([url]) => String(url).endsWith('/auth/user/emailpass'))!;
@@ -99,6 +106,7 @@ describe('Sign in again with the real session and outbox', () => {
   it('shows a wrong-password error, clears the password and stays paused without flushing', async () => {
     await pause();
     const flush = vi.spyOn(outbox, 'flush');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'wrong' } });
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('Incorrect email or password.'));
@@ -111,18 +119,38 @@ describe('Sign in again with the real session and outbox', () => {
     expect(outbox.recent[0].syncStatus).toBe('pending');
   }, 10000);
 
+  it('submits with Enter, but not with an empty password or while signing in', async () => {
+    await pause();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    const password = screen.getByLabelText('Password');
+    const logins = () => fetchStub.mock.calls.filter(([url]) => String(url).endsWith('/auth/user/emailpass'));
+    fireEvent.keyDown(password, { key: 'Enter' });
+    expect(logins()).toHaveLength(0);
+    let respond!: (response: Response) => void;
+    fetchStub.mockImplementationOnce(() => new Promise((resolve) => { respond = resolve; }));
+    fireEvent.change(password, { target: { value: 'correct' } });
+    fireEvent.keyDown(password, { key: 'Enter' });
+    await waitFor(() => expect(logins()).toHaveLength(1));
+    fireEvent.change(password, { target: { value: 'correct' } });
+    fireEvent.keyDown(password, { key: 'Enter' });
+    expect(logins()).toHaveLength(1);
+    await act(async () => { respond(new Response(JSON.stringify({ token: newToken }))); });
+    await waitFor(() => expect(outbox.recent[0].syncStatus).toBe('applied'));
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
+  }, 10000);
+
   it('does not show while authRequired is false, including a pending 401 retry', async () => {
     await mount();
-    expect(screen.queryByText('Sign in again')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
     await act(async () => { await outbox.record(sale()); });
     await waitFor(() => expect(outbox.state.lastRetryReason).toBe('unauthorized'));
     expect(outbox.state.authRequired).not.toBe(true);
-    expect(screen.queryByText('Sign in again')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
   });
 
   it('does not show without a session and flush is a no-op', async () => {
     await mount(false);
-    expect(screen.queryByText('Sign in again')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Sign in' })).toBeNull();
     await act(async () => { await outbox.flush(); });
     expect(fetchStub).not.toHaveBeenCalled();
   });
