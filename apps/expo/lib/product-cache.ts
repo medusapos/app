@@ -5,6 +5,9 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 type CachedDb = { remove(): Promise<unknown>; close(): Promise<unknown> };
 
 const openCaches = new Map<string, CachedDb>();
+// The once-close functions `registerOpenCache` returns, kept so `closeProductCaches`
+// can call the very same once-close instead of starting a second `db.close()`.
+const closers = new Map<string, () => Promise<void>>();
 // Close promises already started (by the function `registerOpenCache` returns, or by
 // `closeProductCaches` itself), kept until they settle so a close started by one is
 // still awaited by the other even after its cache is gone from `openCaches`.
@@ -37,7 +40,9 @@ function startClose(name: string, db: CachedDb): Promise<void> {
 export function registerOpenCache(name: string, db: CachedDb): () => Promise<void> {
   openCaches.set(name, db);
   let closing: Promise<void> | undefined;
-  return () => (closing ??= startClose(name, db));
+  const close = () => (closing ??= startClose(name, db));
+  closers.set(name, close);
+  return close;
 }
 
 /**
@@ -46,7 +51,7 @@ export function registerOpenCache(name: string, db: CachedDb): () => Promise<voi
  * finished yet.
  */
 export async function closeProductCaches(): Promise<void> {
-  for (const [name, db] of openCaches) startClose(name, db);
+  for (const close of closers.values()) close();
   await Promise.all(pendingCloses);
 }
 

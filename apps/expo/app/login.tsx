@@ -19,8 +19,6 @@ const ERROR_MESSAGES: Record<LoginErrorCode, string> = {
 
 export default function LoginScreen() {
   const { session, signIn } = useSession();
-  // The gate remounts the Stack after sign-in; that remount must not land back here.
-  if (session) return <Redirect href="/" />;
   const [baseUrl, setBaseUrl] = useState(storeConfig.defaultBaseUrl);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -41,6 +39,9 @@ export default function LoginScreen() {
       setSigningIn(false);
     }
   }
+
+  // The gate remounts the Stack after sign-in; that remount must not land back here.
+  if (session) return <Redirect href="/" />;
 
   return (
     <View className="flex-1 justify-center bg-background px-6">

@@ -142,4 +142,12 @@ describe('closeProductCaches', () => {
     expect(settled).toBe(true);
     expect(db.close).toHaveBeenCalledOnce();
   });
+
+  it('leaves the returned function usable afterwards, without closing again', async () => {
+    const db = { remove: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
+    const close = registerOpenCache(productCacheName('medusa', 'https://after-close.test'), db);
+    await closeProductCaches();
+    await expect(close()).resolves.toBeUndefined();
+    expect(db.close).toHaveBeenCalledOnce();
+  });
 });

@@ -13,9 +13,8 @@ vi.mock('../lib/live-tab', async (importOriginal) => {
   return { ...actual, closeDatabases: vi.fn() };
 });
 
-// The real `@tallyui/components` barrel trips a Vite/vitest SSR-transform bug on
-// this specific re-export chain (verified unrelated to this repo's own source:
-// importing the same file by its exact path works, only the barrel import fails).
+// The real `@tallyui/components` barrel fails to import under vitest with:
+// SyntaxError: Unexpected token 'typeof'
 // This fake mirrors LiveTabScreen's own rendering rules closely enough to exercise
 // LiveTabGate's usage of it (state, callbacks, string props).
 type FakeLiveTabScreenProps = {

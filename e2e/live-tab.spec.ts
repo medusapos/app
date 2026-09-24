@@ -32,8 +32,10 @@ test('a payment in flight defers the hand-over up to 10 s', async ({ page, conte
   const pageB = await context.newPage();
   await pageB.goto('/');
   await expect(pageB.getByText('Opening MedusaPOS…')).toBeVisible();
-  // A's defer-then-park loop runs on setTimeout; keep A the focused tab so
-  // Chromium's background-tab timer throttling does not stretch it out.
+  // TallyUI's defer loop counts 100 ms sleeps rather than elapsed time, so
+  // Chromium's background-tab timer throttling stretches a backgrounded live
+  // tab's 10 s deferral; this test keeps the live tab in front to prove the
+  // 10 s cap itself, and the stretch is reported to TallyUI.
   await page.bringToFront();
 
   await page.waitForTimeout(5000);
