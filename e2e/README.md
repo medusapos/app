@@ -67,6 +67,16 @@ hook, like `__medusaposCatalogue`) before signing in, then checks the order
 carries over, syncs, and the legacy Dexie database is gone afterwards. Both
 sell only `E2E-1` and check its stock delta, like `smoke.spec.ts`.
 
+The same file proves the storage-health prompts (ADR-061 part B): one test
+kills the storage worker via `window.__medusaposKillStorageWorker()` (another
+`EXPO_PUBLIC_E2E_DEBUG` hook, terminating the worker without forgetting the
+storage), then searches and completes a cash sale for `E2E-1` — expecting
+"Saving is slow…", then "Storage stopped", then a Reload that brings the app
+back live (the killed sale itself is never checked). The other opens a second
+page at the static worker URL and starts a bare `Worker` there to hold the
+opfs-sahpool pool outside the coordinator, then signs in and expects the
+blocked screen with Reload; closing the holder page and reloading recovers.
+
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.

@@ -1,8 +1,27 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, variantIdBySku } from './helpers';
 
 const backend = process.env.E2E_BACKEND_URL ?? 'http://localhost:9100';
+const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
+const SEARCH_PLACEHOLDER = 'Search or scan barcode / SKU';
+
+// Fills in and submits the sign-in form, like `signIn` (helpers.ts), but without that helper's
+// own wait for "Up to date": a storage-start failure never reaches it, showing the blocked
+// screen instead.
+async function submitSignIn(page: Page) {
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(async () => {
+    await page.getByLabel('Backend URL', { exact: true }).clear();
+    await page.getByLabel('Backend URL', { exact: true }).fill(backend);
+    await page.getByLabel('Email', { exact: true }).fill(credentials.email);
+    await page.getByLabel('Password', { exact: true }).fill(credentials.password);
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled({ timeout: 1000 });
+  }).toPass({ timeout: 20_000 });
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+}
 
 // Builds one pending PosOrder for a single E2E-1 (25% Danish VAT, tax-exclusive prices, matching
 // dev/medusa-store's seed-e2e.ts region), by the same shape `@tallyui/pos`'s `finalizeOrder`
@@ -93,4 +112,78 @@ test('a pending order left in the legacy Dexie store carries over on sign-in and
 
   const after = await stockBySku(token);
   expect(after['E2E-1']).toBe(before['E2E-1'] - 1);
+});
+
+test('a dead storage worker shows the reload prompt, and Reload recovers the app', async ({ page }) => {
+  await signIn(page);
+
+  // A rejected order first, with the real worker still alive: RxDB only re-reads storage for a
+  // query it has not already cached an in-sync result for (rx-query.js's _isResultsInSync), so
+  // reaching `dead` afterwards needs a genuinely new one. Orders screen's Retry (requeue's
+  // `id: { $in: [...] }` selector) is exactly that, once the order below exists to retry. The
+  // route answers every command as rejected without reaching the real backend (no phantom order,
+  // no stock decrement, and no `route.fetch()` race with a second matching request).
+  await page.route('**/tally/v1/commands', async (route) => {
+    const { commands } = route.request().postDataJSON() as { commands: { id: string }[] };
+    await route.fulfill({ json: { results: commands.map((command) => ({
+      id: command.id, status: 'rejected',
+      error: { code: 'e2e-storage-test', message: 'forced rejection for e2e' },
+    })) } });
+  });
+  await sellBySku(page, ['E2E-1'], 'exact');
+  await page.unroute('**/tally/v1/commands');
+
+  await page.evaluate(() => (window as unknown as {
+    __medusaposKillStorageWorker: () => void;
+  }).__medusaposKillStorageWorker());
+
+  // The write: a second, different sale saves to the same dead order store. It never completes;
+  // only recovery is checked below.
+  const search = page.getByPlaceholder(SEARCH_PLACEHOLDER, { exact: true });
+  await search.fill('E2E-1');
+  await search.press('Enter');
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
+  await tender.locator('[tabindex="0"]').first().click();
+  await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('Saving is slow…');
+
+  // The read: Retry's requeue() query has never run before, so it must reach the (now dead)
+  // storage, giving the read watchdog something pending to go quiet on. This is the only visit
+  // to Orders after the kill: leaving Products unmounts its product cache, whose close() also
+  // hangs, so a later return to Products would reopen the same database name before that close
+  // ever finishes (RxDB DB8).
+  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await expect(page).toHaveURL(/\/orders/);
+  const retryButton = page.getByRole('button', { name: 'Retry' });
+  await expect(retryButton).toBeVisible();
+  await retryButton.click();
+
+  await expect(page.getByText('Storage stopped')).toBeVisible();
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByText('Up to date · 5 products')).toBeVisible();
+});
+
+test('the opfs-sahpool pool held by another worker blocks the app with Reload', async ({ page, context }) => {
+  const holder = await context.newPage();
+  // A same-origin static URL, so `new Worker(...)` below is same-origin too: any served static
+  // file works, the worker script itself, next to the one under test.
+  await holder.goto('/sqlite/tallyui-sqlite-worker.js');
+  await holder.evaluate((workerUrl) => {
+    (window as unknown as { __holderWorker: Worker }).__holderWorker =
+      new Worker(workerUrl, { type: 'module' });
+  }, '/sqlite/tallyui-sqlite-worker.js');
+  // The worker installs the opfs-sahpool at start-up; there is no signal to wait on from here,
+  // so a fixed wait covers it (this is a holder page, not the app under test).
+  await holder.waitForTimeout(2000);
+
+  await submitSignIn(page);
+  await expect(page.getByText('MedusaPOS is open in another tab. Close that tab to use it here, or reload this one.')).toBeVisible();
+  // LiveTabScreen's Pressable renders with no explicit accessibility role (live-tab.spec.ts).
+  const reload = page.getByText('Reload', { exact: true });
+  await expect(reload).toBeVisible();
+
+  await holder.close();
+  await reload.click();
+  await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 });

@@ -55,3 +55,12 @@ export function terminateWebStorage(): void {
   keptWorkerInput = undefined;
   cachedStorage = undefined;
 }
+
+// E2E debug hook (like `__medusaposCatalogue`): kills the kept worker WITHOUT forgetting the
+// storage, simulating a crash (unlike `terminateWebStorage`'s graceful close-then-terminate).
+// Any call in flight, or made after, never gets a reply — surfacing on `health$` as `dead`.
+if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
+  (window as Window & { __medusaposKillStorageWorker?: () => void }).__medusaposKillStorageWorker = () => {
+    keptWorker?.terminate();
+  };
+}

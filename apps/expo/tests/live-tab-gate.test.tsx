@@ -10,11 +10,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BehaviorSubject } from 'rxjs';
 import type { LiveTabHandle, LiveTabOptions, LiveTabState } from '@tallyui/database';
 import { LiveTabGate } from '../components/live-tab-gate';
-import { closeDatabases, isBusy, markBusy, storageNeedsReload } from '../lib/live-tab';
+import { closeDatabases, isBusy, markBusy, reportStorageStartFailure, storageNeedsReload } from '../lib/live-tab';
+
+// A hand-rolled mock subject (vi.mock factories cannot close over top-level variables, only
+// vi.hoisted ones), reset in beforeEach rather than the real sticky one: this file's tests share
+// one module instance, and a real reportStorageStartFailure() would leak `true` into every test
+// after it.
+const { storageStartFailedSubject, reportStorageStartFailureMock } = vi.hoisted(() => {
+  let value = false;
+  const listeners = new Set<(next: boolean) => void>();
+  const subject = {
+    next: (next: boolean) => { value = next; listeners.forEach((listener) => listener(next)); },
+    subscribe: (listener: (next: boolean) => void) => {
+      listeners.add(listener);
+      listener(value);
+      return { unsubscribe: () => listeners.delete(listener) };
+    },
+  };
+  return { storageStartFailedSubject: subject, reportStorageStartFailureMock: vi.fn(() => subject.next(true)) };
+});
 
 vi.mock('../lib/live-tab', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
-  return { ...actual, closeDatabases: vi.fn(), storageNeedsReload: vi.fn(() => false) };
+  return {
+    ...actual, closeDatabases: vi.fn(), storageNeedsReload: vi.fn(() => false),
+    storageStartFailed$: storageStartFailedSubject,
+    reportStorageStartFailure: reportStorageStartFailureMock,
+  };
 });
 
 // react-dom/client has no bundled types reachable here (no @types/react-dom in
@@ -84,6 +106,7 @@ beforeEach(() => {
   closeDatabasesMock.mockResolvedValue(undefined);
   storageNeedsReloadMock.mockReset();
   storageNeedsReloadMock.mockReturnValue(false);
+  storageStartFailedSubject.next(false);
 });
 
 afterEach(() => {
@@ -156,6 +179,19 @@ describe('LiveTabGate', () => {
       expect(instance.takeOver).not.toHaveBeenCalled();
       expect(reload).toHaveBeenCalledOnce();
     } finally { Object.defineProperty(window, 'location', { configurable: true, value: originalLocation }); }
+  });
+
+  it('shows the blocked screen and no children after reportStorageStartFailure(), whatever the coordinator state', () => {
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    render(<LiveTabGate scope="store-start-failure" startLiveTab={startLiveTab}><Text>children-rendered</Text></LiveTabGate>);
+    const instance = instances[0];
+    act(() => instance.subject.next('live'));
+    expect(screen.getByText('children-rendered')).toBeTruthy();
+
+    act(() => { reportStorageStartFailure(); });
+    expect(screen.queryByText('children-rendered')).toBeNull();
+    expect(screen.getByText('MedusaPOS is open in another tab. Close that tab to use it here, or reload this one.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
   });
 
   it('passes isBusy to the coordinator, following markBusy', () => {

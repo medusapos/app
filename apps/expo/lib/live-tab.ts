@@ -1,3 +1,4 @@
+import { BehaviorSubject, type Observable } from 'rxjs';
 import { closeOrderStores } from './order-store';
 import { closeProductCaches } from './product-cache';
 import { terminateWebStorage } from './web-storage';
@@ -52,4 +53,16 @@ export async function closeDatabases(): Promise<void> {
     console.warn(`closeDatabases: closes did not settle within ${PARK_CLOSE_LIMIT_MS}ms; reload is now required.`);
   }
   terminateWebStorage();
+}
+
+// True once a store's open has failed with a StorageWorkerStartError (e.g. the opfs-sahpool pool
+// held by another worker). Sticky: like a dead worker, reload is the only recovery.
+const storageStartFailedSubject = new BehaviorSubject<boolean>(false);
+
+/** The gate renders the blocked screen while this is true, whatever the coordinator state. */
+export const storageStartFailed$: Observable<boolean> = storageStartFailedSubject.asObservable();
+
+/** Marks that a store's open failed with a StorageWorkerStartError (`useOutbox`, `useReplicatedProducts`). */
+export function reportStorageStartFailure(): void {
+  storageStartFailedSubject.next(true);
 }

@@ -5,7 +5,7 @@ import {
   type LiveTabHandle, type LiveTabOptions, type LiveTabState,
 } from '@tallyui/database';
 import { LiveTabScreen } from '@tallyui/components';
-import { closeDatabases, isBusy, storageNeedsReload } from '../lib/live-tab';
+import { closeDatabases, isBusy, storageNeedsReload, storageStartFailed$ } from '../lib/live-tab';
 
 export interface LiveTabGateProps {
   /** Store scope for the coordinator; no scope (signed out) starts nothing. */
@@ -23,6 +23,8 @@ export interface LiveTabGateProps {
 export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefault }: LiveTabGateProps) {
   const [state, setState] = useState<LiveTabState>('acquiring');
   const [showChildren, setShowChildren] = useState(false);
+  // A StorageWorkerStartError at open (e.g. the opfs-sahpool pool held elsewhere): see below.
+  const [storageStartFailed, setStorageStartFailed] = useState(false);
   const showChildrenRef = useRef(false);
   // Last-committed `showChildren`, updated by the effect below (after a real
   // commit) — unlike `showChildrenRef`, immune to a same-batch true+false no-op.
@@ -43,6 +45,11 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
   const parkCloseRef = useRef<Promise<void> | null>(null);
 
   useEffect(() => () => { unmountedRef.current = true; }, []);
+
+  useEffect(() => {
+    const subscription = storageStartFailed$.subscribe(setStorageStartFailed);
+    return () => subscription.unsubscribe();
+  }, []);
 
   // Layout effects run synchronously in the commit, before any passive effect
   // anywhere in the tree (including a just-mounted child's own mount effect),
@@ -129,16 +136,14 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
     };
   }, [scope, startLiveTab]);
 
-  if (!scope || Platform.OS !== 'web') return <>{children}</>;
-  const owned = ownerScopeRef.current === scope;
-  if (owned && state === 'live' && showChildren) return <>{children}</>;
-  if (owned && (state === 'parked' || state === 'blocked')) {
+  // Shared by the coordinator's own parked/blocked screen and the storage-start-failure override.
+  const renderParkedOrBlocked = (s: 'parked' | 'blocked') => {
     // A prior park's closes outran PARK_CLOSE_LIMIT_MS (live-tab.ts): this tab's
     // database names are stuck taken, so "Use here" would only hang; reload instead.
-    const parkedNeedsReload = state === 'parked' && storageNeedsReload();
+    const parkedNeedsReload = s === 'parked' && storageNeedsReload();
     return (
       <LiveTabScreen
-        state={state}
+        state={s}
         onUseHere={parkedNeedsReload ? () => window.location.reload() : () => { void handleRef.current?.takeOver(); }}
         onReload={() => window.location.reload()}
         parkedTitle="MedusaPOS is open in another tab"
@@ -150,7 +155,15 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
         reloadLabel="Reload"
       />
     );
-  }
+  };
+
+  if (!scope || Platform.OS !== 'web') return <>{children}</>;
+  // ADR-061: shows the blocked screen whatever the coordinator state; the lock stays held, and
+  // reload (below) is the recovery, same as a genuinely blocked coordinator.
+  if (storageStartFailed) return renderParkedOrBlocked('blocked');
+  const owned = ownerScopeRef.current === scope;
+  if (owned && state === 'live' && showChildren) return <>{children}</>;
+  if (owned && (state === 'parked' || state === 'blocked')) return renderParkedOrBlocked(state);
   return (
     <View className="flex-1 items-center justify-center">
       <Text className="text-muted-foreground">Opening MedusaPOS…</Text>

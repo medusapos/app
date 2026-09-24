@@ -2,9 +2,11 @@ import { addRxPlugin, createRxDatabase, removeRxDatabase, type RxCollection, typ
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
+import { withStorageWatchdog } from '@tallyui/database';
 import { posOrderSchema, type PosOrder } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { webStorageAvailable } from './web-storage';
+import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
 
 addRxPlugin(RxDBLocalDocumentsPlugin);
 
@@ -100,20 +102,26 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
   }
   if (!entry) {
     const opening = (async () => {
-      const storage = productCacheStorage();
+      const baseStorage = productCacheStorage();
+      const onWebStorage = webStorageAvailable();
+      // ADR-061: order-store.ts opens directly with createRxDatabase (not createTallyDatabase),
+      // so it wraps the watchdog itself, same as TallyUI's own create-db.ts.
+      const watched = onWebStorage ? withStorageWatchdog(baseStorage, STORAGE_WATCHDOG_OPTIONS) : undefined;
+      const storage = watched ?? baseStorage;
       const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
         name, multiInstance: false, localDocuments: true,
         storage: process.env.NODE_ENV !== 'production' ? wrappedValidateAjvStorage({ storage }) : storage,
       });
+      const unwatch = watched ? watchStorageHealth(watched.health$) : undefined;
       try {
         await db.addCollections({ pos_orders: { schema: posOrderSchema } });
-        if (webStorageAvailable()) {
+        if (onWebStorage) {
           await carryOverOrders({
             fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
           });
         }
-        return { orders: db.pos_orders, close: async () => { await db.close(); } };
-      } catch (error) { await db.close(); throw error; }
+        return { orders: db.pos_orders, close: async () => { unwatch?.(); await db.close(); } };
+      } catch (error) { unwatch?.(); await db.close(); throw error; }
     })();
     entry = { opening, users: 0 };
     stores.set(name, entry);
