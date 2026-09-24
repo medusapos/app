@@ -32,7 +32,7 @@ import {
   Modules,
   ProductStatus,
 } from '@medusajs/framework/utils'
-import type { ExecArgs } from '@medusajs/framework/types'
+import type { ExecArgs, PriceDTO } from '@medusajs/framework/types'
 import { productTitles } from "./seed-titles"
 
 const PRODUCT_COUNT = 2000
@@ -464,10 +464,14 @@ export default async function seedDevStore({ container }: ExecArgs) {
         saleHandles.add(`${HANDLE_PREFIX}-${String(index + 1).padStart(4, '0')}`)
       }
     }
+    // Generated ProductVariant types omit the runtime `prices` link alias.
+    // Type only the price fields requested by these queries at their reads.
     const prices = saleVariants
       .filter((v) => saleHandles.has(v.product?.handle as string))
       .flatMap((v) =>
-        (v.prices ?? []).map((p) => ({
+        ((v as typeof v & {
+          prices?: (Pick<PriceDTO, "amount" | "currency_code"> | null)[] | null
+        }).prices ?? []).map((p) => ({
           variant_id: v.id as string,
           currency_code: p!.currency_code as string,
           // 20% off, rounded to a .99 ending.
@@ -568,7 +572,9 @@ export default async function seedDevStore({ container }: ExecArgs) {
       const lines = 1 + Math.floor(random() * 4)
       const items = Array.from({ length: lines }, () => {
         const variant = pick(pool)
-        const price = variant.prices?.find((p) => p?.currency_code === region.currency_code)
+        const price = (variant as typeof variant & {
+          prices?: (Pick<PriceDTO, "amount" | "currency_code"> | null)[] | null
+        }).prices?.find((p) => p?.currency_code === region.currency_code)
         return {
           variant_id: variant.id as string,
           title: variant.product?.title as string,
