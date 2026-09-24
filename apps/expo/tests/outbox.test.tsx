@@ -79,7 +79,7 @@ describe('useOutbox with the TallyUI HTTP transport', () => {
     await waitFor(() => expect(outbox.orders).not.toBeNull());
     const collection = outbox.orders;
     await act(async () => { await outbox.record(order); });
-    await waitFor(() => expect(outbox.state.lastRetryReason).toBe('status_401'));
+    await waitFor(() => expect(outbox.state.lastRetryReason).toBe('unauthorized'));
     view.rerender(<Harness session={{ ...session, token: 'refreshed-token' }} />);
     expect(outbox.orders).toBe(collection);
     await waitFor(() => expect(outbox.recent[0]?.syncStatus).toBe('applied'), { timeout: 3000 });

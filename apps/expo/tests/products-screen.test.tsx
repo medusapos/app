@@ -60,7 +60,7 @@ beforeEach(() => {
   saveCachedSettings(localStorage, 'https://store.test', settings);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [], state: 'synced', error: null });
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined) });
 });
 
 describe('ProductsScreen catalogue', () => {
