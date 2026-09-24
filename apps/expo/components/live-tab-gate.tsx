@@ -106,6 +106,10 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
       subscription.unsubscribe();
       handle.stop();
       if (handleRef.current === handle) handleRef.current = null;
+      // Drop ownership before the next render (sign-out, or a scope change):
+      // otherwise re-entering the same scope reads this effect's own stale
+      // `state`/`showChildren` as already owned.
+      ownerScopeRef.current = undefined;
     };
   }, [scope, startLiveTab]);
 

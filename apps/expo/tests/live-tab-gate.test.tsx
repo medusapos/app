@@ -1,5 +1,9 @@
 // @vitest-environment jsdom
-import { useEffect } from 'react';
+import { useEffect, type ReactNode } from 'react';
+// @ts-expect-error no @types/react-dom in this Expo/React Native app
+import { flushSync } from 'react-dom';
+// @ts-expect-error no @types/react-dom in this Expo/React Native app
+import { createRoot } from 'react-dom/client';
 import { Platform, Pressable, Text, View } from 'react-native';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -12,6 +16,10 @@ vi.mock('../lib/live-tab', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>;
   return { ...actual, closeDatabases: vi.fn() };
 });
+
+// react-dom/client has no bundled types reachable here (no @types/react-dom in
+// this Expo/React Native app); a minimal local shape covers what this file uses.
+type Root = { render: (element: ReactNode) => void; unmount: () => void };
 
 // The real `@tallyui/components` barrel fails to import under vitest with:
 // SyntaxError: Unexpected token 'typeof'
@@ -246,6 +254,70 @@ describe('LiveTabGate', () => {
     act(() => instanceB.subject.next('live'));
     await waitFor(() => expect(mounts).toHaveBeenCalledTimes(2));
     expect(screen.getByText('children-rendered')).toBeTruthy();
+  });
+
+  it('drops ownership on sign-out so signing back into the same store does not reuse stale state', () => {
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    const mounts = vi.fn();
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    let root!: Root;
+    try {
+      act(() => {
+        root = createRoot(container);
+        root.render(
+          <LiveTabGate scope="store-resignin" startLiveTab={startLiveTab}>
+            <Marker onMount={mounts} text="children-rendered" />
+          </LiveTabGate>,
+        );
+      });
+      act(() => instances[0].subject.next('live'));
+      expect(mounts).toHaveBeenCalledTimes(1);
+      expect(container.textContent).toContain('children-rendered');
+
+      act(() => {
+        root.render(
+          <LiveTabGate startLiveTab={startLiveTab}>
+            <Marker onMount={mounts} text="children-rendered" />
+          </LiveTabGate>,
+        );
+      });
+      expect(container.textContent).toContain('children-rendered');
+
+      // Re-enter the same scope. flushSync forces a synchronous DOM commit;
+      // if this component's stale `live` + showChildren leaked (owned wrongly
+      // true), it would show children before the fresh coordinator for this
+      // scope ever confirms live.
+      flushSync(() => {
+        root.render(
+          <LiveTabGate scope="store-resignin" startLiveTab={startLiveTab}>
+            <Marker onMount={mounts} text="children-rendered" />
+          </LiveTabGate>,
+        );
+      });
+      expect(container.textContent).not.toContain('children-rendered');
+      expect(container.textContent).toContain('Opening MedusaPOS');
+
+      const instanceB = instances[instances.length - 1];
+      expect(instanceB.scope).toBe('store-resignin');
+      act(() => instanceB.subject.next('live'));
+      // A second act-wrapped render (same props) settles the update fully on
+      // this manually-created root: unlike RTL's own render/rerender, a bare
+      // act(() => subject.next(...)) here computes the new tree but this
+      // root's own commit only catches up on the next act with real work.
+      act(() => {
+        root.render(
+          <LiveTabGate scope="store-resignin" startLiveTab={startLiveTab}>
+            <Marker onMount={mounts} text="children-rendered" />
+          </LiveTabGate>,
+        );
+      });
+      expect(mounts).toHaveBeenCalledTimes(2);
+      expect(container.textContent).toContain('children-rendered');
+    } finally {
+      act(() => { root.unmount(); });
+      container.remove();
+    }
   });
 
   it('does not leak a live scope\'s state into a new one on a direct scope change', async () => {
