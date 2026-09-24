@@ -11,6 +11,7 @@ export function useOutbox(session: Session | null, registerId: string): {
   orders: RxCollection<PosOrder> | null; state: OutboxState; recent: PosOrder[];
   record(posOrder: PosOrder): Promise<void>;
   flush(): Promise<void>;
+  requeue(orderIds?: string[]): Promise<number>;
 } {
   const baseUrl = session?.baseUrl;
   const tokenRef = useRef(session?.token);
@@ -56,6 +57,10 @@ export function useOutbox(session: Session | null, registerId: string): {
     async flush() {
       const opened = current.current;
       if (opened && opened.baseUrl === baseUrl) await opened.outbox.flush();
+    },
+    async requeue(orderIds) {
+      const opened = current.current;
+      return opened && opened.baseUrl === baseUrl ? opened.outbox.requeue(orderIds) : 0;
     },
     async record(posOrder) {
       const opened = current.current;

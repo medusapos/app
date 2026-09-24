@@ -14,6 +14,7 @@ import ProductsScreen from '../app/index';
 import OrdersScreen from '../app/orders';
 import { useOutboxContext } from '../lib/outbox-context';
 import { SyncStatus } from '../components/sync-status';
+import { OutboxStrip, StoreRefused } from '../components/store-refused';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
@@ -62,7 +63,7 @@ beforeEach(() => {
   saveCachedSettings(localStorage, 'https://store.test', settings);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [], state: 'synced', error: null, lastSyncedAt: null });
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -86,6 +87,34 @@ describe('ProductsScreen catalogue', () => {
     expect(router.push).toHaveBeenCalledWith('/orders');
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(localStorage.getItem('medusapos.session')).toBeNull();
+  });
+
+  it('keeps the scan box usable with the refused strip in the header title', async () => {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 1, sending: false, refused: { status: 400, reason: 'protocol' } } });
+    await mount();
+    const setOptions = vi.fn<NonNullable<Parameters<typeof StoreRefused>[0]['header']>['setOptions']>();
+    const banner = render(<StoreRefused header={{ setOptions }} />);
+    expect(banner.container.textContent).toBe('');
+    render(<header>{setOptions.mock.lastCall![0].headerTitle!()}</header>);
+    expect(screen.getByText('1 sale not accepted ·').closest('header')).toBeTruthy();
+    const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
+    act(() => input.focus());
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: '123456' } });
+    expect(input.value).toBe('123456');
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(getComputedStyle(screen.getByRole('heading', { name: 'Not accepted by the store' }).parentElement!).position).toBe('absolute');
+    expect(setOptions.mock.lastCall![0].headerTitle).toBeUndefined();
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    expect(setOptions.mock.lastCall![0].headerTitle).toBeTypeOf('function');
+  });
+
+  it('shows only sign-in when both authRequired and refused are set', async () => {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 1, sending: false, authRequired: true, refused: { status: 400, reason: 'protocol' } } });
+    await mount();
+    render(<SessionProvider><OutboxStrip>{null}</OutboxStrip></SessionProvider>);
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Details' })).toBeNull();
   });
 
   it('uses the catalogue layout width for two to six columns with room for 160 px tiles', async () => {
@@ -161,7 +190,9 @@ async function mount(signedIn = true, orders = false, name?: string) {
     baseUrl: 'https://store.test', email: 'admin@store.test', name,
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
-  await act(async () => { render(<SessionProvider>{orders ? <OrdersScreen /> : <ProductsScreen />}</SessionProvider>); });
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(<SessionProvider>{orders ? <OrdersScreen /> : <ProductsScreen />}</SessionProvider>); });
+  return view;
 }
 
 function savedSale(): PosOrder {
@@ -199,6 +230,54 @@ describe('Orders screen and sync status', () => {
     expect(screen.getByText(`${dateAndTotal} · Waiting to sync`)).toBeTruthy();
     expect(screen.getAllByText(`${dateAndTotal} · Synced`)).toHaveLength(2);
     expect(screen.getAllByText(`${dateAndTotal} · Not accepted`)).toHaveLength(2);
+  });
+
+  it.each(['invalid', 'idempotency_mismatch', 'warnings'])('offers Retry only for requeueable rejections: %s', async (kind) => {
+    const order = savedSale();
+    const recent: PosOrder[] = [kind === 'warnings'
+      ? { ...order, syncStatus: 'applied', warnings: [{ code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }
+      : { ...order, syncStatus: 'rejected', error: { code: kind, message: 'Rejected' } }];
+    const requeue = vi.fn().mockResolvedValue(1);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent, requeue });
+    await mount(true, true);
+    if (kind === 'invalid') {
+      fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+      expect(requeue).toHaveBeenCalledExactlyOnceWith([order.id]);
+    } else {
+      expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+      expect(requeue).not.toHaveBeenCalled();
+    }
+    expect(screen.queryByText('This sale needs checking against the store before it can be sent again.') !== null).toBe(kind === 'idempotency_mismatch');
+  });
+
+  it.each([0, 1])('blocks repeat Retry taps until requeue resolves %s or the order leaves rejected', async (result) => {
+    const order: PosOrder = { ...savedSale(), syncStatus: 'rejected' };
+    let resolve!: (count: number) => void;
+    const requeue = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [order], requeue });
+    await mount(true, true);
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    act(() => { fireEvent.click(retry); fireEvent.click(retry); });
+    expect(requeue).toHaveBeenCalledExactlyOnceWith([order.id]);
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { resolve(result); });
+    expect(retry.getAttribute('aria-disabled')).toBe(result === 0 ? null : 'true');
+    fireEvent.click(retry);
+    expect(requeue).toHaveBeenCalledTimes(result === 0 ? 2 : 1);
+  });
+
+  it.each(['pending', 'applied'] as const)('clears Retry state when the outbox reports %s', async (syncStatus) => {
+    const order: PosOrder = { ...savedSale(), syncStatus: 'rejected' };
+    const requeue = vi.fn().mockResolvedValue(1);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [order], requeue });
+    const view = await mount(true, true);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [{ ...order, syncStatus }] });
+    view.rerender(<SessionProvider><OrdersScreen /></SessionProvider>);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [order] });
+    view.rerender(<SessionProvider><OrdersScreen /></SessionProvider>);
+    expect(screen.getByRole('button', { name: 'Retry' }).getAttribute('aria-disabled')).toBeNull();
   });
 
   it('redirects Orders to login when signed out', async () => {

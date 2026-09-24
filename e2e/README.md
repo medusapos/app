@@ -50,3 +50,34 @@ Playwright then starts no servers and drops no database. The backend needs the
 `E2E-*` fixture products from `seed-e2e.ts`; the hosted demo store has them
 (see `deploy/demo-backend/README.md`). Run only `smoke.spec.ts` there:
 the offline spec needs a fresh store where E2E-5 starts at 2.
+
+## Intermittent SKU-lookup miss
+
+**Symptom:** in `offline.spec.ts`, `sellBySku` types a SKU (E2E-3 or E2E-4),
+presses Enter, and the search box keeps the SKU: the app's local catalogue
+lookup found nothing at that moment.
+
+**What is ruled out:** SKU lookup is local (over the replicated catalogue);
+the catalogue replicates from `/admin/products`, which does not use the
+search module. The `Search index "product" has no active version yet` lines
+in the backend log come from search consumers before the first seed finishes
+and are not linked to the lookup.
+
+**Tally (2026-09-24),** e2e runs with the dev store's product search index
+working (PR #28):
+- before CI diagnostics (#33): 3 misses in 8 runs;
+- with diagnostics, TallyUI 78cada7/851206a: 0 in 9;
+- with TallyUI 6b1b0b7 (Medusa connector replication cursor fix, TallyUI
+  #48): 0 in 10.
+
+The cursor fix is a plausible cause of the change but not proven.
+
+**Diagnostics:** CI keeps a Playwright trace for failed tests
+(`retain-on-failure`), and e2e web builds (`EXPO_PUBLIC_E2E_DEBUG=1`) keep a
+catalogue snapshot on `window.__medusaposCatalogue`; on a miss, `sellBySku`
+attaches it to the test as `catalogue-snapshot` (in the `e2e-failure` CI
+artifact). Production builds carry none of this.
+
+**Rule:** a SKU-lookup miss is a bug, not a flake: do not rerun it away.
+Download the `e2e-failure` artifact, read `catalogue-snapshot` and the trace,
+and open an issue with them.
