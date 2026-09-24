@@ -41,3 +41,12 @@ shared dev store. Playwright stops the servers it starts. Outside CI, already
 running e2e servers are reused: stop those yourself before repeating the full
 suite, since the short-sale scenario requires E2E-5 to start at 2. Traces are saved on first retry;
 results and temporary build/pack artifacts are ignored by Git.
+
+## Against a hosted app and backend
+
+Set `E2E_APP_URL` and `E2E_BACKEND_URL` (both, or the config refuses to load),
+plus `E2E_EMAIL` and `E2E_PASSWORD`, to run against already-hosted servers:
+Playwright then starts no servers and drops no database. The backend needs the
+`E2E-*` fixture products from `seed-e2e.ts`; the hosted demo store has them
+(see `deploy/demo-backend/README.md`). Run only `smoke.spec.ts` there:
+the offline spec needs a fresh store where E2E-5 starts at 2.
