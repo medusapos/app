@@ -50,7 +50,7 @@ while true; do
     echo 'smoke: search seeding failed' >&2
     exit 1
   fi
-  if [[ "$backend_logs" == *'[Search] Seeded "product"'* ]]; then
+  if [[ "$backend_logs" == *'[Search] Seeded "product"'* || "$backend_logs" == *'[Search] Seeded \"product\"'* ]]; then
     break
   fi
   if (( SECONDS >= deadline )); then
