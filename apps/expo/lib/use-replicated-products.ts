@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
-import { createTallyDatabase, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION } from '@tallyui/database';
+import {
+  createTallyDatabase, startIdReconcile, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION,
+  type IdReconcileResult,
+} from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
 import { stockOverlay$ } from '@tallyui/pos';
 import { isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache } from './product-cache';
@@ -46,8 +49,9 @@ export function useReplicatedProducts(
   }, []);
   const debug = useRef<{
     lastProductsEmission: string | null; lastReplicationError: string | null;
+    lastIdReconcile: (IdReconcileResult & { at: string }) | null;
     replication?: ReturnType<typeof startReplication>;
-  }>({ lastProductsEmission: null, lastReplicationError: null });
+  }>({ lastProductsEmission: null, lastReplicationError: null, lastIdReconcile: null });
 
   useEffect(() => {
     if (process.env.EXPO_PUBLIC_E2E_DEBUG !== '1' || typeof window === 'undefined') return;
@@ -61,6 +65,7 @@ export function useReplicatedProducts(
         .flatMap((product) => traits.getVariants!(product).map((variant) => variant.sku)),
       lastProductsEmission: debug.current.lastProductsEmission,
       lastReplicationError: debug.current.lastReplicationError,
+      lastIdReconcile: debug.current.lastIdReconcile,
       get checkpoint() { try { return debug.current.replication?.internalReplicationState?.lastCheckpointDoc?.down?.checkpointData; } catch { return undefined; } },
     };
   }, [connector, products, state, error]);
@@ -150,6 +155,19 @@ export function useReplicatedProducts(
           });
         }
 
+        // INTERIM: only this start pass is observable; nightly passes run inside the
+        // runner on its own cadence, and the library itself warns on a brake, until
+        // TallyUI exposes the runner's state (TallyUI backlog item 34).
+        const idAdapter = connector.reconcile?.ids;
+        let idRunner: ReturnType<typeof startIdReconcile> | undefined;
+        if (idAdapter) {
+          idRunner = startIdReconcile({
+            collection: db.products, adapter: idAdapter, context, reSync: () => replication.reSync(),
+            startDelayMs: null,
+          });
+          cleanup.unshift(() => idRunner!.stop());
+        }
+
         setState('syncing');
         await replication.awaitInitialReplication();
         if (!cancelled) {
@@ -157,6 +175,15 @@ export function useReplicatedProducts(
           setLastSyncedAt(new Date());
           setError(null);
           void reconcileStock();
+          idRunner?.reconcileIds().then((result) => {
+            if (cancelled) return; // a start pass that finishes after cleanup must not record anything
+            if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') {
+              debug.current.lastIdReconcile = { ...result, at: new Date().toISOString() };
+            }
+            if (result.braked) console.warn('Id reconcile braked at app start:', result);
+          }, (err) => {
+            if (!cancelled) console.warn('Id reconcile failed:', err);
+          });
         }
       } catch (err) {
         if (!cancelled) {
