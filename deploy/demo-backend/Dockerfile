@@ -2,7 +2,7 @@ FROM node:22-bookworm-slim
 
 ENV MEDUSA_DISABLE_TELEMETRY=true TALLY_E2E_PLUGIN=1
 
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src/app
