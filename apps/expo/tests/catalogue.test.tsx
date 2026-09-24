@@ -174,7 +174,8 @@ describe('replicated catalogue recovery', () => {
     const baseUrl = 'https://catalogue-recovery.test';
     const stream = new Subject<'RESYNC'>();
     let failure: Error | null = new TypeError('Failed to fetch');
-    const connector = { ...medusaConnector, replication: { products: { pull: {
+    // No stock reconcile: this test is about replication recovery and must not reach the network.
+    const connector = { ...medusaConnector, reconcile: undefined, replication: { products: { pull: {
       stream$: stream,
       handler: async () => {
         if (failure) throw failure;
