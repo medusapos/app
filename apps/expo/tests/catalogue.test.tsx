@@ -6,7 +6,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import type { ProductCard, ProductGrid, SearchInput } from '@tallyui/components';
-import { Catalogue } from '../components/catalogue';
+import { Catalogue, formatStockSyncTime } from '../components/catalogue';
 import { createTallyDatabase } from '@tallyui/database';
 import { clearProductCache, productCacheName, productCacheStorage } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
@@ -43,14 +43,26 @@ const products = [
 
 afterEach(cleanup);
 
-function mount(items = products) {
+function mount(items = products, lastSyncedAt: Date | null = null) {
   const onSelect = vi.fn();
-  render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced" />);
+  render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced" lastSyncedAt={lastSyncedAt} />);
   const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
   return { input, onSelect };
 }
 
 describe('Catalogue', () => {
+  it('formats the sync time using device-local hours and minutes', () => {
+    const time = new Date('2026-09-24T10:42:00Z');
+    expect(formatStockSyncTime(time)).toBe(time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
+  });
+  it('shows the last successful sync time with each stock label', () => {
+    const time = new Date('2026-09-24T10:42:00Z');
+    mount(products, time);
+    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    const chooser = within(screen.getByLabelText('Choose variant'));
+    expect(chooser.getByText(`In Stock · as of ${formatStockSyncTime(time)}`)).toBeTruthy();
+    expect(chooser.getByText(`Out of Stock · as of ${formatStockSyncTime(time)}`)).toBeTruthy();
+  });
   it('filters products through search and shows matching counts', () => {
     const { input } = mount();
     expect(document.activeElement).toBe(input);
@@ -94,7 +106,8 @@ describe('Catalogue', () => {
     expect(chooser.getByText('Small')).toBeTruthy();
     expect(chooser.getByText('SHIRT-L')).toBeTruthy();
     expect(chooser.getByText('€25.00')).toBeTruthy();
-    expect(chooser.getByText('Out of Stock')).toBeTruthy();
+    expect(chooser.getByText('Out of Stock · not yet synced')).toBeTruthy();
+    expect(chooser.getByText('In Stock · not yet synced')).toBeTruthy();
     fireEvent.click(chooser.getByRole('button', { name: /Large/ }));
     expect(onSelect).toHaveBeenCalledExactlyOnceWith({
       product: products[1], variant: traits.getVariants!(products[1])[1],
@@ -150,9 +163,14 @@ describe('replicated catalogue recovery', () => {
       await waitFor(() => expect(result.current.state).toBe('offline'));
       expect(result.current.products.map((product) => product.id)).toEqual(['hat']);
       expect(result.current.error).toBe('Failed to fetch');
+      expect(result.current.lastSyncedAt).toBeNull();
+      const initialSyncStarted = Date.now();
       failure = null;
       await waitFor(() => expect(result.current.state).toBe('synced'), { timeout: 7000 });
       expect(result.current.error).toBeNull();
+      const initialSyncedAt = result.current.lastSyncedAt;
+      expect(initialSyncedAt).toBeInstanceOf(Date);
+      expect(initialSyncedAt!.getTime()).toBeGreaterThanOrEqual(initialSyncStarted);
       failure = new Error('Medusa API error: 503');
       act(() => stream.next('RESYNC'));
       await waitFor(() => expect(result.current.state).toBe('error'));
@@ -160,6 +178,7 @@ describe('replicated catalogue recovery', () => {
       failure = null;
       await waitFor(() => expect(result.current.state).toBe('synced'), { timeout: 7000 });
       expect(result.current.error).toBeNull();
+      expect(result.current.lastSyncedAt!.getTime()).toBeGreaterThan(initialSyncedAt!.getTime());
       expect(onUnauthorized).not.toHaveBeenCalled();
     } finally {
       await clearProductCache(connector.id, baseUrl);

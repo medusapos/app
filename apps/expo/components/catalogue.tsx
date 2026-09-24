@@ -11,12 +11,17 @@ const STOCK_LABEL = {
   in_stock: 'In Stock', out_of_stock: 'Out of Stock', backorder: 'On Backorder', unknown: 'Unknown',
 };
 
-export function Catalogue<Doc>({ products, traits, currency, onSelect, statusText }: {
+export function formatStockSyncTime(time: Date): string {
+  return time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+export function Catalogue<Doc>({ products, traits, currency, onSelect, statusText, lastSyncedAt }: {
   products: Doc[];
   traits: ProductTraits<Doc>;
   currency: string;
   onSelect: (entry: CatalogueEntry<Doc>) => void;
   statusText?: string;
+  lastSyncedAt: Date | null;
 }) {
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<CatalogueEntry<Doc>[]>([]);
@@ -50,7 +55,7 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
                 <Text className="font-semibold text-foreground">{entry.variant.title}</Text>
                 <Text className="text-muted-foreground">{entry.variant.sku}</Text>
                 <Text className="text-foreground">{variantPriceLabel(entry.variant, currency)}</Text>
-                <Text className="text-muted-foreground">{STOCK_LABEL[entry.variant.stock.status]}</Text>
+                <Text className="text-muted-foreground">{STOCK_LABEL[entry.variant.stock.status]} · {lastSyncedAt ? `as of ${formatStockSyncTime(lastSyncedAt)}` : 'not yet synced'}</Text>
               </Pressable>
             ))}
             <Pressable accessibilityRole="button" onPress={() => setChoices([])} className="rounded-md border border-border bg-card px-4 py-3">

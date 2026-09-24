@@ -26,6 +26,7 @@ export function useReplicatedProducts(
 ) {
   const [products, setProducts] = useState<any[]>([]);
   const [state, setState] = useState<SyncState>('connecting');
+  const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
   const debug = useRef<{
     lastProductsEmission: string | null; lastReplicationError: string | null;
@@ -100,6 +101,7 @@ export function useReplicatedProducts(
           // RxDB stays active during pull retries; idle after activity means the pull completed.
           if (!cancelled && wasActive && !active) {
             setState('synced');
+            setLastSyncedAt(new Date());
             setError(null);
           }
           wasActive = active;
@@ -110,6 +112,7 @@ export function useReplicatedProducts(
         await replication.awaitInitialReplication();
         if (!cancelled) {
           setState('synced');
+          setLastSyncedAt(new Date());
           setError(null);
         }
       } catch (err) {
@@ -126,5 +129,5 @@ export function useReplicatedProducts(
     };
   }, [connector, baseUrl, headers, onUnauthorized]);
 
-  return { products, state, error };
+  return { products, state, error, lastSyncedAt };
 }
