@@ -2,22 +2,22 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { medusaConnector } from '@tallyui/connector-medusa';
+import { authHeaders, posConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
 const baseUrl = 'https://replication-auth.test';
 const token = 'test-admin-jwt';
-const headers = { Authorization: 'Bearer ' + token };
+const headers = authHeaders(token);
 const onUnauthorized = vi.fn();
 
 function Harness() {
-  const { state } = useReplicatedProducts(medusaConnector, headers, baseUrl, onUnauthorized);
+  const { state } = useReplicatedProducts(posConnector, headers, baseUrl, onUnauthorized);
   return <span>{state}</span>;
 }
 
 afterEach(async () => {
-  await clearProductCache(medusaConnector.id, baseUrl);
+  await clearProductCache(posConnector.id, baseUrl);
   cleanup();
   vi.unstubAllGlobals();
 });
