@@ -63,7 +63,7 @@ function SettingsScreen(props: SignedInProps) {
     return () => { active = false; };
   }, [session, onUnauthorized, attempt]);
   if (!settings) return <View dataSet={{ print: 'hide' }} className="flex-1 items-center justify-center gap-4">
-    <Text className="text-destructive">{error ?? 'Loading store settings…'}</Text>
+    <Text className={error ? 'text-destructive' : 'text-muted-foreground'}>{error ?? 'Loading store settings…'}</Text>
     {error ? <Pressable accessibilityRole="button" onPress={() => setAttempt(attempt + 1)} className="rounded-md border border-border bg-card px-4 py-3"><Text className="text-center text-foreground">Retry</Text></Pressable> : null}
   </View>;
   return <SignedInProducts {...props} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
