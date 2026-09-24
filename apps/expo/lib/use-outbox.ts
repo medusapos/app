@@ -3,6 +3,7 @@ import type { RxCollection } from 'rxdb';
 import { createHttpCommandTransport, createOrderOutbox, type OutboxState, type PosOrder } from '@tallyui/pos';
 import type { Session } from './session';
 import { openOrderStore } from './order-store';
+import { authHeaders } from './pos-connector';
 
 const idle: OutboxState = { pending: 0, sending: false };
 
@@ -31,7 +32,7 @@ export function useOutbox(session: Session | null, registerId: string): {
       if (!active) { await store.close(); return; }
       const outbox = createOrderOutbox({ collection: store.orders, deviceId: registerId,
         transport: createHttpCommandTransport({ baseUrl,
-          getHeaders: () => ({ Authorization: 'Bearer ' + tokenRef.current }),
+          getHeaders: () => authHeaders(tokenRef.current ?? ''),
         }),
       });
       current.current = { baseUrl, orders: store.orders, outbox };

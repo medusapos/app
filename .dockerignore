@@ -1,0 +1,13 @@
+.git
+.claude
+**/node_modules
+**/.medusa
+**/.env
+**/.env.local
+apps
+e2e
+docs
+test-results
+playwright-report
+**/.turbo
+**/dist

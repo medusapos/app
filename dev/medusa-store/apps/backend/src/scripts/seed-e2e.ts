@@ -32,6 +32,13 @@ export default async function seedE2e({ container }: ExecArgs) {
   ].filter(tax => !taxRegions.some(existing => existing.country_code === tax.country_code))
   if (missingTaxRegions.length) await createTaxRegionsWorkflow(container).run({ input: missingTaxRegions })
   let [location] = await container.resolve(Modules.STOCK_LOCATION).listStockLocations({ name: "Copenhagen" })
+  if (!location) {
+    const { data: [channelLinks] } = await query.graph({
+      entity: "sales_channel", filters: { id: channel.id }, fields: ["stock_locations.id"],
+    })
+    const locationId = channelLinks.stock_locations?.[0]?.id
+    if (locationId) [location] = await container.resolve(Modules.STOCK_LOCATION).listStockLocations({ id: locationId })
+  }
   if (!location) [location] = (await createStockLocationsWorkflow(container).run({ input: { locations: [{
     name: "Copenhagen",
     address: { address_1: "Nørregade 1", city: "Copenhagen", country_code: "dk", postal_code: "1165" },

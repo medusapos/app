@@ -1,3 +1,5 @@
+import { authHeaders } from './pos-connector';
+
 export type Session = { baseUrl: string; email: string; token: string };
 export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error' | 'invalid_url' | 'insecure_url';
 export class LoginError extends Error {
@@ -60,7 +62,7 @@ export async function refreshSession(session: Session, fetchImpl = globalThis.fe
   let response: Response;
   try {
     response = await fetchImpl(`${session.baseUrl}/auth/token/refresh`, {
-      method: 'POST', headers: { Authorization: `Bearer ${session.token}` },
+      method: 'POST', headers: authHeaders(session.token),
     });
   } catch { throw new LoginError('unreachable', 'Could not reach the backend.'); }
   if (response.status === 401) throw new LoginError('invalid_credentials', 'Please sign in again.');

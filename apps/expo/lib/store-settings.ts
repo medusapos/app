@@ -1,5 +1,6 @@
 import { ratePpmFromPercent, type TaxContext } from '@tallyui/pos';
 import type { Session, SessionStorage } from './session';
+import { authHeaders } from './pos-connector';
 
 export type StoreSettings = {
   storeName: string;
@@ -21,7 +22,7 @@ export async function fetchStoreSettings(session: Session, fetchImpl = globalThi
   async function request(path: string): Promise<Record<string, unknown>> {
     let response: Response;
     try {
-      response = await fetchImpl(`${session.baseUrl}${path}`, { headers: { Authorization: `Bearer ${session.token}` } });
+      response = await fetchImpl(`${session.baseUrl}${path}`, { headers: authHeaders(session.token) });
     } catch { throw new StoreSettingsError('unreachable', 'Could not reach the backend.'); }
     if (response.status === 401) throw new StoreSettingsError('unauthorized', 'Please sign in again.');
     if (!response.ok) throw new StoreSettingsError('unreachable', 'Could not read store settings.');

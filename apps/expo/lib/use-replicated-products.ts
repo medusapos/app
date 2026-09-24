@@ -49,7 +49,7 @@ export function useReplicatedProducts(
         const context: SyncContext = {
           connectorId: connector.id,
           baseUrl,
-          // Connector credentials use Basic for secret API keys; a signed-in user's JWT needs Bearer.
+          // The caller passes the connector's auth headers.
           headers,
         };
 
