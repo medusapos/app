@@ -43,6 +43,10 @@ if [[ "$backend_logs" != *'redisUrl not found'* ]]; then
   echo 'smoke: in-memory Redis fallback log not found' >&2
   exit 1
 fi
+if [[ "$backend_logs" == *'Failed to seed'* ]]; then
+  echo 'smoke: search seeding failed' >&2
+  exit 1
+fi
 
 docker stop mpdemo-smoke-backend
 docker exec mpdemo-smoke-pg psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
