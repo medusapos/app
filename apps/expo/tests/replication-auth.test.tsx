@@ -25,16 +25,22 @@ afterEach(async () => {
 it('sends the admin JWT as Bearer, never Basic, when replicating products', async () => {
   vi.stubGlobal('crypto', webcrypto);
   const fetchMock = vi.fn(async (_url: string, _init?: RequestInit) =>
-    new Response(JSON.stringify({ products: [], count: 0 }), { status: 200 }));
+    new Response(JSON.stringify({ products: [], count: 0, offset: 0, limit: 100 }), { status: 200 }));
+  // A pass starts with a high-water-mark read, then requests the product page.
+  fetchMock.mockResolvedValueOnce(
+    new Response(JSON.stringify({ products: [], count: 0 }), { status: 200 }),
+  );
   vi.stubGlobal('fetch', fetchMock);
 
   render(<Harness />);
   await waitFor(() => expect(screen.getByText('synced')).toBeTruthy());
 
   const requests = fetchMock.mock.calls.filter(([url]) => new URL(url).pathname === '/admin/products');
-  expect(requests).toHaveLength(1);
-  const authorization = new Headers(requests[0][1]?.headers).get('Authorization');
-  expect(authorization).not.toMatch(/^Basic /);
-  expect(authorization).toBe('Bearer ' + token);
+  expect(requests.length).toBeGreaterThanOrEqual(2);
+  for (const [, init] of requests) {
+    const authorization = new Headers(init?.headers).get('Authorization');
+    expect(authorization).not.toMatch(/^Basic /);
+    expect(authorization).toBe('Bearer ' + token);
+  }
   expect(onUnauthorized).not.toHaveBeenCalled();
 });
