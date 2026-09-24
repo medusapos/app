@@ -4,11 +4,13 @@ Manual probes that produced the evidence behind TallyUI ADR-060: in Medusa
 2.21, deleting a variant does not bump the product's `updated_at`, and
 `GET /admin/products` honours `updated_at[$gte]` but silently ignores the
 plain `updated_at[gte]` form that TallyUI's replication pull uses. Kept here
-so anyone can rerun them and reproduce the evidence.
+so anyone can rerun them and reproduce the evidence. `variant-price-edit.sh`
+answers a later question for TallyUI's Medusa price sync: whether a price-only
+edit bumps the variant's `updated_at`.
 
 **Only ever point these at the disposable e2e store.** `variant-delete.sh`
-creates and deletes a real product against whatever `PROBE_BASE_URL` points
-at. Never run either probe against a shared or production store.
+and `variant-price-edit.sh` create and delete a real product against
+whatever `PROBE_BASE_URL` points at. Never run either probe against a shared or production store.
 
 ## Start the disposable e2e store
 
@@ -34,6 +36,7 @@ to the e2e store started above:
 ```sh
 dev/medusa-store/scripts/probes/variant-delete.sh
 dev/medusa-store/scripts/probes/updated-at-filter.sh
+dev/medusa-store/scripts/probes/variant-price-edit.sh
 ```
 
 ### `variant-delete.sh`
@@ -57,3 +60,16 @@ printing the HTTP status and a trimmed response for each. A future timestamp
 should match nothing; if `updated_at[$gte]` returns `count: 0` while
 `updated_at[gte]` returns every product, that confirms Medusa only honours
 the `$gte` form and silently ignores the plain one.
+
+### `variant-price-edit.sh`
+
+Creates a one-variant product with an EUR price, then edits only that price
+twice: first through `POST /admin/products/:id/variants/batch` (the route the
+admin dashboard's price editor uses), then through
+`POST /admin/products/:id/variants/:variant_id`. Before and after each edit it
+prints the variant's `updated_at`, its prices' `updated_at` (read through
+`GET /admin/product-variants`) and the product's `updated_at`, then deletes
+the product. On Medusa 2.21.0 (2026-09-24) both routes moved the variant's
+`updated_at` and the price's `updated_at`; the product's `updated_at` did not
+move. So a feed filtered on the variant's `updated_at` sees price edits, and
+one filtered on the product's `updated_at` does not.
