@@ -3,6 +3,9 @@ import { Pressable, Text, TextInput, View } from 'react-native';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
 
+// Keep the floating collapsed strips and receipt pad the same height without a layout pass.
+export const COLLAPSED_STRIP_HEIGHT = 48;
+
 export function SignInAgain({ header }: { header?: { setOptions: (options: { headerTitle?: () => ReactNode }) => void } }) {
   const { session, signIn } = useSession();
   const { state, flush } = useOutboxContext();
@@ -46,7 +49,7 @@ export function SignInAgain({ header }: { header?: { setOptions: (options: { hea
     }
   }
 
-  return <View dataSet={{ print: 'hide' }} style={{ position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1 }}
+  return <View dataSet={{ print: 'hide' }} style={{ height: expanded ? undefined : COLLAPSED_STRIP_HEIGHT, position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1 }}
     className="gap-2 border-b border-border bg-card px-4 py-3">
     {!expanded ? strip : <>
     <Text accessibilityRole="header" className="font-semibold text-foreground">Sign in again</Text>

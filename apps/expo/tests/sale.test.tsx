@@ -8,6 +8,9 @@ import type { CartPanelProps, CartLineProps, CartTotalProps, CashTenderedProps, 
 import { Cart } from '../components/cart';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
+import { OutboxStrip } from '../components/store-refused';
+import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
+import { useOutboxContext } from '../lib/outbox-context';
 import { catalogueEntries } from '../lib/catalogue';
 import { useSale } from '../lib/use-sale';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, taxContextFor, type StoreSettings } from '../lib/store-settings';
@@ -41,7 +44,7 @@ vi.mock('@tallyui/components', () => ({
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({
-  useOutboxContext: () => ({ record: vi.fn(), state: { pending: 0, sending: false }, recent: [] }),
+  useOutboxContext: vi.fn(),
 }));
 vi.mock('../lib/use-replicated-products', () => ({
   useReplicatedProducts: () => ({ products: [], state: 'synced', error: null }),
@@ -76,6 +79,7 @@ const typeCash = (value: string) => fireEvent.change(screen.getByRole('textbox',
 function addSaleLines() { act(() => { sale.add(entries[0], traits); sale.add(entries[1], traits); sale.add(entries[0], traits); }); }
 
 beforeEach(() => {
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], flush: vi.fn(), requeue: vi.fn() });
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -88,6 +92,34 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe('sale', () => {
+  it.each(['auth', 'refused'])('pads the receipt immediately by the fixed %s strip height, on screen only', async (kind) => {
+    const view = render(<OutboxStrip><SaleHarness /></OutboxStrip>);
+    addSaleLines();
+    click('Card terminal');
+    await act(async () => { await sale.complete(); });
+    const content = screen.getByText('Test shop').parentElement!;
+    expect(content.previousElementSibling).toBeNull();
+    const state = { pending: 1, sending: false, ...(kind === 'auth' ? { authRequired: true } : { refused: { status: 400, reason: 'protocol' } }) };
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state });
+    view.rerender(<OutboxStrip><SaleHarness /></OutboxStrip>);
+    const strip = screen.getByRole('button', { name: kind === 'auth' ? 'Sign in' : 'Details' }).parentElement!.parentElement!;
+    expect(getComputedStyle(strip).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    const pad = content.previousElementSibling!;
+    expect(pad).not.toBeNull();
+    expect(getComputedStyle(pad).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    expect(pad.getAttribute('data-print')).toBe('hide');
+    expect(pad.textContent).toBe('');
+    click(kind === 'auth' ? 'Sign in' : 'Details');
+    expect((strip as HTMLElement).style.height).toBe('');
+    expect(getComputedStyle(pad).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    click('Later');
+    expect(getComputedStyle(strip).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    expect(getComputedStyle(pad).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 0, sending: false } });
+    view.rerender(<OutboxStrip><SaleHarness /></OutboxStrip>);
+    expect(content.previousElementSibling).toBeNull();
+  });
+
   it('merges variants and displays builder quantities, unit prices, line totals and order totals', () => {
     render(<SaleHarness />);
     addSaleLines();

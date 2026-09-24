@@ -1,12 +1,11 @@
 import '../global.css';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { SessionProvider } from '../lib/session-context';
 import { OutboxProvider } from '../lib/outbox-context';
-import { SignInAgain } from '../components/sign-in-again';
+import { OutboxStrip } from '../components/store-refused';
 
 // The POS ships the light theme; no dark design yet.
 Uniwind.setTheme('light');
@@ -21,9 +20,7 @@ export default function RootLayout() {
       <OutboxProvider><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
-          <View style={{ flex: 1 }}>
-            {children}<SignInAgain header={options.headerShown === false ? undefined : navigation} />
-          </View>
+          <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
         </SafeAreaView>}
         screenOptions={{
           headerStyle: { backgroundColor: card as string },
