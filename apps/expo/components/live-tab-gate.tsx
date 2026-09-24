@@ -27,6 +27,12 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
   const committedResolveRef = useRef<(() => void) | null>(null);
   const unmountedRef = useRef(false);
   const handleRef = useRef<LiveTabHandle | null>(null);
+  // The scope `state`/`showChildren` belong to, set together with them at the
+  // top of the effect below. The render checks this before trusting
+  // `state`/`showChildren`, so a stale `live` + showChildren left over from a
+  // previous scope (e.g. sign-out then straight back in) can never be read for
+  // a new scope before that scope's own coordinator says so.
+  const ownerScopeRef = useRef<string | undefined>(undefined);
   // The in-flight park's closeDatabases(), if any. On `pagehide` the coordinator
   // emits `parked` before `onPark` runs and can go `live` again (via `pageshow`)
   // before that `onPark` settles, so a `live` must wait for this rather than
@@ -44,6 +50,7 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
 
   useEffect(() => {
     if (!scope || Platform.OS !== 'web') return undefined;
+    ownerScopeRef.current = scope;
     setState('acquiring');
     showChildrenRef.current = false;
     setShowChildren(false);
@@ -79,9 +86,10 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
         const pending = parkCloseRef.current;
         parkCloseRef.current = null;
         if (pending) {
-          // Never hangs: closeDatabases() itself never rejects (its own pieces
-          // close best-effort), but settle either way rather than assume.
-          void pending.finally(() => {
+          // Never leaves an unhandled rejection: closeDatabases() can reject (a
+          // real close() failing), but the POS remounts either way once the
+          // park settles.
+          void pending.catch(() => {}).finally(() => {
             if (disposed) return;
             showChildrenRef.current = true;
             setShowChildren(true);
@@ -102,8 +110,9 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
   }, [scope, startLiveTab]);
 
   if (!scope || Platform.OS !== 'web') return <>{children}</>;
-  if (state === 'live' && showChildren) return <>{children}</>;
-  if (state === 'parked' || state === 'blocked') {
+  const owned = ownerScopeRef.current === scope;
+  if (owned && state === 'live' && showChildren) return <>{children}</>;
+  if (owned && (state === 'parked' || state === 'blocked')) {
     return (
       <LiveTabScreen
         state={state}

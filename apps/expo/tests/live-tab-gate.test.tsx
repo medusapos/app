@@ -212,4 +212,96 @@ describe('LiveTabGate', () => {
     unmount();
     expect(instances[1].stop).toHaveBeenCalledOnce();
   });
+
+  it('does not leak a live scope\'s state into a new one after signing out and back in', async () => {
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    const mounts = vi.fn();
+    const { rerender } = render(
+      <LiveTabGate scope="store-leak-a" startLiveTab={startLiveTab}>
+        <Marker onMount={mounts} text="children-rendered" />
+      </LiveTabGate>,
+    );
+    act(() => instances[0].subject.next('live'));
+    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <LiveTabGate startLiveTab={startLiveTab}>
+        <Marker onMount={mounts} text="children-rendered" />
+      </LiveTabGate>,
+    );
+    expect(screen.getByText('children-rendered')).toBeTruthy();
+    expect(mounts).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <LiveTabGate scope="store-leak-b" startLiveTab={startLiveTab}>
+        <Marker onMount={mounts} text="children-rendered" />
+      </LiveTabGate>,
+    );
+    expect(screen.queryByText('children-rendered')).toBeNull();
+    expect(screen.getByText('Opening MedusaPOS…')).toBeTruthy();
+    expect(mounts).toHaveBeenCalledTimes(1);
+
+    const instanceB = instances[instances.length - 1];
+    expect(instanceB.scope).toBe('store-leak-b');
+    act(() => instanceB.subject.next('live'));
+    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(2));
+    expect(screen.getByText('children-rendered')).toBeTruthy();
+  });
+
+  it('does not leak a live scope\'s state into a new one on a direct scope change', async () => {
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    const mounts = vi.fn();
+    const { rerender } = render(
+      <LiveTabGate scope="store-direct-a" startLiveTab={startLiveTab}>
+        <Marker onMount={mounts} text="children-rendered" />
+      </LiveTabGate>,
+    );
+    act(() => instances[0].subject.next('live'));
+    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <LiveTabGate scope="store-direct-b" startLiveTab={startLiveTab}>
+        <Marker onMount={mounts} text="children-rendered" />
+      </LiveTabGate>,
+    );
+    expect(screen.queryByText('children-rendered')).toBeNull();
+    expect(mounts).toHaveBeenCalledTimes(1);
+
+    const instanceB = instances[instances.length - 1];
+    expect(instanceB.scope).toBe('store-direct-b');
+    act(() => instanceB.subject.next('live'));
+    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(2));
+  });
+
+  it('handles closeDatabases rejecting on park with no unhandled rejection, and remounts once live', async () => {
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    const mounts = vi.fn();
+    render(<LiveTabGate scope="store-reject" startLiveTab={startLiveTab}>
+      <Marker onMount={mounts} text="children-rendered" />
+    </LiveTabGate>);
+    const instance = instances[0];
+    act(() => instance.subject.next('live'));
+    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(1));
+
+    const unhandled: unknown[] = [];
+    const onUnhandledRejection = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandledRejection);
+
+    closeDatabasesMock.mockImplementationOnce(() => Promise.reject(new Error('close failed')));
+    // Caught immediately (synchronously, in the same act) so this test's own
+    // await of onPark's result isn't itself a false-positive unhandled
+    // rejection; the assertion below is about the production `pending` chain.
+    let onParkSettled!: Promise<void>;
+    act(() => { onParkSettled = Promise.resolve(instance.options.onPark()).catch(() => {}); });
+    await waitFor(() => expect(screen.queryByText('children-rendered')).toBeNull());
+    await waitFor(() => expect(closeDatabasesMock).toHaveBeenCalledOnce());
+    await act(async () => { await onParkSettled; });
+
+    act(() => instance.subject.next('live'));
+    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(2));
+
+    await new Promise(resolve => setTimeout(resolve, 0));
+    process.off('unhandledRejection', onUnhandledRejection);
+    expect(unhandled).toEqual([]);
+  });
 });

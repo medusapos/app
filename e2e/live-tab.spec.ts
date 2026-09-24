@@ -77,5 +77,13 @@ test('pageshow after pagehide re-opens both databases', async ({ page }) => {
   });
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 
+  const backend = process.env.E2E_BACKEND_URL ?? 'http://localhost:9100';
+  const saleApplied = page.waitForResponse(async response => {
+    if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
+    const body = await response.json();
+    return (body.results ?? []).some((result: { status: string }) => result.status === 'applied');
+  });
   await sellBySku(page, ['E2E-1'], 'exact');
+  await saleApplied;
+  await expect(page.getByLabel('Sync status', { exact: true })).toHaveText('All sales synced');
 });
