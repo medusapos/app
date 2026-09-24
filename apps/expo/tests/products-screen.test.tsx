@@ -94,14 +94,14 @@ describe('ProductsScreen catalogue', () => {
     const banner = render(<StoreRefused header={{ setOptions }} />);
     expect(banner.container.textContent).toBe('');
     render(<header>{setOptions.mock.lastCall![0].headerTitle!()}</header>);
-    expect(screen.getByText('1 sale saved, the store is refusing them ·').closest('header')).toBeTruthy();
+    expect(screen.getByText('1 sale saved, not accepted by the store ·').closest('header')).toBeTruthy();
     const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
     act(() => input.focus());
     expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: '123456' } });
     expect(input.value).toBe('123456');
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
-    expect(getComputedStyle(screen.getByRole('heading', { name: 'The store is refusing these sales' }).parentElement!).position).toBe('absolute');
+    expect(getComputedStyle(screen.getByRole('heading', { name: 'Not accepted by the store' }).parentElement!).position).toBe('absolute');
     expect(setOptions.mock.lastCall![0].headerTitle).toBeUndefined();
     fireEvent.click(screen.getByRole('button', { name: 'Later' }));
     expect(setOptions.mock.lastCall![0].headerTitle).toBeTypeOf('function');

@@ -9,6 +9,7 @@ import { Cart } from '../components/cart';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
 import { OutboxStrip } from '../components/store-refused';
+import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
 import { useOutboxContext } from '../lib/outbox-context';
 import { catalogueEntries } from '../lib/catalogue';
 import { useSale } from '../lib/use-sale';
@@ -91,25 +92,29 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 
 describe('sale', () => {
-  it.each(['auth', 'refused'])('pads the receipt by the measured %s strip height, on screen only', async (kind) => {
-    const state = { pending: 1, sending: false, ...(kind === 'auth' ? { authRequired: true } : { refused: { status: 400, reason: 'protocol' } }) };
-    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state });
+  it.each(['auth', 'refused'])('pads the receipt immediately by the fixed %s strip height, on screen only', async (kind) => {
     const view = render(<OutboxStrip><SaleHarness /></OutboxStrip>);
     addSaleLines();
     click('Card terminal');
     await act(async () => { await sale.complete(); });
-    const strip = screen.getByRole('button', { name: kind === 'auth' ? 'Sign in' : 'Details' }).parentElement!.parentElement! as HTMLElement & {
-      __reactLayoutHandler: (event: { nativeEvent: { layout: { height: number } } }) => void;
-    };
     const content = screen.getByText('Test shop').parentElement!;
-    for (const height of [48, 220]) {
-      if (height === 220) click(kind === 'auth' ? 'Sign in' : 'Details');
-      act(() => strip.__reactLayoutHandler({ nativeEvent: { layout: { height } } }));
-      const pad = content.previousElementSibling!;
-      expect(getComputedStyle(pad).height).toBe(`${height}px`);
-      expect(pad.getAttribute('data-print')).toBe('hide');
-      expect(pad.textContent).toBe('');
-    }
+    expect(content.previousElementSibling).toBeNull();
+    const state = { pending: 1, sending: false, ...(kind === 'auth' ? { authRequired: true } : { refused: { status: 400, reason: 'protocol' } }) };
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state });
+    view.rerender(<OutboxStrip><SaleHarness /></OutboxStrip>);
+    const strip = screen.getByRole('button', { name: kind === 'auth' ? 'Sign in' : 'Details' }).parentElement!.parentElement!;
+    expect(getComputedStyle(strip).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    const pad = content.previousElementSibling!;
+    expect(pad).not.toBeNull();
+    expect(getComputedStyle(pad).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    expect(pad.getAttribute('data-print')).toBe('hide');
+    expect(pad.textContent).toBe('');
+    click(kind === 'auth' ? 'Sign in' : 'Details');
+    expect((strip as HTMLElement).style.height).toBe('');
+    expect(getComputedStyle(pad).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    click('Later');
+    expect(getComputedStyle(strip).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
+    expect(getComputedStyle(pad).height).toBe(`${COLLAPSED_STRIP_HEIGHT}px`);
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 0, sending: false } });
     view.rerender(<OutboxStrip><SaleHarness /></OutboxStrip>);
     expect(content.previousElementSibling).toBeNull();
