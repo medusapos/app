@@ -49,9 +49,11 @@ Also post-MVP (from the #12 review, not blocking):
 
 - Write the take-back and its reversed flag atomically (see the second
   window above).
-- A payment collection left `authorized` (not `completed`) by a crash
-  makes resume fail on every retry; resume should capture or cancel the
-  authorisation.
+- ~~A payment collection left `authorized` (not `completed`) by a crash
+  makes resume fail on every retry.~~ Resolved 2026-09-24: resume marks a
+  `not_paid` collection as paid and, for any other unfinished collection,
+  authorises pending sessions and captures every uncaptured payment. It
+  captures rather than cancels because the sale was paid at the till.
 - Each in-flight sale holds one pooled Postgres connection for its advisory
   lock, so concurrent sales are bounded by the pool size.
 

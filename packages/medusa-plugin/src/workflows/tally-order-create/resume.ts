@@ -25,10 +25,10 @@ export async function resumeOrderCreate(container: MedusaContainer, orderId: str
   }
   for (const collection of collections) {
     if (collection.status === 'completed') continue
-    // A crash inside markPaymentCollectionAsPaid leaves the collection awaiting or authorized.
     if (collection.status === 'not_paid') {
       await markPaymentCollectionAsPaid(container).run({ input: { order_id: orderId, payment_collection_id: collection.id } })
     } else {
+      // A crash between authorising and capturing leaves the collection authorized; a provider that authorises asynchronously leaves it awaiting with a pending session.
       const paymentIds = new Set<string>(collection.payments.filter(payment => payment.captured_at === null).map(payment => payment.id))
       for (const session of collection.payment_sessions) {
         if (session.status === 'pending') {

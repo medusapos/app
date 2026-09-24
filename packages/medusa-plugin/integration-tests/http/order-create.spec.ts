@@ -217,7 +217,7 @@ medusaIntegrationTestRunner({
       await expectStock(data.inventoryD, -2)
     })
 
-    it.each(['draft', 'awaiting', 'authorized', 'paid', 'taken-back'])('resumes a short sale after a crash at %s', async stage => {
+    it.each(['draft', 'session-created', 'authorized', 'paid', 'taken-back'])('resumes a short sale after a crash at %s', async stage => {
       const sale = shortSale()
       const draft = await createDraft(sale, 1)
       if (stage !== 'draft') {
@@ -225,7 +225,7 @@ medusaIntegrationTestRunner({
         const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
           input: { order_id: draft.id, amount: 6 },
         })
-        if (stage === 'awaiting' || stage === 'authorized') {
+        if (stage === 'session-created' || stage === 'authorized') {
           const { result: session } = await createPaymentSessionsWorkflow(container).run({ input: {
             payment_collection_id: collection.id, provider_id: 'pp_system_default', data: {}, context: {},
           } })
