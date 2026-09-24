@@ -4,7 +4,7 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import {
   convertDraftOrderWorkflow, createOrderFulfillmentWorkflow, createOrderPaymentCollectionWorkflow,
-  createOrderWorkflow, getOrderDetailWorkflow, markPaymentCollectionAsPaid, type CreateOrderWorkflowInput,
+  createOrderWorkflow, createPaymentSessionsWorkflow, getOrderDetailWorkflow, markPaymentCollectionAsPaid, type CreateOrderWorkflowInput,
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core'
@@ -217,7 +217,7 @@ medusaIntegrationTestRunner({
       await expectStock(data.inventoryD, -2)
     })
 
-    it.each(['draft', 'paid', 'taken-back'])('resumes a short sale after a crash at %s', async stage => {
+    it.each(['draft', 'awaiting', 'authorized', 'paid', 'taken-back'])('resumes a short sale after a crash at %s', async stage => {
       const sale = shortSale()
       const draft = await createDraft(sale, 1)
       if (stage !== 'draft') {
@@ -225,7 +225,14 @@ medusaIntegrationTestRunner({
         const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
           input: { order_id: draft.id, amount: 6 },
         })
-        await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+        if (stage === 'awaiting' || stage === 'authorized') {
+          const { result: session } = await createPaymentSessionsWorkflow(container).run({ input: {
+            payment_collection_id: collection.id, provider_id: 'pp_system_default', data: {}, context: {},
+          } })
+          if (stage === 'authorized') await container.resolve(Modules.PAYMENT).authorizePaymentSession(session.id, {})
+        } else {
+          await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+        }
       }
       if (stage === 'taken-back') {
         await createOrderFulfillmentWorkflow(container).run({ input: {
