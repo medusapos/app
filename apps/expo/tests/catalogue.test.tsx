@@ -95,7 +95,9 @@ describe('Catalogue', () => {
     [null, undefined] as const, // device reports no preference -> locale default
   ])('shows the last successful sync time with each stock label (uses24hourClock=%s)', (uses24hourClock, hour12) => {
     localization.uses24hourClock = uses24hourClock;
-    const time = new Date('2026-09-24T10:42:00Z');
+    // today, so the label carries no date prefix
+    const time = new Date();
+    time.setHours(10, 42, 0, 0);
     const expected = formatStockSyncTime(time, undefined, hour12, time);
     mount(products, time);
     fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
