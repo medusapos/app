@@ -1,7 +1,10 @@
 import { useState } from 'react';
-import { Pressable, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import * as Linking from 'expo-linking';
 import { router, Stack } from 'expo-router';
+import { version as appVersion } from '../package.json';
 import { storeConfig } from '../lib/config';
+import { feedbackUrl } from '../lib/feedback-url';
 import { LoginError, type LoginErrorCode } from '../lib/session';
 import { useSession } from '../lib/session-context';
 
@@ -57,6 +60,13 @@ export default function LoginScreen() {
         <Pressable accessibilityRole="button" disabled={disabled} onPress={submit}
           className={`rounded-md bg-primary px-4 py-3 ${disabled ? 'opacity-50' : ''}`}>
           <Text className="text-center font-semibold text-primary-foreground">Sign in</Text>
+        </Pressable>
+        <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(feedbackUrl({
+          appVersion, platform: Platform.OS,
+          userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
+          backendUrl: baseUrl,
+        })); }}>
+          <Text className="text-center text-sm text-muted-foreground">Send feedback</Text>
         </Pressable>
       </View>
     </View>

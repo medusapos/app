@@ -1,0 +1,46 @@
+name: Tester feedback
+description: Report a problem or share feedback from testing MedusaPOS.
+labels: [tester-feedback]
+body:
+  - type: input
+    id: app-version
+    attributes:
+      label: App version
+      description: The MedusaPOS app version. Prefilled when opened from the app's "Send feedback" link.
+    validations:
+      required: false
+  - type: input
+    id: backend-host
+    attributes:
+      label: Backend host
+      description: >-
+        Just the host of your Medusa backend (e.g. store.example.com), never
+        the full URL or any credentials.
+    validations:
+      required: false
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      description: The device, OS and (if applicable) browser you were using.
+    validations:
+      required: false
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong, or what you'd like to see changed.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: false

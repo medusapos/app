@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import * as Linking from 'expo-linking';
 import { Redirect, Stack } from 'expo-router';
 import { formatMoney } from '@tallyui/core';
+import { version as appVersion } from '../package.json';
+import { feedbackUrl } from '../lib/feedback-url';
 import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
@@ -56,5 +59,12 @@ export default function OrdersScreen() {
         })}
       </View>
     ))}
+    <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(feedbackUrl({
+      appVersion, platform: Platform.OS,
+      userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
+      backendUrl: session.baseUrl,
+    })); }}>
+      <Text className="text-center text-sm text-muted-foreground">Send feedback</Text>
+    </Pressable>
   </ScrollView>;
 }

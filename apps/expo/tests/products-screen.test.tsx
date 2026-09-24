@@ -23,6 +23,7 @@ vi.mock('expo-router', () => ({
 }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
+vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
@@ -208,6 +209,7 @@ describe('Orders screen and sync status', () => {
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Recent']);
+    expect(screen.getByRole('link', { name: 'Send feedback' })).toBeTruthy();
   });
   it('lists attention first, including errors, both warnings, totals and server display IDs', async () => {
     const order = savedSale();
