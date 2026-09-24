@@ -11,7 +11,7 @@ docker network create mpdemo-smoke
 docker run -d --name mpdemo-smoke-pg --network mpdemo-smoke \
   -e POSTGRES_PASSWORD=smoke -e POSTGRES_DB=medusapos_demo postgres:16-alpine
 deadline=$((SECONDS + 60))
-until docker exec mpdemo-smoke-pg pg_isready -U postgres -d medusapos_demo; do
+until docker exec mpdemo-smoke-pg pg_isready -h 127.0.0.1 -U postgres -d medusapos_demo; do
   if (( SECONDS >= deadline )); then
     echo 'smoke: Postgres readiness timed out after 60 seconds' >&2
     exit 1
@@ -38,7 +38,8 @@ wait_healthy() {
 }
 wait_healthy
 
-if ! docker logs mpdemo-smoke-backend 2>&1 | grep -q 'redisUrl not found'; then
+backend_logs=$(docker logs mpdemo-smoke-backend 2>&1)
+if [[ "$backend_logs" != *'redisUrl not found'* ]]; then
   echo 'smoke: in-memory Redis fallback log not found' >&2
   exit 1
 fi
