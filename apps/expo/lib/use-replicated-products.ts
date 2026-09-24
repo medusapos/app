@@ -6,14 +6,6 @@ import type { SyncContext, TallyConnector } from '@tallyui/core';
 import { stockOverlay$ } from '@tallyui/pos';
 import { isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache } from './product-cache';
 
-/** How often the app checks stock against the store (ADR-060). */
-export const STOCK_CHECK_INTERVAL_MS = 5 * 60_000;
-// The app drives the cadence so it can record each completed pass, so the runner's own timer is
-// parked at the longest delay setInterval accepts (longer ones overflow and fire at once).
-// Interim: once TallyUI's runner exposes its pass state (state$ with lastCompletedAt), use the
-// runner's interval and read that instead.
-const RUNNER_INTERVAL_MS = 2 ** 31 - 1;
-
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error' | 'offline';
 
 export function classifyReplicationError(err: unknown): 'unauthorized' | 'http' | 'offline' {
@@ -45,9 +37,8 @@ export function useReplicatedProducts(
     const runner = stockRunner.current;
     if (!runner) return;
     try {
-      // The runner itself warns about a truncated pass.
-      const result = await runner.reconcileStock();
-      if (!result.truncated && stockRunner.current === runner) setLastStockCheckAt(new Date());
+      // The runner itself warns about a truncated pass; lastStockCheckAt follows its state$.
+      await runner.reconcileStock();
     } catch (err) {
       // A pass aborted by stop() on unmount is not a failure.
       if (stockRunner.current === runner) console.warn('Stock reconcile failed:', err);
@@ -141,17 +132,20 @@ export function useReplicatedProducts(
         const stockAdapter = connector.reconcile?.stock;
         if (stockAdapter) {
           const collection = db[STOCK_LEVELS_COLLECTION];
-          const runner = startStockReconcile({ collection, adapter: stockAdapter, context, intervalMs: RUNNER_INTERVAL_MS });
+          const runner = startStockReconcile({ collection, adapter: stockAdapter, context });
           stockRunner.current = runner;
           const overlay = stockOverlay$(collection).subscribe((map) => { if (!cancelled) setStockOverlay(map); });
-          const timer = setInterval(reconcileStock, STOCK_CHECK_INTERVAL_MS);
+          // Also picks up passes the runner makes on its own timer, and survives a restart.
+          const runnerState = runner.state$.subscribe((state) => {
+            if (!cancelled && state.lastCompletedAt) setLastStockCheckAt(new Date(state.lastCompletedAt));
+          });
           // On web, react-native-web's AppState follows page visibility.
           const foreground = AppState.addEventListener('change', (next) => { if (next === 'active') void reconcileStock(); });
           cleanup.unshift(() => {
             stockRunner.current = undefined;
             runner.stop();
             overlay.unsubscribe();
-            clearInterval(timer);
+            runnerState.unsubscribe();
             foreground.remove();
           });
         }

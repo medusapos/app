@@ -1,6 +1,7 @@
-import { authHeaders } from './pos-connector';
+import { SignInError, type SignInResult } from '@tallyui/core';
+import { authHeaders, posConnector } from './pos-connector';
 
-export type Session = { baseUrl: string; email: string; token: string; name?: string };
+export type Session = { baseUrl: string; email: string; token: string; name?: string; tokenExpiresAt?: number };
 export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error' | 'invalid_url' | 'insecure_url';
 export class LoginError extends Error {
   constructor(readonly code: LoginErrorCode, message: string) { super(message); }
@@ -41,21 +42,22 @@ export function normalizeBaseUrl(input: string): string {
 
 export async function login(baseUrl: string, email: string, password: string, fetchImpl = globalThis.fetch): Promise<Session> {
   baseUrl = normalizeBaseUrl(baseUrl);
-  let response: Response;
+  let result: SignInResult;
   try {
-    response = await fetchImpl(`${baseUrl}/auth/user/emailpass`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-  } catch { throw new LoginError('unreachable', 'Could not reach the backend.'); }
-  if (response.status === 401) throw new LoginError('invalid_credentials', 'Incorrect email or password.');
-  if (!response.ok) throw new LoginError('server_error', 'The backend could not sign you in.');
-  const body: unknown = await response.json().catch(() => null);
-  if (isRecord(body) && (body.mfa_required === true || body.verification_required === true || body.location !== undefined)) {
-    throw new LoginError('unsupported_account', 'This account requires an unsupported sign-in flow.');
+    // The connector is configured with signIn; the app owns everything around the exchange itself.
+    result = await posConnector.auth.signIn!(baseUrl, { email, password }, { fetch: fetchImpl });
+  } catch (error) {
+    if (!(error instanceof SignInError)) throw error; // an abort passes through unchanged
+    if (error.code === 'invalid_credentials') throw new LoginError('invalid_credentials', 'Incorrect email or password.');
+    if (error.code === 'failed') throw new LoginError('unreachable', 'Could not reach the backend.');
+    if (error.code === 'unsupported') throw new LoginError('unsupported_account', 'This account requires an unsupported sign-in flow.');
+    if (error.status === undefined) throw new LoginError('server_error', 'The backend could not sign you in.');
+    if (error.status >= 200 && error.status < 300) throw new LoginError('server_error', 'The backend returned no token.');
+    throw new LoginError('server_error', `The backend could not sign you in (HTTP ${error.status}).`);
   }
-  if (!isRecord(body) || typeof body.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
-  const session: Session = { baseUrl, email, token: body.token };
+  const session: Session = { baseUrl, email, token: result.token };
+  const expiresAt = result.expiresAt !== undefined ? Date.parse(result.expiresAt) : NaN;
+  if (!Number.isNaN(expiresAt)) session.tokenExpiresAt = expiresAt;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const profile: unknown = await Promise.race([
@@ -87,7 +89,8 @@ export async function refreshSession(session: Session, fetchImpl = globalThis.fe
   if (!response.ok) throw new LoginError('server_error', 'The backend could not refresh the session.');
   const body: unknown = await response.json().catch(() => null);
   if (!isRecord(body) || typeof body.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
-  return { ...session, token: body.token };
+  // The refresh endpoint doesn't return a new expiry; clear the old one rather than keep a stale value.
+  return { ...session, token: body.token, tokenExpiresAt: undefined };
 }
 
 export function tokenExpiresAt(token: string): number | null {
@@ -102,9 +105,9 @@ export function tokenExpiresAt(token: string): number | null {
   } catch { return null; }
 }
 
-export function shouldRefresh(token: string, now: number): boolean {
-  const expiry = tokenExpiresAt(token);
-  return expiry === null || expiry <= now + REFRESH_WINDOW_MS;
+export function shouldRefresh(token: string, now: number, expiresAt?: number): boolean {
+  const expiry = expiresAt ?? tokenExpiresAt(token);
+  return expiry === null || expiry === undefined || expiry <= now + REFRESH_WINDOW_MS;
 }
 
 export function defaultStorage(): SessionStorage | null {
@@ -116,14 +119,15 @@ export function loadSession(storage: SessionStorage | null): Session | null {
     const value: unknown = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null');
     if (!isRecord(value) || typeof value.baseUrl !== 'string' || typeof value.email !== 'string' || typeof value.token !== 'string') return null;
     return { baseUrl: value.baseUrl, email: value.email, token: value.token,
-      name: typeof value.name === 'string' ? value.name : undefined };
+      name: typeof value.name === 'string' ? value.name : undefined,
+      tokenExpiresAt: typeof value.tokenExpiresAt === 'number' ? value.tokenExpiresAt : undefined };
   } catch { return null; }
 }
 
 export function saveSession(storage: SessionStorage | null, session: Session): void {
   try {
-    const { baseUrl, email, token, name } = session;
-    storage?.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, email, token, name }));
+    const { baseUrl, email, token, name, tokenExpiresAt } = session;
+    storage?.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, email, token, name, tokenExpiresAt }));
   } catch { /* Keep the in-memory session when web storage is unavailable. */ }
 }
 

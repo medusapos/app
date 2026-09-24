@@ -59,15 +59,26 @@ function mount(items = products, lastSyncedAt: Date | null = null, lastStockChec
 describe('Catalogue', () => {
   it('follows a 24-hour device clock and drops AM/PM', () => {
     const time = new Date(2026, 8, 24, 10, 42);
-    expect(formatStockSyncTime(time, 'en-US', false)).toBe('10:42');
+    expect(formatStockSyncTime(time, 'en-US', false, time)).toBe('10:42');
   });
   it('follows a 12-hour device clock and keeps AM/PM', () => {
     const time = new Date(2026, 8, 24, 10, 42);
-    expect(formatStockSyncTime(time, 'en-US', true)).toMatch(/^10:42[  ]?AM$/);
+    expect(formatStockSyncTime(time, 'en-US', true, time)).toMatch(/^10:42[  ]?AM$/);
   });
   it('keeps the locale default when the device reports no clock preference', () => {
     const time = new Date(2026, 8, 24, 10, 42);
-    expect(formatStockSyncTime(time, 'en-US')).toMatch(/^10:42[  ]?AM$/);
+    expect(formatStockSyncTime(time, 'en-US', undefined, time)).toMatch(/^10:42[  ]?AM$/);
+  });
+  it('shows the time only when the time is on the same device-local day as now', () => {
+    const time = new Date(2026, 8, 24, 16, 5);
+    const now = new Date(2026, 8, 24, 23, 59);
+    expect(formatStockSyncTime(time, 'en-US', false, now)).toBe('16:05');
+  });
+  it('adds a short date ahead of the time when the time is not on the same device-local day as now', () => {
+    const time = new Date(2026, 8, 23, 16, 5);
+    const now = new Date(2026, 8, 24, 0, 1);
+    const dateLabel = time.toLocaleDateString('en-US', { day: 'numeric', month: 'short' });
+    expect(formatStockSyncTime(time, 'en-US', false, now)).toBe(`${dateLabel}, 16:05`);
   });
   it.each([
     [true, false] as const, // device is 24-hour -> hour12 forced off
@@ -76,14 +87,14 @@ describe('Catalogue', () => {
   ])('shows the last successful sync time with each stock label (uses24hourClock=%s)', (uses24hourClock, hour12) => {
     localization.uses24hourClock = uses24hourClock;
     const time = new Date('2026-09-24T10:42:00Z');
-    const expected = formatStockSyncTime(time, undefined, hour12);
+    const expected = formatStockSyncTime(time, undefined, hour12, time);
     mount(products, time);
     fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();
     expect(chooser.getByText(`Out of Stock · as of ${expected}`)).toBeTruthy();
   });
-  it('dates stock by the last completed stock check over the catalogue sync', () => {
+  it('dates stock by the later of the catalogue sync and the persisted stock check, checked later', () => {
     const synced = new Date('2026-09-24T09:15:00Z');
     const checked = new Date('2026-09-24T10:42:00Z');
     mount(products, synced, checked);
@@ -91,6 +102,33 @@ describe('Catalogue', () => {
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText(`In Stock · as of ${formatStockSyncTime(checked)}`)).toBeTruthy();
     expect(chooser.queryByText(`In Stock · as of ${formatStockSyncTime(synced)}`)).toBeNull();
+  });
+  it('dates stock by the later of the catalogue sync and the persisted stock check, synced later', () => {
+    const checked = new Date('2026-09-24T09:15:00Z');
+    const synced = new Date('2026-09-24T10:42:00Z');
+    mount(products, synced, checked);
+    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    const chooser = within(screen.getByLabelText('Choose variant'));
+    expect(chooser.getByText(`In Stock · as of ${formatStockSyncTime(synced)}`)).toBeTruthy();
+    expect(chooser.queryByText(`In Stock · as of ${formatStockSyncTime(checked)}`)).toBeNull();
+  });
+  it('shows a short date as well as the time when the winning sync is from yesterday', () => {
+    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    mount(products, null, yesterday);
+    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    const chooser = within(screen.getByLabelText('Choose variant'));
+    const expected = formatStockSyncTime(yesterday);
+    expect(expected).toContain(',');
+    expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();
+  });
+  it("shows only the time when the winning sync is from today", () => {
+    const today = new Date();
+    mount(products, null, today);
+    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    const chooser = within(screen.getByLabelText('Choose variant'));
+    const expected = formatStockSyncTime(today);
+    expect(expected).not.toContain(',');
+    expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();
   });
   it('filters products through search and shows matching counts', () => {
     const { input } = mount();
