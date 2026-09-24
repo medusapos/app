@@ -15,7 +15,7 @@ concurrency:
 env:
   # Node.js version: engines.node in apps/expo/package.json (Vercel reads it too).
   # TallyUI commit the app builds against (root pnpm.overrides use file:../tallyui); bump deliberately. scripts/vercel-install.sh reads it from here.
-  TALLYUI_REF: 851206a4455b8ba63aeebd1d08071e39b916ba57
+  TALLYUI_REF: 6b1b0b7275d0ae9f7485b399bdb088b3c4f798b7
   # The desktop wrapper is not built in CI.
   ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
 
