@@ -38,7 +38,7 @@ export default function LoginScreen() {
   }
 
   return (
-    <View className="flex-1 justify-center bg-bg px-6">
+    <View className="flex-1 justify-center bg-background px-6">
       <Stack.Screen options={{ title: 'Sign in' }} />
       <View className="w-full max-w-md self-center gap-3 rounded-md border border-border bg-card p-6">
         <Text className="text-foreground">Backend URL</Text>

@@ -53,7 +53,7 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
   }
   const newSale = page.getByRole('button', { name: 'New sale', exact: true });
   await expect(newSale).toBeVisible();
-  const receiptText = await page.getByText(/^Total: /).innerText();
+  const receiptText = (await page.getByLabel(/^Total: /).getAttribute('aria-label')) ?? '';
   const total = Number(receiptText.replace(/[^\d.,]/g, '').replace(',', '.'));
   await newSale.click();
   return total;

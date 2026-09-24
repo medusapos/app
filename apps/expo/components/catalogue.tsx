@@ -49,8 +49,8 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
                 <Text className="text-muted-foreground">{STOCK_LABEL[entry.variant.stock.status]}</Text>
               </Pressable>
             ))}
-            <Pressable accessibilityRole="button" onPress={() => setChoices([])}>
-              <Text className="text-foreground">Cancel</Text>
+            <Pressable accessibilityRole="button" onPress={() => setChoices([])} className="rounded-md border border-border bg-card px-4 py-3">
+              <Text className="text-center text-foreground">Cancel</Text>
             </Pressable>
           </View>
         ) : null}

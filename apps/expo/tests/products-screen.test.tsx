@@ -135,6 +135,14 @@ function savedSale(): PosOrder {
 }
 
 describe('Orders screen and sync status', () => {
+  it('shows only Recent when no orders need attention', async () => {
+    const order = savedSale();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
+      order, { ...order, id: 'applied', syncStatus: 'applied', warnings: [] },
+    ] });
+    await mount(true, true);
+    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Recent']);
+  });
   it('lists attention first, including errors, both warnings, totals and server display IDs', async () => {
     const order = savedSale();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
