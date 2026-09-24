@@ -116,9 +116,9 @@ describe('login', () => {
     [200, { verification_required: true, token: 'unusable' }, 'unsupported_account', 'This account requires an unsupported sign-in flow.'],
     [200, { location: '/verify', token: 'unusable' }, 'unsupported_account', 'This account requires an unsupported sign-in flow.'],
     [500, {}, 'server_error', 'The backend could not sign you in (HTTP 500).'],
-    [200, {}, 'server_error', undefined],
-    [200, { token: 123 }, 'server_error', undefined],
-    [200, null, 'server_error', undefined],
+    [200, {}, 'server_error', 'The backend returned no token.'],
+    [200, { token: 123 }, 'server_error', 'The backend returned no token.'],
+    [200, null, 'server_error', 'The backend returned no token.'],
   ])('maps status %s and body %j to %s', async (status, body, code, message) => {
     const expectation: Record<string, unknown> = { code };
     if (message !== undefined) expectation.message = message;

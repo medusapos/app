@@ -12,10 +12,24 @@ const STOCK_LABEL = {
   in_stock: 'In Stock', out_of_stock: 'Out of Stock', backorder: 'On Backorder', unknown: 'Unknown',
 };
 
-// locale/hour12 are injected (rather than read from the device inside this function) so the
-// formatting is testable without the device; callers default them to the device's own settings.
-export function formatStockSyncTime(time: Date, locale?: string, hour12?: boolean): string {
-  return time.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12 });
+// locale/hour12/now are injected (rather than read from the device or the clock inside this
+// function) so the formatting is testable without the device; callers default them to the
+// device's own settings and the current moment.
+export function formatStockSyncTime(time: Date, locale?: string, hour12?: boolean, now: Date = new Date()): string {
+  const timeLabel = time.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12 });
+  // "Today" is decided in the device's own timezone: toDateString() reads the Date in local time,
+  // the same timezone the device clock and toLocaleTimeString above already use.
+  if (time.toDateString() === now.toDateString()) return timeLabel;
+  const dateLabel = time.toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+  return `${dateLabel}, ${timeLabel}`;
+}
+
+// The later of a session's own catalogue sync and a persisted stock check from a previous session
+// (or restart), so an old persisted time never shadows a fresher sync.
+function laterOf(a: Date | null | undefined, b: Date | null | undefined): Date | null {
+  if (!a) return b ?? null;
+  if (!b) return a;
+  return a.getTime() >= b.getTime() ? a : b;
 }
 
 export function Catalogue<Doc>({ products, traits, currency, onSelect, statusText, lastSyncedAt, lastStockCheckAt }: {
@@ -25,10 +39,10 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
   onSelect: (entry: CatalogueEntry<Doc>) => void;
   statusText?: string;
   lastSyncedAt: Date | null;
-  /** The last completed stock reconcile pass this session, which beats the catalogue sync. */
+  /** The last completed stock reconcile pass, persisted across restarts; the later of this and lastSyncedAt wins. */
   lastStockCheckAt?: Date | null;
 }) {
-  const stockAsOf = lastStockCheckAt ?? lastSyncedAt;
+  const stockAsOf = laterOf(lastStockCheckAt, lastSyncedAt);
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<CatalogueEntry<Doc>[]>([]);
   const [width, setWidth] = useState(0);
