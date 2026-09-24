@@ -135,9 +135,9 @@ describe('sale', () => {
     expect(screen.getByText(`Change due: ${money(sale.order.changeDueMinor)}`)).toBeTruthy();
     await act(async () => { click('Complete sale'); });
     expect(sale.stage.kind).toBe('receipt');
-    expect(screen.getByText(`Change: ${money(625)}`)).toBeTruthy();
-    expect(screen.getByText(`Cash tendered: ${money(5000)}`)).toBeTruthy();
-    expect(screen.getAllByText(`VAT 25%: ${money(before.taxMinor)}`)).toHaveLength(1);
+    expect(screen.getByLabelText(`Change: ${money(625)}`)).toBeTruthy();
+    expect(screen.getByLabelText(`Cash tendered: ${money(5000)}`)).toBeTruthy();
+    expect(screen.getAllByLabelText(`VAT 25%: ${money(before.taxMinor)}`)).toHaveLength(1);
     expect(screen.getByText('Test shop')).toBeTruthy();
     expect(screen.getByText('1 High Street')).toBeTruthy();
     expect(screen.getByText(`Order ${before.id.slice(-8)}`)).toBeTruthy();
@@ -207,7 +207,7 @@ describe('sale', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Terminal reference' }), { target: { value: 'A1B2' } });
     expect(sale.order.payments).toHaveLength(1);
     await act(async () => { click('Payment approved on terminal'); });
-    expect(screen.getByText(`Card terminal: ${money(4375)} · A1B2`)).toBeTruthy();
+    expect(screen.getByLabelText(`Card terminal: ${money(4375)} · A1B2`)).toBeTruthy();
     expect(completed.mock.calls[0][0].payments).toEqual([expect.objectContaining({ method: 'external', amountMinor: 4375, reference: 'A1B2' })]);
     expect(document.querySelectorAll('#pos-print-style')).toHaveLength(1);
   });

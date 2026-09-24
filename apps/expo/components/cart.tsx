@@ -14,14 +14,14 @@ export function Cart({ sale }: { sale: ReturnType<typeof useSale> }) {
         lineTotal={money(line.netMinor)} />
       <View className="flex-row gap-4 px-3 py-2">
         <Pressable accessibilityRole="button" accessibilityLabel={`Decrease ${line.name}`}
-          onPress={() => sale.setQuantity(line.id, line.quantity - 1)} className="rounded-md border border-border bg-card px-3 py-2"><Text className="text-center text-foreground">−</Text></Pressable>
+          onPress={() => sale.setQuantity(line.id, line.quantity - 1)} className="rounded-md border border-border bg-card px-3 py-2 min-h-11 min-w-11 items-center justify-center"><Text className="text-center text-foreground">−</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={`Increase ${line.name}`}
-          onPress={() => sale.setQuantity(line.id, line.quantity + 1)} className="rounded-md border border-border bg-card px-3 py-2"><Text className="text-center text-foreground">+</Text></Pressable>
+          onPress={() => sale.setQuantity(line.id, line.quantity + 1)} className="rounded-md border border-border bg-card px-3 py-2 min-h-11 min-w-11 items-center justify-center"><Text className="text-center text-foreground">+</Text></Pressable>
         <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${line.name}`}
-          onPress={() => sale.remove(line.id)} className="rounded-md border border-border bg-card px-3 py-2"><Text className="text-center text-foreground">Remove</Text></Pressable>
+          onPress={() => sale.remove(line.id)} className="rounded-md border border-border bg-card px-3 py-2 min-h-11 min-w-11 items-center justify-center"><Text className="text-center text-foreground">Remove</Text></Pressable>
       </View>
     </View>}
-    footer={<View className="gap-3">
+    footer={<View className="gap-3 pb-4">
       <CartTotal subtotal={money(totals.subtotalMinor)} total={money(totals.totalMinor)}
         taxLines={totals.taxLines.map((line) => ({ label: `VAT ${line.ratePpm / 10000}%`, amount: money(line.amountMinor) }))} />
       {sale.error ? <Text accessibilityRole="alert" className="text-destructive">{sale.error}</Text> : null}
