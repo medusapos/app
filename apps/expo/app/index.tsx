@@ -3,7 +3,6 @@ import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 
 import { ConnectorProvider } from '@tallyui/core';
-import { medusaConnector } from '@tallyui/connector-medusa';
 
 import { Catalogue } from '../components/catalogue';
 import { Cart } from '../components/cart';
@@ -12,6 +11,7 @@ import { Receipt } from '../components/receipt';
 import { SyncStatus } from '../components/sync-status';
 import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
+import { authHeaders, posConnector } from '../lib/pos-connector';
 import { getRegisterId } from '../lib/register';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -19,7 +19,7 @@ import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettin
 import { useSale } from '../lib/use-sale';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 
-const connector = medusaConnector;
+const connector = posConnector;
 const traits = connector.traits.product;
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -72,7 +72,7 @@ function SettingsScreen(props: SignedInProps) {
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus }: SignedInProps & {
   settings: StoreSettings; settingsStatus: string | null;
 }) {
-  const headers = useMemo(() => ({ Authorization: 'Bearer ' + session.token }), [session.token]);
+  const headers = useMemo(() => authHeaders(session.token), [session.token]);
   const { products, state, error } = useReplicatedProducts(connector, headers, session.baseUrl, onUnauthorized);
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
   const { record, state: outboxState, recent } = useOutboxContext();
