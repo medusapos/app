@@ -1,0 +1,64 @@
+name: Demo backend image
+
+on:
+  pull_request:
+    paths:
+      - deploy/demo-backend/**
+      - dev/medusa-store/**
+      - packages/medusa-plugin/**
+      - .dockerignore
+      - .github/workflows/demo-backend.yml
+      - .github/workflows/ci.yml
+  push:
+    branches: [main]
+    paths:
+      - deploy/demo-backend/**
+      - dev/medusa-store/**
+      - packages/medusa-plugin/**
+      - .dockerignore
+      - .github/workflows/demo-backend.yml
+      - .github/workflows/ci.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: demo-backend-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  image:
+    name: Build demo backend image
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      IMAGE: ghcr.io/medusapos/demo-backend:${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: deploy/demo-backend/Dockerfile
+          load: true
+          push: false
+          tags: ${{ env.IMAGE }}
+          labels: org.opencontainers.image.source=https://github.com/medusapos/app
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke test (Postgres 16, no Redis, nightly reset)
+        run: deploy/demo-backend/smoke.sh "$IMAGE"
+      - uses: docker/login-action@v4
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Coolify deploys the image by this commit-sha tag.
+      - name: Push to GHCR
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: docker push "$IMAGE"
