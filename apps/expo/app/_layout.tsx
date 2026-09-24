@@ -19,10 +19,10 @@ export default function RootLayout() {
     <SessionProvider>
       <StatusBar style="dark" />
       <OutboxProvider><Stack
-        screenLayout={({ children, options }) => <SafeAreaView style={{ flex: 1 }}
+        screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <View style={{ flex: 1 }}>
-            {children}<SignInAgain />
+            {children}<SignInAgain header={options.headerShown === false ? undefined : navigation} />
           </View>
         </SafeAreaView>}
         screenOptions={{

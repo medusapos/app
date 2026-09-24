@@ -64,6 +64,28 @@ beforeEach(() => {
 });
 
 describe('ProductsScreen catalogue', () => {
+  it('keeps search focusable and editable with the authRequired strip in the title slot and header actions present', async () => {
+    const { SignInAgain } = await import('../components/sign-in-again');
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 1, sending: false, authRequired: true } });
+    await mount();
+    const setOptions = vi.fn<NonNullable<Parameters<typeof SignInAgain>[0]['header']>['setOptions']>();
+    const banner = render(<SessionProvider><SignInAgain header={{ setOptions }} /></SessionProvider>);
+    expect(banner.container.textContent).toBe('');
+    render(<header>{setOptions.mock.lastCall![0].headerTitle!()}</header>);
+    expect(screen.getByText('1 sale saved, waiting to send ·').closest('header')).toBeTruthy();
+    const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
+    expect(getComputedStyle(input).display).not.toBe('none');
+    expect(getComputedStyle(input).visibility).toBe('visible');
+    act(() => input.focus());
+    expect(document.activeElement).toBe(input);
+    fireEvent.change(input, { target: { value: '123456' } });
+    expect(input.value).toBe('123456');
+    fireEvent.click(screen.getByRole('button', { name: 'Orders' }));
+    expect(router.push).toHaveBeenCalledWith('/orders');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(localStorage.getItem('medusapos.session')).toBeNull();
+  });
+
   it('uses the catalogue layout width for two to six columns with room for 160 px tiles', async () => {
     await mount();
     const grid = screen.getByTestId('product-grid');

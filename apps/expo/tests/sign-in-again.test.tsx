@@ -11,6 +11,7 @@ import { SignInAgain } from '../components/sign-in-again';
 let outbox: ReturnType<typeof useOutboxContext>;
 let session: Session;
 let sequence = 0;
+let header: Parameters<typeof SignInAgain>[0]['header'];
 const fetchStub = vi.fn<typeof fetch>();
 const newToken = 'signed-in-again';
 function Harness() {
@@ -26,7 +27,7 @@ function sale(): PosOrder {
 const sends = () => fetchStub.mock.calls.filter(([url]) => String(url).endsWith(COMMANDS_PATH));
 async function mount(signedIn = true) {
   if (signedIn) saveSession(localStorage, session);
-  render(<SessionProvider><OutboxProvider><SignInAgain /><Harness /></OutboxProvider></SessionProvider>);
+  render(<SessionProvider><OutboxProvider><SignInAgain header={header} /><Harness /></OutboxProvider></SessionProvider>);
   if (signedIn) await waitFor(() => expect(outbox.orders).not.toBeNull());
 }
 async function pause() {
@@ -37,6 +38,7 @@ async function pause() {
   expect(outbox.state.nextAttemptAt).toBeUndefined();
 }
 beforeEach(() => {
+  header = undefined;
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -70,13 +72,42 @@ afterEach(async () => {
 });
 
 describe('Sign in again with the real session and outbox', () => {
-  it('floats above the screen in both collapsed and expanded states', async () => {
+  it('floats at the safe-area top in both states when the receipt hides the header', async () => {
     await pause();
     const banner = screen.getByText('1 sale saved, waiting to send ·').parentElement!.parentElement!;
     expect(getComputedStyle(banner).position).toBe('absolute');
+    expect(getComputedStyle(banner).top).toBe('0px');
+    expect(banner.getAttribute('data-print')).toBe('hide');
     fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
     expect(screen.getByLabelText('Password')).toBeTruthy();
     expect(getComputedStyle(banner).position).toBe('absolute');
+  }, 10000);
+
+  it('changes only the header title while collapsed and restores it for the form and after sending', async () => {
+    const setOptions = vi.fn<NonNullable<typeof header>['setOptions']>();
+    header = { setOptions };
+    await pause();
+    expect(screen.queryByText('1 sale saved, waiting to send ·')).toBeNull();
+    const title = () => setOptions.mock.lastCall![0].headerTitle?.() ?? 'Products';
+    const slot = render(<header>{title()}</header>);
+    const strip = screen.getByText('1 sale saved, waiting to send ·').parentElement!;
+    expect(getComputedStyle(strip).position).not.toBe('absolute');
+    expect(strip.getAttribute('data-print')).toBe('hide');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    slot.rerender(<header>{title()}</header>);
+    expect(screen.getByText('Products')).toBeTruthy();
+    expect(getComputedStyle(screen.getByLabelText('Password').parentElement!).position).toBe('absolute');
+    fireEvent.click(screen.getByRole('button', { name: 'Later' }));
+    slot.rerender(<header>{title()}</header>);
+    expect(screen.queryByText('Products')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    slot.rerender(<header>{title()}</header>);
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'correct' } });
+    fireEvent.keyDown(screen.getByLabelText('Password'), { key: 'Enter' });
+    await waitFor(() => expect(outbox.state.authRequired).not.toBe(true));
+    expect(setOptions.mock.lastCall![0].headerTitle).toBeUndefined();
+    expect(screen.queryByLabelText('Password')).toBeNull();
+    expect(setOptions.mock.calls.every(([options]) => Object.keys(options).join() === 'headerTitle')).toBe(true);
   }, 10000);
 
   it('collapses with Later without signing in or sending anything', async () => {
