@@ -24,6 +24,9 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
   const [state, setState] = useState<LiveTabState>('acquiring');
   const [showChildren, setShowChildren] = useState(false);
   const showChildrenRef = useRef(false);
+  // Last-committed `showChildren`, updated by the effect below (after a real
+  // commit) — unlike `showChildrenRef`, immune to a same-batch true+false no-op.
+  const committedShowChildrenRef = useRef(false);
   const committedResolveRef = useRef<(() => void) | null>(null);
   const unmountedRef = useRef(false);
   const handleRef = useRef<LiveTabHandle | null>(null);
@@ -44,6 +47,7 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
   // Resolves whoever is waiting for children to unmount, once that unmount
   // (or remount) has committed: children's own effect cleanups have already run.
   useEffect(() => {
+    committedShowChildrenRef.current = showChildren;
     committedResolveRef.current?.();
     committedResolveRef.current = null;
   }, [showChildren]);
@@ -59,6 +63,12 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
     const hideChildren = (): Promise<void> => {
       if (!showChildrenRef.current || unmountedRef.current) return Promise.resolve();
       showChildrenRef.current = false;
+      // Same-batch true+false is a no-op against the previous commit: nothing
+      // to wait for, just keep the pending `true` from landing.
+      if (!committedShowChildrenRef.current) {
+        setShowChildren(false);
+        return Promise.resolve();
+      }
       return new Promise<void>((resolve) => {
         committedResolveRef.current = resolve;
         setShowChildren(false);
