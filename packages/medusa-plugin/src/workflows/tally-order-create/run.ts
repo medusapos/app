@@ -4,7 +4,7 @@ import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyu
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
 import { planOrderCreate, totalWarnings } from './plan'
 import { resumeOrderCreate } from './resume'
-import { planStockTopUp } from './stock'
+import { mergeStockTopUps, planStockTopUp } from './stock'
 import { tallyOrderCreateWorkflow, type StockTopUp } from './workflow'
 
 export type TallyPluginOptions = { salesChannelId?: string; locationId?: string; shippingOptionId?: string }
@@ -12,7 +12,8 @@ export type TallyPluginOptions = { salesChannelId?: string; locationId?: string;
 export async function runOrderCreate(
   container: MedusaContainer,
   command: CommandEnvelope<OrderCreatePayload>,
-  options: TallyPluginOptions = {}
+  options: TallyPluginOptions = {},
+  ledger?: { claimToken: string; carriedTopUps: StockTopUp[] }
 ): Promise<CommandResult> {
   const payload = command.payload
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
@@ -83,16 +84,17 @@ export async function runOrderCreate(
         variantId: variant.id, manageInventory: variant.manage_inventory,
         items: variant.inventory_items.map(item => ({ inventoryItemId: item.inventory_item_id, requiredQuantity: Number(item.required_quantity) })),
       })), levels.map(level => ({ inventoryItemId: level.inventory_item_id, stocked: Number(level.stocked_quantity), reserved: Number(level.reserved_quantity) })))
-      if (stock.topUps.length) planned.plan.draftOrder.metadata.tally_stock_topups = stock.topUps.map(topUp => ({
+      const topUps = mergeStockTopUps(ledger?.carriedTopUps ?? [], stock.topUps.map(topUp => ({
         inventory_item_id: topUp.inventoryItemId, location_id: location.id, shortfall: topUp.shortfall,
-      }))
+      })))
+      if (topUps.length) planned.plan.draftOrder.metadata.tally_stock_topups = topUps
       try {
         const { result } = await tallyOrderCreateWorkflow(container).run({ input: {
+          ledger: ledger ? { commandId: command.id, claimToken: ledger.claimToken } : null, carriedTopUps: ledger?.carriedTopUps ?? [],
           draftOrder: planned.plan.draftOrder, paymentAmount: Number(planned.plan.paymentAmount),
           locationId: planned.plan.locationId, shippingOptionId, stockTopUps: stock.topUps, missingLevels: stock.missingLevels,
         } })
         orderId = result.orderId
-        stockWarnings = stock.warnings
       } catch (error) {
         throw error
       }
@@ -101,7 +103,7 @@ export async function runOrderCreate(
   const { data: [order] } = await query.graph({
     entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'metadata'], filters: { id: orderId },
   })
-  if (!stockWarnings.length && order.metadata?.tally_stock_topups) {
+  if (order.metadata?.tally_stock_topups) {
     const topUps = order.metadata.tally_stock_topups as StockTopUp[]
     const { data: variants } = await query.graph({
       entity: 'product_variant', fields: ['id', 'manage_inventory', 'inventory_items.inventory_item_id', 'inventory_items.required_quantity'],

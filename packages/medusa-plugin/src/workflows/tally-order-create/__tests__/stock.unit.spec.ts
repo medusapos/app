@@ -1,4 +1,4 @@
-import { planStockTopUp, type VariantInventory } from '../stock'
+import { mergeStockTopUps, planStockTopUp, type VariantInventory } from '../stock'
 
 const variant: VariantInventory = { variantId: 'v', manageInventory: true,
   items: [{ inventoryItemId: 'i', requiredQuantity: 1 }] }
@@ -47,5 +47,19 @@ describe('planStockTopUp', () => {
       topUps: [{ inventoryItemId: 'i', shortfall: 1 }, { inventoryItemId: 'j', shortfall: 3 }],
       missingLevels: [], warnings: [warning(2)],
     })
+  })
+})
+
+describe('mergeStockTopUps', () => {
+  it('sums matching item and location pairs in first-appearance order', () => {
+    const a = { inventory_item_id: 'i', location_id: 'berlin', shortfall: 1 }
+    const b = { inventory_item_id: 'j', location_id: 'berlin', shortfall: 2 }
+    const c = { ...a, location_id: 'paris', shortfall: 3 }
+    expect(mergeStockTopUps([a, b], [c, { ...a, shortfall: 4 }])).toEqual([{ ...a, shortfall: 5 }, b, c])
+    expect(a.shortfall).toBe(1)
+  })
+  it('handles empty lists', () => {
+    expect(mergeStockTopUps()).toEqual([])
+    expect(mergeStockTopUps([], [])).toEqual([])
   })
 })

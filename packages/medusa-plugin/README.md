@@ -62,7 +62,10 @@ allows `Authorization`, `Content-Type`, and `X-Tally-Protocol`.
 
 ## Order creation workflow
 
-`runOrderCreate(container, command, options?)` is exported from `@medusapos/medusa-plugin/workflows`.
+`runOrderCreate(container, command, options?, ledger?)` is exported from `@medusapos/medusa-plugin/workflows`.
+The command endpoint passes `ledger` (the claim token and any top-ups a crashed attempt
+applied) so stock top-ups are recorded on the command's ledger row (ADR 0003 amendment);
+without it, nothing is recorded there.
 It resolves Medusa data, validates with the pure planner, and runs `tallyOrderCreateWorkflow`:
 draft → convert → collect the POS total → mark paid → fulfill → complete.
 The payment collection uses `totalMinor` exactly, including when Medusa's unrounded

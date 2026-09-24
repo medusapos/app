@@ -217,6 +217,73 @@ medusaIntegrationTestRunner({
       await expectStock(data.inventoryD, -2)
     })
 
+    it('does not take stock back twice after a crash inside the take-back', async () => {
+      const sale = shortSale()
+      const draft = await createDraft(sale, 1)
+      await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+      const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({ input: { order_id: draft.id, amount: 6 } })
+      await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+      await createOrderFulfillmentWorkflow(container).run({ input: {
+        order_id: draft.id, items: draft.items!.map(item => ({ id: item.id, quantity: Number(item.quantity) })),
+        location_id: data.berlinId, shipping_option_id: data.berlinShippingOptionId, no_notification: true,
+      } })
+      await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, -1)
+      await container.resolve(Modules.ORDER).updateOrders(draft.id, { metadata: { ...draft.metadata, tally_stock_take_back_started: true } })
+      const order = await readOrder(await runOrderCreate(container, sale))
+      expect(order.metadata!.tally_stock_topups_reversed).toBe(true)
+      await expectStock(data.inventoryC, -1)
+    })
+
+    it('skips take-back when its marker was set but the adjustment never happened', async () => {
+      const [before] = await container.resolve(Modules.INVENTORY).listInventoryLevels({
+        inventory_item_id: data.inventoryC, location_id: data.berlinId,
+      })
+      const quantity = Number(before.stocked_quantity) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const draft = await createDraft(sale, 1)
+      await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+      const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+        input: { order_id: draft.id, amount: sale.payload.totalMinor / 100 },
+      })
+      await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+      await createOrderFulfillmentWorkflow(container).run({ input: {
+        order_id: draft.id, items: draft.items!.map(item => ({ id: item.id, quantity: Number(item.quantity) })),
+        location_id: data.berlinId, shipping_option_id: data.berlinShippingOptionId, no_notification: true,
+      } })
+      await container.resolve(Modules.ORDER).updateOrders(draft.id, { metadata: { ...draft.metadata, tally_stock_take_back_started: true } })
+      const marked = await container.resolve(Modules.ORDER).retrieveOrder(draft.id)
+      expect(marked.metadata!.tally_stock_take_back_started).toBe(true)
+      expect(marked.metadata!.tally_stock_topups_reversed).toBeUndefined()
+      await expectStock(data.inventoryC, 0)
+      const order = await readOrder(await runOrderCreate(container, sale))
+      expect(order.id).toBe(draft.id)
+      expect(order.metadata!.tally_stock_take_back_started).toBe(true)
+      expect(order.metadata!.tally_stock_topups_reversed).toBe(true)
+      await expectStock(data.inventoryC, Number(before.stocked_quantity) - quantity + 1)
+    })
+
+    it('resumes past a canceled payment collection', async () => {
+      const sale = command()
+      const draft = await createDraft(sale)
+      await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+      const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({ input: { order_id: draft.id, amount: 10 } })
+      await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'canceled' })
+      expect(await runOrderCreate(container, sale)).toMatchObject({ status: 'applied', serverRefs: { orderId: draft.id } })
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+        entity: 'order', filters: { id: draft.id }, fields: ['id', 'status', 'payment_collections.status'],
+      })
+      expect(order.status).toBe('completed')
+      expect(order.payment_collections.map(collection => collection.status).sort()).toEqual(['canceled', 'completed'])
+      const { result: detail } = await getOrderDetailWorkflow(container).run({
+        input: { order_id: draft.id, fields: ['payment_status', 'currency_code'] },
+      })
+      expect(detail.payment_status).toBe('captured')
+    })
+
     it.each(['draft', 'session-created', 'authorized', 'paid', 'taken-back'])('resumes a short sale after a crash at %s', async stage => {
       const sale = shortSale()
       const draft = await createDraft(sale, 1)

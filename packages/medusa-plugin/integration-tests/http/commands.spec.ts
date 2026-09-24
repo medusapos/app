@@ -122,6 +122,146 @@ medusaIntegrationTestRunner({
       for (const sale of sales) expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(1)
     })
 
+    it('carries a top-up applied before a crash', async () => {
+      const inventory = container.resolve(Modules.INVENTORY)
+      const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      const quantity = Number(before.stocked_quantity) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const claim = await ledger.claim({ id: sale.id, type: sale.type, fingerprint: commandFingerprint(sale) })
+      if (!claim.claimed) throw new Error('Expected a fresh claim')
+      const topUps = [{ inventory_item_id: data.inventoryC, location_id: data.berlinId, shortfall: 1 }]
+      await inventory.adjustInventory(data.inventoryC, data.berlinId, 1)
+      await ledger.recordStockTopUps(sale.id, claim.claimToken, topUps, null)
+      await ledger.release(sale.id, claim.claimToken)
+      const response = await post([sale])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([expect.objectContaining({
+        id: sale.id, status: 'applied',
+        warnings: [{ code: 'insufficient_stock', variantId: data.variantC, quantity: 1 }],
+      })])
+      const orders = await liveOrders(sale.payload.clientOrderId)
+      expect(orders).toHaveLength(1)
+      expect(orders[0].metadata.tally_stock_topups).toEqual(topUps)
+      const [level] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      expect(Number(level.stocked_quantity)).toBe(-1)
+      expect(Number(level.reserved_quantity)).toBe(0)
+    })
+
+    it('restores the ledger after an applied top-up even if the claim token changed', async () => {
+      const run = require('../../.medusa/server/src/workflows/tally-order-create/run') as typeof import('../../src/workflows/tally-order-create/run')
+      const inventory = container.resolve(Modules.INVENTORY)
+      const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      const quantity = Number(before.stocked_quantity) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const claim = await ledger.claim({ id: sale.id, type: sale.type, fingerprint: commandFingerprint(sale) })
+      if (!claim.claimed) throw new Error('Expected a fresh claim')
+      const nextToken = randomUUID()
+      const record = ledger.recordStockTopUps.bind(ledger)
+      // Write through to the real ledger, then simulate a lease reclaim after the applied write.
+      jest.spyOn(ledger, 'recordStockTopUps').mockImplementation(async (...args) => {
+        const written = await record(...args)
+        if (written && args[2].length && args[3] === null) {
+          await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_command')
+            .where({ id: sale.id }).update({ claim_token: nextToken })
+        }
+        return written
+      })
+      await expect(run.runOrderCreate(container, sale, { shippingOptionId: 'so_missing' }, {
+        claimToken: claim.claimToken, carriedTopUps: [],
+      })).rejects.toMatchObject({
+        name: 'TypeError', message: "Cannot read properties of undefined (reading 'shipping_profile_id')",
+      })
+      expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+        status: 'in_progress', claim_token: nextToken, stock_topups_applied: null, stock_topups_pending: null,
+      })
+      const [after] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      expect(Number(after.stocked_quantity)).toBe(Number(before.stocked_quantity))
+      expect(Number(after.reserved_quantity)).toBe(Number(before.reserved_quantity))
+    })
+
+    it('carries an applied top-up and adds a new shortfall through the endpoint', async () => {
+      const inventory = container.resolve(Modules.INVENTORY)
+      const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      const quantity = Number(before.stocked_quantity) + 2
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const claim = await ledger.claim({ id: sale.id, type: sale.type, fingerprint: commandFingerprint(sale) })
+      if (!claim.claimed) throw new Error('Expected a fresh claim')
+      const topUps = [{ inventory_item_id: data.inventoryC, location_id: data.berlinId, shortfall: 1 }]
+      await inventory.adjustInventory(data.inventoryC, data.berlinId, 1)
+      expect(await ledger.recordStockTopUps(sale.id, claim.claimToken, topUps, null)).toBe(true)
+      await ledger.release(sale.id, claim.claimToken)
+      const response = await post([sale])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([expect.objectContaining({
+        id: sale.id, status: 'applied',
+        warnings: [{ code: 'insufficient_stock', variantId: data.variantC, quantity: 2 }],
+      })])
+      const orders = await liveOrders(sale.payload.clientOrderId)
+      expect(orders).toHaveLength(1)
+      expect(orders[0].metadata.tally_stock_topups).toEqual([{ ...topUps[0], shortfall: 2 }])
+      const [after] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      expect(Number(after.stocked_quantity)).toBe(-2)
+      expect(Number(after.reserved_quantity)).toBe(0)
+    })
+
+    it('keeps the applied top-ups on the completed ledger row after a short sale', async () => {
+      const inventory = container.resolve(Modules.INVENTORY)
+      const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      const quantity = Number(before.stocked_quantity) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const response = await post([sale])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0]).toMatchObject({ id: sale.id, status: 'applied' })
+      const orders = await liveOrders(sale.payload.clientOrderId)
+      expect(orders).toHaveLength(1)
+      expect(orders[0].metadata.tally_stock_topups).toEqual([
+        { inventory_item_id: data.inventoryC, location_id: data.berlinId, shortfall: 1 },
+      ])
+      expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+        status: 'applied', stock_topups_applied: orders[0].metadata.tally_stock_topups, stock_topups_pending: null,
+      })
+    })
+
+    it('ignores a pending top-up whose outcome is unknown', async () => {
+      const inventory = container.resolve(Modules.INVENTORY)
+      const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      const quantity = Number(before.stocked_quantity) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const claim = await ledger.claim({ id: sale.id, type: sale.type, fingerprint: commandFingerprint(sale) })
+      if (!claim.claimed) throw new Error('Expected a fresh claim')
+      const pending = [{ inventory_item_id: data.inventoryC, location_id: data.berlinId, shortfall: 1 }]
+      await inventory.adjustInventory(data.inventoryC, data.berlinId, 1)
+      await ledger.recordStockTopUps(sale.id, claim.claimToken, [], pending)
+      await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_command')
+        .where({ id: sale.id }).update({ updated_at: new Date(Date.now() - 60 * 60 * 1000) })
+      const response = await post([sale])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'applied' })])
+      const [level] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      expect(Number(level.stocked_quantity)).toBe(0)
+      expect((await ledger.retrieveTallyCommand(sale.id)).stock_topups_pending).toEqual(pending)
+    })
+
     it('rejects reuse of an id with a changed payload', async () => {
       const sale = command()
       expect((await post([sale])).data.results[0].status).toBe('applied')

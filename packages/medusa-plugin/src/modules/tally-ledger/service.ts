@@ -10,6 +10,7 @@ import {
 } from '@medusajs/framework/utils'
 import { TallyCommand } from './models/tally-command'
 import { parseCommandResult } from './command-result'
+import type { StockTopUp } from '../../workflows/tally-order-create/stock'
 import type { TallyPluginOptions } from '../../workflows/tally-order-create'
 
 export type TallyCommandRecord = InferTypeOf<typeof TallyCommand>
@@ -105,13 +106,44 @@ export default class TallyLedgerModuleService extends MedusaService({ TallyComma
   }
 
   @InjectManager()
+  async recordStockTopUps(
+    id: string, claimToken: string, applied: StockTopUp[], pending: StockTopUp[] | null,
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<boolean> {
+    const rows = await (sharedContext.manager as EntityManager).execute(
+      `update "tally_command" set "stock_topups_applied" = ?::jsonb, "stock_topups_pending" = ?::jsonb, "updated_at" = now()
+       where "id" = ? and "status" = 'in_progress' and "claim_token" = ? returning "id"`,
+      [applied.length ? JSON.stringify(applied) : null, pending?.length ? JSON.stringify(pending) : null, id, claimToken]
+    )
+    return rows.length > 0
+  }
+
+  @InjectManager()
+  async restoreStockTopUps(
+    id: string, applied: StockTopUp[], pending: StockTopUp[] | null,
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<void> {
+    await (sharedContext.manager as EntityManager).execute(
+      `update "tally_command" set "stock_topups_applied" = ?::jsonb, "stock_topups_pending" = ?::jsonb, "updated_at" = now()
+       where "id" = ? and "status" = 'in_progress'`,
+      [applied.length ? JSON.stringify(applied) : null, pending?.length ? JSON.stringify(pending) : null, id]
+    )
+  }
+
+  @InjectManager()
   async release(
     id: string,
     claimToken: string,
     @MedusaContext() sharedContext: Context = {}
   ): Promise<void> {
     await (sharedContext.manager as EntityManager).execute(
-      `delete from "tally_command" where "id" = ? and "status" = 'in_progress' and "claim_token" = ?`,
+      `delete from "tally_command" where "id" = ? and "status" = 'in_progress' and "claim_token" = ? and "stock_topups_applied" is null`,
+      [id, claimToken]
+    )
+    // ADR 0003 amendment: keep applied top-ups for an immediate retry to carry forward.
+    await (sharedContext.manager as EntityManager).execute(
+      `update "tally_command" set "updated_at" = to_timestamp(0)
+       where "id" = ? and "status" = 'in_progress' and "claim_token" = ? and "stock_topups_applied" is not null`,
       [id, claimToken]
     )
   }
