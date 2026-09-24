@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const backend = process.env.E2E_BACKEND_URL ?? 'http://localhost:9100';
 const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
@@ -32,7 +32,18 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
   for (const sku of skus) {
     await search.fill(sku);
     await search.press('Enter');
-    await expect(search).toHaveValue('');
+    try {
+      await expect(search).toHaveValue('');
+    } catch (error) {
+      try {
+        const snapshot = await page.evaluate(() => (window as Window & { __medusaposCatalogue?: unknown }).__medusaposCatalogue);
+        const body = JSON.stringify(snapshot ?? null, null, 2);
+        console.log(`Catalogue snapshot after SKU lookup failed for ${sku}:\n${body}`);
+        await test.info().attach('catalogue-snapshot', { body, contentType: 'application/json' });
+      } finally {
+        throw error;
+      }
+    }
   }
   if (cash === 'external') {
     await page.getByRole('button', { name: 'Card terminal', exact: true }).click();

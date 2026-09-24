@@ -19,7 +19,7 @@ export default defineConfig({
       reuseExistingServer: !process.env.CI,
     },
     {
-      command: 'EXPO_PUBLIC_MEDUSA_URL=http://localhost:9100 CI=1 EXPO_NO_TELEMETRY=1 pnpm --filter @medusapos/expo build:web --clear && node e2e/serve.mjs',
+      command: 'EXPO_PUBLIC_MEDUSA_URL=http://localhost:9100 EXPO_PUBLIC_E2E_DEBUG=1 CI=1 EXPO_NO_TELEMETRY=1 pnpm --filter @medusapos/expo build:web --clear && node e2e/serve.mjs',
       cwd: '..', url: 'http://localhost:8099', timeout: 300_000,
       reuseExistingServer: !process.env.CI,
     },

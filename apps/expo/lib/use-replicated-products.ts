@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { createTallyDatabase, startReplication } from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
@@ -27,6 +27,26 @@ export function useReplicatedProducts(
   const [products, setProducts] = useState<any[]>([]);
   const [state, setState] = useState<SyncState>('connecting');
   const [error, setError] = useState<string | null>(null);
+  const debug = useRef<{
+    lastProductsEmission: string | null; lastReplicationError: string | null;
+    replication?: ReturnType<typeof startReplication>;
+  }>({ lastProductsEmission: null, lastReplicationError: null });
+
+  useEffect(() => {
+    if (process.env.EXPO_PUBLIC_E2E_DEBUG !== '1' || typeof window === 'undefined') return;
+    if (error !== null) debug.current.lastReplicationError = error;
+    const traits = connector.traits.product;
+    const sellable = products.filter(traits.isSellable);
+    (window as Window & { __medusaposCatalogue?: unknown }).__medusaposCatalogue = {
+      state, replicatedProductCount: products.length, sellableProductCount: sellable.length,
+      sellableSkus: sellable.flatMap((product) => traits.getVariants!(product).map((variant) => variant.sku)),
+      nonSellableSkus: products.filter((product) => !traits.isSellable(product))
+        .flatMap((product) => traits.getVariants!(product).map((variant) => variant.sku)),
+      lastProductsEmission: debug.current.lastProductsEmission,
+      lastReplicationError: debug.current.lastReplicationError,
+      get checkpoint() { try { return debug.current.replication?.internalReplicationState?.lastCheckpointDoc?.down?.checkpointData; } catch { return undefined; } },
+    };
+  }, [connector, products, state, error]);
 
   useEffect(() => {
     const adapter = connector.replication?.products;
@@ -54,11 +74,15 @@ export function useReplicatedProducts(
         };
 
         const subscription = db.products.find().$.subscribe((docs) => {
-          if (!cancelled) setProducts(docs.map((doc) => doc.toJSON()));
+          if (!cancelled) {
+            if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') debug.current.lastProductsEmission = new Date().toISOString();
+            setProducts(docs.map((doc) => doc.toJSON()));
+          }
         });
         cleanup.unshift(() => subscription.unsubscribe());
 
         const replication = startReplication({ collection: db.products, adapter, context });
+        if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') debug.current.replication = replication;
         cleanup.unshift(() => replication.cancel());
         replication.error$.subscribe((err) => {
           if (cancelled) return;
