@@ -1,15 +1,17 @@
-import { useEffect } from 'react';
+import { useContext, useEffect } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, type Order } from '@tallyui/pos';
 import type { StoreSettings } from '../lib/store-settings';
 import { injectPrintStyle } from './print-style';
 import { formatDate } from '../lib/format-date';
+import { StripHeightContext } from './store-refused';
 
 export function Receipt({ order, settings, cashier, registerId, newSale }: {
   order: Order; settings: StoreSettings; cashier: string; registerId: string; newSale: () => void;
 }) {
   useEffect(injectPrintStyle, []);
+  const stripHeight = useContext(StripHeightContext);
   const receipt = buildReceiptData(order, {
     storeName: settings.storeName, storeAddress: settings.location.addressLine, cashier, register: registerId,
   });
@@ -18,7 +20,9 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
     <Text className={`text-foreground ${bold ? 'font-semibold' : ''}`}>{label}</Text>
     <Text className={`text-right text-foreground ${bold ? 'font-semibold' : ''}`}>{amount}</Text>
   </View>;
-  return <View className="w-full max-w-md self-center gap-3 p-4 bg-card">
+  return <>
+    {stripHeight > 0 ? <View dataSet={{ print: 'hide' }} style={{ height: stripHeight, flexShrink: 0 }} /> : null}
+    <View className="w-full max-w-md self-center gap-3 p-4 bg-card">
     <Text className="text-lg font-semibold text-foreground">{receipt.header.storeName}</Text>
     {receipt.header.storeAddress ? <Text className="text-muted-foreground">{receipt.header.storeAddress}</Text> : null}
     <Text className="text-foreground">Order {receipt.header.orderNumber.slice(-8)}</Text>
@@ -40,5 +44,5 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
       </Pressable>
       <Pressable accessibilityRole="button" onPress={newSale} className="rounded-md bg-primary px-4 py-3"><Text className="text-center font-semibold text-primary-foreground">New sale</Text></Pressable>
     </View>
-  </View>;
+  </View></>;
 }
