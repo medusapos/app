@@ -26,10 +26,7 @@ RUN npm run build && npm pack
 WORKDIR /src/app/dev/medusa-store
 RUN npm install --no-save --no-audit --no-fund /src/app/packages/medusa-plugin/medusapos-medusa-plugin-0.0.1.tgz
 WORKDIR /src/app/dev/medusa-store/apps/backend
-# The dev store has existing type errors; medusa build still emits and exits 1.
-RUN npx medusa build || (test -f .medusa/server/medusa-config.js \
-    && test -f .medusa/server/src/scripts/seed-e2e.js \
-    && test -f .medusa/server/public/admin/index.html)
+RUN npx medusa build
 
 ENV NODE_ENV=production
 WORKDIR /src/app/dev/medusa-store/apps/backend/.medusa/server
