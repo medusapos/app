@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { addRxPlugin } from 'rxdb';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
-import { needsAttention, openOrderStore, orderDatabaseName } from './order-store';
+import { closeOrderStores, needsAttention, openOrderStore, orderDatabaseName } from './order-store';
 
 addRxPlugin(RxDBDevModePlugin);
 
@@ -38,6 +38,27 @@ describe('order store', () => {
     try {
       expect((await reopened.orders.findOne(order.id).exec())?.toJSON()).toEqual(order);
     } finally { await reopened.close(); }
+  });
+
+  it('closes an open store and a still-opening store, and removes them', async () => {
+    const opened = await openOrderStore('https://close-open.test');
+    // Not awaited: still opening when closeOrderStores runs.
+    const openingHandle = openOrderStore('https://close-opening.test');
+    await closeOrderStores();
+    expect(opened.orders.database.closed).toBe(true);
+    const stillOpening = await openingHandle;
+    expect(stillOpening.orders.database.closed).toBe(true);
+  });
+
+  it('leaves a store opened after the park open when a pre-park handle closes late, and reopens fresh', async () => {
+    const preParkHandle = await openOrderStore('https://late-close.test');
+    await closeOrderStores();
+    const postParkHandle = await openOrderStore('https://late-close.test');
+    await preParkHandle.close();
+    expect(postParkHandle.orders.database.closed).toBe(false);
+    await postParkHandle.orders.insert(sale());
+    await postParkHandle.close();
+    expect(postParkHandle.orders.database.closed).toBe(true);
   });
 
   it('selects rejected and applied-with-warnings orders newest first without changing the input', () => {

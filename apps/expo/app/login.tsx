@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Platform, Pressable, Text, TextInput, View } from 'react-native';
 import * as Linking from 'expo-linking';
-import { router, Stack } from 'expo-router';
+import { Redirect, router, Stack } from 'expo-router';
 import { version as appVersion } from '../package.json';
 import { storeConfig } from '../lib/config';
 import { feedbackUrl } from '../lib/feedback-url';
@@ -18,7 +18,7 @@ const ERROR_MESSAGES: Record<LoginErrorCode, string> = {
 };
 
 export default function LoginScreen() {
-  const { signIn } = useSession();
+  const { session, signIn } = useSession();
   const [baseUrl, setBaseUrl] = useState(storeConfig.defaultBaseUrl);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,6 +39,9 @@ export default function LoginScreen() {
       setSigningIn(false);
     }
   }
+
+  // The gate remounts the Stack after sign-in; that remount must not land back here.
+  if (session) return <Redirect href="/" />;
 
   return (
     <View className="flex-1 justify-center bg-background px-6">

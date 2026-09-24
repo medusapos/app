@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { RxCollection } from 'rxdb';
 import { createHttpCommandTransport, createOrderOutbox, type OutboxState, type PosOrder } from '@tallyui/pos';
 import type { Session } from './session';
+import { markBusy } from './live-tab';
 import { openOrderStore } from './order-store';
 import { authHeaders } from './pos-connector';
 
@@ -51,6 +52,11 @@ export function useOutbox(session: Session | null, registerId: string): {
     }).catch((error: unknown) => { if (active) openingError.current = error; });
     return () => { active = false; current.current = null; dispose?.(); };
   }, [baseUrl, registerId]);
+
+  useEffect(() => {
+    markBusy('outbox', state.sending);
+    return () => markBusy('outbox', false);
+  }, [state.sending]);
 
   const ready = current.current?.baseUrl === baseUrl && !!baseUrl;
   return { orders: ready ? orders : null, state: ready ? state : idle, recent: ready ? recent : [],

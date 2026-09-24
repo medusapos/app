@@ -3,20 +3,22 @@ import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
-import { SessionProvider } from '../lib/session-context';
+import { LiveTabGate } from '../components/live-tab-gate';
+import { SessionProvider, useSession } from '../lib/session-context';
 import { OutboxProvider } from '../lib/outbox-context';
 import { OutboxStrip } from '../components/store-refused';
 
 // The POS ships the light theme; no dark design yet.
 Uniwind.setTheme('light');
 
-export default function RootLayout() {
+// Needs SessionProvider above it, so it is its own component under RootLayout.
+function GatedApp() {
+  const { session } = useSession();
   const card = useCSSVariable('--color-card');
   const foreground = useCSSVariable('--color-foreground');
   const background = useCSSVariable('--color-background');
   return (
-    <SessionProvider>
-      <StatusBar style="dark" />
+    <LiveTabGate scope={session?.baseUrl}>
       <OutboxProvider><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
@@ -29,6 +31,15 @@ export default function RootLayout() {
           headerTitleStyle: { fontWeight: '600' },
         }}
       /></OutboxProvider>
+    </LiveTabGate>
+  );
+}
+
+export default function RootLayout() {
+  return (
+    <SessionProvider>
+      <StatusBar style="dark" />
+      <GatedApp />
     </SessionProvider>
   );
 }

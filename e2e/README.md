@@ -46,7 +46,17 @@ warning to the result, which the app treats as its own trigger for a pass,
 with no visibility change needed. Neither test sells `E2E-5` or leaves stock
 changed.
 
-CI runs both tests on every PR in **End-to-end (web)** with Postgres 17 and
+`live-tab.spec.ts` proves ADR-061 (exactly one live tab per store): a second
+tab takes over from the first, which shows a "MedusaPOS is open in another
+tab" screen with no search box, and "Use here" hands the POS back; a payment
+in the tender stage defers the hand-over up to 10 s before the second tab
+goes live (no sale is completed); closing the live tab, rather than a
+graceful hand-over, frees a waiting tab within 5 s; and a `pagehide`/
+`pageshow` cycle (the browser's back-forward cache) parks the tab and then
+reopens both the product cache and the order store fresh, checked with a
+sale of `E2E-1`. It uses the shared sign-in fixture and sells only `E2E-1`.
+
+CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.
 
