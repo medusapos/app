@@ -77,6 +77,9 @@ it('uses plural sales copy for a refused batch', async () => {
   mount();
   await waitFor(() => expect(outbox.orders).not.toBeNull());
   await act(async () => { await outbox.orders!.bulkInsert([sale(), sale()]); await outbox.flush(); });
+  // flush() may just forward to this tab's own pending leader election (multiInstance is now on
+  // for web); the actual send follows once that settles, not necessarily by the time flush() resolves.
+  await waitFor(() => expect(outbox.state.refused).toEqual({ status: 400, reason: 'unsupported_protocol' }));
   expect(screen.getByText('2 sales not accepted ·')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Details' }));
   expect(screen.getByText('2 sales are kept on this register and have not been sent. The store said: unsupported_protocol (HTTP 400).')).toBeTruthy();

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { addRxPlugin } from 'rxdb';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
+import { getLocalDocStateByParent } from 'rxdb/plugins/local-documents';
+import { Platform } from 'react-native';
 import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import { needsAttention, openOrderStore, orderDatabaseName } from './order-store';
 
@@ -38,6 +40,25 @@ describe('order store', () => {
     try {
       expect((await reopened.orders.findOne(order.id).exec())?.toJSON()).toEqual(order);
     } finally { await reopened.close(); }
+  });
+
+  it('is multi-instance with local documents on web, single-instance on native', async () => {
+    expect(Platform.OS).toBe('web'); // vitest aliases react-native to react-native-web
+    const web = await openOrderStore('https://multi-instance.test');
+    try {
+      expect(web.orders.database.multiInstance).toBe(true);
+      expect(() => getLocalDocStateByParent(web.orders.database)).not.toThrow();
+    } finally { await web.close(); }
+
+    const originalOS = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      const native = await openOrderStore('https://single-instance.test');
+      try {
+        expect(native.orders.database.multiInstance).toBe(false);
+        expect(() => getLocalDocStateByParent(native.orders.database)).toThrow();
+      } finally { await native.close(); }
+    } finally { Platform.OS = originalOS; }
   });
 
   it('selects rejected and applied-with-warnings orders newest first without changing the input', () => {

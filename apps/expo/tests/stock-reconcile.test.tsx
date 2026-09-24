@@ -2,11 +2,15 @@
 import { act, renderHook } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
 import { AppState, type AppStateStatus } from 'react-native';
+import type { RxCollection } from 'rxdb';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, expect, it, vi } from 'vitest';
-import { createTallyDatabase, startReplication, startStockReconcile, type StockReconcileResult, type StockReconcileState } from '@tallyui/database';
+import {
+  createTallyDatabase, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION, STOCK_LEVELS_LAST_PASS,
+  type StockReconcileResult, type StockReconcileState,
+} from '@tallyui/database';
 import { authHeaders, posConnector } from '../lib/pos-connector';
-import { clearProductCache } from '../lib/product-cache';
+import { clearProductCache, productCacheName, productCacheStorage } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
 vi.mock('@tallyui/database', async (importOriginal) => {
@@ -29,11 +33,12 @@ afterEach(async () => {
 });
 
 /**
- * Mounts the hook with a fake replication and a fake runner (whose state$ the test drives
- * directly, the way the real runner's own timer or a restart-seeded value would); resolves once
- * the runner has started.
+ * Mounts the hook with a fake replication and a fake runner (leader-gated: it starts once the
+ * (single-instance, always-leader) database's waitForLeadership() resolves); resolves once the
+ * runner has started. reconcileImpl gets the real stock_levels collection, the way the app's
+ * lastStockCheckAt (from stockOverlayAsOf$) sees a pass the real runner would record there.
  */
-async function mount(reconcileImpl: (state$: BehaviorSubject<StockReconcileState>) => Promise<StockReconcileResult>) {
+async function mount(reconcileImpl: (collection: RxCollection) => Promise<StockReconcileResult>) {
   vi.stubGlobal('crypto', webcrypto);
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   let onAppState!: (state: AppStateStatus) => void;
@@ -44,23 +49,20 @@ async function mount(reconcileImpl: (state$: BehaviorSubject<StockReconcileState
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(),
     awaitInitialReplication: () => new Promise<void>((done) => { finishInitial = done; }),
   } as never);
-  const state$ = new BehaviorSubject<StockReconcileState>({ running: false, truncated: false });
-  const runner = { reconcileStock: vi.fn(() => reconcileImpl(state$)), stop: vi.fn(), state$ };
+  let collection!: RxCollection;
+  const runner = { reconcileStock: vi.fn(() => reconcileImpl(collection)), stop: vi.fn(),
+    state$: new BehaviorSubject<StockReconcileState>({ running: false, truncated: false }) };
   let started!: () => void;
   const runnerStarted = new Promise<void>((done) => { started = done; });
-  vi.mocked(startStockReconcile).mockImplementation(() => { started(); return runner; });
+  vi.mocked(startStockReconcile).mockImplementation((options) => { collection = options.collection; started(); return runner; });
   const hook = renderHook(() => useReplicatedProducts(posConnector, headers, baseUrl, onUnauthorized));
   await act(async () => { await runnerStarted; });
-  return { ...hook, runner, state$, remove, finishInitial: () => act(async () => finishInitial()),
+  return { ...hook, runner, collection, remove, finishInitial: () => act(async () => finishInitial()),
     appState: (state: AppStateStatus) => act(async () => onAppState(state)) };
 }
 
 it('starts the runner with its own default cadence and reconciles after initial replication, on foreground, and stops on unmount', async () => {
-  const { runner, remove, finishInitial, appState, unmount } = await mount(async (state$) => {
-    const result = pass(false);
-    state$.next({ running: false, truncated: false, lastCompletedAt: new Date().toISOString() });
-    return result;
-  });
+  const { runner, remove, finishInitial, appState, unmount } = await mount(async () => pass(false));
   expect(startStockReconcile).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
     adapter: posConnector.reconcile!.stock, context: expect.objectContaining({ baseUrl, headers }),
   }));
@@ -78,13 +80,12 @@ it('starts the runner with its own default cadence and reconciles after initial 
   expect(remove).toHaveBeenCalledTimes(1);
 });
 
-it('takes lastStockCheckAt from state$, including a pass the runner makes on its own, and warns on failure', async () => {
+it('takes lastStockCheckAt from the shared last-pass doc, including a pass the runner makes on its own, and warns on failure', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
   const results = [new Error('Failed to fetch'), pass(false)];
-  const { result, state$, appState, unmount } = await mount(async (subject) => {
+  const { result, collection, appState, unmount } = await mount(async () => {
     const next = results.shift()!;
     if (next instanceof Error) throw next;
-    subject.next({ running: false, truncated: false, lastCompletedAt: new Date().toISOString() });
     return next;
   });
   expect(result.current.lastStockCheckAt).toBeNull();
@@ -92,17 +93,15 @@ it('takes lastStockCheckAt from state$, including a pass the runner makes on its
   expect(result.current.lastStockCheckAt).toBeNull();
   expect(warn).toHaveBeenCalledWith('Stock reconcile failed:', expect.any(Error));
 
-  // A pass the runner makes on its own timer, with no call from the app at all.
+  // A pass — the runner's own timer or the app's call — writes the shared last-pass doc
+  // (a follower with no runner sees it the same way).
   const own = new Date().toISOString();
-  await act(async () => { state$.next({ running: false, truncated: false, lastCompletedAt: own }); });
-  expect(result.current.lastStockCheckAt).toEqual(new Date(own));
-
-  // A truncated pass leaves the recorded time as is.
-  await act(async () => { state$.next({ running: false, truncated: true, lastCompletedAt: own }); });
+  await act(async () => { await collection.upsertLocal(STOCK_LEVELS_LAST_PASS, { completedAt: own }); });
   expect(result.current.lastStockCheckAt).toEqual(new Date(own));
 
   const before = Date.now();
   await appState('active');
+  await act(async () => { await collection.upsertLocal(STOCK_LEVELS_LAST_PASS, { completedAt: new Date().toISOString() }); });
   expect(result.current.lastStockCheckAt!.getTime()).toBeGreaterThanOrEqual(before);
   unmount();
 });
@@ -115,10 +114,15 @@ it('shows a restart-seeded lastCompletedAt immediately, without any call from th
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(),
     awaitInitialReplication: () => new Promise<void>(() => {}),
   } as never);
+  const { createTallyDatabase: open } = await vi.importActual<typeof import('@tallyui/database')>('@tallyui/database');
   const seeded = new Date().toISOString();
-  // Seeded as the real runner does on restart, before the app calls reconcileStock at all.
-  const state$ = new BehaviorSubject<StockReconcileState>({ running: false, truncated: false, lastCompletedAt: seeded });
-  const runner = { reconcileStock: vi.fn(async () => pass(false)), stop: vi.fn(), state$ };
+  // Seeded as the real runner does on restart, in the shared last-pass doc, before the app calls
+  // reconcileStock at all.
+  const seedDb = await open({ connector: posConnector, name: productCacheName(posConnector.id, baseUrl), storage: productCacheStorage() });
+  await seedDb[STOCK_LEVELS_COLLECTION].upsertLocal(STOCK_LEVELS_LAST_PASS, { completedAt: seeded });
+  await seedDb.close();
+  const runner = { reconcileStock: vi.fn(async () => pass(false)), stop: vi.fn(),
+    state$: new BehaviorSubject<StockReconcileState>({ running: false, truncated: false }) };
   vi.mocked(startStockReconcile).mockReturnValue(runner);
   const { result, unmount } = renderHook(() => useReplicatedProducts(posConnector, headers, baseUrl, onUnauthorized));
   await vi.waitFor(() => expect(result.current.lastStockCheckAt).toEqual(new Date(seeded)));

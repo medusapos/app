@@ -1,5 +1,6 @@
 import { createRxDatabase, type RxCollection } from 'rxdb';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
+import { Platform } from 'react-native';
 import { posOrderSchema, type PosOrder } from '@tallyui/pos';
 import { productCacheName, productCacheStorage } from './product-cache';
 
@@ -20,8 +21,11 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
   if (!entry) {
     const opening = (async () => {
       const storage = productCacheStorage();
+      // On web, several tabs share one database; the outbox needs multiInstance and
+      // localDocuments to elect a leader and forward follower state (TallyUI #42).
+      const multiInstance = Platform.OS === 'web';
       const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
-        name, multiInstance: false,
+        name, multiInstance, localDocuments: multiInstance,
         storage: process.env.NODE_ENV !== 'production' ? wrappedValidateAjvStorage({ storage }) : storage,
       });
       try {

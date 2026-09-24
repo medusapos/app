@@ -3,7 +3,7 @@ import { medusaConnector } from '@tallyui/connector-medusa';
 import { clearProductCache } from './product-cache';
 import {
   clearSession, defaultStorage, loadSession, login, LoginError, refreshSession,
-  saveSession, shouldRefresh, type Session,
+  saveSession, shouldRefresh, STORAGE_KEY, type Session,
 } from './session';
 
 type SessionContextValue = {
@@ -30,6 +30,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     currentSession.current = next;
     setSession(next);
   }
+  useEffect(() => {
+    // On web, a sign-in, refresh or sign-out in another tab updates this tab too — including
+    // giving the leader a follower's new token.
+    if (typeof window === 'undefined') return;
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== STORAGE_KEY) return;
+      const next = loadSession(defaultStorage());
+      currentSession.current = next;
+      setSession(next);
+    };
+    window.addEventListener('storage', onStorage);
+    return () => window.removeEventListener('storage', onStorage);
+  }, []);
   const signedIn = session !== null;
   useEffect(() => {
     if (!signedIn) return;

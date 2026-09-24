@@ -4,7 +4,7 @@ import { Text } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import { clearProductCache } from './product-cache';
-import { REFRESH_WINDOW_MS, saveSession, type Session } from './session';
+import { REFRESH_WINDOW_MS, saveSession, STORAGE_KEY, type Session } from './session';
 import { SessionProvider, useSession } from './session-context';
 
 vi.mock('./product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
@@ -94,6 +94,29 @@ describe('SessionProvider', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(context.session).toEqual(stored);
   });
+  it('updates the in-memory session (and its ref) when another tab signs in, refreshes or signs out', async () => {
+    await mount(null);
+    expect(context.session).toBeNull();
+    const fromAnotherTab: Session = { ...stored, token: token(now + 24 * 60 * 60 * 1000) };
+    saveSession(storage, fromAnotherTab);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: storage.getItem(STORAGE_KEY) })); });
+    expect(context.session).toEqual(fromAnotherTab);
+
+    const refreshed = { ...fromAnotherTab, token: token(now + 25 * 60 * 60 * 1000) };
+    saveSession(storage, refreshed);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: storage.getItem(STORAGE_KEY) })); });
+    expect(context.session).toEqual(refreshed);
+
+    storage.removeItem(STORAGE_KEY);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: STORAGE_KEY, newValue: null })); });
+    expect(context.session).toBeNull();
+
+    // A storage event for an unrelated key is ignored.
+    saveSession(storage, stored);
+    act(() => { window.dispatchEvent(new StorageEvent('storage', { key: 'medusapos.register_id', newValue: 'other' })); });
+    expect(context.session).toBeNull();
+  });
+
   it.each(['signOut', 'reportUnauthorized'] as const)('%s clears state, storage and this backend cache', async (action) => {
     await mount();
     act(() => context[action]());

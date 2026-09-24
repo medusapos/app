@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppState } from 'react-native';
+import { AppState, Platform } from 'react-native';
+import { addRxPlugin } from 'rxdb';
+import { RxDBLeaderElectionPlugin } from 'rxdb/plugins/leader-election';
 
 import { createTallyDatabase, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION } from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
-import { stockOverlay$ } from '@tallyui/pos';
+import { stockOverlay$, stockOverlayAsOf$ } from '@tallyui/pos';
 import { isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache } from './product-cache';
+import { suppressLeaderCloseRace } from './rxdb-close-race';
+
+// waitForLeadership() below needs this even on native, where multiInstance is
+// always false and it resolves at once (RxDB's own leader-election plugin).
+addRxPlugin(RxDBLeaderElectionPlugin);
 
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error' | 'offline';
 
@@ -37,7 +44,7 @@ export function useReplicatedProducts(
     const runner = stockRunner.current;
     if (!runner) return;
     try {
-      // The runner itself warns about a truncated pass; lastStockCheckAt follows its state$.
+      // The runner itself warns about a truncated pass; lastStockCheckAt follows the shared last-pass doc.
       await runner.reconcileStock();
     } catch (err) {
       // A pass aborted by stop() on unmount is not a failure.
@@ -80,14 +87,17 @@ export function useReplicatedProducts(
     (async () => {
       try {
         const name = productCacheName(connector.id, baseUrl);
-        const db = await createTallyDatabase({ connector, name, storage: productCacheStorage() });
+        // On web, several tabs share this database; createTallyDatabase enables localDocuments itself.
+        const db = await createTallyDatabase({ connector, name, storage: productCacheStorage(),
+          multiInstance: Platform.OS === 'web' });
         // Unmounted while opening: cleanup has already run, so start nothing that would outlive it.
         if (cancelled) {
+          suppressLeaderCloseRace();
           await db.close();
           return;
         }
         cleanup.push(registerOpenCache(name, db));
-        cleanup.push(() => db.close());
+        cleanup.push(() => { suppressLeaderCloseRace(); void db.close(); });
         const context: SyncContext = {
           connectorId: connector.id,
           baseUrl,
@@ -132,22 +142,24 @@ export function useReplicatedProducts(
         const stockAdapter = connector.reconcile?.stock;
         if (stockAdapter) {
           const collection = db[STOCK_LEVELS_COLLECTION];
-          const runner = startStockReconcile({ collection, adapter: stockAdapter, context });
-          stockRunner.current = runner;
           const overlay = stockOverlay$(collection).subscribe((map) => { if (!cancelled) setStockOverlay(map); });
-          // Also picks up passes the runner makes on its own timer, and survives a restart.
-          const runnerState = runner.state$.subscribe((state) => {
-            if (!cancelled && state.lastCompletedAt) setLastStockCheckAt(new Date(state.lastCompletedAt));
+          // The shared last-pass local doc, not a runner's state$: a follower holds no runner.
+          const asOf = stockOverlayAsOf$(collection).subscribe((completedAt) => {
+            if (!cancelled && completedAt) setLastStockCheckAt(new Date(completedAt));
           });
-          // On web, react-native-web's AppState follows page visibility.
+          // On web, react-native-web's AppState follows page visibility. In a follower,
+          // reconcileStock() is already a no-op below (stockRunner.current stays unset).
           const foreground = AppState.addEventListener('change', (next) => { if (next === 'active') void reconcileStock(); });
-          cleanup.unshift(() => {
-            stockRunner.current = undefined;
-            runner.stop();
-            overlay.unsubscribe();
-            runnerState.unsubscribe();
-            foreground.remove();
-          });
+          cleanup.unshift(() => { overlay.unsubscribe(); asOf.unsubscribe(); foreground.remove(); });
+          // Runner only in the leader tab: duplicate passes would double backend load.
+          // Resolves at once on native and single-instance; on web, when a follower is later
+          // elected leader, its own pending wait resolves and it starts its runner.
+          void db.waitForLeadership().then(() => {
+            if (cancelled) return;
+            const runner = startStockReconcile({ collection, adapter: stockAdapter, context });
+            stockRunner.current = runner;
+            cleanup.unshift(() => { stockRunner.current = undefined; runner.stop(); });
+          }).catch(() => {});
         }
 
         setState('syncing');
