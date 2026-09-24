@@ -55,6 +55,22 @@ describe('isPrivateHost', () => {
 });
 
 describe('login', () => {
+  it('signs in without a name after a user request hangs for three seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = response({ token: 'jwt' })
+        .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));
+      const resolved = vi.fn();
+      const result = login(session.baseUrl, session.email, 'secret', fetchImpl).then(resolved);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(resolved).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(resolved).toHaveBeenCalledWith(session);
+      await result;
+    } finally { vi.useRealTimers(); }
+  });
   it('reads the signed-in user name and preserves it in session storage', async () => {
     const fetchImpl = response({ user: { first_name: ' Alex', last_name: 'Shopkeeper ' } })
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })));

@@ -56,12 +56,15 @@ export async function login(baseUrl: string, email: string, password: string, fe
   }
   if (!isRecord(body) || typeof body.token !== 'string') throw new LoginError('server_error', 'The backend returned no token.');
   const session: Session = { baseUrl, email, token: body.token };
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
-    const userResponse = await fetchImpl(`${baseUrl}/admin/users/me`, {
-      method: 'GET', headers: authHeaders(session.token),
-    });
-    if (userResponse.ok) {
-      const profile: unknown = await userResponse.json();
+    const profile: unknown = await Promise.race([
+      fetchImpl(`${baseUrl}/admin/users/me`, {
+        method: 'GET', headers: authHeaders(session.token),
+      }).then((response) => response.ok ? response.json() : null),
+      new Promise((resolve) => { timer = setTimeout(() => resolve(null), 3000); }),
+    ]);
+    if (profile) {
       if (isRecord(profile) && isRecord(profile.user)) {
         const name = [profile.user.first_name, profile.user.last_name]
           .filter((part) => typeof part === 'string').join(' ').trim();
@@ -69,6 +72,7 @@ export async function login(baseUrl: string, email: string, password: string, fe
       }
     }
   } catch { /* The cashier name is optional; keep the successful login. */ }
+  finally { clearTimeout(timer); }
   return session;
 }
 

@@ -4,6 +4,7 @@ import { formatMoney } from '@tallyui/core';
 import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
+import { formatDate } from '../lib/format-date';
 
 const STATUS_LABEL = { pending: 'Waiting to sync', applied: 'Synced', rejected: 'Not accepted' };
 
@@ -21,7 +22,7 @@ export default function OrdersScreen() {
           return (
           <View key={order.id} className="gap-1 rounded-md border border-border bg-card p-3">
             <Text className="text-foreground">{order.serverRefs?.displayId ? `Order #${order.serverRefs.displayId} · ` : ''}{count} {count === 1 ? 'item' : 'items'}</Text>
-            <Text className="text-muted-foreground">{new Date(order.createdAt).toLocaleString()} · {formatMoney({ amount: order.totalMinor, currency: order.currency })} · {STATUS_LABEL[order.syncStatus]}</Text>
+            <Text className="text-muted-foreground">{formatDate(order.createdAt)} · {formatMoney({ amount: order.totalMinor, currency: order.currency })} · {STATUS_LABEL[order.syncStatus]}</Text>
             {order.syncStatus === 'rejected' && order.error ? <Text className="text-destructive">{order.error.code}: {order.error.message}</Text> : null}
             {order.warnings?.map((warning, index) => <View key={index} className="border-l-4 border-warning pl-2"><Text className="text-foreground">
               {warning.code === 'insufficient_stock'
