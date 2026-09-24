@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { getCalendars } from 'expo-localization';
 import type { ProductTraits } from '@tallyui/core';
-import { ProductCard, ProductGrid, SearchInput } from '@tallyui/components';
+import { ProductGrid, ProductImage, ProductPrice, ProductStockBadge, ProductTitle, SearchInput, VStack } from '@tallyui/components';
 import { searchProducts } from '@tallyui/pos';
 import { catalogueEntries, findEntryByCode, variantPriceLabel, type CatalogueEntry } from '../lib/catalogue';
 
@@ -89,11 +89,21 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
       </View>
       <ProductGrid items={results} numColumns={columns}
         renderItem={(product: Doc) => (
-          <ProductCard doc={product} onPress={() => {
+          // TallyUI's ProductCard has no children slot, so the tile is composed directly here
+          // (same structure/classes as ProductCard) to add the stock badge as a fourth child,
+          // inside the card and centred with the rest, instead of TallyUI (out of scope).
+          <Pressable accessibilityRole="button" testID={`product-tile-${traits.getName(product)}`} onPress={() => {
             const variants = entries.filter((entry) => entry.product === product);
             if (variants.length === 1) select(variants[0]);
             else setChoices(variants);
-          }} />
+          }}>
+            <VStack space="sm" className="items-center rounded-lg border border-border bg-card p-3">
+              <ProductImage doc={product} size={80} className="rounded-md" />
+              <ProductTitle doc={product} className="text-sm" numberOfLines={2} />
+              <ProductPrice doc={product} />
+              <ProductStockBadge doc={product} showAsOf={false} className="self-center" />
+            </VStack>
+          </Pressable>
         )}
         emptyState={<Text className="mt-10 text-center text-sm text-muted-foreground">
           {query.trim() ? `No products match "${query.trim()}".` : 'No products yet.'}

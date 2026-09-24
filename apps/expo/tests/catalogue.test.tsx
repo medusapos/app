@@ -5,7 +5,7 @@ import { Subject } from 'rxjs';
 import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import type { ProductCard, ProductGrid, SearchInput } from '@tallyui/components';
+import type { ProductGrid, ProductStockBadge, SearchInput } from '@tallyui/components';
 import { Catalogue, formatStockSyncTime } from '../components/catalogue';
 import { createTallyDatabase } from '@tallyui/database';
 import { clearProductCache, productCacheName, productCacheStorage } from '../lib/product-cache';
@@ -22,8 +22,17 @@ vi.mock('@tallyui/components', () => ({
       {items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}
     </div>
   ),
-  ProductCard: ({ doc, onPress }: ComponentProps<typeof ProductCard>) => (
-    <button onClick={onPress}>{doc.title as ReactNode}</button>
+  // The tile is composed directly in catalogue.tsx (ProductCard has no children slot), so these
+  // stand in for its pieces; only ProductTitle needs to render real content for the tests below.
+  ProductImage: () => null,
+  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
+  ProductPrice: () => null,
+  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  // Stands in for TallyUI's real badge (which reads useProductStock off a ConnectorProvider):
+  // reports the status this doc's own fields resolve to, so a test can tell which product a
+  // tile's badge belongs to and confirm the tile never asks it to show an "as of".
+  ProductStockBadge: ({ doc, showAsOf }: ComponentProps<typeof ProductStockBadge>) => (
+    <span data-testid={`stock-badge-${doc.id}`} data-as-of={String(showAsOf)}>{traits.getStock(doc).status}</span>
   ),
 }));
 // expo-localization's native module isn't available under vitest; mock it with a controllable clock preference.
@@ -89,7 +98,7 @@ describe('Catalogue', () => {
     const time = new Date('2026-09-24T10:42:00Z');
     const expected = formatStockSyncTime(time, undefined, hour12, time);
     mount(products, time);
-    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();
     expect(chooser.getByText(`Out of Stock · as of ${expected}`)).toBeTruthy();
@@ -98,7 +107,7 @@ describe('Catalogue', () => {
     const synced = new Date('2026-09-24T09:15:00Z');
     const checked = new Date('2026-09-24T10:42:00Z');
     mount(products, synced, checked);
-    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText(`In Stock · as of ${formatStockSyncTime(checked)}`)).toBeTruthy();
     expect(chooser.queryByText(`In Stock · as of ${formatStockSyncTime(synced)}`)).toBeNull();
@@ -107,7 +116,7 @@ describe('Catalogue', () => {
     const checked = new Date('2026-09-24T09:15:00Z');
     const synced = new Date('2026-09-24T10:42:00Z');
     mount(products, synced, checked);
-    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText(`In Stock · as of ${formatStockSyncTime(synced)}`)).toBeTruthy();
     expect(chooser.queryByText(`In Stock · as of ${formatStockSyncTime(checked)}`)).toBeNull();
@@ -115,7 +124,7 @@ describe('Catalogue', () => {
   it('shows a short date as well as the time when the winning sync is from yesterday', () => {
     const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
     mount(products, null, yesterday);
-    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     const chooser = within(screen.getByLabelText('Choose variant'));
     const expected = formatStockSyncTime(yesterday);
     expect(expected).toContain(',');
@@ -124,7 +133,7 @@ describe('Catalogue', () => {
   it("shows only the time when the winning sync is from today", () => {
     const today = new Date();
     mount(products, null, today);
-    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     const chooser = within(screen.getByLabelText('Choose variant'));
     const expected = formatStockSyncTime(today);
     expect(expected).not.toContain(',');
@@ -134,8 +143,8 @@ describe('Catalogue', () => {
     const { input } = mount();
     expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: 'red' } });
-    expect(screen.getByRole('button', { name: 'Red Shirt' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Blue Hat' })).toBeNull();
+    expect(screen.getByTestId('product-tile-Red Shirt')).toBeTruthy();
+    expect(screen.queryByTestId('product-tile-Blue Hat')).toBeNull();
     expect(screen.getByText('Synced · 1 matching')).toBeTruthy();
   });
   it('submits a barcode across all variants, preferring it over another product SKU, and clears search', () => {
@@ -146,8 +155,8 @@ describe('Catalogue', () => {
       product: products[1], variant: traits.getVariants!(products[1])[1],
     });
     expect(input.value).toBe('');
-    expect(screen.getByRole('button', { name: 'Blue Hat' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Red Shirt' })).toBeTruthy();
+    expect(screen.getByTestId('product-tile-Blue Hat')).toBeTruthy();
+    expect(screen.getByTestId('product-tile-Red Shirt')).toBeTruthy();
   });
   it('leaves an unknown code and its results intact', () => {
     const { input, onSelect } = mount();
@@ -159,7 +168,7 @@ describe('Catalogue', () => {
   });
   it('selects a single variant by tapping its product', () => {
     const { onSelect } = mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Blue Hat' }));
+    fireEvent.click(screen.getByTestId('product-tile-Blue Hat'));
     expect(onSelect).toHaveBeenCalledExactlyOnceWith({
       product: products[0], variant: traits.getVariants!(products[0])[0],
     });
@@ -167,7 +176,7 @@ describe('Catalogue', () => {
   });
   it('shows variant details and lets an out-of-stock variant be selected', () => {
     const { onSelect } = mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     expect(onSelect).not.toHaveBeenCalled();
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText('Small')).toBeTruthy();
@@ -183,7 +192,7 @@ describe('Catalogue', () => {
   });
   it('closes the chooser on Cancel without selecting', () => {
     const { onSelect } = mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
     expect(screen.queryByLabelText('Choose variant')).toBeNull();
     expect(onSelect).not.toHaveBeenCalled();
@@ -191,6 +200,19 @@ describe('Catalogue', () => {
   it('shows an empty catalogue', () => {
     mount([]);
     expect(screen.getByText('No products yet.')).toBeTruthy();
+  });
+  it('renders a stock badge on every tile from the tile\'s own (already-overlaid) product, without an "as of"', () => {
+    const soldOut = { id: 'boots', title: 'Green Boots', status: 'published', variants: [
+      { id: 'boots-one', title: 'One size', sku: 'BOOTS', barcode: '333',
+        prices: [{ amount: 40, currency_code: 'eur' }], manage_inventory: true, inventory_quantity: 0 },
+    ] };
+    mount([...products, soldOut]);
+    const hatBadge = screen.getByTestId('stock-badge-hat');
+    expect(hatBadge.textContent).toBe('in_stock');
+    expect(hatBadge.getAttribute('data-as-of')).toBe('false');
+    const bootsBadge = screen.getByTestId('stock-badge-boots');
+    expect(bootsBadge.textContent).toBe('out_of_stock');
+    expect(bootsBadge.getAttribute('data-as-of')).toBe('false');
   });
   it('uses the catalogue pane width for two to six columns with room for 160 px tiles', () => {
     mount();

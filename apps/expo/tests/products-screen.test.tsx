@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
-import type { ProductCard, ProductGrid, SearchInput, CartPanelProps, CartLineProps, CartTotalProps } from '@tallyui/components';
+import type { ProductGrid, SearchInput, CartPanelProps, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { createOrderBuilder, finalizeOrder, type LineItem, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -44,7 +44,16 @@ vi.mock('@tallyui/components', () => ({
   ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
     <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
   ),
-  ProductCard: ({ doc, onPress }: ComponentProps<typeof ProductCard>) => <button onClick={onPress}>{doc.title}</button>,
+  // The tile is composed directly in catalogue.tsx (ProductCard has no children slot); these
+  // stand in for its pieces. Only ProductTitle needs to render visible content — this file's
+  // tests aren't about price or the tile badge (see catalogue.test.tsx) and the tile's
+  // accessibilityRole="button" name must stay exactly the product name for the button-role
+  // assertions below.
+  ProductImage: () => null,
+  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
+  ProductPrice: () => null,
+  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  ProductStockBadge: () => null,
   SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder }: ComponentProps<typeof SearchInput>) => (
     <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)}
       onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />

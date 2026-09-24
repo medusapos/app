@@ -2,6 +2,10 @@ import { expect, test, type Page } from '@playwright/test';
 import { adminToken, inventoryLevel, sellBySku, setInventoryLevel, signIn, variantIdBySku } from './helpers';
 
 const PRODUCT_4 = 'E2E product 4';
+// Single-variant, so the product-level status the tile badge shows is that one variant's own
+// status — unlike E2E product 4, whose Default variant staying in stock would mask a change to
+// just E2E-4B in the tile's (product-level) aggregate.
+const PRODUCT_1 = 'E2E product 1';
 
 // The variant chooser only opens for a product with more than one variant (E2E product 4 is the
 // only such fixture product), and is the app's only stock display.
@@ -15,6 +19,12 @@ function variantChoice(page: Page) {
 
 function stockStatusText(choice: ReturnType<typeof variantChoice>) {
   return choice.getByText(/^(In Stock|Out of Stock|On Backorder|Unknown) · /);
+}
+
+// The tile badge (apps/expo/components/catalogue.tsx) shows the status only, no quantity or "as
+// of" (it has showAsOf={false}), unlike the chooser's "Status · as of …".
+function tileBadgeText(page: Page, productName: string) {
+  return page.getByTestId(`product-tile-${productName}`).getByText(/^(In Stock|Out of Stock|On Backorder|Unknown)$/);
 }
 
 // Formats are locale-dependent ("as of 14:32" or "as of 2:32 PM"); compare by minute of day so
@@ -47,16 +57,20 @@ async function triggerReconcile(page: Page) {
 test('stock change reaches the chooser without a catalogue pull', async ({ page }) => {
   const token = await adminToken();
   const { inventoryItemId, locationId, stockedQuantity: original } = await inventoryLevel(token, 'E2E-4B');
+  const product1 = await inventoryLevel(token, 'E2E-1');
   try {
     await signIn(page);
     await openChooser(page);
     const before = await stockStatusText(variantChoice(page)).textContent();
     if (!before) throw new Error('No stock status text found for E2E-4B');
     const beforeMinutes = asOfMinutes(before);
+    await expect(tileBadgeText(page, PRODUCT_1)).toHaveText('In Stock');
 
     // Flip the status server-side (0 reads Out of Stock), then reconcile without any catalogue
-    // pull (no reload, no new sign-in).
+    // pull (no reload, no new sign-in). E2E-1 flips alongside E2E-4B so the same pass proves the
+    // tile badge picks up reconciled stock too.
     await setInventoryLevel(token, inventoryItemId, locationId, 0);
+    await setInventoryLevel(token, product1.inventoryItemId, product1.locationId, 0);
     await triggerReconcile(page);
 
     let after = '';
@@ -71,8 +85,13 @@ test('stock change reaches the chooser without a catalogue pull', async ({ page 
 
     expect(after).not.toBe(before);
     expect(asOfMinutes(after)).toBeGreaterThanOrEqual(beforeMinutes);
+
+    // The single-variant product's tile badge (its own product-level status, not the chooser)
+    // also reflects the same reconcile pass.
+    await expect(tileBadgeText(page, PRODUCT_1)).toHaveText('Out of Stock');
   } finally {
     await setInventoryLevel(token, inventoryItemId, locationId, original);
+    await setInventoryLevel(token, product1.inventoryItemId, product1.locationId, product1.stockedQuantity);
   }
 });
 
