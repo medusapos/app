@@ -23,7 +23,7 @@ export function StoreRefused({ header }: ComponentProps<typeof SignInAgain>) {
   const [expanded, setExpanded] = useState(false);
   const visible = !!state.refused && !state.authRequired;
   const strip = useMemo(() => <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-1">
-    <Text numberOfLines={1} className="shrink text-foreground">{state.pending} {state.pending === 1 ? 'sale' : 'sales'} saved, not accepted by the store ·</Text>
+    <Text numberOfLines={1} className="shrink text-foreground">{state.pending} {state.pending === 1 ? 'sale' : 'sales'} not accepted ·</Text>
     <Pressable accessibilityRole="button" onPress={() => setExpanded(true)}>
       <Text className="font-semibold text-primary">Details</Text>
     </Pressable>
@@ -38,7 +38,7 @@ export function StoreRefused({ header }: ComponentProps<typeof SignInAgain>) {
     className="gap-2 border-b border-border bg-card px-4 py-3">
     {!expanded ? strip : <>
       <Text accessibilityRole="header" className="font-semibold text-foreground">Not accepted by the store</Text>
-      <Text className="text-foreground">{state.pending === 1 ? '1 sale is' : `${state.pending} sales are`} kept on this register and have not been sent. The store said: {state.refused!.reason} (HTTP {state.refused!.status}).</Text>
+      <Text className="text-foreground">{state.pending === 1 ? '1 sale is' : `${state.pending} sales are`} kept on this register and {state.pending === 1 ? 'has' : 'have'} not been sent. The store said: {state.refused!.reason} (HTTP {state.refused!.status}).</Text>
       <Pressable accessibilityRole="button" disabled={state.sending} onPress={() => { void flush(); }}
         className={`rounded-md bg-primary px-4 py-2 ${state.sending ? 'opacity-50' : ''}`}>
         <Text className="text-center font-semibold text-primary-foreground">Try again</Text>

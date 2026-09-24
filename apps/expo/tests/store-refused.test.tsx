@@ -50,13 +50,13 @@ it('keeps refused sales pending, explains the refusal, and sends them when Try a
   expect(fetchStub).toHaveBeenCalledTimes(1);
   expect(String(fetchStub.mock.calls[0][0])).toMatch(COMMANDS_PATH);
   expect((await outbox.orders!.findOne(order.id).exec())!.toMutableJSON()).toEqual(order);
-  const strip = screen.getByText('1 sale saved, not accepted by the store ·').parentElement!.parentElement!;
+  const strip = screen.getByText('1 sale not accepted ·').parentElement!.parentElement!;
   expect(getComputedStyle(strip).position).toBe('absolute');
   expect(getComputedStyle(strip).top).toBe('0px');
   expect(strip.getAttribute('data-print')).toBe('hide');
   fireEvent.click(screen.getByRole('button', { name: 'Details' }));
   expect(screen.getByRole('heading', { name: 'Not accepted by the store' })).toBeTruthy();
-  expect(screen.getByText('1 sale is kept on this register and have not been sent. The store said: unsupported_protocol (HTTP 400).')).toBeTruthy();
+  expect(screen.getByText('1 sale is kept on this register and has not been sent. The store said: unsupported_protocol (HTTP 400).')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Later' }));
   expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull();
   fireEvent.click(screen.getByRole('button', { name: 'Details' }));
@@ -77,7 +77,7 @@ it('uses plural sales copy for a refused batch', async () => {
   mount();
   await waitFor(() => expect(outbox.orders).not.toBeNull());
   await act(async () => { await outbox.orders!.bulkInsert([sale(), sale()]); await outbox.flush(); });
-  expect(screen.getByText('2 sales saved, not accepted by the store ·')).toBeTruthy();
+  expect(screen.getByText('2 sales not accepted ·')).toBeTruthy();
   fireEvent.click(screen.getByRole('button', { name: 'Details' }));
   expect(screen.getByText('2 sales are kept on this register and have not been sent. The store said: unsupported_protocol (HTTP 400).')).toBeTruthy();
   expect(outbox.recent.every((order) => order.syncStatus === 'pending')).toBe(true);

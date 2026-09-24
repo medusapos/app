@@ -94,7 +94,7 @@ describe('ProductsScreen catalogue', () => {
     const banner = render(<StoreRefused header={{ setOptions }} />);
     expect(banner.container.textContent).toBe('');
     render(<header>{setOptions.mock.lastCall![0].headerTitle!()}</header>);
-    expect(screen.getByText('1 sale saved, not accepted by the store ·').closest('header')).toBeTruthy();
+    expect(screen.getByText('1 sale not accepted ·').closest('header')).toBeTruthy();
     const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
     act(() => input.focus());
     expect(document.activeElement).toBe(input);
@@ -188,7 +188,9 @@ async function mount(signedIn = true, orders = false, name?: string) {
     baseUrl: 'https://store.test', email: 'admin@store.test', name,
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
-  await act(async () => { render(<SessionProvider>{orders ? <OrdersScreen /> : <ProductsScreen />}</SessionProvider>); });
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(<SessionProvider>{orders ? <OrdersScreen /> : <ProductsScreen />}</SessionProvider>); });
+  return view;
 }
 
 function savedSale(): PosOrder {
@@ -244,6 +246,36 @@ describe('Orders screen and sync status', () => {
       expect(requeue).not.toHaveBeenCalled();
     }
     expect(screen.queryByText('This sale needs checking against the store before it can be sent again.') !== null).toBe(kind === 'idempotency_mismatch');
+  });
+
+  it.each([0, 1])('blocks repeat Retry taps until requeue resolves %s or the order leaves rejected', async (result) => {
+    const order: PosOrder = { ...savedSale(), syncStatus: 'rejected' };
+    let resolve!: (count: number) => void;
+    const requeue = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [order], requeue });
+    await mount(true, true);
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    act(() => { fireEvent.click(retry); fireEvent.click(retry); });
+    expect(requeue).toHaveBeenCalledExactlyOnceWith([order.id]);
+    expect(retry.getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { resolve(result); });
+    expect(retry.getAttribute('aria-disabled')).toBe(result === 0 ? null : 'true');
+    fireEvent.click(retry);
+    expect(requeue).toHaveBeenCalledTimes(result === 0 ? 2 : 1);
+  });
+
+  it.each(['pending', 'applied'] as const)('clears Retry state when the outbox reports %s', async (syncStatus) => {
+    const order: PosOrder = { ...savedSale(), syncStatus: 'rejected' };
+    const requeue = vi.fn().mockResolvedValue(1);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [order], requeue });
+    const view = await mount(true, true);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [{ ...order, syncStatus }] });
+    view.rerender(<SessionProvider><OrdersScreen /></SessionProvider>);
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [order] });
+    view.rerender(<SessionProvider><OrdersScreen /></SessionProvider>);
+    expect(screen.getByRole('button', { name: 'Retry' }).getAttribute('aria-disabled')).toBeNull();
   });
 
   it('redirects Orders to login when signed out', async () => {
