@@ -10,7 +10,7 @@ export default defineConfig({
   timeout: 90_000,
   expect: { timeout: 30_000 },
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
-  use: { baseURL: appUrl || 'http://localhost:8099', trace: 'on-first-retry' },
+  use: { baseURL: appUrl || 'http://localhost:8099', trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: appUrl ? undefined : [
     {
