@@ -3,6 +3,91 @@ import "@medusajs/framework/modules-sdk";
 import productIndex from "../search/product";
 
 describe("product search ingestion", () => {
+  it("consumes product deletion without loading prices", async () => {
+    const ids = ["prod_1", "prod_2"]
+    const graph = jest.fn()
+    const context = {
+      container: { query: { graph } },
+      index: { entity: "product", primary_key: "id" },
+    } as unknown as SearchTypes.SearchSeedContext
+
+    const mutations = await productIndex.consume!(
+      { name: "product.deleted", data: ids.map((id) => ({ id })) },
+      context,
+    )
+
+    expect(mutations).toEqual([{ action: "delete", filters: { id: ids } }])
+    expect(graph).not.toHaveBeenCalled()
+  })
+
+  it("seeds two pages with one pricing read per currency per page", async () => {
+    const rows = Array.from({ length: 201 }, (_, index) => ({
+      id: `prod_${String(index).padStart(3, "0")}`,
+      title: `Product ${index}`,
+    }))
+    const graph = jest.fn(async (input: {
+      context?: unknown
+      filters: { id?: string[] | { $gt: string } }
+      pagination?: { take: number }
+    }) => {
+      if ("context" in input) {
+        const ids = input.filters.id as string[]
+        return {
+          data: rows.filter((row) => ids.includes(row.id)).map((row) => ({
+            id: row.id,
+            variants: [{
+              calculated_price: { calculated_amount: 10, original_amount: 15 },
+            }],
+          })),
+        }
+      }
+      const cursor = (input.filters.id as { $gt: string } | undefined)?.$gt
+      return {
+        data: rows
+          .filter((row) => cursor === undefined || row.id > cursor)
+          .slice(0, input.pagination!.take),
+      }
+    })
+    const context = {
+      container: { query: { graph } },
+      index: { entity: "product", primary_key: "id" },
+    } as unknown as SearchTypes.SearchSeedContext
+    const batches: SearchTypes.SearchMutation[][] = []
+
+    for await (const batch of productIndex.seed(context)) {
+      batches.push(batch)
+    }
+
+    const pages = [rows.slice(0, 200), rows.slice(200)]
+    expect(batches).toEqual(pages.map((page) => [{
+      action: "upsert",
+      documents: page.map((row) => expect.objectContaining({
+        ...row,
+        min_price_eur: 10,
+        min_price_usd: 10,
+      })),
+    }]))
+    expect(graph).toHaveBeenCalledTimes(6)
+    pages.forEach((page, pageIndex) => {
+      expect(graph).toHaveBeenNthCalledWith(
+        pageIndex * 3 + 1,
+        expect.objectContaining({
+          filters: pageIndex === 0 ? {} : { id: { $gt: rows[199].id } },
+          pagination: { take: 200, order: { id: "ASC" } },
+        }),
+      )
+      for (const call of [2, 3]) {
+        expect(graph).toHaveBeenNthCalledWith(
+          pageIndex * 3 + call,
+          expect.objectContaining({
+            filters: { id: page.map((row) => row.id) },
+            context: expect.anything(),
+          }),
+        )
+      }
+    })
+  })
+
   it("seeds and consumes the same priced documents in batches", async () => {
     const rows = [
       { id: "prod_1", title: "First product" },
