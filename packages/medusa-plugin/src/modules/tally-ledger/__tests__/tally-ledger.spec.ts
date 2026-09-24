@@ -20,6 +20,37 @@ moduleIntegrationTestRunner<TallyLedgerModuleService>({
     }
     afterEach(() => jest.restoreAllMocks())
 
+    it('records top-ups with claim fencing and stores empty lists as null', async () => {
+      const { command: claim } = await service.claim(input)
+      const applied = [{ inventory_item_id: 'i', location_id: 'berlin', shortfall: 1 }]
+      const pending = [{ inventory_item_id: 'j', location_id: 'berlin', shortfall: 2 }]
+      expect(await service.recordStockTopUps(input.id, claim.claim_token, applied, pending)).toBe(true)
+      expect(await service.recordStockTopUps(input.id, 'wrong-token', [], null)).toBe(false)
+      expect(await service.retrieveTallyCommand(input.id)).toMatchObject({ stock_topups_applied: applied, stock_topups_pending: pending })
+      expect(await service.recordStockTopUps(input.id, claim.claim_token, [], [])).toBe(true)
+      expect(await service.retrieveTallyCommand(input.id)).toMatchObject({ stock_topups_applied: null, stock_topups_pending: null })
+      expect(await service.recordStockTopUps(input.id, claim.claim_token, applied, null)).toBe(true)
+      expect(await service.retrieveTallyCommand(input.id)).toMatchObject({ stock_topups_applied: applied, stock_topups_pending: null })
+    })
+
+    it('keeps applied top-ups on release and permits an immediate re-claim', async () => {
+      const { command: claim } = await service.claim(input)
+      const applied = [{ inventory_item_id: 'i', location_id: 'berlin', shortfall: 1 }]
+      await service.recordStockTopUps(input.id, claim.claim_token, applied, null)
+      await service.release(input.id, claim.claim_token)
+      const next = await service.claim(input)
+      expect(next.claimed).toBe(true)
+      expect(next.command.claim_token).not.toBe(claim.claim_token)
+      expect(next.command.stock_topups_applied).toEqual(applied)
+    })
+
+    it('deletes a released row without applied top-ups', async () => {
+      const { command: claim } = await service.claim(input)
+      await service.recordStockTopUps(input.id, claim.claim_token, [], [{ inventory_item_id: 'i', location_id: 'berlin', shortfall: 1 }])
+      await service.release(input.id, claim.claim_token)
+      expect(await service.listTallyCommands({ id: input.id })).toEqual([])
+    })
+
     it('asserts the current in-progress claim', async () => {
       const { command: claim } = await service.claim(input)
       await expect(service.assertClaim(input.id, claim.claim_token)).resolves.toBeUndefined()

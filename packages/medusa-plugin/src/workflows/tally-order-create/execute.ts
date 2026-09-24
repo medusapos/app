@@ -5,6 +5,7 @@ import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'
 import { commandFingerprint } from './fingerprint'
+import type { StockTopUp } from './stock'
 import { payloadShapeErrors } from './payload-shape'
 import { runOrderCreate, type TallyPluginOptions } from './run'
 
@@ -64,7 +65,9 @@ export async function executeOrderCreate(
           }
           throw error
         }
-        const result = await runOrderCreate(container, command, options)
+        const result = await runOrderCreate(container, command, options, {
+          claimToken: claim.claimToken, carriedTopUps: (claim.command.stock_topups_applied ?? []) as unknown as StockTopUp[],
+        })
         await ledger.complete(id, claim.claimToken, result)
         completed = true
         return { kind: 'result', result }

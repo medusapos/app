@@ -1,3 +1,15 @@
+export type StockTopUp = { inventory_item_id: string; location_id: string; shortfall: number }
+
+export function mergeStockTopUps(...lists: StockTopUp[][]): StockTopUp[] {
+  const merged: StockTopUp[] = []
+  for (const topUp of lists.flat()) {
+    const existing = merged.find(item => item.inventory_item_id === topUp.inventory_item_id && item.location_id === topUp.location_id)
+    if (existing) existing.shortfall += topUp.shortfall
+    else merged.push({ ...topUp })
+  }
+  return merged
+}
+
 export type VariantInventory = { variantId: string; manageInventory: boolean
   items: Array<{ inventoryItemId: string; requiredQuantity: number }> }
 export type LevelAt = { inventoryItemId: string; stocked: number; reserved: number }
