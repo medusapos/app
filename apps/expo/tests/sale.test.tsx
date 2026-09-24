@@ -141,7 +141,10 @@ describe('sale', () => {
     expect(screen.getByText('Test shop')).toBeTruthy();
     expect(screen.getByText('1 High Street')).toBeTruthy();
     expect(screen.getByText(`Order ${before.id.slice(-8)}`)).toBeTruthy();
-    expect(screen.getByText(before.createdAt)).toBeTruthy();
+    expect(screen.getByText(new Date(before.createdAt).toLocaleString())).toBeTruthy();
+    expect(screen.queryByText(before.createdAt)).toBeNull();
+    expect(screen.queryByText(/^Register:/)).toBeNull();
+    expect(screen.getByText(`Cashier: ${session.email}`)).toBeTruthy();
     expect(completed).toHaveBeenCalledTimes(1);
     expect(completed.mock.calls[0][0]).toMatchObject({ registerId: 'register-1', cashierRef: session.email,
       totalMinor: 4375, payments: [{ method: 'cash', amountMinor: 4375, tenderedMinor: 5000, changeMinor: 625 }] });
@@ -195,6 +198,13 @@ describe('sale', () => {
     expect(sale.order.balanceDueMinor).toBe(0);
     await act(async () => { click('Complete sale'); });
     expect(sale.stage.kind).toBe('receipt');
+  });
+
+  it('shows the cashier display name when supplied to the receipt', () => {
+    const order = createOrderBuilder({ currency: settings.currency, taxContext: taxContextFor(settings) }).getSnapshot();
+    render(<Receipt order={order} settings={settings} cashier="Alex Shopkeeper" registerId="register-1" newSale={() => {}} />);
+    expect(screen.getByText('Cashier: Alex Shopkeeper')).toBeTruthy();
+    expect(screen.queryByText(/^Register:/)).toBeNull();
   });
 
   it('completes a card terminal payment with its optional reference', async () => {

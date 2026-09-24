@@ -112,14 +112,17 @@ describe('Catalogue', () => {
     mount([]);
     expect(screen.getByText('No products yet.')).toBeTruthy();
   });
-  it.each([[599, 2], [600, 4], [1023, 4], [1024, 6]])('uses %i px width for %i columns', (width, columns) => {
-    const originalWidth = document.documentElement.clientWidth;
-    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: width });
-    fireEvent(window, new Event('resize'));
+  it('uses the catalogue pane width for two to six columns with room for 160 px tiles', () => {
     mount();
-    expect(screen.getByTestId('grid').getAttribute('data-columns')).toBe(String(columns));
-    Object.defineProperty(document.documentElement, 'clientWidth', { configurable: true, value: originalWidth });
-    fireEvent(window, new Event('resize'));
+    const grid = screen.getByTestId('grid');
+    const pane = grid.parentElement as HTMLElement & {
+      __reactLayoutHandler: (event: { nativeEvent: { layout: { width: number } } }) => void;
+    };
+    expect(grid.getAttribute('data-columns')).toBe('2');
+    for (const [width, columns] of [[300, 2], [511, 2], [512, 3], [680, 4], [848, 5], [1016, 6], [1600, 6], [400, 2]]) {
+      act(() => pane.__reactLayoutHandler({ nativeEvent: { layout: { width } } }));
+      expect(grid.getAttribute('data-columns')).toBe(String(columns));
+    }
   });
 });
 

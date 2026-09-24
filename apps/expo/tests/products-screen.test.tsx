@@ -36,8 +36,8 @@ vi.mock('@tallyui/components', () => ({
     {taxLines?.map((line, index) => <span key={index}>{line.label}: {formatMoney(line.amount)}</span>)}
     <span>Total: {formatMoney(total)}</span>
   </div>,
-  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) => (
-    <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
+  ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
+    <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
   ),
   ProductCard: ({ doc, onPress }: ComponentProps<typeof ProductCard>) => <button onClick={onPress}>{doc.title}</button>,
   SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder }: ComponentProps<typeof SearchInput>) => (
@@ -64,6 +64,18 @@ beforeEach(() => {
 });
 
 describe('ProductsScreen catalogue', () => {
+  it('uses the catalogue layout width for two to six columns with room for 160 px tiles', async () => {
+    await mount();
+    const grid = screen.getByTestId('product-grid');
+    const pane = grid.parentElement as HTMLElement & {
+      __reactLayoutHandler: (event: { nativeEvent: { layout: { width: number } } }) => void;
+    };
+    expect(grid.getAttribute('data-columns')).toBe('2');
+    for (const [width, columns] of [[300, 2], [511, 2], [512, 3], [680, 4], [848, 5], [1016, 6], [1600, 6], [400, 2]]) {
+      act(() => pane.__reactLayoutHandler({ nativeEvent: { layout: { width } } }));
+      expect(grid.getAttribute('data-columns')).toBe(String(columns));
+    }
+  });
   it('keeps cached sellable products sorted while offline and adds selections to the cart', async () => {
     const product = (id: string, title: string, status = 'published') => ({
       id, title, status, variants: [{ id: `${id}-one`, title: 'One size', sku: id,
@@ -98,12 +110,12 @@ describe('ProductsScreen catalogue', () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  it('records the finalized sale through the shared outbox', async () => {
+  it.each([undefined, 'Alex Shopkeeper'])('records the cashier email and shows the receipt with name %s', async (name) => {
     vi.mocked(useReplicatedProducts).mockReturnValue({ state: 'synced', error: null, products: [{
       id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
         prices: [{ amount: 12, currency_code: 'eur' }] }],
     }] });
-    await mount();
+    await mount(true, false, name);
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
     fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
@@ -111,6 +123,7 @@ describe('ProductsScreen catalogue', () => {
       syncStatus: 'pending', totalMinor: 1500, cashierRef: 'admin@store.test',
     }));
     expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    expect(screen.getByText(`Cashier: ${name ?? 'admin@store.test'}`)).toBeTruthy();
   });
 });
 afterEach(() => {
@@ -119,9 +132,9 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function mount(signedIn = true, orders = false) {
+async function mount(signedIn = true, orders = false, name?: string) {
   if (signedIn) saveSession(localStorage, {
-    baseUrl: 'https://store.test', email: 'admin@store.test',
+    baseUrl: 'https://store.test', email: 'admin@store.test', name,
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
   await act(async () => { render(<SessionProvider>{orders ? <OrdersScreen /> : <ProductsScreen />}</SessionProvider>); });
@@ -148,16 +161,20 @@ describe('Orders screen and sync status', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
       { ...order, id: 'rejected', syncStatus: 'rejected', error: { code: 'invalid', message: 'Unknown variant' } },
       { ...order, id: 'warned', syncStatus: 'applied', serverRefs: { orderId: 'server', displayId: '42', totalMinor: 1000 },
+        lines: order.lines.map((line) => ({ ...line, quantity: 3 })),
         warnings: [{ code: 'insufficient_stock', variantId: 'blue', quantity: 2 },
           { code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }, order,
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Recent']);
-    for (const label of ['invalid: Unknown variant', 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'applied · 42']) {
+    for (const label of ['invalid: Unknown variant', 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order #42 · 3 items']) {
       expect(screen.getAllByText(label)).toHaveLength(2);
     }
-    expect(screen.getByText('pending')).toBeTruthy();
-    expect(screen.getAllByText(`${new Date(order.createdAt).toLocaleString()} · €12.00`)).toHaveLength(5);
+    expect(screen.getAllByText('1 item')).toHaveLength(3);
+    const dateAndTotal = `${new Date(order.createdAt).toLocaleString()} · €12.00`;
+    expect(screen.getByText(`${dateAndTotal} · Waiting to sync`)).toBeTruthy();
+    expect(screen.getAllByText(`${dateAndTotal} · Synced`)).toHaveLength(2);
+    expect(screen.getAllByText(`${dateAndTotal} · Not accepted`)).toHaveLength(2);
   });
 
   it('redirects Orders to login when signed out', async () => {
