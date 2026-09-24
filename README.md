@@ -52,7 +52,7 @@ must include the app's origin (`http://localhost:8081` for local development).
 
 ## Known limitations
 
-- Replicated stock levels and prices are a snapshot from the first sync and are not refreshed when only stock or prices change. Do not treat the stock shown in the POS as live. Sales are still recorded correctly: the server checks and tops up stock when recording each sale (see [ADR 0003](docs/adr/0003-offline-sale-stock.md)). A TallyUI fix is in progress under ADR-060.
+- Stock is checked against the store every 5 minutes and when the app returns to the foreground (TallyUI ADR-060), so the stock shown in the POS is live within that cadence; each variant's stock label says when it was last checked. Prices are still a snapshot from the last catalogue sync and are not refreshed when only prices change: only stock is reconciled. Sales are recorded correctly either way: the server checks and tops up stock when recording each sale (see [ADR 0003](docs/adr/0003-offline-sale-stock.md)).
 
 ## Tech Stack
 

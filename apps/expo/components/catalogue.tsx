@@ -18,14 +18,17 @@ export function formatStockSyncTime(time: Date, locale?: string, hour12?: boolea
   return time.toLocaleTimeString(locale, { hour: '2-digit', minute: '2-digit', hour12 });
 }
 
-export function Catalogue<Doc>({ products, traits, currency, onSelect, statusText, lastSyncedAt }: {
+export function Catalogue<Doc>({ products, traits, currency, onSelect, statusText, lastSyncedAt, lastStockCheckAt }: {
   products: Doc[];
   traits: ProductTraits<Doc>;
   currency: string;
   onSelect: (entry: CatalogueEntry<Doc>) => void;
   statusText?: string;
   lastSyncedAt: Date | null;
+  /** The last completed stock reconcile pass this session, which beats the catalogue sync. */
+  lastStockCheckAt?: Date | null;
 }) {
+  const stockAsOf = lastStockCheckAt ?? lastSyncedAt;
   const [query, setQuery] = useState('');
   const [choices, setChoices] = useState<CatalogueEntry<Doc>[]>([]);
   const [width, setWidth] = useState(0);
@@ -61,7 +64,7 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
                 <Text className="font-semibold text-foreground">{entry.variant.title}</Text>
                 <Text className="text-muted-foreground">{entry.variant.sku}</Text>
                 <Text className="text-foreground">{variantPriceLabel(entry.variant, currency)}</Text>
-                <Text className="text-muted-foreground">{STOCK_LABEL[entry.variant.stock.status]} · {lastSyncedAt ? `as of ${formatStockSyncTime(lastSyncedAt, undefined, hour12)}` : 'not yet synced'}</Text>
+                <Text className="text-muted-foreground">{STOCK_LABEL[entry.variant.stock.status]} · {stockAsOf ? `as of ${formatStockSyncTime(stockAsOf, undefined, hour12)}` : 'not yet synced'}</Text>
               </Pressable>
             ))}
             <Pressable accessibilityRole="button" onPress={() => setChoices([])} className="rounded-md border border-border bg-card px-4 py-3">

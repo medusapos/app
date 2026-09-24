@@ -15,6 +15,7 @@ import OrdersScreen from '../app/orders';
 import { useOutboxContext } from '../lib/outbox-context';
 import { SyncStatus } from '../components/sync-status';
 import { OutboxStrip, StoreRefused } from '../components/store-refused';
+import { formatStockSyncTime } from '../components/catalogue';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
@@ -50,6 +51,11 @@ vi.mock('@tallyui/components', () => ({
   ),
 }));
 
+type Replicated = ReturnType<typeof useReplicatedProducts>;
+const reconcileStock = vi.fn(async () => {});
+const replicated = (over: Partial<Replicated>): Replicated => ({ products: [], state: 'synced', error: null,
+  lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, ...over });
+
 const settings: StoreSettings = {
   storeName: 'Test shop', currency: 'EUR', taxRatePpm: 250000, pricesIncludeTax: false,
   location: { id: 'loc', name: 'Main', countryCode: 'dk' },
@@ -63,7 +69,7 @@ beforeEach(() => {
   });
   saveCachedSettings(localStorage, 'https://store.test', settings);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
-  vi.mocked(useReplicatedProducts).mockReturnValue({ products: [], state: 'synced', error: null, lastSyncedAt: null });
+  vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
 });
 
@@ -135,10 +141,10 @@ describe('ProductsScreen catalogue', () => {
       id, title, status, variants: [{ id: `${id}-one`, title: 'One size', sku: id,
         prices: [{ amount: 12.5, currency_code: 'eur' }] }],
     });
-    vi.mocked(useReplicatedProducts).mockReturnValue({
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
       products: [product('z', 'Zebra'), product('draft', 'Draft', 'draft'), product('a', 'Apple')],
-      state: 'offline', error: 'Failed to fetch', lastSyncedAt: null,
-    });
+      state: 'offline', error: 'Failed to fetch',
+    }));
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Sign out', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
@@ -165,10 +171,10 @@ describe('ProductsScreen catalogue', () => {
   });
 
   it.each([undefined, 'Alex Shopkeeper'])('records the cashier email and shows the receipt with name %s', async (name) => {
-    vi.mocked(useReplicatedProducts).mockReturnValue({ state: 'synced', error: null, lastSyncedAt: null, products: [{
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
       id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
         prices: [{ amount: 12, currency_code: 'eur' }] }],
-    }] });
+    }] }));
     await mount(true, false, name);
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
     fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
@@ -297,6 +303,41 @@ describe('Orders screen and sync status', () => {
       expect(screen.getByLabelText('Sync status').textContent).toBe('1 sale waiting to sync · retrying (network) in 2s');
       cleanup();
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('ProductsScreen live stock', () => {
+  const item = (id: string, stocked: number) => ({ inventory_item_id: id, required_quantity: 1,
+    inventory: { location_levels: [{ stocked_quantity: stocked, reserved_quantity: 0 }] } });
+  const shirt = { id: 'shirt', title: 'Shirt', status: 'published', variants: [
+    { id: 'small', title: 'Small', sku: 'S', prices: [], manage_inventory: true, inventory_items: [item('inv-small', 0)] },
+    { id: 'large', title: 'Large', sku: 'L', prices: [], manage_inventory: true, inventory_items: [item('inv-large', 4)] },
+  ] };
+
+  it('reads stock from the overlay before the replicated product', async () => {
+    const pass = new Date('2026-09-24T10:42:00Z');
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [shirt], lastSyncedAt: new Date(0),
+      lastStockCheckAt: pass, stockOverlay: new Map([
+        ['inv-small', [{ stocked_quantity: 3, reserved_quantity: 0 }]],
+        ['inv-large', [{ stocked_quantity: 2, reserved_quantity: 2 }]],
+      ]) }));
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    const asOf = `as of ${formatStockSyncTime(pass)}`;
+    expect(screen.getByRole('button', { name: /Small/ }).textContent).toContain(`In Stock · ${asOf}`);
+    expect(screen.getByRole('button', { name: /Large/ }).textContent).toContain(`Out of Stock · ${asOf}`);
+  });
+
+  it('reconciles stock once for each applied order with a new insufficient_stock warning', async () => {
+    const short: PosOrder = { ...savedSale(), syncStatus: 'applied',
+      warnings: [{ code: 'insufficient_stock', variantId: 'blue', quantity: 2 }] };
+    const outbox = useOutboxContext();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...outbox, recent: [short, { ...short, id: 'queued', syncStatus: 'pending' }] });
+    const view = await mount();
+    expect(reconcileStock).toHaveBeenCalledTimes(1);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...outbox, recent: [{ ...short }] });
+    view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>);
+    expect(reconcileStock).toHaveBeenCalledTimes(1);
   });
 });
 
