@@ -39,6 +39,8 @@ vi.mock('@tallyui/components', () => ({
   SearchInput: () => <input aria-label="Search catalogue" />,
 }));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
+// expo-localization's native module isn't available under vitest.
+vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({
   useOutboxContext: () => ({ record: vi.fn(), state: { pending: 0, sending: false }, recent: [] }),

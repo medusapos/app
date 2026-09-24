@@ -26,6 +26,11 @@ vi.mock('@tallyui/components', () => ({
     <button onClick={onPress}>{doc.title as ReactNode}</button>
   ),
 }));
+// expo-localization's native module isn't available under vitest; mock it with a controllable clock preference.
+const localization = vi.hoisted(() => ({ uses24hourClock: null as boolean | null }));
+vi.mock('expo-localization', () => ({
+  getCalendars: () => [{ uses24hourClock: localization.uses24hourClock }],
+}));
 
 const traits = medusaConnector.traits.product;
 const products = [
@@ -41,7 +46,7 @@ const products = [
   ] },
 ];
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); localization.uses24hourClock = null; });
 
 function mount(items = products, lastSyncedAt: Date | null = null) {
   const onSelect = vi.fn();
@@ -51,17 +56,31 @@ function mount(items = products, lastSyncedAt: Date | null = null) {
 }
 
 describe('Catalogue', () => {
-  it('formats the sync time using device-local hours and minutes', () => {
-    const time = new Date('2026-09-24T10:42:00Z');
-    expect(formatStockSyncTime(time)).toBe(time.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }));
+  it('follows a 24-hour device clock and drops AM/PM', () => {
+    const time = new Date(2026, 8, 24, 10, 42);
+    expect(formatStockSyncTime(time, 'en-US', false)).toBe('10:42');
   });
-  it('shows the last successful sync time with each stock label', () => {
+  it('follows a 12-hour device clock and keeps AM/PM', () => {
+    const time = new Date(2026, 8, 24, 10, 42);
+    expect(formatStockSyncTime(time, 'en-US', true)).toMatch(/^10:42[  ]?AM$/);
+  });
+  it('keeps the locale default when the device reports no clock preference', () => {
+    const time = new Date(2026, 8, 24, 10, 42);
+    expect(formatStockSyncTime(time, 'en-US')).toMatch(/^10:42[  ]?AM$/);
+  });
+  it.each([
+    [true, false] as const, // device is 24-hour -> hour12 forced off
+    [false, true] as const, // device is 12-hour -> hour12 forced on
+    [null, undefined] as const, // device reports no preference -> locale default
+  ])('shows the last successful sync time with each stock label (uses24hourClock=%s)', (uses24hourClock, hour12) => {
+    localization.uses24hourClock = uses24hourClock;
     const time = new Date('2026-09-24T10:42:00Z');
+    const expected = formatStockSyncTime(time, undefined, hour12);
     mount(products, time);
     fireEvent.click(screen.getByRole('button', { name: 'Red Shirt' }));
     const chooser = within(screen.getByLabelText('Choose variant'));
-    expect(chooser.getByText(`In Stock · as of ${formatStockSyncTime(time)}`)).toBeTruthy();
-    expect(chooser.getByText(`Out of Stock · as of ${formatStockSyncTime(time)}`)).toBeTruthy();
+    expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();
+    expect(chooser.getByText(`Out of Stock · as of ${expected}`)).toBeTruthy();
   });
   it('filters products through search and shows matching counts', () => {
     const { input } = mount();
