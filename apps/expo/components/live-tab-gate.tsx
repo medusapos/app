@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, Text, View } from 'react-native';
 import {
   startLiveTab as startLiveTabDefault,
@@ -44,10 +44,16 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
 
   useEffect(() => () => { unmountedRef.current = true; }, []);
 
+  // Layout effects run synchronously in the commit, before any passive effect
+  // anywhere in the tree (including a just-mounted child's own mount effect),
+  // so `onPark` can never read a commit that hasn't actually happened yet.
+  useLayoutEffect(() => {
+    committedShowChildrenRef.current = showChildren;
+  }, [showChildren]);
+
   // Resolves whoever is waiting for children to unmount, once that unmount
   // (or remount) has committed: children's own effect cleanups have already run.
   useEffect(() => {
-    committedShowChildrenRef.current = showChildren;
     committedResolveRef.current?.();
     committedResolveRef.current = null;
   }, [showChildren]);
