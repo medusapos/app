@@ -81,6 +81,8 @@ Replicated stock and prices are a snapshot from the first sync, not live —
 see the README's [Known limitations](../README.md#known-limitations)
 section for the full picture.
 
+Sale prices from Medusa price lists are not shown yet; base prices only.
+
 ## Report a problem
 
 The fastest way: tap **Send feedback**, on the sign-in screen or the Orders
