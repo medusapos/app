@@ -1,7 +1,7 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import {
-  completeOrderWorkflow, convertDraftOrderWorkflow, createOrderFulfillmentWorkflow,
+  capturePaymentWorkflow, completeOrderWorkflow, convertDraftOrderWorkflow, createOrderFulfillmentWorkflow,
   createOrderPaymentCollectionWorkflow, markPaymentCollectionAsPaid,
 } from '@medusajs/medusa/core-flows'
 import { fulfillmentGroups } from './plan'
@@ -12,6 +12,8 @@ export async function resumeOrderCreate(container: MedusaContainer, orderId: str
   const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
     entity: 'order', filters: { id: orderId }, fields: ['id', 'status', 'is_draft_order', 'metadata',
       'payment_collections.id', 'payment_collections.status', 'fulfillments.id', 'fulfillments.canceled_at',
+      'payment_collections.payment_sessions.id', 'payment_collections.payment_sessions.status',
+      'payment_collections.payments.id', 'payment_collections.payments.captured_at',
       'items.id', 'items.quantity', 'items.requires_shipping', 'items.detail.quantity', 'items.detail.fulfilled_quantity'],
   })
   if (order.status === 'completed') return
@@ -22,9 +24,20 @@ export async function resumeOrderCreate(container: MedusaContainer, orderId: str
     collections = result
   }
   for (const collection of collections) {
-    if (collection.status !== 'completed') await markPaymentCollectionAsPaid(container).run({
-      input: { order_id: orderId, payment_collection_id: collection.id },
-    })
+    if (collection.status === 'completed') continue
+    if (collection.status === 'not_paid') {
+      await markPaymentCollectionAsPaid(container).run({ input: { order_id: orderId, payment_collection_id: collection.id } })
+    } else {
+      // A crash between authorising and capturing leaves the collection authorized; a provider that authorises asynchronously leaves it awaiting with a pending session.
+      const paymentIds = new Set<string>(collection.payments.filter(payment => payment.captured_at === null).map(payment => payment.id))
+      for (const session of collection.payment_sessions) {
+        if (session.status === 'pending') {
+          const payment = await container.resolve(Modules.PAYMENT).authorizePaymentSession(session.id, {})
+          paymentIds.add(payment!.id)
+        }
+      }
+      for (const payment_id of paymentIds) await capturePaymentWorkflow(container).run({ input: { payment_id } })
+    }
   }
   const remaining = order.items.map(item => ({ ...item,
     quantity: Number(item.quantity) - Number(item.detail.fulfilled_quantity),
