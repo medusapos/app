@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { getCalendars } from 'expo-localization';
 import type { ProductTraits } from '@tallyui/core';
-import { ProductCard, ProductGrid, SearchInput } from '@tallyui/components';
+import { ProductCard, ProductGrid, ProductStockBadge, SearchInput } from '@tallyui/components';
 import { searchProducts } from '@tallyui/pos';
 import { catalogueEntries, findEntryByCode, variantPriceLabel, type CatalogueEntry } from '../lib/catalogue';
 
@@ -89,11 +89,17 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
       </View>
       <ProductGrid items={results} numColumns={columns}
         renderItem={(product: Doc) => (
-          <ProductCard doc={product} onPress={() => {
-            const variants = entries.filter((entry) => entry.product === product);
-            if (variants.length === 1) select(variants[0]);
-            else setChoices(variants);
-          }} />
+          <View testID={`product-tile-${traits.getName(product)}`} className="self-stretch gap-1">
+            <ProductCard doc={product} onPress={() => {
+              const variants = entries.filter((entry) => entry.product === product);
+              if (variants.length === 1) select(variants[0]);
+              else setChoices(variants);
+            }} />
+            {/* ProductStockBadge's own default className is self-start, which left-aligns it under
+                the card's edge; the wrapper above no longer sets items-center, so this stretches
+                the card to the grid cell's full width instead of shrinking it to content. */}
+            <ProductStockBadge doc={product} showAsOf={false} />
+          </View>
         )}
         emptyState={<Text className="mt-10 text-center text-sm text-muted-foreground">
           {query.trim() ? `No products match "${query.trim()}".` : 'No products yet.'}

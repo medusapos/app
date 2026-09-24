@@ -5,7 +5,7 @@ import { Subject } from 'rxjs';
 import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import type { ProductCard, ProductGrid, SearchInput } from '@tallyui/components';
+import type { ProductCard, ProductGrid, ProductStockBadge, SearchInput } from '@tallyui/components';
 import { Catalogue, formatStockSyncTime } from '../components/catalogue';
 import { createTallyDatabase } from '@tallyui/database';
 import { clearProductCache, productCacheName, productCacheStorage } from '../lib/product-cache';
@@ -24,6 +24,12 @@ vi.mock('@tallyui/components', () => ({
   ),
   ProductCard: ({ doc, onPress }: ComponentProps<typeof ProductCard>) => (
     <button onClick={onPress}>{doc.title as ReactNode}</button>
+  ),
+  // Stands in for TallyUI's real badge (which reads useProductStock off a ConnectorProvider):
+  // reports the status this doc's own fields resolve to, so a test can tell which product a
+  // tile's badge belongs to and confirm the tile never asks it to show an "as of".
+  ProductStockBadge: ({ doc, showAsOf }: ComponentProps<typeof ProductStockBadge>) => (
+    <span data-testid={`stock-badge-${doc.id}`} data-as-of={String(showAsOf)}>{traits.getStock(doc).status}</span>
   ),
 }));
 // expo-localization's native module isn't available under vitest; mock it with a controllable clock preference.
@@ -191,6 +197,19 @@ describe('Catalogue', () => {
   it('shows an empty catalogue', () => {
     mount([]);
     expect(screen.getByText('No products yet.')).toBeTruthy();
+  });
+  it('renders a stock badge on every tile from the tile\'s own (already-overlaid) product, without an "as of"', () => {
+    const soldOut = { id: 'boots', title: 'Green Boots', status: 'published', variants: [
+      { id: 'boots-one', title: 'One size', sku: 'BOOTS', barcode: '333',
+        prices: [{ amount: 40, currency_code: 'eur' }], manage_inventory: true, inventory_quantity: 0 },
+    ] };
+    mount([...products, soldOut]);
+    const hatBadge = screen.getByTestId('stock-badge-hat');
+    expect(hatBadge.textContent).toBe('in_stock');
+    expect(hatBadge.getAttribute('data-as-of')).toBe('false');
+    const bootsBadge = screen.getByTestId('stock-badge-boots');
+    expect(bootsBadge.textContent).toBe('out_of_stock');
+    expect(bootsBadge.getAttribute('data-as-of')).toBe('false');
   });
   it('uses the catalogue pane width for two to six columns with room for 160 px tiles', () => {
     mount();

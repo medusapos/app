@@ -45,6 +45,9 @@ vi.mock('@tallyui/components', () => ({
     <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
   ),
   ProductCard: ({ doc, onPress }: ComponentProps<typeof ProductCard>) => <button onClick={onPress}>{doc.title}</button>,
+  // This file's tests aren't about the tile badge (see catalogue.test.tsx); a stub keeps the mock
+  // of '@tallyui/components' complete now that catalogue.tsx renders one per tile.
+  ProductStockBadge: () => null,
   SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder }: ComponentProps<typeof SearchInput>) => (
     <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)}
       onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />
