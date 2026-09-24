@@ -62,7 +62,7 @@ export default async function seedE2e({ container }: ExecArgs) {
   if (!set) set = await fulfillment.createFulfillmentSets({
     name: "Copenhagen pickup", type: "pickup",
   })
-  let [zone] = await fulfillment.listServiceZones({ fulfillment_set_id: set.id, name: "Denmark" })
+  let [zone] = await fulfillment.listServiceZones({ fulfillment_set: { id: set.id }, name: "Denmark" })
   if (!zone) zone = await fulfillment.createServiceZones({
     fulfillment_set_id: set.id, name: "Denmark", geo_zones: [{ country_code: "dk", type: "country" }],
   })
