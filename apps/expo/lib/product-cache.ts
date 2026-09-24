@@ -12,6 +12,9 @@ const closers = new Map<string, () => Promise<void>>();
 // `closeProductCaches` itself), kept until they settle so a close started by one is
 // still awaited by the other even after its cache is gone from `openCaches`.
 const pendingCloses = new Set<Promise<void>>();
+// Opens from `openProductCache` still in flight: resolves to the registered
+// `{ close }`, or `undefined` if the open failed (which counts as closed).
+const pendingOpens = new Set<Promise<{ close: () => Promise<void> } | undefined>>();
 
 /** Persistent browser storage, with memory storage for environments without IndexedDB. */
 export function productCacheStorage(): RxStorage<any, any> {
@@ -46,13 +49,30 @@ export function registerOpenCache(name: string, db: CachedDb): () => Promise<voi
 }
 
 /**
- * Closes every registered cache through that same once-close, and also
- * awaits closes already started (by the function above) that have not
- * finished yet.
+ * Opens a cache, tracked while in flight so `closeProductCaches` can wait
+ * for it, and registers the result through the same once-close as `registerOpenCache`.
+ */
+export function openProductCache<T extends CachedDb>(
+  name: string, open: () => Promise<T>,
+): Promise<{ db: T; close: () => Promise<void> }> {
+  const opened = open().then((db) => ({ db, close: registerOpenCache(name, db) }));
+  const tracked = opened.catch(() => undefined);
+  pendingOpens.add(tracked);
+  void tracked.finally(() => pendingOpens.delete(tracked));
+  return opened;
+}
+
+/**
+ * Closes every registered cache through that same once-close, awaits closes
+ * already started that have not finished, and waits for every open still in
+ * flight before closing what it opened the same way.
  */
 export async function closeProductCaches(): Promise<void> {
   for (const close of closers.values()) close();
+  const opens = Array.from(pendingOpens);
   await Promise.all(pendingCloses);
+  const opened = (await Promise.all(opens)).filter((o) => o !== undefined);
+  await Promise.all(opened.map((o) => o.close()));
 }
 
 /** Removes an open or closed backend cache without throwing. */

@@ -3,7 +3,8 @@ import { createRxDatabase } from 'rxdb';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import {
-  clearProductCache, closeProductCaches, isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache,
+  clearProductCache, closeProductCaches, isUnauthorizedError, openProductCache, productCacheName, productCacheStorage,
+  registerOpenCache,
 } from './product-cache';
 
 describe('productCacheStorage', () => {
@@ -149,5 +150,36 @@ describe('closeProductCaches', () => {
     await closeProductCaches();
     await expect(close()).resolves.toBeUndefined();
     expect(db.close).toHaveBeenCalledOnce();
+  });
+
+  it('waits for an openProductCache open still in flight, then closes it once', async () => {
+    let resolveOpen!: () => void;
+    const db = { remove: vi.fn(), close: vi.fn().mockResolvedValue(undefined) };
+    const open = vi.fn(() => new Promise<typeof db>((resolve) => { resolveOpen = () => resolve(db); }));
+    const opened = openProductCache(productCacheName('medusa', 'https://opening.test'), open);
+
+    const all = closeProductCaches();
+    let settled = false;
+    void all.then(() => { settled = true; });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(db.close).not.toHaveBeenCalled();
+
+    resolveOpen();
+    await all;
+    expect(settled).toBe(true);
+    expect(db.close).toHaveBeenCalledOnce();
+
+    const { close } = await opened;
+    await expect(close()).resolves.toBeUndefined();
+    expect(db.close).toHaveBeenCalledOnce();
+  });
+
+  it('does not reject or hang closeProductCaches when an in-flight open fails', async () => {
+    const open = vi.fn().mockRejectedValue(new Error('open failed'));
+    const opened = openProductCache(productCacheName('medusa', 'https://open-fails.test'), open);
+    opened.catch(() => {});
+    await expect(closeProductCaches()).resolves.toBeUndefined();
+    await expect(opened).rejects.toThrow('open failed');
   });
 });

@@ -175,6 +175,29 @@ describe('LiveTabGate', () => {
     expect(parkSettled).toBe(true);
   });
 
+  it('settles onPark without hanging when a hand-over arrives before `live` commits', async () => {
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    const mounts = vi.fn();
+    render(<LiveTabGate scope="store-race" startLiveTab={startLiveTab}>
+      <Marker onMount={mounts} text="children-rendered" />
+    </LiveTabGate>);
+    const instance = instances[0];
+
+    // The reviewer's repro: `live` and `onPark` land in the same batch, so
+    // `showChildren` goes true then false without ever committing `true` —
+    // nothing to wait a commit for.
+    let onParkPromise!: Promise<void>;
+    act(() => {
+      instance.subject.next('live');
+      onParkPromise = Promise.resolve(instance.options.onPark());
+    });
+
+    await act(async () => { await onParkPromise; });
+    expect(closeDatabasesMock).toHaveBeenCalledOnce();
+    expect(mounts).not.toHaveBeenCalled();
+    expect(screen.queryByText('children-rendered')).toBeNull();
+  });
+
   it('remounts children after a park settles, and not before', async () => {
     const { startLiveTab, instances } = fakeStartLiveTab();
     const mounts = vi.fn();

@@ -7,7 +7,7 @@ import {
 } from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
 import { stockOverlay$ } from '@tallyui/pos';
-import { isUnauthorizedError, productCacheName, productCacheStorage, registerOpenCache } from './product-cache';
+import { isUnauthorizedError, openProductCache, productCacheName, productCacheStorage } from './product-cache';
 
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error' | 'offline';
 
@@ -85,13 +85,14 @@ export function useReplicatedProducts(
     (async () => {
       try {
         const name = productCacheName(connector.id, baseUrl);
-        const db = await createTallyDatabase({ connector, name, storage: productCacheStorage() });
+        const { db, close: closeCache } = await openProductCache(
+          name, () => createTallyDatabase({ connector, name, storage: productCacheStorage() }),
+        );
         // Unmounted while opening: cleanup has already run, so start nothing that would outlive it.
         if (cancelled) {
-          await db.close();
+          await closeCache();
           return;
         }
-        const closeCache = registerOpenCache(name, db);
         cleanup.push(() => { void closeCache(); });
         const context: SyncContext = {
           connectorId: connector.id,
