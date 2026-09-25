@@ -27,6 +27,11 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
 // comes from its own module, and the POS pieces are stand-ins.
 vi.mock('@tallyui/components', async () => ({
   ...await import('../node_modules/@tallyui/components/src/layout/store-settings-choice-screen'),
+  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
+    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
+    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
+    {afterItems}{footer}
+  </div>,
   CartLine: ({ name, quantity, lineTotal }: CartLineProps) => <div>{name} × {quantity} = {formatMoney(lineTotal)}</div>,
   CartTotal: ({ total }: CartTotalProps) => <span>Total: {formatMoney(total)}</span>,
   CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,

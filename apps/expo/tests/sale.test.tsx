@@ -20,6 +20,11 @@ import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 
 vi.mock('@tallyui/components', () => ({
+  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
+    { items: T[]; renderItem: (item: T, index: number) => React.ReactNode; emptyState?: React.ReactNode; afterItems?: React.ReactNode; footer?: React.ReactNode }) => <div>
+    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
+    {afterItems}{footer}
+  </div>,
   CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) => <div role="group" aria-label={name}>
     <span>{name}</span><span>Quantity: {quantity}</span><span>Unit: {formatMoney(unitPrice)}</span><span>Line: {formatMoney(lineTotal)}</span>
   </div>,
