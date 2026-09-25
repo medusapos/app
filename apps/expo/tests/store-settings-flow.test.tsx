@@ -10,7 +10,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { posConnector } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
 import {
-  fetchStoreSettings, loadCachedPricing, loadSettingsChoice, saveCachedPricing, saveSettingsChoice, type StoreSettings,
+  fetchStoreSettings, loadCachedPricing, loadSettingsChoice, saveCachedPricing, saveCachedSettings, saveSettingsChoice, type StoreSettings,
 } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
@@ -237,21 +237,67 @@ describe('store settings flow', () => {
     fireEvent.click(button('Remove Shirt'));
     await act(async () => { fireEvent.click(button('Retry')); });
     await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
+    // The catalogue follows the replication context's region: Germany's own Shirt price is €20.
+    const shirtDe = { ...shirt, variants: [{ ...shirt.variants[0], prices: [{ amount: 20, currency_code: 'eur' }] }] };
+    vi.mocked(useReplicatedProducts).mockImplementation((_connector, context) => ({ products: [context.pricingContext?.region_id === 'reg_de' ? shirtDe : shirt],
+      state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}) }));
+    const region = () => vi.mocked(useReplicatedProducts).mock.lastCall![1].pricingContext?.region_id;
     fireEvent.click(button('Shirt'));
-    fireEvent.click(button('Card terminal'));
-    // Germany's settings (19% inclusive) arrive mid-payment: the card sale completes on Europe's 25% exclusive.
+    // Germany's settings (19% inclusive, its own prices) arrive mid-sale: the sale, and the catalogue, stay on Europe's.
     await act(async () => { settle.resolve({ currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000 },
       pricingContext: { region_id: 'reg_de', currency_code: 'eur', publishable_key: 'pk_1' } }); });
-    expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
+    expect(region()).toBe('reg_eu');
+    fireEvent.click(button('Shirt'));
+    expect(screen.getByText('Total: €30.00')).toBeTruthy();
+    fireEvent.click(button('Card terminal'));
+    expect(screen.getByText('Card terminal: €30.00')).toBeTruthy();
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     const record = vi.mocked(useOutboxContext().record);
     expect(record).toHaveBeenCalledOnce();
-    expect(record.mock.calls[0][0]).toMatchObject({ pricesIncludeTax: false, subtotalMinor: 1200, taxMinor: 300, totalMinor: 1500,
-      payments: [expect.objectContaining({ method: 'external', amountMinor: 1500 })] });
+    expect(record.mock.calls[0][0]).toMatchObject({ pricesIncludeTax: false, subtotalMinor: 2400, taxMinor: 600, totalMinor: 3000,
+      lines: [expect.objectContaining({ quantity: 2, unitPriceMinor: 1200 })],
+      payments: [expect.objectContaining({ method: 'external', amountMinor: 3000 })] });
+    expect(region()).toBe('reg_eu');
     await act(async () => { fireEvent.click(button('New sale')); });
+    expect(region()).toBe('reg_de');
     fireEvent.click(button('Shirt'));
-    expect(screen.getByText('Total: €12.00')).toBeTruthy();
+    expect(screen.getByText('Total: €20.00')).toBeTruthy();
   }, 20000);
+
+  it('keeps the POS and its sale when a retry resolves to the choice screen mid-sale, and shows the choice after it (a money rule)', async () => {
+    saveCachedPricing(localStorage, session.baseUrl, pricing);
+    let settle!: { resolve: (value: PricingSettings) => void; reject: (error: unknown) => void };
+    storeSettings.mockImplementation(() => new Promise((resolve, reject) => { settle = { resolve, reject }; }));
+    render(<ProductsScreen />);
+    await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledOnce());
+    await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
+    await pos();
+    await act(async () => { fireEvent.click(button('Retry')); });
+    await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
+    fireEvent.click(button('Shirt'));
+    fireEvent.click(button('Card terminal'));
+    await act(async () => { settle.reject(choiceRequired({ regions })); });
+    expect(screen.queryByText('Set up this till')).toBeNull();
+    expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    expect(vi.mocked(useOutboxContext().record).mock.calls[0][0]).toMatchObject({ totalMinor: 1500, taxMinor: 300 });
+    expect(screen.queryByText('Set up this till')).toBeNull();
+    await act(async () => { fireEvent.click(button('New sale')); });
+    expect(await screen.findByText('Set up this till')).toBeTruthy();
+  }, 20000);
+
+  it('resolves again when the stock location\'s country changes (D1)', async () => {
+    saveCachedSettings(localStorage, session.baseUrl, settings);
+    let fetched!: (value: StoreSettings) => void;
+    vi.mocked(fetchStoreSettings).mockReturnValue(new Promise((resolve) => { fetched = resolve; }));
+    storeSettings.mockResolvedValue(pricing);
+    render(<ProductsScreen />);
+    await pos();
+    expect(storeSettings.mock.calls.map((call) => call[1])).toEqual([{ country: 'dk' }]);
+    await act(async () => { fetched({ ...settings, location: { ...settings.location, countryCode: 'de' } }); });
+    await vi.waitFor(() => expect(storeSettings.mock.calls.map((call) => call[1])).toEqual([{ country: 'dk' }, { country: 'de' }]));
+    await pos();
+  });
 
   it('keeps the sync context through a token refresh, without re-resolving, and sends the new token', async () => {
     storeSettings.mockResolvedValue(pricing);

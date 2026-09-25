@@ -88,11 +88,11 @@ function PricingScreen(props: PricingProps) {
   const token = useRef(session.token);
   token.current = session.token;
   const [attempt, setAttempt] = useState(0);
-  // Read per request (as useOutbox), so a token refresh keeps this identity and never re-resolves.
-  const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
-    headers: { get Authorization() { return authHeaders(token.current).Authorization; } } }), [session.baseUrl, attempt]);
   // D1: the plugin taxes each order by the stock location's address, so the till's country is always its country.
   const country = settings.location.countryCode.toLowerCase();
+  // Read per request (as useOutbox), so a token refresh keeps this identity and never re-resolves; a new country does.
+  const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
+    headers: { get Authorization() { return authHeaders(token.current).Authorization; } } }), [session.baseUrl, attempt, country]);
   const store = useStoreSettings({
     connector, context, loadChoice: () => ({ ...loadSettingsChoice(defaultStorage(), session.baseUrl), country }),
     saveChoice: (choice) => saveSettingsChoice(defaultStorage(), session.baseUrl, choice),
@@ -100,20 +100,24 @@ function PricingScreen(props: PricingProps) {
   });
   // A Retry never unmounts the POS or ends its sale (a money rule): the POS keeps the settings it shows (the same
   // object, so the tax context and replication stay) while a retry loads or fails, and until it resolves to new ones.
-  const shown = useRef<PricingSettings | null>(null);
+  const shown = useRef<{ pricing: PricingSettings; syncContext: SyncContext } | null>(null);
   const pricing = useMemo(() => {
-    const previous = shown.current;
+    const previous = shown.current?.pricing ?? null;
     if (store.state === 'ready') return previous && JSON.stringify(previous) === JSON.stringify(store.settings) ? previous : store.settings;
     if (store.state === 'error') return previous ?? loadCachedPricing(defaultStorage(), session.baseUrl);
     return store.state === 'loading' ? previous : null;
   }, [store, session.baseUrl]);
-  shown.current = pricing;
   useEffect(() => { if (store.state === 'ready') saveCachedPricing(defaultStorage(), session.baseUrl, store.settings); }, [store, session.baseUrl]);
-  const syncContext = useMemo(() => pricing && withPricingContext(context, pricing), [context, pricing]);
+  const live = useMemo(() => pricing && { pricing, syncContext: withPricingContext(context, pricing) }, [context, pricing]);
+  // A sale in progress keeps the POS on what it shows (prices, tax, catalogue, currency; a money rule): new
+  // settings, and the choose, unsupported or error screens, wait until the sale is idle.
+  const [busy, setBusy] = useState(false);
+  const held = busy && shown.current !== null;
+  if (!held) shown.current = live;
   const regionNames = useRef(new Map<string, string>());
   const again = () => setAttempt(attempt + 1);
 
-  if (store.state === 'choose') {
+  if (store.state === 'choose' && !held) {
     for (const region of store.choices.regions ?? []) regionNames.current.set(region.id, region.name);
     const { countries, ...choices } = store.choices;
     if (countries && !countries.includes(country)) {
@@ -125,17 +129,18 @@ function PricingScreen(props: PricingProps) {
     return <StoreSettingsChoiceScreen choices={choices} initial={store.initial} title="Set up this till"
       onSubmit={(choice) => store.choose({ ...choice, country })} />;
   }
-  if (store.state === 'unsupported') return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
-  if (store.state === 'error' && !pricing) return <SettingsMessage text={store.error instanceof Error ? store.error.message : String(store.error)} actions={{ Retry: store.retry }} />;
-  if (!pricing || !syncContext) return <SettingsMessage text="Loading store settings…" actions={{}} />;
-  return <TaxProvider {...taxProviderProps(pricing)}>
-    <SignedInProducts {...props} pricing={pricing} syncContext={syncContext}
+  if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
+  const pos = shown.current;
+  if (store.state === 'error' && !pos) return <SettingsMessage text={store.error instanceof Error ? store.error.message : String(store.error)} actions={{ Retry: store.retry }} />;
+  if (!pos) return <SettingsMessage text="Loading store settings…" actions={{}} />;
+  return <TaxProvider {...taxProviderProps(pos.pricing)}>
+    <SignedInProducts {...props} pricing={pos.pricing} syncContext={pos.syncContext} onBusy={setBusy}
       settingsStatus={props.settingsStatus ?? (store.state !== 'ready' ? 'Offline' : null)} onRetry={store.state === 'error' ? store.retry : undefined} />
   </TaxProvider>;
 }
 
-function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry }: PricingProps & {
-  pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void;
+function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
+  pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
@@ -151,6 +156,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
   const sale = useSale(pricing, { registerId, cashierRef: session.email, onSaleCompleted: record });
+  useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
     return () => markBusy('payment', false);
