@@ -1,10 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { addRxPlugin, createRevision, createRxDatabase, fillWithDefaultSettings, now, type RxCollection, type RxJsonSchema } from 'rxdb';
+import { addRxPlugin, createRevision, createRxDatabase, fillWithDefaultSettings, now, type RxCollection, type RxDatabase, type RxJsonSchema } from 'rxdb';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
-import { createOrderBuilder, finalizeOrder, posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
+import { addPosOrderCollection, createOrderBuilder, finalizeOrder, posOrderSchema, type PosOrder } from '@tallyui/pos';
 import { carryOverOrders, closeOrderStores, needsAttention, openOrderStore, orderDatabaseName } from './order-store';
 
 addRxPlugin(RxDBDevModePlugin);
@@ -82,7 +82,7 @@ async function memoryOrdersDb(name: string, localDocuments = false) {
   const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
     name, storage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), multiInstance: false, localDocuments,
   });
-  await db.addCollections({ pos_orders: posOrderCollection() });
+  await addPosOrderCollection(db as unknown as RxDatabase);
   return db;
 }
 
@@ -110,10 +110,17 @@ async function seedV0(name: string, orders: PosOrder[], invalid?: PosOrder) {
   const db = await createRxDatabase({ name, storage: memoryStorage(), multiInstance: false });
   await (await db.addCollections({ pos_orders: { schema: versionZero() } })).pos_orders.bulkInsert(orders);
   await db.close();
-  if (!invalid) return;
+  if (invalid) await writeRawV0(name, invalid);
+}
+
+/** Writes `order` into the version-0 storage beneath RxDB, over any stored copy (as a version-0 build could). */
+async function writeRawV0(name: string, order: PosOrder) {
   const raw = await rawV0(name);
-  await raw.bulkWrite([{ document: { ...invalid, _deleted: false, _attachments: {}, _meta: { lwt: now() }, _rev: createRevision('test') } }], 'test');
-  await raw.close();
+  try {
+    const [previous] = await raw.findDocumentsById([order.id], false);
+    const document = { ...order, _deleted: false, _attachments: {}, _meta: { lwt: now() }, _rev: createRevision('test', previous) };
+    expect((await raw.bulkWrite([{ previous, document }], 'test')).error).toEqual([]);
+  } finally { await raw.close(); }
 }
 
 /** The version-0 documents still in storage, without their storage metadata. */
@@ -129,7 +136,7 @@ const invalidSale = () => ({ ...sale(), syncStatus: 'queued' }) as unknown as Po
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
 
 describe('pos_orders schema v0 to v1', () => {
-  it('reopens a version-0 order store through posOrderCollection(): the pending order is there, unchanged', async () => {
+  it('reopens a version-0 order store through addPosOrderCollection(): the pending order is there, unchanged', async () => {
     const url = 'https://v0-store.test';
     const pending = sale();
     await seedV0(orderDatabaseName(url), [pending]);
@@ -152,6 +159,24 @@ describe('pos_orders schema v0 to v1', () => {
       await expect(openOrderStore(url)).rejects.toMatchObject({ code: 'DM4' });
       expect((await v0Documents(name, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
     }
+  });
+
+  it('after a DM4 and a fix to the v0 data, the very next open migrates every order unchanged', async () => {
+    const url = 'https://v0-store-dm4-fix.test';
+    const name = orderDatabaseName(url);
+    const pending = sale();
+    const invalid = invalidSale();
+    await seedV0(name, [pending], invalid);
+    await expect(openOrderStore(url)).rejects.toMatchObject({ code: 'DM4' });
+    expect((await v0Documents(name, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
+
+    const fixed: PosOrder = { ...invalid, syncStatus: 'pending' };
+    await writeRawV0(name, fixed);
+    const store = await openOrderStore(url);
+    try {
+      expect((await store.orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].sort(byId));
+    } finally { await store.close(); }
+    expect(await v0Documents(name, [pending.id, invalid.id])).toEqual([]);
   });
 });
 // The legacy database "exists" (memory storages have no IndexedDB to list).
@@ -289,19 +314,30 @@ describe('carryOverOrders', () => {
     await to.remove();
   });
 
-  it('a DM4 on the legacy open keeps the source and writes no marker', async () => {
+  it('a DM4 on the legacy open keeps the source and writes no marker; after a fix, the next carry-over copies all once', async () => {
     const fromName = 'legacy-carry-dm4';
     const pending = sale();
     const invalid = invalidSale();
     await seedV0(fromName, [pending], invalid);
     const to = await memoryOrdersDb('target-carry-dm4', true);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const bulkInsert = vi.spyOn(to.pos_orders, 'bulkInsert');
     try {
       await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('carry-over'), expect.objectContaining({ code: 'DM4' }));
       expect(await to.getLocal('legacy-orders-migrated')).toBeNull();
       expect(await to.pos_orders.find().exec()).toEqual([]);
       expect((await v0Documents(fromName, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
+
+      const fixed: PosOrder = { ...invalid, syncStatus: 'pending' };
+      await writeRawV0(fromName, fixed);
+      warn.mockClear();
+      await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
+      expect(warn).not.toHaveBeenCalled();
+      expect(bulkInsert).toHaveBeenCalledTimes(1);
+      expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].sort(byId));
+      expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 2 });
+      expect(await v0Documents(fromName, [pending.id, invalid.id])).toEqual([]);
     } finally {
       warn.mockRestore();
       await to.remove();

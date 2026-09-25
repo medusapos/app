@@ -35,11 +35,9 @@ the bottom half of a phone screen (the tester's main surface).
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
 
-## pos_orders migration recovery after a DM4
+## TALLYUI_REF is pinned to a backport branch
 
-TallyUI, no app change. After a DM4, RxDB 16.21 keeps an error migration
-status, so recovery takes an extra reload. On SQLite, an open can also close
-the database mid-migration. A stale "done" status after a rollback and
-re-upgrade can open the store before newly written sales have migrated.
-TallyUI will reset a leftover error or stale done status inside
-`posOrderCollection()`. Pin that SHA when it lands (from #64 review).
+`TALLYUI_REF` pins TallyUI `backport/131-on-e5f540a` (4abbf04): #131's
+`addPosOrderCollection` alone on e5f540a, off TallyUI main. #66 (display
+totals) moves the pin back to TallyUI main; the backport branch is deleted
+then.
