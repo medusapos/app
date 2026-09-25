@@ -19,6 +19,12 @@ it('accepts every optional field', () => {
   })).toEqual([])
 })
 
+it.each([true, false, undefined])('accepts lines[0].taxInclusive %s, and its absence', taxInclusive => {
+  expect('taxInclusive' in payload.lines[0]).toBe(false)
+  expect(payloadShapeErrors(payload)).toEqual([])
+  expect(payloadShapeErrors({ ...payload, lines: [{ ...payload.lines[0], taxInclusive }] })).toEqual([])
+})
+
 it.each([undefined, null, {}, { email: '' }])('accepts optional customer %j', customer => {
   expect(payloadShapeErrors({ ...payload, customer })).toEqual([])
 })
@@ -52,6 +58,8 @@ it.each([
   ['lines', 'clientLineId', undefined, 'a string'], ['lines', 'variantId', 1, 'a string'],
   ['lines', 'title', null, 'a string'], ['lines', 'quantity', '1', 'a finite number'],
   ['lines', 'unitPriceMinor', Infinity, 'a finite number'],
+  ['lines', 'taxInclusive', 'false', 'a boolean'], ['lines', 'taxInclusive', null, 'a boolean'],
+  ['lines', 'taxInclusive', 0, 'a boolean'],
   ['payments', 'clientPaymentId', undefined, 'a string'], ['payments', 'method', undefined, 'a string'],
   ['payments', 'amountMinor', '1000', 'a finite number'], ['payments', 'tenderedMinor', NaN, 'a finite number'],
   ['payments', 'changeMinor', null, 'a finite number'], ['payments', 'reference', 1, 'a string'],
