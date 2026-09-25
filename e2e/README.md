@@ -97,6 +97,7 @@ Both seed at `pos_orders` schema v0 (pre-TallyUI #123): the legacy hook, and
 `__medusaposSeedV0Order` into the SQLite order store, whose test signs in with
 `/tally/v1/commands` blocked, sees the migrated sale "Waiting to sync", then
 one Medusa order.
+Both open `pos_orders` through TallyUI's `addPosOrderCollection` (ADR-032 amendment 2); a DM4 has no e2e (production web storage doesn't validate), so `order-store.test.ts` covers DM4 then fix.
 
 Every `window.__medusapos…` hook goes through `apps/expo/lib/e2e-debug.ts`
 (`exposeE2eHook('Catalogue', …)`), the only app code that writes to `window`
