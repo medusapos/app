@@ -1,8 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { CartLine, CartLineActions, CartPanel, CartTotal } from '@tallyui/components';
-import { buildReceiptData } from '@tallyui/pos';
-import type { useSale } from '../lib/use-sale';
+import { buildReceiptData, type useSale } from '@tallyui/pos';
 import { DiscountChips, DiscountForm } from './discount-form';
 
 export function Cart({ sale }: { sale: ReturnType<typeof useSale> }) {

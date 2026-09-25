@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { catalogueEntries, findEntryByCode, variantPriceLabel } from './catalogue';
+import { catalogueEntries, findEntryByCode, variantPriceLabel } from '@tallyui/pos';
 import { classifyReplicationError } from './use-replicated-products';
 
 const traits = medusaConnector.traits.product;

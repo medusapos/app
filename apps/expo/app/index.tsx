@@ -4,7 +4,9 @@ import { Redirect, router, Stack } from 'expo-router';
 
 import { StoreSettingsChoiceScreen } from '@tallyui/components';
 import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
-import { TaxProvider, taxProviderProps, useStoreSettings, withPricingContext, withStockOverlay } from '@tallyui/pos';
+import {
+  catalogueEntries, findEntryByCode, TaxProvider, taxProviderProps, useSale, useStoreSettings, withPricingContext, withStockOverlay,
+} from '@tallyui/pos';
 
 import { Catalogue } from '../components/catalogue';
 import { Cart } from '../components/cart';
@@ -12,7 +14,6 @@ import { CartBar } from '../components/cart-bar';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
 import { SyncStatus } from '../components/sync-status';
-import { catalogueEntries, findEntryByCode } from '../lib/catalogue';
 import { markBusy } from '../lib/live-tab';
 import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -24,7 +25,6 @@ import {
   clearSettingsRegion, fetchStoreSettings, loadCachedPricing, loadCachedSettings, loadSettingsChoice, saveCachedPricing,
   saveCachedSettings, saveSettingsChoice, StoreSettingsError, type StoreSettings,
 } from '../lib/store-settings';
-import { useSale } from '../lib/use-sale';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 

@@ -1,7 +1,6 @@
 import { Pressable, Text } from 'react-native';
 import { formatMoney } from '@tallyui/core';
-import { buildReceiptData } from '@tallyui/pos';
-import type { useSale } from '../lib/use-sale';
+import { buildReceiptData, type useSale } from '@tallyui/pos';
 
 /** Phone mode's cart summary (ADR 0009): the whole bar is one button; the total is the cart's own Total row. */
 export function CartBar({ sale, onOpen }: { sale: ReturnType<typeof useSale>; onOpen: () => void }) {

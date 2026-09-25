@@ -3,8 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 import { getCalendars } from 'expo-localization';
 import type { ProductTraits } from '@tallyui/core';
 import { ProductGrid, ProductImage, ProductPrice, ProductStockBadge, ProductTitle, SearchInput, VStack } from '@tallyui/components';
-import { searchProducts } from '@tallyui/pos';
-import { catalogueEntries, findEntryByCode, variantPriceLabel, type CatalogueEntry } from '../lib/catalogue';
+import { catalogueEntries, findEntryByCode, searchProducts, variantPriceLabel, type CatalogueEntry } from '@tallyui/pos';
 
 // Keep product names readable and touch targets at least 160 px wide where two columns fit.
 const MIN_TILE_WIDTH = 160;

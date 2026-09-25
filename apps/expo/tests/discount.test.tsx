@@ -4,13 +4,13 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, type ServerCapabilities, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { createOrderBuilder, TaxProvider, taxProviderProps, toOrderCreateEnvelope, type Order, type PosOrder } from '@tallyui/pos';
+import {
+  catalogueEntries, createOrderBuilder, DISCOUNTS_UNSUPPORTED, TaxProvider, taxProviderProps, toOrderCreateEnvelope, useSale, type Order, type PosOrder,
+} from '@tallyui/pos';
 import type { CartAction, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { Cart } from '../components/cart';
 import { parseDiscount } from '../components/discount-form';
 import { Receipt } from '../components/receipt';
-import { catalogueEntries } from '../lib/catalogue';
-import { DISCOUNTS_UNSUPPORTED, useSale } from '../lib/use-sale';
 
 vi.mock('@tallyui/components', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
