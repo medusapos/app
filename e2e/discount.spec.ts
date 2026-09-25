@@ -33,8 +33,10 @@ test('a discounted sale is applied as order.create v2, with a "POS discount" adj
   await discount(page, 'order', 'Amount', '0.50');
   await expect(page.getByRole('button', { name: /^Remove discount .*0\.50/ })).toBeVisible();
   // The totals are TallyUI's order.display (ADR-063): Subtotal − Discount + VAT = Total (4.00 − 0.90 + 0.78 = 3.88).
-  // The line reads before its discounts (4.00, adding up to the Subtotal); each chip carries its amount.
-  await expect(page.getByTestId('cart-scroll').getByText('E2E product 1', { exact: true }).locator('../..')).toHaveText(/× 2\D*4\.00$/);
+  // The line reads before its discounts (4.00, adding up to the Subtotal); each chip carries its amount. No
+  // cart-scroll testID with CartPanel (TallyUI #136): the line's own Remove button scopes to the cart's copy.
+  const cartLine = page.getByRole('button', { name: 'Remove E2E product 1' }).locator('../..');
+  await expect(cartLine.getByText('E2E product 1', { exact: true }).locator('../..')).toHaveText(/× 2\D*4\.00$/);
   await expect(page.getByText(/^10% −\D*0\.40$/)).toBeVisible();
   await expect(page.getByText(/^Order discount −.*0\.50$/)).toBeVisible();
   // The last "Discount" is the totals row; the first is the line's action.

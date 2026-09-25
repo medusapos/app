@@ -13,6 +13,11 @@ import { catalogueEntries } from '../lib/catalogue';
 import { DISCOUNTS_UNSUPPORTED, useSale } from '../lib/use-sale';
 
 vi.mock('@tallyui/components', () => ({
+  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
+    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
+    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
+    {afterItems}{footer}
+  </div>,
   CartLine: ({ name, lineTotal }: CartLineProps) => <span>{name}: {formatMoney(lineTotal)}</span>,
   CartLineActions: ({ children, actions }: { children: ReactNode; actions: CartAction[] }) => <div>{children}
     {actions.map((action) => <button key={action.id} onClick={action.onPress}>{action.label}</button>)}</div>,

@@ -38,6 +38,11 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
 vi.mock('@tallyui/components', () => ({
+  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
+    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
+    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
+    {afterItems}{footer}
+  </div>,
   CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) =>
     <div>{name}: {formatMoney(unitPrice)} × {quantity} = {formatMoney(lineTotal)}</div>,
   CartTotal: ({ subtotal, total, taxLines }: CartTotalProps) => <div>
@@ -427,10 +432,10 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     fireEvent.click(button('Shirt'));
     expect(search()).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Open cart|^Cart is empty$/ })).toBeNull();
-    const scroll = within(screen.getByTestId('cart-scroll'));
-    expect(scroll.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
-    expect(scroll.getByRole('button', { name: 'Order discount' })).toBeTruthy();
-    expect(scroll.queryByRole('button', { name: 'Cash' })).toBeNull();
+    // CartPanel's scroll region isn't a separate testID; the Order discount button comes after the last line instead.
+    const lastLine = screen.getByText('Shirt: €12.00 × 1 = €12.00');
+    const orderDiscount = screen.getByRole('button', { name: 'Order discount' });
+    expect(lastLine.compareDocumentPosition(orderDiscount) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const footer = within(screen.getByTestId('cart-footer'));
     for (const name of ['Cash', 'Card terminal']) expect(footer.getByRole('button', { name })).toBeTruthy();
     expect(footer.getByText('Total: €15.00')).toBeTruthy();

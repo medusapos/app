@@ -36,9 +36,10 @@ after the last line. Pinned footer: the totals block as it was ("Includes
 discounts of …" and `CartTotal`), the sale error, and Cash and Card terminal
 side by side, each at least 48 px tall.
 
-The app composes this with a `ScrollView` and a footer in `CartPanel`'s
-classes rather than using `CartPanel`, whose scroll area holds only the
-items (backlog: a list-footer slot in TallyUI).
+The cart uses TallyUI's `CartPanel` with its `afterItems` slot (TallyUI
+#136) for the order-discount section. The earlier composition existed only
+for the missing slot: the footer was always pinned, and react-native-web
+gives every `View` `minHeight: 0`, so no app-side layout cause existed.
 
 From 600 px the existing split stays (a column below 900 px, a row from
 900 px), with the new cart structure.
