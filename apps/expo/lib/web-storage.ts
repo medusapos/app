@@ -1,6 +1,7 @@
 import type { RxStorageSQLiteWasm } from '@tallyui/storage-sqlite/web';
 import { Platform } from 'react-native';
 import { getRxStorageSQLiteWasm } from '@tallyui/storage-sqlite/web';
+import { exposeE2eHook } from './e2e-debug';
 
 // Built by this app's `build:sqlite-worker` script (package.json: `tallyui-build-sqlite-worker
 // public/sqlite`, run before `build:web`/`web`/`dev`) into `public/sqlite/`.
@@ -36,7 +37,7 @@ export function usingMemoryStorageForTests(): boolean {
 
 let cachedStorage: RxStorageSQLiteWasm | undefined;
 // Set synchronously by workerInput below (mode 'one' calls it eagerly) — kept so the e2e crash
-// hook (`__medusaposKillStorageWorker` below) can end it without forgetting the storage.
+// hook (`KillStorageWorker` below) can end it without forgetting the storage.
 let keptWorker: Worker | undefined;
 
 /**
@@ -72,11 +73,9 @@ export function terminateWebStorage(): void {
   cachedStorage = undefined;
 }
 
-// E2E debug hook (like `__medusaposCatalogue`): kills the kept worker WITHOUT forgetting the
+// E2E debug hook (see e2e-debug.ts): kills the kept worker WITHOUT forgetting the
 // storage, simulating a crash (unlike `terminateWebStorage`'s graceful close-then-terminate).
 // Any call in flight, or made after, never gets a reply — surfacing on `health$` as `dead`.
-if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
-  (window as Window & { __medusaposKillStorageWorker?: () => void }).__medusaposKillStorageWorker = () => {
-    keptWorker?.terminate();
-  };
+if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') {
+  exposeE2eHook('KillStorageWorker', () => { keptWorker?.terminate(); });
 }

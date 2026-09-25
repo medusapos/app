@@ -7,6 +7,7 @@ import { posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos'
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { terminateWebStorage, webStorageAvailable } from './web-storage';
 import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
+import { exposeE2eHook } from './e2e-debug';
 
 addRxPlugin(RxDBLocalDocumentsPlugin);
 
@@ -187,7 +188,7 @@ export function needsAttention(orders: PosOrder[]): PosOrder[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-// E2E debug hook (same pattern as `__medusaposCatalogue` in use-replicated-products.ts):
+// E2E debug hooks (see e2e-debug.ts):
 // seeds one order at schema v0 (v1 minus `sessionId`, as builds before TallyUI #123 wrote it) into a backend's legacy
 // Dexie order database, or (…SeedV0Order, then ending the worker) its SQLite order store; resolves to the version.
 if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
@@ -201,9 +202,8 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
       return db.pos_orders.schema.version;
     } finally { await db.close(); }
   };
-  Object.assign(window, {
-    __medusaposSeedLegacyOrder: (baseUrl: string, order: PosOrder) => seedV0(legacyDexieName('orders', baseUrl), getRxStorageDexie(), order),
-    __medusaposSeedV0Order: (baseUrl: string, order: PosOrder) =>
-      seedV0(orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage),
-  });
+  exposeE2eHook('SeedLegacyOrder', (baseUrl: string, order: PosOrder) =>
+    seedV0(legacyDexieName('orders', baseUrl), getRxStorageDexie(), order));
+  exposeE2eHook('SeedV0Order', (baseUrl: string, order: PosOrder) =>
+    seedV0(orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
 }
