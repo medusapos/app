@@ -27,7 +27,7 @@ export function validateBatch(body: unknown):
     let field: string | undefined
     if (typeof command.id !== 'string' || command.id.length === 0 || command.id.length > 64) field = 'id'
     else if (command.type !== 'order.create') field = 'type'
-    else if (command.version !== 1) field = 'version'
+    else if (command.version !== 1 && command.version !== 2) field = 'version'
     else if (typeof command.payload !== 'object' || command.payload === null || Array.isArray(command.payload)) field = 'payload'
     else if (typeof command.createdAt !== 'string') field = 'createdAt'
     else if (typeof command.deviceId !== 'string') field = 'deviceId'
@@ -44,6 +44,11 @@ export async function processBatch(
 ): Promise<BatchOutcome> {
   const results: CommandResult[] = []
   for (const command of commands) {
+    // ADR-062 sends version 2 only with a discount.
+    if (command.version === 2 && command.payload.discountMinor === undefined) {
+      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: 'version 2 requires discountMinor' } })
+      continue
+    }
     const outcome = await executeOrderCreate(container, command, options)
     if (outcome.kind === 'in_progress') {
       return { status: 409, body: { code: 'in_progress', id: outcome.id } }

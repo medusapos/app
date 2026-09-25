@@ -40,7 +40,7 @@ Sign in as a Medusa admin user through `/auth/user/emailpass` and send its JWT a
 `Authorization: Bearer <jwt>` (an authenticated admin session is also accepted).
 
 Send `POST /tally/v1/commands` with `X-Tally-Protocol: 1` and JSON
-`{ commands: CommandEnvelope[] }` containing 1–50 `order.create` version 1 commands.
+`{ commands: CommandEnvelope[] }` containing 1–50 `order.create` commands, version 1 or 2.
 Every envelope includes `id` (1–64 characters), object `payload`, string `createdAt`
 and `deviceId`, and a safe integer `attempt` of at least 1.
 A `200 { results: CommandResult[] }` returns one result per command in the same order:
@@ -59,6 +59,14 @@ A `409` or `503` stops the batch at that command. Retry the whole batch; earlier
 completed commands replay as duplicates. Network errors, `5xx`, and `429` are also
 retryable. Preflight `OPTIONS` needs no authentication; CORS uses `ADMIN_CORS` and
 allows `Authorization`, `Content-Type`, and `X-Tally-Protocol`.
+
+Version 2 (TallyUI ADR-062) adds discounts: `lines[].discountMinor` (the line's discount in its
+own tax mode) and `discountMinor`, their sum; both positive when present. Version 2 without
+`discountMinor` is `invalid_payload`. Each discounted line gets one code-less Medusa line-item
+adjustment, "POS discount", in the line's tax mode, so tax is charged on the discounted amount.
+
+`GET /tally/v1/info` returns `{ "contracts": { "order.create": [1, 2] } }`, with the same
+authentication and CORS as the command endpoint.
 
 ## Order creation workflow
 

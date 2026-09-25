@@ -93,6 +93,26 @@ medusaIntegrationTestRunner({
       }
     })
 
+    it('serves GET /tally/v1/info to bearer and session users, 401 otherwise, with CORS for adminCors origins (ADR-062)', async () => {
+      const info = (requestHeaders: Record<string, string>) =>
+        api.get('/tally/v1/info', { headers: requestHeaders, validateStatus: () => true })
+      const session = await api.post('/auth/session', {}, { headers: { Authorization: headers.Authorization } })
+      const cookie = session.headers['set-cookie']![0].split(';')[0]
+      for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
+        const response = await info(requestHeaders)
+        expect([response.status, response.data]).toEqual([200, { contracts: { 'order.create': [1, 2] } }])
+      }
+      expect((await info({})).status).toBe(401)
+      for (const origin of ['http://localhost', 'https://untrusted.example']) {
+        const response = await api.options('/tally/v1/info', { headers: {
+          Origin: origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization',
+        } })
+        expect(response.status).toBe(204)
+        expect(response.headers['access-control-allow-origin']).toBe(origin === 'http://localhost' ? origin : undefined)
+        if (origin === 'http://localhost') expect(response.headers['access-control-allow-methods']).toBe('GET,OPTIONS')
+      }
+    })
+
     it('applies two sales in order and replays the original references and warnings exactly once', async () => {
       const sales = [command(), command({
         lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity: 2, unitPriceMinor: 300 }],

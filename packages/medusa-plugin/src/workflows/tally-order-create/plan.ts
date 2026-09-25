@@ -23,6 +23,9 @@ export type PlanContext = {
 export type DraftOrderItemInput = {
   variant_id: string; quantity: number; unit_price: string; is_tax_inclusive: boolean
   metadata: { tally_line_uuid: string }
+  /** Only on a discounted line (ADR-062): one adjustment of its discountMinor, in its own tax mode. No code:
+   * createOrderWorkflow's promotion refresh deletes every adjustment whose code is not an applied promotion. */
+  adjustments?: Array<{ amount: string; description: 'POS discount'; is_tax_inclusive: boolean }>
 }
 
 export type OrderCreatePlan = {
@@ -50,6 +53,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
   const fields: Array<[string, number, number]> = []
   payload.lines.forEach((line, i) => {
     fields.push([`lines[${i}].quantity`, line.quantity, 1], [`lines[${i}].unitPriceMinor`, line.unitPriceMinor, 0])
+    if (line.discountMinor !== undefined) fields.push([`lines[${i}].discountMinor`, line.discountMinor, 1])
   })
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor'] as const) {
     fields.push([field, payload[field], 0])
@@ -65,6 +69,8 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
       return { ok: false, rejection: { code: 'invalid_quantity', message: `Invalid ${field}` } }
     }
   }
+  const over = payload.lines.findIndex(line => BigInt(line.discountMinor ?? 0) > BigInt(line.unitPriceMinor) * BigInt(line.quantity))
+  if (over >= 0) return { ok: false, rejection: { code: 'invalid_quantity', message: `Invalid lines[${over}].discountMinor: exceeds the line amount` } }
 
   const currencyCode = payload.currency.toLowerCase()
   if (currencyCode !== ctx.region.currency_code.toLowerCase()) {
@@ -124,6 +130,9 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
           // A line's own tax mode wins; absent means the order's (ADR-038 amendment).
           is_tax_inclusive: line.taxInclusive ?? payload.pricesIncludeTax,
           metadata: { tally_line_uuid: line.clientLineId },
+          // The whole line's discount in the item's mode: gross when inclusive, net otherwise (ADR-062).
+          ...(line.discountMinor !== undefined ? { adjustments: [{ amount: minorToMajor(line.discountMinor, decimals),
+            description: 'POS discount' as const, is_tax_inclusive: line.taxInclusive ?? payload.pricesIncludeTax }] } : {}),
         })),
       },
     },

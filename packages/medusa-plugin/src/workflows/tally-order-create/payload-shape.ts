@@ -10,6 +10,12 @@ export function payloadShapeErrors(payload: unknown): string[] {
   }
   const number = (value: unknown, path: string) =>
     check(typeof value === 'number' && Number.isFinite(value), path, 'a finite number')
+  // Discounts (ADR-062) are checked here, values included, when present.
+  const discount = (value: unknown, path: string): bigint => {
+    const valid = value === undefined || (Number.isSafeInteger(value) && (value as number) > 0)
+    check(valid, path, 'a positive safe integer')
+    return valid && value !== undefined ? BigInt(value as number) : 0n
+  }
   if (!object(payload)) return ['payload: expected an object']
   check(typeof payload.clientOrderId === 'string' && payload.clientOrderId.length > 0, 'clientOrderId', 'a non-empty string')
   for (const field of ['createdAt', 'currency']) check(typeof payload[field] === 'string', field, 'a string')
@@ -43,6 +49,10 @@ export function payloadShapeErrors(payload: unknown): string[] {
     }
   }
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor']) number(payload[field], field)
+  const lineDiscounts = (Array.isArray(payload.lines) ? payload.lines : [])
+    .reduce((sum: bigint, line, index) => sum + (object(line) ? discount(line.discountMinor, `lines[${index}].discountMinor`) : 0n), 0n)
+  const orderDiscount = discount(payload.discountMinor, 'discountMinor')
+  if (errors.length === 0) check(orderDiscount === lineDiscounts, 'discountMinor', 'the sum of lines[].discountMinor')
   if (payload.customer !== undefined && payload.customer !== null) {
     check(object(payload.customer), 'customer', 'an object')
     if (object(payload.customer) && payload.customer.email !== undefined) {

@@ -1,4 +1,5 @@
-import { validateBatch } from '../process'
+import type { MedusaContainer } from '@medusajs/framework/types'
+import { processBatch, validateBatch } from '../process'
 
 const command = {
   id: 'sale-1', type: 'order.create', version: 1, payload: {},
@@ -21,13 +22,24 @@ describe('validateBatch', () => {
 
   it.each([
     ['id', ''], ['id', 'x'.repeat(65)], ['id', 1],
-    ['type', 'order.cancel'], ['version', 2],
+    ['type', 'order.cancel'], ['version', 3], ['version', '2'],
     ['deviceId', undefined], ['createdAt', undefined],
     ['payload', null], ['payload', []], ['payload', 'sale'],
     ['attempt', 0], ['attempt', 1.5], ['attempt', Number.MAX_SAFE_INTEGER + 1],
   ])('rejects invalid %s (%p), naming the index and field', (field, value) => {
     const result = validateBatch({ commands: [command, { ...command, [field as string]: value }] })
     expect(result).toEqual({ ok: false, status: 400, message: expect.stringContaining(`commands[1].${field}`) })
+  })
+
+  it('accepts version 2 (ADR-062)', () => {
+    expect(validateBatch({ commands: [{ ...command, version: 2 }] })).toEqual({ ok: true, commands: [{ ...command, version: 2 }] })
+  })
+
+  it('rejects a version 2 command without a discount before touching the container', async () => {
+    const outcome = await processBatch({} as MedusaContainer, [{ ...command, id: 'sale-2', version: 2 } as never], {})
+    expect(outcome).toEqual({ status: 200, body: { results: [{ id: 'sale-2', status: 'rejected', error: {
+      code: 'invalid_payload', message: 'version 2 requires discountMinor',
+    } }] } })
   })
 
   it('rejects a non-object envelope', () => {

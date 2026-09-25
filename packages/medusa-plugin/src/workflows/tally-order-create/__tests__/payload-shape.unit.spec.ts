@@ -78,6 +78,30 @@ it('rejects a non-string customer email', () => {
   expect(payloadShapeErrors({ ...payload, customer: { email: 1 } })).toEqual(['customer.email: expected a string'])
 })
 
+describe('discountMinor (ADR-062)', () => {
+  const line = payload.lines[0]
+  const lines = [{ ...line, discountMinor: 100 }, { ...line, clientLineId: 'line_2' }, { ...line, clientLineId: 'line_3', discountMinor: 25 }]
+
+  it('accepts line discounts whose sum is the payload discount', () => {
+    expect(payloadShapeErrors({ ...payload, lines, discountMinor: 125 })).toEqual([])
+  })
+
+  it.each([[124], [126], [undefined]])('rejects a payload discount of %j for lines summing to 125', discountMinor => {
+    expect(payloadShapeErrors({ ...payload, lines, discountMinor })).toEqual(['discountMinor: expected the sum of lines[].discountMinor'])
+  })
+
+  it('rejects a payload discount without line discounts', () => {
+    expect(payloadShapeErrors({ ...payload, discountMinor: 1 })).toEqual(['discountMinor: expected the sum of lines[].discountMinor'])
+  })
+
+  it.each([0, -1, 1.5, NaN, '100', null, Number.MAX_SAFE_INTEGER + 1])('rejects discountMinor %j on a line and on the payload', value => {
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...line, discountMinor: value }], discountMinor: 1 }))
+      .toEqual(['lines[0].discountMinor: expected a positive safe integer'])
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...line, discountMinor: 1 }], discountMinor: value }))
+      .toEqual(['discountMinor: expected a positive safe integer'])
+  })
+})
+
 it('reports at most ten errors', () => {
   const errors = payloadShapeErrors({ lines: [{}, {}, {}], payments: [{}] })
   expect(errors).toHaveLength(10)
