@@ -43,6 +43,8 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: app
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
       - run: pnpm typecheck
         working-directory: app
       - run: pnpm test
@@ -84,6 +86,8 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: app
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
       - run: npm ci
         working-directory: app/packages/medusa-plugin
       - run: npm ci
@@ -128,6 +132,8 @@ jobs:
           cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: app
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
       - run: pnpm --filter @medusapos/expo build:web
         env:
           CI: '1'

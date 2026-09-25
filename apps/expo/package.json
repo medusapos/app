@@ -5,22 +5,25 @@
   "main": "expo-router/entry",
   "engines": { "node": "22.x" },
   "scripts": {
-    "dev": "expo start",
-    "build:web": "expo export --platform web",
+    "build:sqlite-worker": "tallyui-build-sqlite-worker public/sqlite",
+    "dev": "pnpm run build:sqlite-worker && expo start",
+    "build:web": "pnpm run build:sqlite-worker && expo export --platform web",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web",
+    "web": "pnpm run build:sqlite-worker && expo start --web",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
+    "@sqlite.org/sqlite-wasm": "3.53.4-build1",
     "@tallyui/components": "^1.0.0",
     "@tallyui/connector-medusa": "^1.0.0",
     "@tallyui/core": "^0.2.0",
     "@tallyui/database": "^1.0.0",
     "@tallyui/pos": "^0.1.0",
     "@tallyui/primitives": "^0.1.0",
+    "@tallyui/storage-sqlite": "^0.2.0",
     "@tallyui/theme": "^0.2.0",
     "expo": "~54.0.0",
     "expo-linking": "~8.0.11",
@@ -35,12 +38,14 @@
     "react-native-svg": "15.12.1",
     "react-native-web": "~0.21.2",
     "rxdb": "16.21.1",
+    "rxdb-premium": "16.21.1",
     "rxjs": "7.8.2",
     "tailwindcss": "^4.1.18",
     "uniwind": "^1.2.2"
   },
   "devDependencies": {
     "@types/react": "^19.1.0",
+    "esbuild": "0.27.3",
     "typescript": "~5.8.3"
   }
 }

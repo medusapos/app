@@ -6,3 +6,4 @@ expo-env.d.ts
 # @end expo-cli
 
 dist/
+public/sqlite/

@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
 import {
-  createTallyDatabase, startIdReconcile, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION,
-  type IdReconcileResult,
+  createTallyDatabase, getStorageHealth, isStorageWorkerFailure, startIdReconcile, startReplication,
+  startStockReconcile, STOCK_LEVELS_COLLECTION, type IdReconcileResult,
 } from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
 import { stockOverlay$ } from '@tallyui/pos';
-import { isUnauthorizedError, openProductCache, productCacheName, productCacheStorage } from './product-cache';
+import {
+  deleteLegacyProductCache, isUnauthorizedError, openProductCache, productCacheName, productCacheStorage,
+} from './product-cache';
+import { reportStorageStartFailure } from './live-tab';
+import { watchStorageHealth } from './storage-health';
 
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error' | 'offline';
 
@@ -94,6 +98,8 @@ export function useReplicatedProducts(
           return;
         }
         cleanup.push(() => { void closeCache(); });
+        const health$ = getStorageHealth(db);
+        if (health$) cleanup.push(watchStorageHealth(health$));
         const context: SyncContext = {
           connectorId: connector.id,
           baseUrl,
@@ -175,6 +181,9 @@ export function useReplicatedProducts(
           setState('synced');
           setLastSyncedAt(new Date());
           setError(null);
+          // One-time cleanup of the pre-SQLite Dexie cache, now that this mount's
+          // first pull has landed in the new store; never blocks rendering on it.
+          void deleteLegacyProductCache(connector.id, baseUrl);
           void reconcileStock();
           idRunner?.reconcileIds().then((result) => {
             if (cancelled) return; // a start pass that finishes after cleanup must not record anything
@@ -191,6 +200,7 @@ export function useReplicatedProducts(
           setState('error');
           setError(err instanceof Error ? err.message : String(err));
         }
+        if (isStorageWorkerFailure(err)) reportStorageStartFailure();
       }
     })();
 

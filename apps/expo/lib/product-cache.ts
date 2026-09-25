@@ -1,6 +1,7 @@
 import { removeRxDatabase, type RxStorage } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
-import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
+import { Platform } from 'react-native';
+import { getWebStorage, UnsupportedStorageError, usingMemoryStorageForTests, webStorageAvailable } from './web-storage';
 
 type CachedDb = { remove(): Promise<unknown>; close(): Promise<unknown> };
 
@@ -16,15 +17,52 @@ const pendingCloses = new Set<Promise<void>>();
 // `{ close }`, or `undefined` if the open failed (which counts as closed).
 const pendingOpens = new Set<Promise<{ close: () => Promise<void> } | undefined>>();
 
-/** Persistent browser storage, with memory storage for environments without IndexedDB. */
+/**
+ * Persistent storage on web (ADR-061's SQLite-wasm); memory on native. Web without SQLite-wasm
+ * support throws `UnsupportedStorageError` rather than keep sales only in memory (unless a test
+ * run called `useMemoryStorageForTests()`).
+ */
 export function productCacheStorage(): RxStorage<any, any> {
-  return globalThis.indexedDB ? getRxStorageDexie() : getRxStorageMemory();
+  if (webStorageAvailable()) return getWebStorage();
+  if (Platform.OS !== 'web' || usingMemoryStorageForTests()) return getRxStorageMemory();
+  throw new UnsupportedStorageError();
+}
+
+function encodeBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/[^a-z0-9]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
 }
 
 /** Names one backend using an injective encoding of its exact UTF-16 base URL. */
 export function productCacheName(connectorId: string, baseUrl: string): string {
-  const encoded = baseUrl.replace(/[^a-z0-9]/g, (c) => `_${c.charCodeAt(0).toString(16)}_`);
-  return `medusapos_${connectorId}_${encoded}`;
+  return `medusapos_sqlite_${connectorId}_${encodeBaseUrl(baseUrl)}`;
+}
+
+/**
+ * The pre-SQLite Dexie name for the same backend (same injective encoding,
+ * the old prefix): the source for the one-time order carry-over, and what
+ * `deleteLegacyProductCache` clears.
+ */
+export function legacyDexieName(connectorId: string, baseUrl: string): string {
+  return `medusapos_${connectorId}_${encodeBaseUrl(baseUrl)}`;
+}
+
+/**
+ * Deletes every IndexedDB database RxDB's Dexie storage created for the
+ * pre-SQLite product cache of one backend. Never throws.
+ */
+export async function deleteLegacyProductCache(connectorId: string, baseUrl: string): Promise<void> {
+  try {
+    const databases = await globalThis.indexedDB?.databases?.();
+    if (!databases) return;
+    const prefix = `rxdb-dexie-${legacyDexieName(connectorId, baseUrl)}--`;
+    const names = databases.map((d) => d.name).filter((name): name is string => !!name?.startsWith(prefix));
+    await Promise.all(names.map((name) => new Promise<void>((resolve) => {
+      const request = globalThis.indexedDB.deleteDatabase(name);
+      request.onsuccess = () => resolve();
+      request.onerror = () => resolve();
+      request.onblocked = () => resolve();
+    })));
+  } catch { /* Legacy cache cleanup must never throw. */ }
 }
 
 function startClose(name: string, db: CachedDb): Promise<void> {

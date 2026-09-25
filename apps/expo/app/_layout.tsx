@@ -4,6 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { LiveTabGate } from '../components/live-tab-gate';
+import { StorageHealth } from '../components/storage-health';
 import { SessionProvider, useSession } from '../lib/session-context';
 import { OutboxProvider } from '../lib/outbox-context';
 import { OutboxStrip } from '../components/store-refused';
@@ -19,7 +20,7 @@ function GatedApp() {
   const background = useCSSVariable('--color-background');
   return (
     <LiveTabGate scope={session?.baseUrl}>
-      <OutboxProvider><Stack
+      <StorageHealth><OutboxProvider><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
@@ -30,7 +31,7 @@ function GatedApp() {
           contentStyle: { backgroundColor: background as string },
           headerTitleStyle: { fontWeight: '600' },
         }}
-      /></OutboxProvider>
+      /></OutboxProvider></StorageHealth>
     </LiveTabGate>
   );
 }

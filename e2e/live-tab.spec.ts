@@ -11,6 +11,11 @@ test('a second tab takes over, and "Use here" reclaims it', async ({ page, conte
   await expect(pageB.getByText('Up to date · 5 products')).toBeVisible();
 
   await expect(page.getByText('MedusaPOS is open in another tab')).toBeVisible();
+  // ADR-061: closing (then terminating) the SQLite-wasm worker is what frees the OPFS pool for
+  // the next tab, so A must have none left and B must hold exactly one.
+  const sqliteWorkerUrl = /\/sqlite\/tallyui-sqlite-worker\.js$/;
+  await expect.poll(() => page.workers().some((worker) => sqliteWorkerUrl.test(worker.url()))).toBe(false);
+  await expect.poll(() => pageB.workers().filter((worker) => sqliteWorkerUrl.test(worker.url())).length).toBe(1);
   // LiveTabScreen's Pressable renders with no explicit accessibility role.
   await expect(page.getByText('Use here', { exact: true })).toBeVisible();
   await expect(page.getByPlaceholder(SEARCH_PLACEHOLDER, { exact: true })).toHaveCount(0);

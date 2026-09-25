@@ -9,6 +9,7 @@ const types = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.json': 'application/json', '.png': 'image/png', '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf',
+  '.wasm': 'application/wasm',
 };
 createServer(async (req, res) => {
   for (const { key, value } of headers) res.setHeader(key, value);

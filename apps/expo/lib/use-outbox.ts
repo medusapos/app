@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RxCollection } from 'rxdb';
+import { isStorageWorkerFailure } from '@tallyui/database';
 import { createHttpCommandTransport, createOrderOutbox, type OutboxState, type PosOrder } from '@tallyui/pos';
 import type { Session } from './session';
-import { markBusy } from './live-tab';
+import { markBusy, reportStorageStartFailure } from './live-tab';
 import { openOrderStore } from './order-store';
 import { authHeaders } from './pos-connector';
 
@@ -49,7 +50,10 @@ export function useOutbox(session: Session | null, registerId: string): {
       };
       setOrders(store.orders);
       outbox.start();
-    }).catch((error: unknown) => { if (active) openingError.current = error; });
+    }).catch((error: unknown) => {
+      if (active) openingError.current = error;
+      if (isStorageWorkerFailure(error)) reportStorageStartFailure();
+    });
     return () => { active = false; current.current = null; dispose?.(); };
   }, [baseUrl, registerId]);
 

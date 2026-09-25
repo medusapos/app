@@ -12,12 +12,14 @@ export default defineConfig({
       ...Object.fromEntries(['core', 'components', 'database', 'pos', 'primitives', 'theme', 'connector-medusa'].map(
         (name) => [`@tallyui/${name}`, path.resolve(__dirname, `apps/expo/node_modules/@tallyui/${name}/src/index.ts`)],
       )),
+      '@tallyui/storage-sqlite/web': path.resolve(__dirname, 'apps/expo/node_modules/@tallyui/storage-sqlite/src/web/index.ts'),
     },
   },
   test: {
     include: ['apps/**/*.test.{ts,tsx}', 'packages/**/*.test.{ts,tsx}'],
     exclude: ['**/node_modules/**', 'dev/**', 'packages/medusa-plugin/**'],
     passWithNoTests: true,
+    setupFiles: ['apps/expo/tests/setup-storage.ts'],
     // The shared agent host caps test workers at 2.
     maxWorkers: 2,
   },

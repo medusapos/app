@@ -28,7 +28,8 @@
     "onlyBuiltDependencies": [
       "rxdb",
       "esbuild",
-      "electron"
+      "electron",
+      "rxdb-premium"
     ],
     "overrides": {
       "@tallyui/core": "file:../tallyui/packages/core",
@@ -37,7 +38,8 @@
       "@tallyui/pos": "file:../tallyui/packages/pos",
       "@tallyui/primitives": "file:../tallyui/packages/primitives",
       "@tallyui/theme": "file:../tallyui/packages/theme",
-      "@tallyui/connector-medusa": "file:../tallyui/connectors/medusa"
+      "@tallyui/connector-medusa": "file:../tallyui/connectors/medusa",
+      "@tallyui/storage-sqlite": "file:../tallyui/packages/storage-sqlite"
     }
   }
 }

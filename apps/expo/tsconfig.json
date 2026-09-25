@@ -9,7 +9,8 @@
       "@tallyui/pos": ["./node_modules/@tallyui/pos/src/index.ts"],
       "@tallyui/primitives": ["./node_modules/@tallyui/primitives/src/index.ts"],
       "@tallyui/theme": ["./node_modules/@tallyui/theme/src/index.ts"],
-      "@tallyui/connector-medusa": ["./node_modules/@tallyui/connector-medusa/src/index.ts"]
+      "@tallyui/connector-medusa": ["./node_modules/@tallyui/connector-medusa/src/index.ts"],
+      "@tallyui/storage-sqlite/web": ["./node_modules/@tallyui/storage-sqlite/src/web/index.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx", ".expo/types/**/*.ts", "expo-env.d.ts", "uniwind-env.d.ts"]
