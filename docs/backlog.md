@@ -39,5 +39,7 @@ Tap race: a line added at the instant new store settings land is dropped from th
 
 `TALLYUI_REF` pins TallyUI `backport/131-on-e5f540a` (4abbf04): #131's
 `addPosOrderCollection` alone on e5f540a, off TallyUI main. #66 (display
-totals) moves the pin back to TallyUI main; the backport branch is deleted
-then.
+totals) moves the pin back to TallyUI main. Keep the backport branch
+afterwards, or replace it with a tag on 4abbf04: CI and Vercel fetch the
+pinned commit by SHA, so this app's history can only be rebuilt, reverted or
+bisected while a TallyUI ref still holds that commit (from #68 review).
