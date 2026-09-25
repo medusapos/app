@@ -16,10 +16,10 @@ vi.mock('@tallyui/components', () => ({
   CartLine: ({ name, lineTotal }: CartLineProps) => <span>{name}: {formatMoney(lineTotal)}</span>,
   CartLineActions: ({ children, actions }: { children: ReactNode; actions: CartAction[] }) => <div>{children}
     {actions.map((action) => <button key={action.id} onClick={action.onPress}>{action.label}</button>)}</div>,
-  CartTotal: ({ subtotal, taxLines, discount, total }: CartTotalProps) => <div>
+  CartTotal: ({ subtotal, taxLines, discount, total, taxInclusive }: CartTotalProps) => <div>
     <span>Subtotal: {formatMoney(subtotal)}</span>
-    {taxLines?.map((line) => <span key={line.label}>{line.label}: {formatMoney(line.amount)}</span>)}
     {discount && discount.amount > 0 ? <span>Discount: {formatMoney(discount)}</span> : null}
+    {taxLines?.map((line) => <span key={line.label}>{taxInclusive ? 'incl. ' : ''}{line.label}: {formatMoney(line.amount)}</span>)}
     <span>Total: {formatMoney(total)}</span>
   </div>,
   DiscountBadge: ({ label }: { label: string }) => <span>{label}</span>,
@@ -121,11 +121,11 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
   it('labels a fixed chip with the amount that comes off, not the amount asked for', () => {
     start();
     discount('Discount', 'Amount', '20');
-    expect(screen.getByText(money(2000)!)).toBeTruthy();
+    expect(screen.getByText(`−${money(2000)}`)).toBeTruthy();
     act(() => sale.setQuantity(sale.order.lineItems[0].id, 1));
     expect(sale.order.lineItems[0].discounts[0]).toMatchObject({ value: 2000, amountMinor: 1250 });
-    expect(screen.getByText(money(1250)!)).toBeTruthy();
-    expect(screen.queryByText(money(2000)!)).toBeNull();
+    expect(screen.getByText(`−${money(1250)}`)).toBeTruthy();
+    expect(screen.queryByText(`−${money(2000)}`)).toBeNull();
   });
 
   it('shows invalid input inline and applies nothing', () => {
@@ -150,11 +150,12 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     expect(totals(sale.order)).toEqual(totals(order));
     expect(sale.order.lineItems[0]).toMatchObject({ discountMinor: 300, orderDiscountMinor: 50, netMinor: 2200 });
     expect(screen.getByText(`Discount: ${money(300)}`)).toBeTruthy();
-    expect(screen.getByText('10%')).toBeTruthy();
+    // Each chip carries its order.display amount: the line's 10% of €25.00, and the order row.
+    expect(screen.getByText(`10% −${money(250)}`)).toBeTruthy();
     expect(screen.getByText(`Order discount −${money(50)}`)).toBeTruthy();
     expect(screen.queryByRole('group')).toBeNull();
-    click('Remove discount 10%');
-    click(`Remove discount ${money(50)}`);
+    click(`Remove discount 10% −${money(250)}`);
+    click(`Remove discount Order discount −${money(50)}`);
     expect(totals(sale.order)).toEqual(plain);
     expect(screen.queryByText(/^Discount: /)).toBeNull();
   });
@@ -169,20 +170,27 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     discount('Discount', 'Percent', '10');
     discount('Order discount', 'Amount', '0.50');
     const { display } = sale.order;
-    expect(display).toEqual({ taxInclusive: inclusive, ...expected });
+    const [line] = sale.order.lineItems;
+    // The line before its discounts (€25.00), its 10% as a row (€2.50), and the order discount as one row (€0.50).
+    expect(display).toEqual({ taxInclusive: inclusive, ...expected, orderDiscountMinor: 50,
+      lines: [{ lineId: line.id, amountMinor: 2500, discounts: [{ discountId: line.discounts[0].id, amountMinor: 250 }] }] });
     // Exclusive: subtotal − discount + VAT = total. Inclusive: subtotal − discount = total, the VAT included.
     expect(display.subtotalMinor - display.discountMinor + (inclusive ? 0 : display.taxMinor)).toBe(display.totalMinor);
-    expect(screen.getByText(`Subtotal: ${money(display.subtotalMinor)}`)).toBeTruthy();
-    expect(screen.getByText(`Discount: ${money(display.discountMinor)}`)).toBeTruthy();
-    expect(screen.getByText(`Total: ${money(display.totalMinor)}`)).toBeTruthy();
-    if (inclusive) expect(screen.getByLabelText(`Includes VAT 25%: ${money(display.taxMinor)}`)).toBeTruthy();
-    expect(screen.queryByText(`VAT 25%: ${money(display.taxMinor)}`)).toEqual(inclusive ? null : expect.anything());
+    // The line amounts add up to the subtotal; the line discounts plus the order row to the discount.
+    expect(display.lines.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(display.subtotalMinor);
+    expect(display.lines.flatMap((row) => row.discounts).reduce((sum, row) => sum + row.amountMinor, display.orderDiscountMinor))
+      .toBe(display.discountMinor);
+    const tax = `${inclusive ? 'incl. ' : ''}VAT 25%: ${money(display.taxMinor)}`;
+    for (const text of [`Shirt: ${money(2500)}`, `10% −${money(250)}`, `Order discount −${money(50)}`, `Subtotal: ${money(2500)}`,
+      `Discount: ${money(300)}`, tax, `Total: ${money(display.totalMinor)}`]) expect(screen.getByText(text)).toBeTruthy();
     const order = sale.order;
     cleanup();
     render(<Receipt order={order} settings={receiptSettings} cashier="cashier" registerId="register-1" newSale={() => {}} />);
-    const rows = [`Subtotal: ${money(display.subtotalMinor)}`, `Discount: −${money(display.discountMinor)}`,
-      `${inclusive ? 'Includes ' : ''}VAT 25%: ${money(display.taxMinor)}`, `Total: ${money(display.totalMinor)}`];
-    for (const label of rows) expect(screen.getByLabelText(label)).toBeTruthy();
+    // In the cart's order: the line, its discount row, the order discount row, then Subtotal, Discount, VAT and Total.
+    const rows = [`2 × ${money(1250)}: ${money(2500)}`, `10% off: −${money(250)}`, `Order discount: −${money(50)}`,
+      `Subtotal: ${money(2500)}`, `Discount: −${money(300)}`, tax, `Total: ${money(display.totalMinor)}`];
+    const labels = Array.from(document.querySelectorAll('[aria-label]'), (element) => element.getAttribute('aria-label'));
+    expect(labels.filter((label) => rows.includes(label!))).toEqual(rows);
   });
 
   it('at order.create 1 shows TallyUI\'s message when applying, and the order stays undiscounted', async () => {
@@ -222,8 +230,11 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     expect(envelope.payload).toMatchObject({ discountMinor: 500, totalMinor: order.totalMinor, lines: [expect.objectContaining({ discountMinor: 500 })] });
     cleanup();
     render(<Receipt order={order} settings={receiptSettings} cashier="cashier" registerId="register-1" newSale={() => {}} />);
-    // The line's own discounts label its description; the amounts come from the snapshot.
-    expect(screen.getByText(`2 × ${money(1250)} · 10% off · ${money(250)} off`)).toBeTruthy();
+    // The line before its discounts, then each of its own discounts as a row; the amounts come from the snapshot.
+    for (const label of [`2 × ${money(1250)}: ${money(2500)}`, `10% off: −${money(250)}`, `${money(250)} off: −${money(250)}`]) {
+      expect(screen.getByLabelText(label)).toBeTruthy();
+    }
+    expect(screen.queryByLabelText(/^Order discount/)).toBeNull();
     expect(screen.getByLabelText(`Discount: −${money(500)}`)).toBeTruthy();
     expect(screen.getByLabelText(`Subtotal: ${money(2500)}`)).toBeTruthy();
     expect(screen.getByLabelText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();

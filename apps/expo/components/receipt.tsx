@@ -23,7 +23,7 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
   </View>;
   const { totals } = receipt;
   const vat = totals.taxLines.map((line, index) =>
-    row(`${totals.taxInclusive ? 'Includes ' : ''}VAT ${line.ratePpm / 10000}%`, money(line.amountMinor), false, index));
+    row(`${totals.taxInclusive ? 'incl. ' : ''}VAT ${line.ratePpm / 10000}%`, money(line.amountMinor), false, index));
   return <>
     {stripHeight > 0 ? <View dataSet={{ print: 'hide' }} style={{ height: stripHeight, flexShrink: 0 }} /> : null}
     <View className="w-full max-w-md self-center gap-3 p-4 bg-card">
@@ -34,17 +34,18 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
     <Text className="text-muted-foreground">Cashier: {receipt.header.cashier}</Text>
     {receipt.lineItems.map((line, index) => <View key={index}>
       <Text className="text-foreground">{line.name}</Text>
-      {/* The line's own discounts as labels; the order discount's share stays in the line total (ADR-062). */}
-      {row(`${line.quantity} × ${money(line.unitPriceMinor)}${order.lineItems[index].discounts
-        .map((discount) => ` · ${discountLabel(discount, receipt.currency)} off`).join('')}`, money(line.lineTotalMinor))}
+      {/* Before any discount, then the line's own discounts as sub-rows (TallyUI ADR-063); they add up to the subtotal. */}
+      {row(`${line.quantity} × ${money(line.unitPriceMinor)}`, money(line.displayAmountMinor))}
+      {line.displayDiscounts.map((discount, i) => <View key={i} className="pl-4">{row(`${discountLabel(
+        order.lineItems[index].discounts[i], receipt.currency)} off`, `−${money(discount.amountMinor)}`)}</View>)}
     </View>)}
-    {/* order.display's figures (TallyUI ADR-063, ADR 0008). Exclusive: subtotal − discount + VAT = total; inclusive:
-        subtotal − discount = total, and the VAT is shown under it as included, not added. */}
+    {receipt.orderDiscountMinor > 0 ? row('Order discount', `−${money(receipt.orderDiscountMinor)}`) : null}
+    {/* order.display's figures (TallyUI ADR-063, ADR 0008), in the cart's order. Exclusive: subtotal − discount + VAT
+        = total; inclusive: subtotal − discount = total, and the VAT is "incl.", not added. */}
     {row('Subtotal', money(totals.subtotalMinor))}
     {totals.discountMinor > 0 ? row('Discount', `−${money(totals.discountMinor)}`) : null}
-    {totals.taxInclusive ? null : vat}
+    {vat}
     {row('Total', money(totals.totalMinor), true)}
-    {totals.taxInclusive ? vat : null}
     {receipt.payments.map((payment, index) => row(payment.method === 'cash' ? 'Cash tendered' : 'Card terminal',
       money(payment.amountMinor) + (payment.reference ? ` · ${payment.reference}` : ''), false, index))}
     {row('Change', money(receipt.changeDueMinor))}
