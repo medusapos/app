@@ -17,6 +17,7 @@ vi.mock('@tallyui/database', async (importOriginal) => {
 
 const baseUrl = 'https://stock-reconcile.test';
 const headers = authHeaders('test-admin-jwt');
+const context = { connectorId: posConnector.id, baseUrl, headers };
 const onUnauthorized = vi.fn();
 const pass = (truncated: boolean): StockReconcileResult => ({ pages: 1, written: 0, removed: 0, truncated });
 
@@ -49,7 +50,7 @@ async function mount(reconcileImpl: (state$: BehaviorSubject<StockReconcileState
   let started!: () => void;
   const runnerStarted = new Promise<void>((done) => { started = done; });
   vi.mocked(startStockReconcile).mockImplementation(() => { started(); return runner; });
-  const hook = renderHook(() => useReplicatedProducts(posConnector, headers, baseUrl, onUnauthorized));
+  const hook = renderHook(() => useReplicatedProducts(posConnector, context, onUnauthorized));
   await act(async () => { await runnerStarted; });
   return { ...hook, runner, state$, remove, finishInitial: () => act(async () => finishInitial()),
     appState: (state: AppStateStatus) => act(async () => onAppState(state)) };
@@ -120,7 +121,7 @@ it('shows a restart-seeded lastCompletedAt immediately, without any call from th
   const state$ = new BehaviorSubject<StockReconcileState>({ running: false, truncated: false, lastCompletedAt: seeded });
   const runner = { reconcileStock: vi.fn(async () => pass(false)), stop: vi.fn(), state$ };
   vi.mocked(startStockReconcile).mockReturnValue(runner);
-  const { result, unmount } = renderHook(() => useReplicatedProducts(posConnector, headers, baseUrl, onUnauthorized));
+  const { result, unmount } = renderHook(() => useReplicatedProducts(posConnector, context, onUnauthorized));
   await vi.waitFor(() => expect(result.current.lastStockCheckAt).toEqual(new Date(seeded)));
   expect(runner.reconcileStock).not.toHaveBeenCalled();
   unmount();
@@ -140,7 +141,7 @@ it('closes the database and starts nothing when unmounted while the database is 
     close = vi.spyOn(db, 'close');
     return db;
   });
-  const { unmount } = renderHook(() => useReplicatedProducts(posConnector, headers, baseUrl, onUnauthorized));
+  const { unmount } = renderHook(() => useReplicatedProducts(posConnector, context, onUnauthorized));
   unmount();
   release();
   await vi.waitFor(() => expect(close?.mock.calls).toHaveLength(1));

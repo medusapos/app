@@ -3,7 +3,6 @@ import { medusaConnector } from '@tallyui/connector-medusa';
 import { createOrderBuilder } from '@tallyui/pos';
 import { catalogueEntries } from './catalogue';
 import { addEntryToCart, CartError } from './cart';
-import { taxContextFor } from './store-settings';
 
 const traits = medusaConnector.traits.product;
 const product = {
@@ -12,10 +11,7 @@ const product = {
 };
 const entry = catalogueEntries([product], traits)[0];
 function orderBuilder() {
-  return createOrderBuilder({ currency: 'EUR', taxContext: taxContextFor({
-    storeName: 'Store', currency: 'EUR', location: { id: 'loc_1', name: 'Warehouse', countryCode: 'de' },
-    taxRatePpm: 190000, pricesIncludeTax: false,
-  }) });
+  return createOrderBuilder({ currency: 'EUR', taxContext: { getTaxRatePpm: () => 190000, pricesIncludeTax: false } });
 }
 
 describe('addEntryToCart', () => {

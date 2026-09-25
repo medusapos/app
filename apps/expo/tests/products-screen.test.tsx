@@ -2,8 +2,8 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
 import type { ProductGrid, SearchInput, CartPanelProps, CartLineProps, CartTotalProps } from '@tallyui/components';
-import { formatMoney } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, type LineItem, type PosOrder } from '@tallyui/pos';
+import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
+import { createOrderBuilder, finalizeOrder, useStoreSettings, type LineItem, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { saveSession } from '../lib/session';
@@ -28,6 +28,10 @@ vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn(
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
+// store-settings-flow.test.tsx covers the settings states; here the store settings are ready.
+vi.mock('@tallyui/pos', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(),
+}));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
@@ -66,8 +70,11 @@ const replicated = (over: Partial<Replicated>): Replicated => ({ products: [], s
   lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, ...over });
 
 const settings: StoreSettings = {
-  storeName: 'Test shop', currency: 'EUR', taxRatePpm: 250000, pricesIncludeTax: false,
-  location: { id: 'loc', name: 'Main', countryCode: 'dk' },
+  storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' },
+};
+const pricing: PricingSettings = {
+  currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 },
+  pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' },
 };
 beforeEach(() => {
   const data = new Map<string, string>();
@@ -78,6 +85,7 @@ beforeEach(() => {
   });
   saveCachedSettings(localStorage, 'https://store.test', settings);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
+  vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
 });
@@ -365,9 +373,9 @@ describe('ProductsScreen session routing', () => {
   });
   it('signs out when product replication reports unauthorized', async () => {
     await mount();
-    const [, headers, baseUrl, onUnauthorized] = vi.mocked(useReplicatedProducts).mock.calls[0];
-    expect(headers).toEqual({ Authorization: 'Bearer ' + JSON.parse(localStorage.getItem('medusapos.session')!).token });
-    expect(baseUrl).toBe('https://store.test');
+    const [, context, onUnauthorized] = vi.mocked(useReplicatedProducts).mock.calls[0];
+    expect({ ...context.headers }).toEqual({ Authorization: 'Bearer ' + JSON.parse(localStorage.getItem('medusapos.session')!).token });
+    expect(context).toMatchObject({ connectorId: 'medusa', baseUrl: 'https://store.test', pricingContext: pricing.pricingContext });
     act(() => onUnauthorized());
     expect(localStorage.getItem('medusapos.session')).toBeNull();
     expect(screen.getByText('redirect:/login')).toBeTruthy();

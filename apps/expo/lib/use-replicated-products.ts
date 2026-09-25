@@ -25,14 +25,16 @@ export function classifyReplicationError(err: unknown): 'unauthorized' | 'http' 
 /**
  * Replicates a connector's products into a local RxDB database and keeps a
  * live list of them. Nothing here is backend-specific: the connector
- * supplies the schema and pull handler; the caller supplies auth headers.
+ * supplies the schema and pull handler; the caller supplies the sync context
+ * (auth headers, and the pricing context in priced mode), memoised, since a
+ * new one restarts replication.
  */
 export function useReplicatedProducts(
   connector: TallyConnector,
-  headers: Record<string, string>,
-  baseUrl: string,
+  context: SyncContext,
   onUnauthorized: () => void,
 ) {
+  const { baseUrl } = context;
   const [products, setProducts] = useState<any[]>([]);
   const [state, setState] = useState<SyncState>('connecting');
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
@@ -100,13 +102,6 @@ export function useReplicatedProducts(
         cleanup.push(() => { void closeCache(); });
         const health$ = getStorageHealth(db);
         if (health$) cleanup.push(watchStorageHealth(health$));
-        const context: SyncContext = {
-          connectorId: connector.id,
-          baseUrl,
-          // The caller passes the connector's auth headers.
-          headers,
-        };
-
         const subscription = db.products.find().$.subscribe((docs) => {
           if (!cancelled) {
             if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') debug.current.lastProductsEmission = new Date().toISOString();
@@ -208,7 +203,7 @@ export function useReplicatedProducts(
       cancelled = true;
       for (const fn of cleanup) fn();
     };
-  }, [connector, baseUrl, headers, onUnauthorized, reconcileStock]);
+  }, [connector, baseUrl, context, onUnauthorized, reconcileStock]);
 
   return { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock };
 }

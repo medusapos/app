@@ -4,7 +4,10 @@ import { E2E_RUN } from './ports';
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 
-export async function signIn(page: Page) {
+// The e2e store has two regions and no default one, so a fresh till shows "Set up this till";
+// the existing specs keep Europe (dk, 25% exclusive). Returns whether the choice screen showed;
+// with `region` null it returns there, without choosing.
+export async function signIn(page: Page, region: string | null = 'Europe'): Promise<boolean> {
   await page.goto('/login');
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
@@ -20,11 +23,24 @@ export async function signIn(page: Page) {
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled({ timeout: 1000 });
   }).toPass({ timeout: 20000 });
   await page.getByRole('button', { name: 'Sign in', exact: true }).click();
-  if (process.env.E2E_BACKEND_URL !== undefined) {
+  const setUp = page.getByText('Set up this till', { exact: true });
+  const hosted = process.env.E2E_BACKEND_URL !== undefined;
+  await expect(setUp.or(page.getByText(/Up to date · /))).toBeVisible({ timeout: hosted ? 5 * 60_000 : undefined });
+  const chose = await setUp.isVisible();
+  if (chose && region === null) return true;
+  if (chose) await chooseRegion(page, region!);
+  if (hosted) {
     await expect(page.getByText(/Up to date · [\d,.  ]+ products/)).toBeVisible({ timeout: 5 * 60_000 });
   } else {
     await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
   }
+  return chose;
+}
+
+// On "Set up this till": pick a region and continue.
+export async function chooseRegion(page: Page, region: string) {
+  await page.getByRole('radio', { name: region, exact: true }).click();
+  await page.getByText('Continue', { exact: true }).click();
 }
 
 // Numeric cash is in EUR major units. Return the displayed receipt total before New sale.

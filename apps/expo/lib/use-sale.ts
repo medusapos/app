@@ -1,19 +1,19 @@
-import { useEffect, useState } from 'react';
-import type { ProductTraits } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, type Order, type PosOrder } from '@tallyui/pos';
+import { useEffect, useRef, useState } from 'react';
+import type { ProductTraits, StoreSettings } from '@tallyui/core';
+import { createOrderBuilder, finalizeOrder, useTax, type Order, type PosOrder } from '@tallyui/pos';
 import type { CatalogueEntry } from './catalogue';
 import { addEntryToCart, CartError } from './cart';
-import { taxContextFor, type StoreSettings } from './store-settings';
 
 export type SaleStage = { kind: 'cart' } | { kind: 'tender'; method: 'cash' | 'external' }
   | { kind: 'receipt'; order: Order; posOrder: PosOrder };
 
-export function useSale(settings: StoreSettings, opts: {
+/** Call under a `TaxProvider`: its tax context and the settings' currency price every sale. */
+export function useSale(settings: Pick<StoreSettings, 'currency'>, opts: {
   registerId: string; cashierRef: string; onSaleCompleted?: (posOrder: PosOrder) => Promise<void> | void;
 }) {
-  const [builder, setBuilder] = useState(() => createOrderBuilder({
-    currency: settings.currency, taxContext: taxContextFor(settings),
-  }));
+  const taxContext = useTax();
+  const madeWith = useRef({ taxContext, currency: settings.currency });
+  const [builder, setBuilder] = useState(() => createOrderBuilder({ currency: settings.currency, taxContext }));
   const [order, setOrder] = useState(() => builder.getSnapshot());
   const [stage, setStage] = useState<SaleStage>({ kind: 'cart' });
   const [error, setError] = useState<string | null>(null);
@@ -21,6 +21,10 @@ export function useSale(settings: StoreSettings, opts: {
     const subscription = builder.order$.subscribe(setOrder);
     return () => subscription.unsubscribe();
   }, [builder]);
+  // New tax settings or currency start a new sale on them, so no sale mixes two.
+  useEffect(() => {
+    if (madeWith.current.taxContext !== taxContext || madeWith.current.currency !== settings.currency) result.newSale();
+  });
 
   function setTender(tender: { method: 'cash' | 'external'; amountMinor: number; reference?: string } | null) {
     const previous = builder.getSnapshot().payments[0];
@@ -29,7 +33,7 @@ export function useSale(settings: StoreSettings, opts: {
     setError(null);
   }
 
-  return {
+  const result = {
     order, stage, error,
     add(entry: CatalogueEntry<any>, traits: ProductTraits<any>) {
       try {
@@ -69,11 +73,13 @@ export function useSale(settings: StoreSettings, opts: {
       setStage({ kind: 'receipt', order: current, posOrder });
     },
     newSale() {
-      const next = createOrderBuilder({ currency: settings.currency, taxContext: taxContextFor(settings) });
+      madeWith.current = { taxContext, currency: settings.currency };
+      const next = createOrderBuilder({ currency: settings.currency, taxContext });
       setBuilder(next);
       setOrder(next.getSnapshot());
       setStage({ kind: 'cart' });
       setError(null);
     },
   };
+  return result;
 }
