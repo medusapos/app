@@ -2,16 +2,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 
-import { StoreSettingsChoiceScreen } from '@tallyui/components';
+import { Cart, CartBar, StoreSettingsChoiceScreen, Tender } from '@tallyui/components';
 import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, TaxProvider, taxProviderProps, useSale, useStoreSettings, withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
 import { Catalogue } from '../components/catalogue';
-import { Cart } from '../components/cart';
-import { CartBar } from '../components/cart-bar';
-import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
 import { SyncStatus } from '../components/sync-status';
 import { markBusy } from '../lib/live-tab';
@@ -234,7 +231,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {!phone ? <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
             {catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? <Cart sale={sale} /> : <Tender sale={sale} />}
+              {sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : <Tender sale={sale} />}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card"><Tender sale={sale} /></View>
             : cartOpen ? <View className="flex-1 bg-card">
@@ -243,7 +240,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
                   className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
               </View>
               {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
-              <Cart sale={sale} />
+              <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
             </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
         </View>}
     </ConnectorProvider>
