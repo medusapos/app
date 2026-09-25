@@ -190,25 +190,27 @@ describe('store settings flow', () => {
     await requested(1);
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
-    fireEvent.click(button('Shirt'));
-    fireEvent.click(button('Card terminal'));
+    const startSale = () => { fireEvent.click(button('Shirt')); fireEvent.click(button('Card terminal')); };
     const inTender = () => {
       expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
       expect(button('Payment approved on terminal')).toBeTruthy();
     };
-    inTender();
+    const toIdle = () => { fireEvent.click(button('Back')); fireEvent.click(button('Remove Shirt')); };
     const replicationContext = vi.mocked(useReplicatedProducts).mock.lastCall![1];
 
+    // Retry is offered only while the sale is idle, so a sale is started while the retry loads.
     await act(async () => { fireEvent.click(button('Retry')); });
     await requested(2);
+    startSale();
     inTender(); // still mounted while the retry loads
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     inTender();
     expect(screen.getByText('Offline')).toBeTruthy();
 
+    toIdle();
     await act(async () => { fireEvent.click(button('Retry')); });
     await requested(3);
-    inTender();
+    startSale();
     await act(async () => { settle.resolve({ ...pricing, taxRatesPpm: { ...pricing.taxRatesPpm } }); });
     inTender();
     expect(screen.queryByText('Offline')).toBeNull();
@@ -216,5 +218,52 @@ describe('store settings flow', () => {
     fireEvent.click(button('Back'));
     expect(button('Remove Shirt')).toBeTruthy();
     expect(screen.getByText('Total: €15.00')).toBeTruthy();
+  }, 20000);
+
+  it('hides Retry while the cart has lines or a tender is open, and new settings wait for the sale to end (a money rule)', async () => {
+    saveCachedPricing(localStorage, session.baseUrl, pricing);
+    let settle!: { resolve: (value: PricingSettings) => void; reject: (error: unknown) => void };
+    storeSettings.mockImplementation(() => new Promise((resolve, reject) => { settle = { resolve, reject }; }));
+    render(<ProductsScreen />);
+    await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledOnce());
+    await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
+    await pos();
+    expect(button('Retry')).toBeTruthy();
+    fireEvent.click(button('Shirt'));
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    fireEvent.click(button('Card terminal'));
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    fireEvent.click(button('Back'));
+    fireEvent.click(button('Remove Shirt'));
+    await act(async () => { fireEvent.click(button('Retry')); });
+    await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
+    fireEvent.click(button('Shirt'));
+    fireEvent.click(button('Card terminal'));
+    // Germany's settings (19% inclusive) arrive mid-payment: the card sale completes on Europe's 25% exclusive.
+    await act(async () => { settle.resolve({ currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000 },
+      pricingContext: { region_id: 'reg_de', currency_code: 'eur', publishable_key: 'pk_1' } }); });
+    expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    const record = vi.mocked(useOutboxContext().record);
+    expect(record).toHaveBeenCalledOnce();
+    expect(record.mock.calls[0][0]).toMatchObject({ pricesIncludeTax: false, subtotalMinor: 1200, taxMinor: 300, totalMinor: 1500,
+      payments: [expect.objectContaining({ method: 'external', amountMinor: 1500 })] });
+    await act(async () => { fireEvent.click(button('New sale')); });
+    fireEvent.click(button('Shirt'));
+    expect(screen.getByText('Total: €12.00')).toBeTruthy();
+  }, 20000);
+
+  it('keeps the sync context through a token refresh, without re-resolving, and sends the new token', async () => {
+    storeSettings.mockResolvedValue(pricing);
+    const view = render(<ProductsScreen />);
+    await pos();
+    const context = vi.mocked(useReplicatedProducts).mock.lastCall![1];
+    vi.mocked(useSession).mockReturnValue({ session: { ...session, token: 'jwt-refreshed' }, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn() });
+    await act(async () => { view.rerender(<ProductsScreen />); });
+    await pos();
+    expect(storeSettings).toHaveBeenCalledOnce();
+    expect(vi.mocked(useReplicatedProducts).mock.lastCall![1]).toBe(context);
+    expect(context.headers.Authorization).toBe('Bearer jwt-refreshed');
+    expect(storeSettings.mock.calls[0][0].headers.Authorization).toBe('Bearer jwt-refreshed');
   });
 });

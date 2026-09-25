@@ -5,10 +5,11 @@ import { Subject } from 'rxjs';
 import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { medusaConnector } from '@tallyui/connector-medusa';
+import type { SyncContext } from '@tallyui/core';
 import type { ProductGrid, ProductStockBadge, SearchInput } from '@tallyui/components';
 import { Catalogue, formatStockSyncTime } from '../components/catalogue';
 import { createTallyDatabase } from '@tallyui/database';
-import { clearProductCache, productCacheName, productCacheStorage } from '../lib/product-cache';
+import { clearProductCache, pricedCacheName, productCacheStorage } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
 vi.mock('@tallyui/components', () => ({
@@ -248,7 +249,7 @@ describe('replicated catalogue recovery', () => {
     const context = { connectorId: connector.id, baseUrl, headers };
     const onUnauthorized = vi.fn();
     const db = await createTallyDatabase({ connector,
-      name: productCacheName(connector.id, baseUrl), storage: productCacheStorage() });
+      name: pricedCacheName(connector.id, baseUrl), storage: productCacheStorage() });
     await db.products.insert({ ...products[0], handle: 'blue-hat' });
     await db.close();
     const { result, unmount } = renderHook(() => useReplicatedProducts(connector, context, onUnauthorized));
@@ -277,6 +278,60 @@ describe('replicated catalogue recovery', () => {
       await clearProductCache(connector.id, baseUrl);
       unmount();
       stream.complete();
+      vi.unstubAllGlobals();
+    }
+  }, 16000);
+});
+
+describe('a pricing-context change', () => {
+  it('opens a new cache and resyncs from no checkpoint; the old cache is swept after that sync, and sign-out removes the new one', async () => {
+    vi.stubGlobal('crypto', webcrypto);
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+      removeItem: (key: string) => { data.delete(key); },
+    });
+    const baseUrl = 'https://pricing-context.test';
+    const doc = (amount: number) => ({ id: 'hat', title: 'Blue Hat', handle: 'blue-hat', status: 'published', _deleted: false, variants: [
+      { id: 'hat-one', title: 'One size', sku: 'HAT', prices: [{ amount, currency_code: 'eur' }], manage_inventory: false }] });
+    // Like Medusa's pull: from no checkpoint, the region's documents; after it, nothing (no product changed).
+    const handler = vi.fn(async (checkpoint: unknown, _batchSize: number, context: SyncContext) => checkpoint
+      ? { documents: [], checkpoint }
+      : { documents: [doc(context.pricingContext?.region_id === 'reg_de' ? 20 : 10)], checkpoint: { id: 'done' } });
+    const connector = { ...medusaConnector, reconcile: undefined, replication: { products: { pull: { handler } } } };
+    const context = (region_id: string): SyncContext => ({ connectorId: connector.id, baseUrl, headers: { Authorization: 'Bearer test' },
+      pricingContext: { region_id, currency_code: 'eur', publishable_key: 'pk_1' } });
+    const [eu, de] = [context('reg_eu'), context('reg_de')];
+    const euName = pricedCacheName(connector.id, baseUrl, eu.pricingContext);
+    const deName = pricedCacheName(connector.id, baseUrl, de.pricingContext);
+    const recorded = () => localStorage.getItem(`medusapos.product-cache.${baseUrl}`);
+    const amounts = (docs: any[]) => docs.map((product) => product.variants[0].prices[0].amount);
+    const onUnauthorized = vi.fn();
+    const view = renderHook(({ ctx }) => useReplicatedProducts(connector, ctx, onUnauthorized), { initialProps: { ctx: eu } });
+    let mounted = true;
+    try {
+      await waitFor(() => expect(view.result.current.state).toBe('synced'));
+      expect(amounts(view.result.current.products)).toEqual([10]);
+      await waitFor(() => expect(recorded()).toBe(euName));
+
+      view.rerender({ ctx: de });
+      await waitFor(() => expect(amounts(view.result.current.products)).toEqual([20]));
+      await waitFor(() => expect(view.result.current.state).toBe('synced'));
+      const dePulls = handler.mock.calls.filter((call) => call[2].pricingContext?.region_id === 'reg_de');
+      expect(dePulls[0][0]).toBeUndefined();
+      await waitFor(() => expect(recorded()).toBe(deName));
+      const old = await createTallyDatabase({ connector, name: euName, storage: productCacheStorage() });
+      try { expect(await old.products.find().exec()).toEqual([]); } finally { await old.remove(); }
+
+      await clearProductCache(connector.id, baseUrl); // sign-out
+      expect(recorded()).toBeNull();
+      view.unmount();
+      mounted = false;
+      const current = await createTallyDatabase({ connector, name: deName, storage: productCacheStorage() });
+      try { expect(await current.products.find().exec()).toEqual([]); } finally { await current.remove(); }
+    } finally {
+      if (mounted) view.unmount();
       vi.unstubAllGlobals();
     }
   }, 16000);

@@ -4,7 +4,8 @@ import { E2E_RUN } from './ports';
 
 // TallyUI store settings (TV4) and priced replication (D2b) against the seeded store: regions
 // Europe (dk, exclusive) and Germany (de, inclusive), no default region, the stock location in
-// Copenhagen (dk), one publishable key for the E2E channel, and E2E-U in no channel.
+// Copenhagen (dk), one publishable key for the E2E channel, and E2E-U only in another channel.
+// (Medusa 2.21.0 applies the store API's channel filter only with more than one sales channel.)
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const setUp = (page: Page) => page.getByText('Set up this till', { exact: true });
 const tile = (page: Page) => page.getByTestId('product-tile-E2E product 1');
@@ -73,6 +74,43 @@ test('an unlisted product stays hidden', async ({ page }) => {
   await expect(page.getByText(/Up to date · 5 products · 0 matching/)).toBeVisible();
   await search.press('Enter');
   await expect(search).toHaveValue('E2E-U');
+});
+
+// A new pricing context is a new product cache and a pull from no checkpoint. Germany gets its own
+// E2E-1 price before the till syncs Europe, so a pull resumed from Europe's checkpoint would find
+// nothing changed and keep showing Europe's price. The location moves to de for the switch, and back.
+test('a region change resyncs the catalogue at the new region\'s price', async ({ page }) => {
+  const token = await adminToken();
+  const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+  const get = async (path: string) => (await fetch(`${backend}${path}`, { headers })).json();
+  const post = (path: string, body: unknown) => fetch(`${backend}${path}`, { method: 'POST', headers, body: JSON.stringify(body) });
+  const { regions } = await get('/admin/regions?limit=100&fields=id,name');
+  const germany: string = regions.find((entry: { name: string }) => entry.name === 'Germany').id;
+  const { variants: [variant] } = await get('/admin/product-variants?limit=1&sku[]=E2E-1&fields=id,product_id');
+  const { stock_locations: [location] } = await get('/admin/stock-locations?limit=1&name=Copenhagen&fields=id,address.*');
+  const { address_1, city, postal_code } = location.address;
+  const setPrices = (prices: unknown[]) => post(`/admin/products/${variant.product_id}/variants/${variant.id}`, { prices });
+  const moveTo = (country_code: string) => post(`/admin/stock-locations/${location.id}`, { address: { address_1, city, postal_code, country_code } });
+  try {
+    const priced = await setPrices([{ currency_code: 'eur', amount: 2 }, { currency_code: 'eur', amount: 3, rules: { region_id: germany } }]);
+    expect(priced.ok, await priced.clone().text()).toBeTruthy();
+    await signIn(page);
+    const [europePrice, germanyPrice] = [await storePriceLabel(page, token, 'Europe'), await storePriceLabel(page, token, 'Germany')];
+    expect(germanyPrice).not.toBe(europePrice);
+    await expect(tile(page)).toContainText(europePrice);
+    const moved = await moveTo('de');
+    expect(moved.ok, await moved.clone().text()).toBeTruthy();
+    // Without the cached app settings, the reload reads the moved location before resolving the region.
+    await page.evaluate((key) => localStorage.removeItem(key), `medusapos.settings.${backend}`);
+    await page.reload();
+    await page.getByRole('button', { name: 'Choose another region', exact: true }).click();
+    await chooseRegion(page, 'Germany');
+    await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
+    await expect(tile(page)).toContainText(germanyPrice);
+  } finally {
+    expect((await moveTo('dk')).ok).toBeTruthy();
+    expect((await setPrices([{ currency_code: 'eur', amount: 2 }])).ok).toBeTruthy();
+  }
 });
 
 test('the choice survives a reload', async ({ page }) => {

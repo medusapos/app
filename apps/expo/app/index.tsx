@@ -184,7 +184,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
-          {onRetry ? <Pressable accessibilityRole="button" onPress={onRetry}><Text className="text-foreground underline">Retry</Text></Pressable> : null}
+          {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
+          {onRetry && sale.idle ? <Pressable accessibilityRole="button" onPress={onRetry}><Text className="text-foreground underline">Retry</Text></Pressable> : null}
           <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
             <View className="flex-1">
               <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}

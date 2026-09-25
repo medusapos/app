@@ -139,7 +139,9 @@ export default async function seedE2e({ container }: ExecArgs) {
   if (missingProducts.length) await createProductsWorkflow(container).run({ input: { products: missingProducts } })
   // Priced and stocked, but only in another sales channel: the store API doesn't list it for the
   // E2E key, so the till replicates it unlisted and hides it (the catalogue still shows 5 products).
-  // Not "in no channel": Medusa's store API lists a product with no channel for every key.
+  // Medusa 2.21.0 skips the store API's channel filter only when the store has at most one sales
+  // channel (store/products/middlewares.js); with several, a product in no channel is excluded for
+  // every key. Its own channel keeps it unlisted for the E2E key whatever the channel count.
   let [otherChannel] = await container.resolve(Modules.SALES_CHANNEL).listSalesChannels({ name: "E2E other channel" })
   if (!otherChannel) [otherChannel] = (await createSalesChannelsWorkflow(container).run({
     input: { salesChannelsData: [{ name: "E2E other channel" }] },

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRxDatabase } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 
@@ -16,7 +16,7 @@ vi.mock('./web-storage', async (importOriginal) => {
 import { webStorageAvailable, getWebStorage, UnsupportedStorageError, usingMemoryStorageForTests } from './web-storage';
 import {
   clearProductCache, closeProductCaches, deleteLegacyProductCache, isUnauthorizedError, legacyDexieName,
-  openProductCache, productCacheName, productCacheStorage, registerOpenCache,
+  openProductCache, pricedCacheName, productCacheName, productCacheStorage, registerOpenCache, sweepProductCaches,
 } from './product-cache';
 
 afterEach(() => {
@@ -62,6 +62,105 @@ describe('productCacheName', () => {
     for (const name of names) expect(name).toMatch(/^[a-z][_$a-z0-9\-]*$/);
     expect(names[2]).toContain('_53_');
     expect(names[5]).toContain('_d83d__de00_');
+  });
+});
+
+describe('pricedCacheName', () => {
+  const context = { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' };
+  const base = productCacheName('medusa', 'http://localhost:9000');
+  const name = (pricingContext?: Record<string, string>) => pricedCacheName('medusa', 'http://localhost:9000', pricingContext);
+  it('is the backend\'s name plus 8 hex of the context\'s region and key, stable across calls', () => {
+    expect(name(context)).toMatch(new RegExp(`^${base}_[0-9a-f]{8}$`));
+    expect(name(context)).toBe(name({ ...context }));
+    expect(name(context)).toBe(name({ ...context, currency_code: 'usd' }));
+    expect(name()).toBe(`${base}_${name().slice(-8)}`);
+  });
+  it('changes with region_id or publishable_key, and no context (\'none\') differs from any context', () => {
+    const names = [name(context), name({ ...context, region_id: 'reg_de' }), name({ ...context, publishable_key: 'pk_2' }),
+      name(), name({}), name({ region_id: 'none' })];
+    expect(new Set(names).size).toBe(names.length);
+  });
+});
+
+describe('sweepProductCaches and the recorded name', () => {
+  const record = (baseUrl: string) => localStorage.getItem(`medusapos.product-cache.${baseUrl}`);
+  const collections = { products: { schema: {
+    title: 'cache test', version: 0, primaryKey: 'id', type: 'object',
+    properties: { id: { type: 'string', maxLength: 100 } }, required: ['id'],
+  } } };
+  async function cacheWithDoc(name: string) {
+    const db = await createRxDatabase({ name, storage: productCacheStorage(), multiInstance: false });
+    await db.addCollections(collections);
+    await db.products.insert({ id: 'priced-in-old-context' });
+    return db;
+  }
+  async function docCount(name: string) {
+    const db = await createRxDatabase({ name, storage: productCacheStorage(), multiInstance: false });
+    try {
+      await db.addCollections(collections);
+      return (await db.products.find().exec()).length;
+    } finally { await db.remove(); }
+  }
+  beforeEach(() => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+      removeItem: (key: string) => { data.delete(key); },
+    });
+  });
+  afterEach(() => { vi.unstubAllGlobals(); });
+
+  it('removes the previously recorded, closed cache, then records the new name', async () => {
+    const baseUrl = 'https://sweep.test';
+    const previous = pricedCacheName('medusa', baseUrl, { region_id: 'reg_eu', publishable_key: 'pk_1' });
+    const next = pricedCacheName('medusa', baseUrl, { region_id: 'reg_de', publishable_key: 'pk_1' });
+    await (await cacheWithDoc(previous)).close();
+    localStorage.setItem(`medusapos.product-cache.${baseUrl}`, previous);
+    await sweepProductCaches('medusa', baseUrl, next);
+    expect(record(baseUrl)).toBe(next);
+    expect(await docCount(previous)).toBe(0);
+  });
+
+  it('with nothing recorded (an upgrade), removes the unsuffixed cache from before priced replication', async () => {
+    const baseUrl = 'https://upgrade.test';
+    const next = pricedCacheName('medusa', baseUrl, { region_id: 'reg_eu', publishable_key: 'pk_1' });
+    await (await cacheWithDoc(productCacheName('medusa', baseUrl))).close();
+    await sweepProductCaches('medusa', baseUrl, next);
+    expect(record(baseUrl)).toBe(next);
+    expect(await docCount(productCacheName('medusa', baseUrl))).toBe(0);
+  });
+
+  it('keeps the recorded cache when it is the same name or still open', async () => {
+    const baseUrl = 'https://sweep-open.test';
+    const previous = pricedCacheName('medusa', baseUrl);
+    const db = await cacheWithDoc(previous);
+    const close = registerOpenCache(previous, db);
+    localStorage.setItem(`medusapos.product-cache.${baseUrl}`, previous);
+    await sweepProductCaches('medusa', baseUrl, previous);
+    await sweepProductCaches('medusa', baseUrl, pricedCacheName('medusa', baseUrl, { region_id: 'reg_eu' }));
+    expect((await db.products.find().exec()).length).toBe(1);
+    await close();
+    expect(await docCount(previous)).toBe(1);
+  });
+
+  it('never throws', async () => {
+    vi.stubGlobal('localStorage', { getItem: () => { throw new Error('denied'); }, setItem: () => { throw new Error('denied'); } });
+    await expect(sweepProductCaches('medusa', 'https://denied.test', 'medusapos_sqlite_x_00000000')).resolves.toBeUndefined();
+  });
+
+  it('sign-out removes the recorded current cache, open or closed, and clears the record', async () => {
+    for (const open of [true, false]) {
+      const baseUrl = `https://sign-out-${open}.test`;
+      const current = pricedCacheName('medusa', baseUrl, { region_id: 'reg_de', publishable_key: 'pk_1' });
+      const db = await cacheWithDoc(current);
+      const close = open ? registerOpenCache(current, db) : async () => {};
+      if (!open) await db.close();
+      localStorage.setItem(`medusapos.product-cache.${baseUrl}`, current);
+      try { await clearProductCache('medusa', baseUrl); } finally { await close(); }
+      expect(record(baseUrl)).toBeNull();
+      expect(await docCount(current)).toBe(0);
+    }
   });
 });
 

@@ -310,17 +310,44 @@ describe('sale', () => {
     expect(sale.order.taxMinor).toBe(160); // 1000 × 19/119, rounded
   });
 
-  it('starts a new sale on new tax settings, and keeps the sale while they are unchanged', () => {
-    const view = render(<SaleHarness />);
+  it('holds new tax settings while a card sale is in progress: it completes on the old ones, the next sale uses the new', async () => {
+    const completed = vi.fn();
+    const inclusive: PricingSettings = { currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000 } };
+    const view = render(<SaleHarness onSaleCompleted={completed} />);
     act(() => sale.add(entries[1], traits));
-    view.rerender(<SaleHarness />);
+    view.rerender(<SaleHarness onSaleCompleted={completed} />);
     expect(sale.order.lineItems).toHaveLength(1);
-    const inclusive: PricingSettings = { ...pricing, pricesIncludeTax: true };
-    view.rerender(<SaleHarness with={inclusive} />);
-    expect(sale.order.lineItems).toEqual([]);
+    click('Card terminal');
+    const before = sale.order;
+    view.rerender(<SaleHarness onSaleCompleted={completed} with={inclusive} />);
+    expect(sale.stage).toEqual({ kind: 'tender', method: 'external' });
+    expect(sale.order).toBe(before);
+    expect(sale.idle).toBe(false);
+    await act(async () => { click('Payment approved on terminal'); });
+    expect(completed).toHaveBeenCalledOnce();
+    expect(completed.mock.calls[0][0]).toMatchObject({ pricesIncludeTax: false, subtotalMinor: 1000, taxMinor: 250, totalMinor: 1250,
+      lines: [expect.objectContaining({ netMinor: 1000, taxLines: [expect.objectContaining({ ratePpm: 250000 })] })],
+      payments: [expect.objectContaining({ method: 'external', amountMinor: 1250 })] });
+    expect(screen.getByLabelText(`Card terminal: ${money(1250)}`)).toBeTruthy();
+    click('New sale');
+    expect(sale.order.id).not.toBe(before.id);
     expect(sale.order.pricesIncludeTax).toBe(true);
     act(() => sale.add(entries[1], traits));
     expect(sale.order.totalMinor).toBe(1000);
+    expect(sale.order.taxMinor).toBe(160);
+  });
+
+  it('holds new settings while the cart has lines, and applies them once it is empty', () => {
+    const view = render(<SaleHarness />);
+    act(() => sale.add(entries[1], traits));
+    const before = sale.order.id;
+    view.rerender(<SaleHarness with={{ ...pricing, pricesIncludeTax: true }} />);
+    expect(sale.order.id).toBe(before);
+    expect(sale.order.pricesIncludeTax).toBe(false);
+    click('Remove Shirt · Red');
+    expect(sale.idle).toBe(true);
+    expect(sale.order.id).not.toBe(before);
+    expect(sale.order.pricesIncludeTax).toBe(true);
   });
 });
 

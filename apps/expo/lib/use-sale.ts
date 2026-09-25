@@ -21,9 +21,11 @@ export function useSale(settings: Pick<StoreSettings, 'currency'>, opts: {
     const subscription = builder.order$.subscribe(setOrder);
     return () => subscription.unsubscribe();
   }, [builder]);
-  // New tax settings or currency start a new sale on them, so no sale mixes two.
+  // New tax settings or currency wait until the sale is idle (an empty cart), then start a new sale on them:
+  // a sale in progress (lines, tender or receipt) finishes on the settings it started with (a money rule).
+  const idle = stage.kind === 'cart' && !order.lineItems.length;
   useEffect(() => {
-    if (madeWith.current.taxContext !== taxContext || madeWith.current.currency !== settings.currency) result.newSale();
+    if (idle && (madeWith.current.taxContext !== taxContext || madeWith.current.currency !== settings.currency)) result.newSale();
   });
 
   function setTender(tender: { method: 'cash' | 'external'; amountMinor: number; reference?: string } | null) {
@@ -34,10 +36,10 @@ export function useSale(settings: Pick<StoreSettings, 'currency'>, opts: {
   }
 
   const result = {
-    order, stage, error,
+    order, stage, error, idle,
     add(entry: CatalogueEntry<any>, traits: ProductTraits<any>) {
       try {
-        addEntryToCart(builder, entry, traits, settings.currency);
+        addEntryToCart(builder, entry, traits, madeWith.current.currency);
         setError(null);
       } catch (error) {
         if (!(error instanceof CartError)) throw error;
