@@ -204,11 +204,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
-        <View dataSet={{ print: 'hide' }} className="flex-row gap-4">
-        <Pressable accessibilityRole="button" onPress={() => router.push('/orders')}>
+        // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
+        <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
+        <Pressable accessibilityRole="button" onPress={() => router.push('/orders')} className="min-h-11 justify-center">
           <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }}>
+        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }} className="min-h-11 justify-center">
           <Text className="text-foreground">Sign out</Text>
         </Pressable>
         </View>

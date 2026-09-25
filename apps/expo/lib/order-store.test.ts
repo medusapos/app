@@ -65,6 +65,41 @@ describe('order store', () => {
     expect(postParkHandle.orders.database.closed).toBe(true);
   });
 
+  it('a rejected close still frees the name: the caller sees the rejection, and the next open reads its orders', async () => {
+    const url = 'https://reject-close.test';
+    const first = await openOrderStore(url);
+    const order = sale();
+    await first.orders.insert(order);
+    // The real close still runs (so RxDB itself deregisters the name), but the promise the code awaits rejects.
+    const realClose = first.orders.database.close.bind(first.orders.database);
+    vi.spyOn(first.orders.database, 'close').mockImplementationOnce(async () => {
+      await realClose();
+      throw new Error('close boom');
+    });
+    await expect(first.close()).rejects.toThrow('close boom');
+    const second = await openOrderStore(url);
+    try {
+      expect((await second.orders.findOne(order.id).exec())?.toJSON()).toEqual(order);
+    } finally { await second.close(); }
+  });
+
+  it('closeOrderStores rejects on a failed close but still frees the name, and the next open reads its orders', async () => {
+    const url = 'https://reject-close-park.test';
+    const handle = await openOrderStore(url);
+    const order = sale();
+    await handle.orders.insert(order);
+    const realClose = handle.orders.database.close.bind(handle.orders.database);
+    vi.spyOn(handle.orders.database, 'close').mockImplementationOnce(async () => {
+      await realClose();
+      throw new Error('park boom');
+    });
+    await expect(closeOrderStores()).rejects.toThrow('park boom');
+    const reopened = await openOrderStore(url);
+    try {
+      expect((await reopened.orders.findOne(order.id).exec())?.toJSON()).toEqual(order);
+    } finally { await reopened.close(); }
+  });
+
   it('selects rejected and applied-with-warnings orders newest first without changing the input', () => {
     const base = sale();
     const rejected: PosOrder = { ...base, id: 'rejected', syncStatus: 'rejected', createdAt: '2026-01-01T00:00:00Z' };
