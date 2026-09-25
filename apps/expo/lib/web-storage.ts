@@ -13,6 +13,28 @@ export function webStorageAvailable(): boolean {
     && typeof navigator !== 'undefined' && !!navigator.storage?.getDirectory;
 }
 
+/** Web without SQLite-wasm support: sales would only live in memory, so nothing opens. */
+export class UnsupportedStorageError extends Error {
+  constructor() {
+    super('This browser can\'t store sales safely (no OPFS worker storage). Use a current Chrome, Edge, Safari or Firefox over HTTPS.');
+    this.name = 'UnsupportedStorageError';
+  }
+}
+
+// TEST-ONLY: jsdom has no OPFS. Set by apps/expo/tests/setup-storage.ts (a vitest setupFiles
+// entry) so `productCacheStorage()` returns memory storage there; production never sets it.
+let memoryStorageForTests = false;
+
+/** TEST-ONLY (see above): makes `productCacheStorage()` return memory storage on web. */
+export function useMemoryStorageForTests(): void {
+  memoryStorageForTests = true;
+}
+
+/** TEST-ONLY (see above): true once `useMemoryStorageForTests()` ran. */
+export function usingMemoryStorageForTests(): boolean {
+  return memoryStorageForTests;
+}
+
 let cachedStorage: RxStorage<any, any> | undefined;
 // Set synchronously by workerInput below (mode 'one' calls it eagerly) — kept so
 // `terminateWebStorage` can end it.

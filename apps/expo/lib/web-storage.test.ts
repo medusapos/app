@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Platform } from 'react-native';
 
+// apps/expo/tests/setup-storage.ts (a setupFiles entry) already imported the real './web-storage'
+// and, through it, the real '@tallyui/storage-sqlite/web'; a fresh module registry lets the mock
+// below apply to this file's own import.
+vi.hoisted(() => vi.resetModules());
+
 // The real `@tallyui/storage-sqlite/web` calls into rxdb-premium's own
 // `web-worker` dependency, which resolves to a worker_threads shim under
 // Node/vitest and rejects any stubbed `Worker` with "no Worker given" — a

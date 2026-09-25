@@ -19,6 +19,7 @@ export default defineConfig({
     include: ['apps/**/*.test.{ts,tsx}', 'packages/**/*.test.{ts,tsx}'],
     exclude: ['**/node_modules/**', 'dev/**', 'packages/medusa-plugin/**'],
     passWithNoTests: true,
+    setupFiles: ['apps/expo/tests/setup-storage.ts'],
     // The shared agent host caps test workers at 2.
     maxWorkers: 2,
   },

@@ -114,6 +114,46 @@ test('a pending order left in the legacy Dexie store carries over on sign-in and
   expect(after['E2E-1']).toBe(before['E2E-1'] - 1);
 });
 
+// F1 in miniature: another tab still on the old build writes a legacy sale after this tab's
+// first carry-over already wrote the marker. The next open must carry it over, not delete it.
+test('a legacy sale written after the first carry-over is carried over on reload and syncs once', async ({ page }) => {
+  const token = await adminToken();
+  const variantId = await variantIdBySku(token, 'E2E-1');
+  const sales = captureSales(page);
+  const seedLegacy = (order: ReturnType<typeof pendingE2E1Order>) => page.evaluate(([backendUrl, posOrder]) => (window as unknown as {
+    __medusaposSeedLegacyOrder: (base: string, order: unknown) => Promise<void>;
+  }).__medusaposSeedLegacyOrder(backendUrl, posOrder), [backend, order] as const);
+  const legacyDatabases = () => page.evaluate(async () => (await indexedDB.databases())
+    .map((db) => db.name).filter((name) => name?.startsWith('rxdb-dexie-medusapos_orders_')));
+
+  const first = pendingE2E1Order(variantId);
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+  await seedLegacy(first);
+  await signIn(page);
+  await expect.poll(() => sales.has(first.id), { timeout: 30_000 }).toBe(true);
+  await expect.poll(legacyDatabases).toEqual([]);
+
+  // The old build's tab is its own JS realm: seed from a fresh page, since this one's Dexie
+  // handles for the legacy name were closed when the carry-over deleted that database.
+  await page.reload();
+  await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
+  const second = pendingE2E1Order(variantId);
+  await seedLegacy(second);
+  expect(await legacyDatabases()).not.toEqual([]);
+  await page.reload();
+  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await expect(page.getByText('· Synced', { exact: false })).toHaveCount(2, { timeout: 30_000 });
+  await expect(page.getByText('· Waiting to sync', { exact: false })).toHaveCount(0);
+
+  expect(sales.has(second.id)).toBe(true);
+  for (const order of [first, second]) {
+    const matching = (await ordersByClientId(token)).filter((o) => o.metadata.tally_client_id === order.id);
+    expect(matching).toHaveLength(1);
+  }
+  expect(await legacyDatabases()).toEqual([]);
+});
+
 test('a dead storage worker shows the reload prompt, and Reload recovers the app', async ({ page }) => {
   await signIn(page);
 

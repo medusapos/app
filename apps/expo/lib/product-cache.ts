@@ -1,6 +1,7 @@
 import { removeRxDatabase, type RxStorage } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
-import { getWebStorage, webStorageAvailable } from './web-storage';
+import { Platform } from 'react-native';
+import { getWebStorage, UnsupportedStorageError, usingMemoryStorageForTests, webStorageAvailable } from './web-storage';
 
 type CachedDb = { remove(): Promise<unknown>; close(): Promise<unknown> };
 
@@ -16,9 +17,15 @@ const pendingCloses = new Set<Promise<void>>();
 // `{ close }`, or `undefined` if the open failed (which counts as closed).
 const pendingOpens = new Set<Promise<{ close: () => Promise<void> } | undefined>>();
 
-/** Persistent storage on web (ADR-061's SQLite-wasm); memory elsewhere (native, and jsdom tests). */
+/**
+ * Persistent storage on web (ADR-061's SQLite-wasm); memory on native. Web without SQLite-wasm
+ * support throws `UnsupportedStorageError` rather than keep sales only in memory (unless a test
+ * run called `useMemoryStorageForTests()`).
+ */
 export function productCacheStorage(): RxStorage<any, any> {
-  return webStorageAvailable() ? getWebStorage() : getRxStorageMemory();
+  if (webStorageAvailable()) return getWebStorage();
+  if (Platform.OS !== 'web' || usingMemoryStorageForTests()) return getRxStorageMemory();
+  throw new UnsupportedStorageError();
 }
 
 function encodeBaseUrl(baseUrl: string): string {

@@ -86,6 +86,10 @@ async function memoryOrdersDb(name: string, localDocuments = false) {
   return db;
 }
 
+const memoryStorage = () => wrappedValidateAjvStorage({ storage: getRxStorageMemory() });
+// The legacy database "exists" (memory storages have no IndexedDB to list).
+const legacyExists = async () => true;
+
 describe('carryOverOrders', () => {
   it('copies every document with its syncStatus, writes the marker, then removes the source', async () => {
     const fromName = 'legacy-carry-basic';
@@ -96,7 +100,7 @@ describe('carryOverOrders', () => {
     await legacy.close();
 
     const to = await memoryOrdersDb('target-carry-basic', true);
-    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
+    await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
 
     const copied = (await to.pos_orders.find().exec()).map((doc) => doc.toJSON());
     expect(copied.sort((a, b) => a.id.localeCompare(b.id)))
@@ -118,14 +122,14 @@ describe('carryOverOrders', () => {
     await legacy.close();
 
     const to = await memoryOrdersDb('target-carry-crash', true);
-    const realBulkUpsert = to.pos_orders.bulkUpsert.bind(to.pos_orders);
-    const spy = vi.spyOn(to.pos_orders, 'bulkUpsert').mockImplementationOnce(async (docs: Partial<PosOrder>[]) => {
+    const realBulkInsert = to.pos_orders.bulkInsert.bind(to.pos_orders);
+    const spy = vi.spyOn(to.pos_orders, 'bulkInsert').mockImplementationOnce(async (docs: PosOrder[]) => {
       // Applies half for real, then crashes before the rest and before the marker.
-      await realBulkUpsert(docs.slice(0, docs.length / 2));
+      await realBulkInsert(docs.slice(0, docs.length / 2));
       throw new Error('simulated crash mid carry-over');
     });
 
-    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
+    await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
     expect(await to.getLocal('legacy-orders-migrated')).toBeNull();
     expect(await to.pos_orders.find().exec()).toHaveLength(2);
 
@@ -134,7 +138,7 @@ describe('carryOverOrders', () => {
     await legacyStillThere.close();
 
     spy.mockRestore();
-    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
+    await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
 
     const finalIds = (await to.pos_orders.find().exec()).map((doc) => doc.id);
     expect(new Set(finalIds).size).toBe(finalIds.length);
@@ -147,21 +151,81 @@ describe('carryOverOrders', () => {
     await to.remove();
   });
 
-  it('skips the copy and removes a leftover source when the marker is already present', async () => {
+  it('with the marker already present, still carries over a legacy sale with a new id before removing the source', async () => {
+    // F1: another tab still on the old build wrote this sale after a first copy wrote the marker.
     const fromName = 'legacy-carry-marker';
     const legacy = await memoryOrdersDb(fromName);
-    await legacy.pos_orders.insert(sale());
+    const late = sale();
+    await legacy.pos_orders.insert(late);
     await legacy.close();
 
     const to = await memoryOrdersDb('target-carry-marker', true);
-    await to.insertLocal('legacy-orders-migrated', { count: 0, at: new Date(0).toISOString() });
+    const marker = { count: 1, at: new Date(0).toISOString() };
+    await to.insertLocal('legacy-orders-migrated', marker);
+    // Records the order of the insert into the new store and any removal of a source storage instance.
+    const events: string[] = [];
+    const realBulkInsert = to.pos_orders.bulkInsert.bind(to.pos_orders);
+    vi.spyOn(to.pos_orders, 'bulkInsert').mockImplementationOnce(async (docs: PosOrder[]) => {
+      const result = await realBulkInsert(docs);
+      events.push(`inserted ${docs.map((doc) => doc.id).join()}`);
+      return result;
+    });
+    const base = memoryStorage();
+    const fromStorage: typeof base = { ...base, createStorageInstance: async (params) => {
+      const instance = await base.createStorageInstance(params);
+      const remove = instance.remove.bind(instance);
+      instance.remove = async () => { events.push('source removed'); return remove(); };
+      return instance;
+    } };
 
-    await carryOverOrders({ fromStorage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }), fromName, to });
-    expect(await to.pos_orders.find().exec()).toEqual([]);
+    await carryOverOrders({ fromStorage, fromName, to, legacyExists });
+    expect(events[0]).toBe(`inserted ${late.id}`);
+    expect(events.slice(1)).toContain('source removed');
+    expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toEqual([late]);
+    expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toEqual(marker);
 
     const legacyGone = await memoryOrdersDb(fromName);
     expect(await legacyGone.pos_orders.find().exec()).toEqual([]);
     await legacyGone.remove();
     await to.remove();
+  });
+
+  it('keeps the new store\'s copy of an order present in both (applied stays applied)', async () => {
+    const fromName = 'legacy-carry-both';
+    const order = sale();
+    const legacy = await memoryOrdersDb(fromName);
+    await legacy.pos_orders.insert({ ...order, syncStatus: 'pending' });
+    await legacy.close();
+
+    const to = await memoryOrdersDb('target-carry-both', true);
+    await to.pos_orders.insert({ ...order, syncStatus: 'applied' });
+
+    await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
+    expect((await to.pos_orders.find().exec()).map((doc) => doc.syncStatus)).toEqual(['applied']);
+    expect(await to.getLocal('legacy-orders-migrated')).not.toBeNull();
+
+    const legacyGone = await memoryOrdersDb(fromName);
+    expect(await legacyGone.pos_orders.find().exec()).toEqual([]);
+    await legacyGone.remove();
+    await to.remove();
+  });
+
+  it('opens and creates nothing, and writes no marker, when no legacy database exists', async () => {
+    const createStorageInstance = vi.fn();
+    const fromStorage = { ...memoryStorage(), createStorageInstance };
+    const warn = vi.spyOn(console, 'warn');
+    const to = await memoryOrdersDb('target-carry-none', true);
+    try {
+      await expect(carryOverOrders({
+        fromStorage, fromName: 'legacy-carry-none', to, legacyExists: async () => false,
+      })).resolves.toBeUndefined();
+      expect(createStorageInstance).not.toHaveBeenCalled();
+      expect(await to.getLocal('legacy-orders-migrated')).toBeNull();
+      expect(await to.pos_orders.find().exec()).toEqual([]);
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      await to.remove();
+    }
   });
 });

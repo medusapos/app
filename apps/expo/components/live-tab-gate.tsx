@@ -6,6 +6,7 @@ import {
 } from '@tallyui/database';
 import { LiveTabScreen } from '@tallyui/components';
 import { closeDatabases, isBusy, storageNeedsReload, storageStartFailed$ } from '../lib/live-tab';
+import { UnsupportedStorageError, webStorageAvailable } from '../lib/web-storage';
 
 export interface LiveTabGateProps {
   /** Store scope for the coordinator; no scope (signed out) starts nothing. */
@@ -65,8 +66,12 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
     committedResolveRef.current = null;
   }, [showChildren]);
 
+  // Web without SQLite-wasm (plain http on a LAN IP, an old browser): sales would only live in
+  // memory, so the coordinator never starts and nothing opens; a screen says why instead.
+  const unsupported = !!scope && Platform.OS === 'web' && !webStorageAvailable();
+
   useEffect(() => {
-    if (!scope || Platform.OS !== 'web') return undefined;
+    if (!scope || Platform.OS !== 'web' || unsupported) return undefined;
     ownerScopeRef.current = scope;
     setState('acquiring');
     showChildrenRef.current = false;
@@ -134,10 +139,10 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
       // `state`/`showChildren` as already owned.
       ownerScopeRef.current = undefined;
     };
-  }, [scope, startLiveTab]);
+  }, [scope, startLiveTab, unsupported]);
 
   // Shared by the coordinator's own parked/blocked screen and the storage-start-failure override.
-  const renderParkedOrBlocked = (s: 'parked' | 'blocked') => {
+  const renderParkedOrBlocked = (s: 'parked' | 'blocked', title = 'MedusaPOS is open in another tab') => {
     // A prior park's closes outran PARK_CLOSE_LIMIT_MS (live-tab.ts): this tab's
     // database names are stuck taken, so "Use here" would only hang; reload instead.
     const parkedNeedsReload = s === 'parked' && storageNeedsReload();
@@ -146,7 +151,7 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
         state={s}
         onUseHere={parkedNeedsReload ? () => window.location.reload() : () => { void handleRef.current?.takeOver(); }}
         onReload={() => window.location.reload()}
-        parkedTitle="MedusaPOS is open in another tab"
+        parkedTitle={title}
         parkedBody={parkedNeedsReload
           ? 'Reload this tab to use MedusaPOS here.'
           : 'This tab stopped so the other one can take sales. Use MedusaPOS here instead?'}
@@ -158,11 +163,27 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
   };
 
   if (!scope || Platform.OS !== 'web') return <>{children}</>;
+  if (unsupported) {
+    return (
+      <LiveTabScreen
+        state="blocked"
+        onUseHere={() => window.location.reload()}
+        onReload={() => window.location.reload()}
+        parkedTitle="MedusaPOS can't run in this browser"
+        blockedBody={new UnsupportedStorageError().message}
+        reloadLabel="Reload"
+      />
+    );
+  }
   // ADR-061: shows the blocked screen whatever the coordinator state; the lock stays held, and
   // reload (below) is the recovery, same as a genuinely blocked coordinator.
   if (storageStartFailed) return renderParkedOrBlocked('blocked');
   const owned = ownerScopeRef.current === scope;
-  if (owned && state === 'live' && showChildren) return <>{children}</>;
+  // Live again (e.g. `pageshow` after a `pagehide` park) with names a park's closes left stuck:
+  // opening the POS would hang on them, so the parked screen's Reload shows instead.
+  if (owned && state === 'live' && showChildren) {
+    return storageNeedsReload() ? renderParkedOrBlocked('parked', 'MedusaPOS needs a reload') : <>{children}</>;
+  }
   if (owned && (state === 'parked' || state === 'blocked')) return renderParkedOrBlocked(state);
   return (
     <View className="flex-1 items-center justify-center">

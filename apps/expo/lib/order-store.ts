@@ -14,8 +14,8 @@ type OrdersDatabase = RxDatabase<{ pos_orders: RxCollection<PosOrder> }>;
 type OrderStore = { orders: RxCollection<PosOrder>; close(): Promise<void> };
 const stores = new Map<string, { opening: Promise<OrderStore>; users: number; closing?: Promise<void> }>();
 
-// Local document id marking that `carryOverOrders` already ran (successfully, or found
-// nothing to copy) for a store, so a later open never repeats or duplicates the copy.
+// Local document id recording that `carryOverOrders` copied a legacy database (count and time).
+// A record only: it never causes a delete, nor skips reading a legacy database that exists.
 const LEGACY_ORDERS_MARKER = 'legacy-orders-migrated';
 
 export function orderDatabaseName(baseUrl: string): string {
@@ -44,30 +44,37 @@ async function removeLegacyOrdersDatabase(fromName: string, fromStorage: RxStora
 }
 
 /**
- * One-time, idempotent, crash-safe copy of any sales left in the pre-SQLite
- * Dexie order store into the new one. Exported (rather than inlined in
- * `openOrderStore`) so a unit test can run it directly with memory storages.
- *
- * If the new database already carries the marker, only a leftover legacy
- * database is removed. Otherwise every `pos_orders` document is read from
- * the legacy database and upserted into the new one by id (so a repeat
- * after a crash below never duplicates a sale, keeping each document's own
- * `syncStatus`), verified present by a `findByIds` count, and only then is
- * the marker written; only after the marker is committed is the legacy
- * database removed. A failure anywhere before the marker is written leaves
- * the legacy database in place and only logs a warning: the store still
- * opens, and the next open repeats the copy.
+ * True when IndexedDB holds any `rxdb-dexie-<fromName>--…` database. Where the browser cannot
+ * list databases, true: an unknown legacy database is read (and only then removed), never skipped.
  */
-export async function carryOverOrders({ fromStorage, fromName, to }: {
+async function legacyOrdersDatabaseExists(fromName: string): Promise<boolean> {
+  if (!globalThis.indexedDB?.databases) return true;
+  return (await globalThis.indexedDB.databases()).some((db) => !!db.name?.startsWith(`rxdb-dexie-${fromName}--`));
+}
+
+/**
+ * Idempotent, crash-safe copy of any sales in the pre-SQLite Dexie order
+ * store into the new one, on every open while a legacy database exists
+ * (a tab still on the old build can write one after a first copy).
+ * Exported so a unit test can run it directly with memory storages.
+ *
+ * When `legacyExists()` is false it opens and creates nothing. Otherwise
+ * every `pos_orders` document is read from the legacy database, only the
+ * ids missing from the new store are inserted (`bulkInsert`, never upsert:
+ * a copy already there, possibly synced since, always wins), every legacy
+ * id is verified present by a `findByIds` count, the marker is written if
+ * absent, and only then is the legacy database removed. A failure anywhere
+ * before the removal leaves the legacy database in place and only logs a
+ * warning: the store still opens, and the next open repeats the copy.
+ */
+export async function carryOverOrders({ fromStorage, fromName, to, legacyExists }: {
   fromStorage: RxStorage<any, any>;
   fromName: string;
   to: OrdersDatabase;
+  legacyExists: () => Promise<boolean>;
 }): Promise<void> {
   try {
-    if (await to.getLocal(LEGACY_ORDERS_MARKER)) {
-      await removeLegacyOrdersDatabase(fromName, fromStorage);
-      return;
-    }
+    if (!(await legacyExists())) return;
     let count = 0;
     const legacy = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
       name: fromName, storage: fromStorage, multiInstance: false,
@@ -76,7 +83,9 @@ export async function carryOverOrders({ fromStorage, fromName, to }: {
       await legacy.addCollections({ pos_orders: { schema: posOrderSchema } });
       const docs = (await legacy.pos_orders.find().exec()).map((doc) => doc.toJSON() as PosOrder);
       if (docs.length) {
-        await to.pos_orders.bulkUpsert(docs);
+        const present = await to.pos_orders.findByIds(docs.map((order) => order.id)).exec();
+        const missing = docs.filter((order) => !present.has(order.id));
+        if (missing.length) await to.pos_orders.bulkInsert(missing);
         const found = await to.pos_orders.findByIds(docs.map((order) => order.id)).exec();
         if (found.size !== docs.length) {
           throw new Error(`carryOverOrders: only ${found.size} of ${docs.length} legacy orders verified in the new store`);
@@ -86,7 +95,9 @@ export async function carryOverOrders({ fromStorage, fromName, to }: {
     } finally {
       await legacy.close();
     }
-    await to.insertLocal(LEGACY_ORDERS_MARKER, { count, at: new Date().toISOString() });
+    if (!(await to.getLocal(LEGACY_ORDERS_MARKER))) {
+      await to.insertLocal(LEGACY_ORDERS_MARKER, { count, at: new Date().toISOString() });
+    }
     await removeLegacyOrdersDatabase(fromName, fromStorage);
   } catch (error) {
     console.warn('Order carry-over from the legacy store failed; the next open will retry it:', error);
@@ -118,6 +129,7 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
         if (onWebStorage) {
           await carryOverOrders({
             fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
+            legacyExists: () => legacyOrdersDatabaseExists(legacyDexieName('orders', baseUrl)),
           });
         }
         return { orders: db.pos_orders, close: async () => { unwatch?.(); await db.close(); } };

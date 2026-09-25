@@ -11,6 +11,7 @@ import { BehaviorSubject } from 'rxjs';
 import type { LiveTabHandle, LiveTabOptions, LiveTabState } from '@tallyui/database';
 import { LiveTabGate } from '../components/live-tab-gate';
 import { closeDatabases, isBusy, markBusy, reportStorageStartFailure, storageNeedsReload } from '../lib/live-tab';
+import { webStorageAvailable } from '../lib/web-storage';
 
 // A hand-rolled mock subject (vi.mock factories cannot close over top-level variables, only
 // vi.hoisted ones), reset in beforeEach rather than the real sticky one: this file's tests share
@@ -38,6 +39,12 @@ vi.mock('../lib/live-tab', async (importOriginal) => {
     reportStorageStartFailure: reportStorageStartFailureMock,
   };
 });
+
+// jsdom has no OPFS: every test runs as a supporting browser unless it says otherwise.
+vi.mock('../lib/web-storage', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../lib/web-storage')>()),
+  webStorageAvailable: vi.fn(() => true),
+}));
 
 // react-dom/client has no bundled types reachable here (no @types/react-dom in
 // this Expo/React Native app); a minimal local shape covers what this file uses.
@@ -107,6 +114,7 @@ beforeEach(() => {
   storageNeedsReloadMock.mockReset();
   storageNeedsReloadMock.mockReturnValue(false);
   storageStartFailedSubject.next(false);
+  vi.mocked(webStorageAvailable).mockReturnValue(true);
 });
 
 afterEach(() => {
@@ -179,6 +187,28 @@ describe('LiveTabGate', () => {
       expect(instance.takeOver).not.toHaveBeenCalled();
       expect(reload).toHaveBeenCalledOnce();
     } finally { Object.defineProperty(window, 'location', { configurable: true, value: originalLocation }); }
+  });
+
+  it('shows the unsupported-browser screen, no children and starts nothing on web without SQLite-wasm support', () => {
+    vi.mocked(webStorageAvailable).mockReturnValue(false);
+    const { startLiveTab } = fakeStartLiveTab();
+    const startSpy = vi.fn(startLiveTab);
+    render(<LiveTabGate scope="store-unsupported" startLiveTab={startSpy}><Text>children-rendered</Text></LiveTabGate>);
+    expect(screen.getByText('This browser can\'t store sales safely (no OPFS worker storage). Use a current Chrome, Edge, Safari or Firefox over HTTPS.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
+    expect(screen.queryByText('children-rendered')).toBeNull();
+    expect(startSpy).not.toHaveBeenCalled();
+  });
+
+  it('shows Reload instead of the POS when live while storageNeedsReload() is true', () => {
+    storageNeedsReloadMock.mockReturnValue(true);
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    render(<LiveTabGate scope="store-live-needs-reload" startLiveTab={startLiveTab}><Text>children-rendered</Text></LiveTabGate>);
+    act(() => instances[0].subject.next('live'));
+    expect(screen.getByText('MedusaPOS needs a reload')).toBeTruthy();
+    expect(screen.getByText('Reload this tab to use MedusaPOS here.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
+    expect(screen.queryByText('children-rendered')).toBeNull();
   });
 
   it('shows the blocked screen and no children after reportStorageStartFailure(), whatever the coordinator state', () => {

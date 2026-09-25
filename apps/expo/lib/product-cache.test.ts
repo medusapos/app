@@ -2,22 +2,44 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createRxDatabase } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 
-vi.mock('./web-storage', () => {
+import { Platform } from 'react-native';
+
+vi.mock('./web-storage', async (importOriginal) => {
   const webStorageStub = { name: 'web-storage-stub' };
-  return { webStorageAvailable: vi.fn(() => false), getWebStorage: vi.fn(() => webStorageStub) };
+  return {
+    ...(await importOriginal<typeof import('./web-storage')>()),
+    webStorageAvailable: vi.fn(() => false), getWebStorage: vi.fn(() => webStorageStub),
+    usingMemoryStorageForTests: vi.fn(() => true),
+  };
 });
 
-import { webStorageAvailable, getWebStorage } from './web-storage';
+import { webStorageAvailable, getWebStorage, UnsupportedStorageError, usingMemoryStorageForTests } from './web-storage';
 import {
   clearProductCache, closeProductCaches, deleteLegacyProductCache, isUnauthorizedError, legacyDexieName,
   openProductCache, productCacheName, productCacheStorage, registerOpenCache,
 } from './product-cache';
 
-afterEach(() => { vi.mocked(webStorageAvailable).mockReturnValue(false); });
+afterEach(() => {
+  vi.mocked(webStorageAvailable).mockReturnValue(false);
+  vi.mocked(usingMemoryStorageForTests).mockReturnValue(true);
+});
 
 describe('productCacheStorage', () => {
-  it('uses memory storage when the web SQLite storage is unavailable (native, and jsdom tests)', () => {
-    vi.mocked(webStorageAvailable).mockReturnValue(false);
+  it('uses memory storage on native', () => {
+    const original = Platform.OS;
+    Platform.OS = 'ios';
+    vi.mocked(usingMemoryStorageForTests).mockReturnValue(false);
+    try {
+      expect(productCacheStorage().name).toBe(getRxStorageMemory().name);
+    } finally { Platform.OS = original; }
+  });
+  it('throws UnsupportedStorageError on web without SQLite-wasm support and without the test override', () => {
+    expect(Platform.OS).toBe('web');
+    vi.mocked(usingMemoryStorageForTests).mockReturnValue(false);
+    expect(() => productCacheStorage()).toThrow(UnsupportedStorageError);
+    expect(() => productCacheStorage()).toThrow('This browser can\'t store sales safely (no OPFS worker storage). Use a current Chrome, Edge, Safari or Firefox over HTTPS.');
+  });
+  it('uses memory storage on web without support only under the test override (jsdom tests)', () => {
     expect(productCacheStorage().name).toBe(getRxStorageMemory().name);
   });
   it('uses the web SQLite storage when available', () => {
