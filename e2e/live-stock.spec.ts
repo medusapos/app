@@ -72,26 +72,55 @@ test('stock change reaches the chooser without a catalogue pull', async ({ page 
     await setInventoryLevel(token, inventoryItemId, locationId, 0);
     await setInventoryLevel(token, product1.inventoryItemId, product1.locationId, 0);
     await triggerReconcile(page);
+    // The single-variant product's tile badge (its own product-level status, not the chooser)
+    // reflects the pass; the chooser renders from the same pass.
+    await expect(tileBadgeText(page, PRODUCT_1)).toHaveText('Out of Stock');
 
     let after = '';
     await expect(async () => {
-      // The already-open chooser is a snapshot taken when it was opened; re-opening it (a normal
-      // cashier action, not a reload or sign-in) re-reads the reconciled overlay.
+      // The chooser is live (ADR 0007): it derives its choices from the current catalogue
+      // entries, never a copy taken when it was opened. Re-opening it is a normal cashier action.
+      // The short inner timeout lets toPass really retry.
       await openChooser(page);
       const status = stockStatusText(variantChoice(page));
-      await expect(status).toHaveText(/^Out of Stock · /);
+      await expect(status).toHaveText(/^Out of Stock · /, { timeout: 1_000 });
       after = (await status.textContent()) ?? '';
     }).toPass({ timeout: 30_000 });
 
     expect(after).not.toBe(before);
     expect(asOfMinutes(after)).toBeGreaterThanOrEqual(beforeMinutes);
-
-    // The single-variant product's tile badge (its own product-level status, not the chooser)
-    // also reflects the same reconcile pass.
-    await expect(tileBadgeText(page, PRODUCT_1)).toHaveText('Out of Stock');
   } finally {
     await setInventoryLevel(token, inventoryItemId, locationId, original);
     await setInventoryLevel(token, product1.inventoryItemId, product1.locationId, product1.stockedQuantity);
+  }
+});
+
+// ADR 0007 regression: the reconcile's inventory read is held back 750 ms and the chooser is opened
+// before the pass lands and never re-opened. Only a live chooser shows the pass; a copy taken at
+// open would keep "In Stock".
+test('an open chooser shows a reconcile pass that lands after it opened', async ({ page }) => {
+  const token = await adminToken();
+  const { inventoryItemId, locationId, stockedQuantity: original } = await inventoryLevel(token, 'E2E-4B');
+  let delayed = 0;
+  try {
+    await signIn(page);
+    await openChooser(page);
+    const status = stockStatusText(variantChoice(page));
+    await expect(status).toHaveText(/^In Stock · /);
+
+    await page.route('**/admin/inventory-items*', async (route) => {
+      delayed += 1;
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      await route.continue();
+    });
+    await setInventoryLevel(token, inventoryItemId, locationId, 0);
+    await triggerReconcile(page);
+
+    await expect(status).toHaveText(/^Out of Stock · /);
+    expect(delayed).toBeGreaterThan(0);
+  } finally {
+    await page.unrouteAll({ behavior: 'wait' });
+    await setInventoryLevel(token, inventoryItemId, locationId, original);
   }
 });
 
@@ -123,7 +152,7 @@ test('a stock warning triggers a pass', async ({ page }) => {
     // what triggers the pass (app/index.tsx).
     await expect(async () => {
       await openChooser(page);
-      await expect(stockStatusText(variantChoice(page))).toHaveText(/^Out of Stock · /);
+      await expect(stockStatusText(variantChoice(page))).toHaveText(/^Out of Stock · /, { timeout: 1_000 });
     }).toPass({ timeout: 30_000 });
   } finally {
     await setInventoryLevel(token, inventoryItemId, locationId, original);

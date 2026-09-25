@@ -200,6 +200,32 @@ describe('Catalogue', () => {
     expect(screen.queryByLabelText('Choose variant')).toBeNull();
     expect(onSelect).not.toHaveBeenCalled();
   });
+  // ADR 0007: the open chooser derives from the current products, never a copy taken when it opened.
+  it('re-renders an open chooser with the stock status of a new products prop', () => {
+    const onSelect = vi.fn();
+    const props = { traits, currency: 'EUR', onSelect, lastSyncedAt: null };
+    const view = render(<Catalogue products={products} {...props} />);
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
+    const large = () => within(screen.getByLabelText('Choose variant')).getByRole('button', { name: /Large/ });
+    expect(within(large()).getByText('Out of Stock · not yet synced')).toBeTruthy();
+    const restocked = [products[0], { ...products[1], variants: [products[1].variants[0],
+      { ...products[1].variants[1], inventory_quantity: 3 }] }];
+    view.rerender(<Catalogue products={restocked} {...props} />);
+    expect(within(large()).getByText('In Stock · not yet synced')).toBeTruthy();
+    fireEvent.click(large());
+    expect(onSelect).toHaveBeenCalledExactlyOnceWith({
+      product: restocked[1], variant: traits.getVariants!(restocked[1])[1],
+    });
+  });
+  it('closes an open chooser when its product leaves the catalogue', () => {
+    const props = { traits, currency: 'EUR', onSelect: vi.fn(), lastSyncedAt: null };
+    const view = render(<Catalogue products={products} {...props} />);
+    fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
+    view.rerender(<Catalogue products={[products[0]]} {...props} />);
+    expect(screen.queryByLabelText('Choose variant')).toBeNull();
+    view.rerender(<Catalogue products={products} {...props} />);
+    expect(screen.queryByLabelText('Choose variant')).toBeNull();
+  });
   it('shows an empty catalogue', () => {
     mount([]);
     expect(screen.getByText('No products yet.')).toBeTruthy();
