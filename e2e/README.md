@@ -112,8 +112,8 @@ blocked screen with Reload; closing the holder page and reloading recovers.
 `discount.spec.ts` proves cart discounts (TallyUI ADR-062). One test signs in
 (the plugin reports `order.create` 1 and 2, so the session stores 2), gives
 two `E2E-1` a 10% line discount and a €0.50 order discount, checks that the
-cart's Subtotal, VAT and Total rows add up (€3.10 + €0.78 = €3.88) with
-"Includes discounts of €0.90" outside them, pays exact cash,
+cart and the receipt show TallyUI's `order.display` rows (ADR 0008):
+Subtotal €4.00, Discount €0.90, VAT €0.78 and Total €3.88. It pays exact cash,
 and expects the outbox result `applied` with no warnings, a version 2 command,
 Medusa's total equal to the till's, and one "POS discount" adjustment of the
 line's `discountMinor`. The other route-intercepts `GET /tally/v1/info` to a
