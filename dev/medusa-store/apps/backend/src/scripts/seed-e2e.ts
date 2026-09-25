@@ -43,13 +43,18 @@ export default async function seedE2e({ container }: ExecArgs) {
   if (currentStore.default_region_id) await updateStoresWorkflow(container).run({ input: {
     selector: { id: currentStore.id }, update: { default_region_id: null },
   } })
-  // The till prices through the store API with a publishable key for the E2E channel (D2b).
-  const [publishableKey] = await container.resolve(Modules.API_KEY).listApiKeys({ title: "E2E", type: "publishable" })
-  if (!publishableKey) {
-    const [created] = (await createApiKeysWorkflow(container).run({ input: { api_keys: [{
-      title: "E2E", type: "publishable", created_by: "seed-e2e",
-    }] } })).result
-    await linkSalesChannelsToApiKeyWorkflow(container).run({ input: { id: created.id, add: [channel.id] } })
+  // The till prices through the store API with a publishable key for the E2E channel (D2b). Medusa
+  // creates a default publishable key at boot; a second one would make the till ask for a channel,
+  // so use the first live key, creating one only when there is none, and link it to the channel.
+  const { data: publishableKeys } = await query.graph({
+    entity: "api_key", fields: ["id", "revoked_at", "sales_channels.id"], filters: { type: "publishable" },
+  })
+  const liveKey = publishableKeys.find(key => !key.revoked_at)
+  const keyId = liveKey?.id ?? (await createApiKeysWorkflow(container).run({ input: { api_keys: [{
+    title: "E2E", type: "publishable", created_by: "seed-e2e",
+  }] } })).result[0].id
+  if (!liveKey?.sales_channels?.some(existing => existing?.id === channel.id)) {
+    await linkSalesChannelsToApiKeyWorkflow(container).run({ input: { id: keyId, add: [channel.id] } })
   }
   const taxRegions = await container.resolve(Modules.TAX).listTaxRegions({ country_code: ["dk", "de"] })
   const missingTaxRegions = [
@@ -132,11 +137,17 @@ export default async function seedE2e({ container }: ExecArgs) {
     ],
   })).filter(product => !products.some(existing => existing.handle === product.handle))
   if (missingProducts.length) await createProductsWorkflow(container).run({ input: { products: missingProducts } })
-  // Priced and stocked, but in no sales channel: the store API doesn't list it for the E2E key,
-  // so the till replicates it unlisted and hides it (the catalogue still shows 5 products).
+  // Priced and stocked, but only in another sales channel: the store API doesn't list it for the
+  // E2E key, so the till replicates it unlisted and hides it (the catalogue still shows 5 products).
+  // Not "in no channel": Medusa's store API lists a product with no channel for every key.
+  let [otherChannel] = await container.resolve(Modules.SALES_CHANNEL).listSalesChannels({ name: "E2E other channel" })
+  if (!otherChannel) [otherChannel] = (await createSalesChannelsWorkflow(container).run({
+    input: { salesChannelsData: [{ name: "E2E other channel" }] },
+  })).result
   const [unlisted] = await productService.listProducts({ handle: "e2e-unlisted" })
   if (!unlisted) await createProductsWorkflow(container).run({ input: { products: [{
     title: "E2E unlisted", handle: "e2e-unlisted", status: ProductStatus.PUBLISHED, shipping_profile_id: profile.id,
+    sales_channels: [{ id: otherChannel.id }],
     options: [{ title: "Variant", values: ["Default"] }],
     variants: [{ title: "Default", sku: "E2E-U", manage_inventory: true, options: { Variant: "Default" },
       prices: [{ currency_code: "eur", amount: 7 }] }],

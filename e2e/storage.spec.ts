@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, variantIdBySku } from './helpers';
+import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, variantIdBySku } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -226,5 +226,7 @@ test('the opfs-sahpool pool held by another worker blocks the app with Reload', 
 
   await holder.close();
   await reload.click();
+  // A fresh till: the store has two regions, so it asks once (as `signIn` does).
+  await chooseRegion(page, 'Europe');
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 });

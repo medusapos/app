@@ -42,9 +42,10 @@ stock, so either file can run first; Playwright uses one worker.
 The till prices through TallyUI's store settings (TV4) and Medusa's store
 API (D2b), so the seed also has two regions and no default region: Europe
 (dk, prices exclusive through the EUR currency preference) and Germany (de,
-inclusive through its own region preference). It has one publishable key for
-the E2E channel, and an unlisted product, `E2E unlisted` (`E2E-U`), priced and
-stocked but in no sales channel. A fresh sign-in therefore shows "Set up this
+inclusive through its own region preference). It has one publishable key (the
+one Medusa creates at boot) linked to the E2E channel, and an unlisted product, `E2E unlisted` (`E2E-U`), priced and
+stocked but only in another sales channel (Medusa's store API lists a product
+with no channel for every key). A fresh sign-in therefore shows "Set up this
 till"; `signIn` picks Europe (its `region` argument), so the other specs keep
 their Danish 25% exclusive totals. `pricing.spec.ts` proves the choice screen,
 the "does not cover" error for Germany (the Copenhagen location is in dk, and
