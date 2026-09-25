@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 
+const port = Number(process.env.E2E_APP_PORT ?? 8099);
 const root = resolve('apps/expo/dist');
 const config = JSON.parse(await readFile('apps/expo/vercel.json', 'utf8'));
 const headers = config.headers.find(({ source }) => source === '/(.*)').headers;
@@ -26,4 +27,4 @@ createServer(async (req, res) => {
   } catch {
     res.writeHead(500).end('Could not serve web export');
   }
-}).listen(8099, () => console.log('E2E app: http://localhost:8099'));
+}).listen(port, () => console.log(`E2E app: http://localhost:${port}`));

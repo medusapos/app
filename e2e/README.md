@@ -12,6 +12,13 @@ Postgres must be running on port 5432. The default connection is role `claude`,
 no password, host `localhost`; CI can set `DB_USERNAME`, `DB_PASSWORD`, `DB_HOST`.
 The role needs permission to create and drop **medusapos_e2e**.
 
+Locally, each checkout gets its own backend port, app port and database,
+derived from the checkout's absolute path (`e2e/ports.ts`), so two checkouts
+can run the harness at once without colliding. CI keeps the fixed values used
+throughout the rest of this doc: `:9100`, `:8099` and `medusapos_e2e`. Started
+without those env vars (as a manual probe does — see below), `start.sh` keeps
+the same defaults.
+
 Playwright builds and packs the plugin, installs that local tarball into
 `dev/medusa-store` without changing lockfiles, drops/recreates `medusapos_e2e`,
 migrates and seeds five taxed EUR products, and creates `e2e@tally.test` /
