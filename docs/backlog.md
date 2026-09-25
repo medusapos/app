@@ -26,6 +26,17 @@ minimum-length thresholds as constants (`WEDGE_AVG_KEY_MS`,
 per-store settings (`barcode_scanning_avg_time_input_threshold`,
 `barcode_scanning_min_chars`); once this app has settings, do the same here.
 
+## Screen tests stub TallyUI primitives through deep aliases
+
+The screen tests use the real TallyUI components (`importOriginal()`), but stub
+the primitives those components compose (`CartPanel`, `CartTotal`,
+`CashTendered`, …) and assert against the stand-ins. To reach them,
+`vitest.config.ts` aliases `@tallyui/components/{cart,checkout,product,input,ui}`
+to TallyUI's internal submodules, so a TallyUI refactor of those folders breaks
+the app's tests in one place. Moving the assertions onto the real primitives
+(or TallyUI exporting those subpaths) would drop the aliases (from the TV6b
+review).
+
 ## Tap race when new store settings land
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
