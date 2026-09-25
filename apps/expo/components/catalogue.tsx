@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { getCalendars } from 'expo-localization';
 import type { ProductTraits } from '@tallyui/core';
@@ -44,7 +44,9 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
 }) {
   const stockAsOf = laterOf(lastStockCheckAt, lastSyncedAt);
   const [query, setQuery] = useState('');
-  const [choices, setChoices] = useState<CatalogueEntry<Doc>[]>([]);
+  // The chooser is live (ADR 0007): it holds only the chosen product's id and derives its choices
+  // from the current entries below, so an open chooser shows each reconcile pass as it lands.
+  const [chooserId, setChooserId] = useState<string | null>(null);
   const [width, setWidth] = useState(0);
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.
   const clockPreference = getCalendars()[0]?.uses24hourClock;
@@ -53,10 +55,14 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
   const columns = Math.max(2, Math.min(6, Math.floor((width - 8) / (MIN_TILE_WIDTH + 8))));
   const entries = useMemo(() => catalogueEntries(products, traits), [products, traits]);
   const results = useMemo(() => searchProducts(products, query, traits), [products, query, traits]);
+  const choices = useMemo(() => (chooserId === null ? []
+    : entries.filter((entry) => traits.getId(entry.product) === chooserId)), [entries, chooserId, traits]);
+  // A product that leaves the catalogue (a resync, or no longer sellable) closes its chooser.
+  useEffect(() => { if (chooserId !== null && choices.length === 0) setChooserId(null); }, [chooserId, choices]);
 
   function select(entry: CatalogueEntry<Doc>) {
     onSelect(entry);
-    setChoices([]);
+    setChooserId(null);
   }
 
   return (
@@ -81,7 +87,7 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
                 <Text className="text-muted-foreground">{STOCK_LABEL[entry.variant.stock.status]} · {stockAsOf ? `as of ${formatStockSyncTime(stockAsOf, undefined, hour12)}` : 'not yet synced'}</Text>
               </Pressable>
             ))}
-            <Pressable accessibilityRole="button" onPress={() => setChoices([])} className="rounded-md border border-border bg-card px-4 py-3">
+            <Pressable accessibilityRole="button" onPress={() => setChooserId(null)} className="rounded-md border border-border bg-card px-4 py-3">
               <Text className="text-center text-foreground">Cancel</Text>
             </Pressable>
           </View>
@@ -95,7 +101,7 @@ export function Catalogue<Doc>({ products, traits, currency, onSelect, statusTex
           <Pressable accessibilityRole="button" testID={`product-tile-${traits.getName(product)}`} onPress={() => {
             const variants = entries.filter((entry) => entry.product === product);
             if (variants.length === 1) select(variants[0]);
-            else setChoices(variants);
+            else setChooserId(traits.getId(product));
           }}>
             <VStack space="sm" className="items-center rounded-lg border border-border bg-card p-3">
               <ProductImage doc={product} size={80} className="rounded-md" />

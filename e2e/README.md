@@ -69,7 +69,8 @@ triggers a reconcile pass via a visibility change (overriding
 app's `AppState` on web follows page visibility); the other sells `E2E-1`
 while route-intercepting `/tally/v1/commands` to add an `insufficient_stock`
 warning to the result, which the app treats as its own trigger for a pass,
-with no visibility change needed. Neither test sells `E2E-5` or leaves stock
+with no visibility change needed. A third delays `/admin/inventory-items` 750 ms under an open chooser, which must turn Out of Stock with no reopen (ADR 0007: the chooser is live).
+None of them sells `E2E-5` or leaves stock
 changed.
 
 `live-tab.spec.ts` proves ADR-061 (exactly one live tab per store): a second
