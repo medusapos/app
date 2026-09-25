@@ -33,6 +33,21 @@ minimum-length thresholds as constants (`WEDGE_AVG_KEY_MS`,
 per-store settings (`barcode_scanning_avg_time_input_threshold`,
 `barcode_scanning_min_chars`); once this app has settings, do the same here.
 
+## Screen tests mock TallyUI components by internal path
+
+`vi.mock('@tallyui/components')` can't spread the real barrel under vitest
+(it fails on a `typeof` syntax error; see `live-tab-gate.test.tsx`), so the
+screen tests import the real components from
+`../node_modules/@tallyui/components/src/...` and mock the primitives those
+files import relatively (`src/cart`, `src/checkout`). This ties the app's
+tests to TallyUI's internal file layout. Likely cause (tallyui worker, to be
+verified): vitest externalizes `@tallyui/components`' `dist`, so the app's
+`react-native` → `react-native-web` alias never applies and the real RN entry
+(Flow) loads. Fix in `apps/expo` vitest config: `test.server.deps.inline:
+[/@tallyui\//]` (keep the aliases; add a `react-native-svg` web alias if
+needed), or resolve the package's `source` condition. Then switch the mocks to
+`importOriginal()` and drop the path imports (from the TV6a review).
+
 ## Tap race when new store settings land
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
