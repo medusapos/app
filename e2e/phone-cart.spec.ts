@@ -1,12 +1,19 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { addE2E1, discount, sellBySku, signIn } from './helpers';
 
 // The sale screen on a phone (ADR 0009): below 600 px a cart bar opens the cart at full height, its lines and
 // order discount scroll, and the totals and pay buttons stay pinned. Sells only E2E-1 and E2E-2.
 test.use({ viewport: { width: 360, height: 740 } });
 
+// The "Sign out" header action's bounding box lies within the 360 px viewport (job #71 follow-up).
+async function expectSignOutInViewport(page: Page) {
+  const box = (await page.getByRole('button', { name: 'Sign out', exact: true }).boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(360);
+}
+
 test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart bar counts items', async ({ page }) => {
   await signIn(page);
+  await expectSignOutInViewport(page);
   await addE2E1(page);
   await addE2E1(page);
   const bar = page.getByRole('button', { name: /^Open cart, / });
@@ -16,6 +23,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   expect([box.width, box.height >= 56]).toEqual([336, true]);
   await bar.click();
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+  await expectSignOutInViewport(page);
   await discount(page, 'line', 'Percent', '10');
   await discount(page, 'order', 'Amount', '0.50');
   const orderChip = page.getByRole('button', { name: /^Remove discount .*0\.50/ });

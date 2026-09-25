@@ -113,7 +113,9 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
   const name = orderDatabaseName(baseUrl);
   let entry = stores.get(name);
   if (entry?.closing) {
-    await entry.closing;
+    // A rejected close still frees the name for a fresh database; the caller that awaited
+    // close() itself already sees the rejection on its own reference to that promise.
+    await entry.closing.catch(() => undefined);
     return openOrderStore(baseUrl);
   }
   if (!entry) {
@@ -156,9 +158,10 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
       // closeOrderStores() may already be closing this same entry; share that
       // promise instead of closing the database a second time.
       if (!shared.closing) {
-        shared.closing = store.close().then(() => {
+        shared.closing = store.close().finally(() => {
           // A store opened for this name after closeOrderStores() ran is a
           // different entry: never delete it under a late close() like this one.
+          // Runs on a rejection too, so a failed close still frees the name.
           if (stores.get(name) === shared) stores.delete(name);
         });
       }
@@ -180,8 +183,12 @@ export async function closeOrderStores(): Promise<void> {
     if (!entry.closing) {
       entry.closing = entry.opening.then((store) => store.close(), () => undefined);
     }
-    await entry.closing;
-    if (stores.get(name) === entry) stores.delete(name);
+    try {
+      await entry.closing;
+    } finally {
+      // Runs on a rejection too, so a failed close still frees the name for the next open.
+      if (stores.get(name) === entry) stores.delete(name);
+    }
   }));
 }
 

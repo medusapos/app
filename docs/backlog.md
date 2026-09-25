@@ -34,20 +34,6 @@ shown. Phones mostly scan with the camera, so this is minor; a fix would
 route scans to `sale.add` in either view, e.g. a scan listener above both
 (from the phone-cart review).
 
-## "Sign out" is clipped at 360 px
-
-The header's right side ("Orders", "Sign out") runs past the right edge at
-360 px, on main and with ADR 0009 alike. Give the header actions a right
-inset, or move Sign out into a menu on phones (from #69 review).
-
 ## Tap race when new store settings land
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
-
-## A rejected order-store close blocks reopening until a reload
-
-`openOrderStore` (`apps/expo/lib/order-store.ts`, the `closing` path): if
-`store.close()` ever rejects, the rejected `closing` promise stays in the
-`stores` map, and every later open for that URL rethrows it until the page
-reloads. Unlikely, since `db.close` rarely rejects; clear the entry when the
-close settles, whatever the result (from #68 review).
