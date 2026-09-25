@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { sellBySku, signIn } from './helpers';
+import { E2E_RUN } from './ports';
 
 const SEARCH_PLACEHOLDER = 'Search or scan barcode / SKU';
 
@@ -81,7 +82,7 @@ test('pageshow after pagehide re-opens both databases', async ({ page }) => {
   });
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 
-  const backend = process.env.E2E_BACKEND_URL ?? 'http://localhost:9100';
+  const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
   const saleApplied = page.waitForResponse(async response => {
     if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
     const body = await response.json();

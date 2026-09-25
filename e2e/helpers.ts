@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
+import { E2E_RUN } from './ports';
 
-const backend = process.env.E2E_BACKEND_URL ?? 'http://localhost:9100';
+const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 
 export async function signIn(page: Page) {

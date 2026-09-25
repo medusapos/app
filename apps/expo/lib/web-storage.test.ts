@@ -15,7 +15,7 @@ vi.hoisted(() => vi.resetModules());
 vi.mock('@tallyui/storage-sqlite/web', () => ({
   getRxStorageSQLiteWasm: vi.fn((options: { workerInput: () => Worker }) => {
     const worker = options.workerInput();
-    return { name: 'sqlite-wasm-stub', worker };
+    return { name: 'sqlite-wasm-stub', worker, terminate: vi.fn(() => worker.terminate()) };
   }),
 }));
 
@@ -88,10 +88,11 @@ describe('getWebStorage / terminateWebStorage', () => {
   });
 
   it('terminates the kept worker and builds a fresh one on the next call', () => {
-    const first = getWebStorage();
-    const firstWorker = (first as unknown as { worker: FakeWorker }).worker;
+    const first = getWebStorage() as unknown as { worker: FakeWorker; terminate: () => void };
+    const firstWorker = first.worker;
 
     terminateWebStorage();
+    expect(first.terminate).toHaveBeenCalledOnce();
     expect(firstWorker.terminate).toHaveBeenCalledOnce();
 
     const second = getWebStorage();

@@ -1,8 +1,9 @@
 import { execFileSync } from 'node:child_process';
+import { E2E_RUN } from './ports';
 
 export default function globalTeardown() {
   try {
-    execFileSync('dropdb', ['--if-exists', '--force', 'medusapos_e2e'], {
+    execFileSync('dropdb', ['--if-exists', '--force', E2E_RUN.database], {
       env: {
         ...process.env,
         PATH: `/opt/homebrew/opt/postgresql@17/bin:${process.env.PATH}`,
@@ -14,6 +15,6 @@ export default function globalTeardown() {
       stdio: 'pipe',
     });
   } catch (error) {
-    console.warn('Warning: could not drop medusapos_e2e during teardown:', error);
+    console.warn(`Warning: could not drop ${E2E_RUN.database} during teardown:`, error);
   }
 }
