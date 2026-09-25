@@ -68,6 +68,14 @@ describe('parseDiscount', () => {
     ['fixed', '1,50', 'EUR', { type: 'fixed', value: 150 }],
     ['fixed', '1,5', 'EUR', { type: 'fixed', value: 150 }],
     ['fixed', '1,2,3', 'EUR', 'Enter a number.'],
+    // A comma or dot with 3 decimals may be a thousands separator: refused in both modes, never read as 1.
+    ['percentage', '1,000', 'EUR', 'Use at most 2 decimal places.'],
+    ['percentage', '1.000', 'EUR', 'Use at most 2 decimal places.'],
+    ['percentage', '10,125', 'EUR', 'Use at most 2 decimal places.'],
+    ['fixed', '1,000', 'EUR', 'Use at most 2 decimal places.'],
+    ['percentage', '12,5', 'EUR', { type: 'percentage', value: 12.5 }],
+    ['percentage', '12,50', 'EUR', { type: 'percentage', value: 12.5 }],
+    ['fixed', '12,5', 'EUR', { type: 'fixed', value: 1250 }],
     ['percentage', '0', 'EUR', 'Enter a discount above 0.'],
     ['fixed', '-1', 'EUR', 'Enter a discount above 0.'],
     ['percentage', '100.5', 'EUR', 'A percentage can be at most 100.'],
@@ -98,6 +106,19 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     discount('Order discount', 'Amount', '1');
     expect(within(screen.getByRole('group', { name: 'Order discount' })).getByRole('alert').textContent).toBe('The discount is more than the order');
     expect(sale.order.discounts).toHaveLength(1);
+  });
+
+  // A known TallyUI gap (order-builder recalculateLine): stacked line discounts are each computed on the line's FULL
+  // price, not on what is left, so 10% then €12.00 on a €12.50 line passes the cap check at amountMinor 1200 while only
+  // €11.25 comes off. This asserts the correct behaviour, so it fails today. The Front desk has queued the fix in
+  // TallyUI; once TallyUI caps per discount this starts failing, and the `.fails` marker must be removed.
+  it.fails('refuses a stacked fixed line discount above what the earlier ones leave, or labels what comes off', () => {
+    render(<Harness capabilities={{ orderCreate: 2 }} />);
+    act(() => sale.add(blue, traits));
+    discount('Discount', 'Percent', '10');
+    discount('Discount', 'Amount', '12');
+    const fixed = sale.order.lineItems[0].discounts.find((entry) => entry.type === 'fixed');
+    expect(fixed === undefined || fixed.amountMinor === 1125).toBe(true);
   });
 
   it('labels a fixed chip with the amount that comes off, not the amount asked for', () => {

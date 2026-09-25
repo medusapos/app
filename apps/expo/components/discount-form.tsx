@@ -13,9 +13,10 @@ export function parseDiscount(type: Discount['type'], text: string, currency: st
   if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return 'Enter a number.';
   const value = Number(trimmed);
   if (value <= 0) return 'Enter a discount above 0.';
-  if (type === 'percentage') return value > 100 ? 'A percentage can be at most 100.' : { type, value };
-  const digits = minorUnitDigits(currency);
+  // At most 2 decimals in both modes: "1,000" or "1.000" may be a thousands separator, so it is refused, never read as 1.
+  const digits = type === 'percentage' ? 2 : Math.min(2, minorUnitDigits(currency));
   if ((trimmed.split('.')[1]?.length ?? 0) > digits) return digits ? `Use at most ${digits} decimal places.` : 'Use a whole amount.';
+  if (type === 'percentage') return value > 100 ? 'A percentage can be at most 100.' : { type, value };
   const money = moneyFromDecimalString(trimmed, currency);
   return money ? { type, value: money.amount } : 'Enter a number.';
 }
