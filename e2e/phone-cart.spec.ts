@@ -12,13 +12,16 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   const bar = page.getByRole('button', { name: /^Open cart, / });
   await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, /);
   const box = (await bar.boundingBox())!;
-  expect([box.width, box.height >= 56]).toEqual([360, true]);
+  // Inset mx-3 each side (12 px) so the bar reads as a button, not a status line (job #69 follow-up).
+  expect([box.width, box.height >= 56]).toEqual([336, true]);
   await bar.click();
+  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
   await discount(page, 'line', 'Percent', '10');
   await discount(page, 'order', 'Amount', '0.50');
   const orderChip = page.getByRole('button', { name: /^Remove discount .*0\.50/ });
   await expect(orderChip).toBeVisible();
   await page.getByRole('button', { name: 'Products', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
   await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, \D*3\.88$/);
   await bar.click();
   const total = page.getByText('Total', { exact: true }).locator('..');

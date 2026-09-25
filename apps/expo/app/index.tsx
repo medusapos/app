@@ -203,7 +203,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
+      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
         <View dataSet={{ print: 'hide' }} className="flex-row gap-4">
         <Pressable accessibilityRole="button" onPress={() => router.push('/orders')}>
           <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>

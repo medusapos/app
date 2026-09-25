@@ -11,8 +11,8 @@ export function CartBar({ sale, onOpen }: { sale: ReturnType<typeof useSale>; on
   const items = `${count} ${count === 1 ? 'item' : 'items'}`;
   return <Pressable accessibilityRole="button" accessibilityLabel={count ? `Open cart, ${items}, ${total}` : 'Cart is empty'}
     disabled={!count} onPress={onOpen}
-    className={`min-h-14 flex-row items-center justify-between border-t border-border bg-card px-4 py-3 ${count ? '' : 'opacity-50'}`}>
-    <Text className="font-semibold text-foreground">{count ? `Cart · ${items}` : 'Cart is empty'}</Text>
-    {count ? <Text className="font-bold text-foreground">{total}</Text> : null}
+    className={`min-h-14 mx-3 mb-3 flex-row items-center justify-between rounded-md bg-primary px-4 py-3 ${count ? '' : 'opacity-50'}`}>
+    <Text className="font-bold text-primary-foreground">{count ? `Cart · ${items}` : 'Cart is empty'}</Text>
+    {count ? <Text className="font-bold text-primary-foreground">{total} ›</Text> : null}
   </Pressable>;
 }

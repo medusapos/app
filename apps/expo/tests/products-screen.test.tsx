@@ -398,9 +398,9 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     await mount();
     expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(button('Shirt'));
-    expect(button('Open cart, 1 item, €15.00').textContent).toBe('Cart · 1 item€15.00');
+    expect(button('Open cart, 1 item, €15.00').textContent).toBe('Cart · 1 item€15.00 ›');
     fireEvent.click(button('Shirt'));
-    expect(button('Open cart, 2 items, €30.00').textContent).toBe('Cart · 2 items€30.00');
+    expect(button('Open cart, 2 items, €30.00').textContent).toBe('Cart · 2 items€30.00 ›');
     expect(search()).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Cash' })).toBeNull();
     fireEvent.click(button(/^Open cart/));
