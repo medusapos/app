@@ -101,6 +101,12 @@ it('runs one calculated-price pass once the first sync has settled, and none of 
 
 it('follows the runner\'s state: a failed later pass keeps the count and marks it stale, then a good pass clears it', async () => {
   let failing = false;
+  // The runner stamps results and errors with Date.now (captured when it starts) and a result is current only when
+  // strictly newer than the last error; `skew` moves the clock on deterministically, since both passes can land in
+  // the same millisecond.
+  const realNow = Date.now.bind(Date);
+  let skew = 0;
+  vi.spyOn(Date, 'now').mockImplementation(() => realNow() + skew);
   const { result, calculatedRunner, finishInitial, settle, unmount } = await mount(fakeAdapter(['listed'], () => failing));
   await finishInitial();
   await settle();
@@ -113,6 +119,7 @@ it('follows the runner\'s state: a failed later pass keeps the count and marks i
   expect(result.current.state).toBe('synced');
   expect(result.current.error).toBeNull();
   failing = false;
+  skew += 1;
   await act(async () => { await calculatedRunner.reconcile(); });
   expect(result.current.unlisted).toEqual({ count: 1, stale: false });
   unmount();
