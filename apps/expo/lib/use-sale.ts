@@ -53,8 +53,17 @@ export function useSale(settings: Pick<StoreSettings, 'currency'>, opts: {
     /** A line's discount, or the order's without a line; returns the refusal to show, or null once applied. */
     applyDiscount(lineId: string | null, discount: Discount): string | null {
       if ((opts.capabilities?.orderCreate ?? 1) < 2) return DISCOUNTS_UNSUPPORTED;
+      const applied = (snapshot: Order) => lineId === null ? snapshot.discounts
+        : snapshot.lineItems.find((line) => line.id === lineId)?.discounts ?? [];
+      const before = new Set(applied(builder.getSnapshot()).map((entry) => entry.id));
       if (lineId === null) builder.applyOrderDiscount(discount);
       else builder.applyLineDiscount(lineId, discount);
+      // TallyUI caps a fixed amount at what is left; refuse it instead of showing more off than comes off.
+      const added = applied(builder.getSnapshot()).find((entry) => !before.has(entry.id));
+      if (added?.type === 'fixed' && added.amountMinor < added.value) {
+        builder.removeDiscount(added.id);
+        return `The discount is more than the ${lineId === null ? 'order' : 'line'}`;
+      }
       return null;
     },
     removeDiscount(id: string) { builder.removeDiscount(id); },

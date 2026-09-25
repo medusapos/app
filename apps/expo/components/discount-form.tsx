@@ -6,7 +6,9 @@ import type { AppliedDiscount, Discount } from '@tallyui/pos';
 
 /** The cashier's entry as a TallyUI Discount (a percent, or integer minor units), or the inline error to show. */
 export function parseDiscount(type: Discount['type'], text: string, currency: string): Discount | string {
-  const trimmed = text.trim();
+  // A comma-locale keypad (inputMode="decimal") types "1,50": a single comma is the decimal separator.
+  const raw = text.trim();
+  const trimmed = raw.split(',').length === 2 ? raw.replace(',', '.') : raw;
   if (!trimmed) return 'Enter a discount.';
   if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return 'Enter a number.';
   const value = Number(trimmed);
@@ -18,8 +20,9 @@ export function parseDiscount(type: Discount['type'], text: string, currency: st
   return money ? { type, value: money.amount } : 'Enter a number.';
 }
 
-export const discountLabel = (discount: Discount, currency: string) => discount.type === 'percentage'
-  ? `${discount.value}%` : formatMoney({ amount: discount.value, currency }) ?? String(discount.value);
+/** "10%", or a fixed discount's amount as it actually comes off (amountMinor), never the amount requested. */
+export const discountLabel = (discount: AppliedDiscount, currency: string) => discount.type === 'percentage'
+  ? `${discount.value}%` : formatMoney({ amount: discount.amountMinor, currency }) ?? String(discount.amountMinor);
 
 const button = 'rounded-md border border-border px-3 py-2 min-h-11 items-center justify-center';
 
@@ -59,8 +62,9 @@ export function DiscountForm({ title, currency, onApply, onClose }: {
 }
 
 /** Applied discounts as badges; pressing one removes it through TallyUI's builder. */
-export function DiscountChips({ discounts, currency, onRemove }: {
-  discounts: AppliedDiscount[]; currency: string; onRemove: (id: string) => void;
+/** `prefix` names a chip that would otherwise read like a fee, e.g. "Order discount −€0.50". */
+export function DiscountChips({ discounts, currency, onRemove, prefix }: {
+  discounts: AppliedDiscount[]; currency: string; onRemove: (id: string) => void; prefix?: string;
 }) {
   if (!discounts.length) return null;
   return <View className="flex-row flex-wrap gap-2 px-3">
@@ -68,7 +72,7 @@ export function DiscountChips({ discounts, currency, onRemove }: {
       const label = discountLabel(discount, currency);
       return <Pressable key={discount.id} accessibilityRole="button" accessibilityLabel={`Remove discount ${label}`}
         onPress={() => onRemove(discount.id)} className="min-h-11 flex-row items-center gap-1">
-        <DiscountBadge label={label} className="self-center" /><Text className="text-muted-foreground">✕</Text>
+        <DiscountBadge label={prefix ? `${prefix} −${label}` : label} className="self-center" /><Text className="text-muted-foreground">✕</Text>
       </Pressable>;
     })}
   </View>;

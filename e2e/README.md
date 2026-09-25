@@ -107,14 +107,16 @@ blocked screen with Reload; closing the holder page and reloading recovers.
 (the plugin reports `order.create` 1 and 2, so the session stores 2), gives
 two `E2E-1` a 10% line discount and a €0.50 order discount, checks that the
 cart's Subtotal, VAT and Total rows add up (€3.10 + €0.78 = €3.88) with
-"Includes discounts of −€0.90" outside them, pays exact cash,
+"Includes discounts of €0.90" outside them, pays exact cash,
 and expects the outbox result `applied` with no warnings, a version 2 command,
 Medusa's total equal to the till's, and one "POS discount" adjustment of the
 line's `discountMinor`. The other route-intercepts `GET /tally/v1/info` to a
 404 before a fresh sign-in (capability 1): applying a discount shows TallyUI's
 `finalize: discounts are not supported by the server yet (order.create v2)`
 at once, nothing is sent, and the undiscounted sale then goes out as version 1.
-Both sell only `E2E-1`.
+A third gives `E2E-1` 100% off and completes it with cash at €0.00: applied
+with no warnings, a server `totalMinor` of 0 and one Medusa order (the plugin
+needs no payment collection for it). All three sell only `E2E-1`.
 
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.

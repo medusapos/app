@@ -27,6 +27,10 @@ async function discount(page: Page, opener: 'line' | 'order', type: 'Percent' | 
   await page.getByLabel('Discount value', { exact: true }).fill(value);
   await page.getByRole('button', { name: 'Apply', exact: true }).click();
 }
+const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
+  if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
+  return ((await response.json()).results ?? []).some((result: { status: string }) => result.status === 'applied');
+});
 const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medusapos.session') ?? 'null')?.capabilities);
 
 test('a discounted sale is applied as order.create v2, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
@@ -41,14 +45,12 @@ test('a discounted sale is applied as order.create v2, with a "POS discount" adj
   await discount(page, 'order', 'Amount', '0.50');
   await expect(page.getByRole('button', { name: /^Remove discount .*0\.50/ })).toBeVisible();
   // The totals read true: three rows that add up, and the discount only as information outside them.
-  await expect(page.getByText(/^Includes discounts of −.*0\.90$/)).toBeVisible();
+  await expect(page.getByText(/^Order discount −.*0\.50$/)).toBeVisible();
+  await expect(page.getByText(/^Includes discounts of \D*0\.90$/)).toBeVisible();
   const row = async (label: string) => Number((await page.getByText(label, { exact: true }).locator('..').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
   expect([await row('Subtotal'), await row('VAT 25%'), await row('Total')]).toEqual([3.1, 0.78, 3.88]);
   await expect(page.getByText('Discount', { exact: true })).toHaveCount(1); // the line's action, no totals row
-  const applied = page.waitForResponse(async (response) => {
-    if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-    return ((await response.json()).results ?? []).some((result: { status: string }) => result.status === 'applied');
-  });
+  const applied = appliedResponse(page);
   const receiptTotal = await sellBySku(page, [], 'exact');
   expect(receiptTotal).toBe(3.88);
   const { results } = await (await applied).json();
@@ -88,4 +90,29 @@ test('below order.create v2 the till refuses a discount when it is applied, and 
   expect(await sellBySku(page, [], 'exact')).toBe(2.5);
   await expect(page.getByText('All sales synced', { exact: true })).toBeVisible();
   expect(commands.map((command) => command.version)).toEqual([1]);
+});
+
+// The plugin completes a zero-total sale without a payment collection (#62).
+test('100% off the line completes with cash at €0.00 as one Medusa order', async ({ page }) => {
+  const token = await adminToken();
+  const commands = captureCommands(page);
+  await signIn(page);
+  await addE2E1(page);
+  await discount(page, 'line', 'Percent', '100');
+  const row = page.getByText('Total', { exact: true }).locator('..');
+  await expect(row).toContainText('0.00');
+  const applied = appliedResponse(page);
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
+  await expect(page.getByLabel(/^Total: /)).toHaveAttribute('aria-label', /^Total: \D*0\.00$/);
+  const { results } = await (await applied).json();
+  expect(results).toEqual([expect.objectContaining({ status: 'applied' })]);
+  expect(results[0].warnings).toBeUndefined();
+  expect(results[0].serverRefs.totalMinor).toBe(0);
+  expect(commands).toHaveLength(1);
+  expect(commands[0].version).toBe(2);
+  const orders = (await ordersByClientId(token)).filter((order) => order.metadata.tally_client_id === commands[0].payload.clientOrderId);
+  expect(orders).toHaveLength(1);
+  expect(orders[0].total).toBe(0);
+  await page.getByRole('button', { name: 'New sale', exact: true }).click();
 });

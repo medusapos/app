@@ -65,7 +65,9 @@ describe('parseDiscount', () => {
     ['percentage', '', 'EUR', 'Enter a discount.'],
     ['fixed', '  ', 'EUR', 'Enter a discount.'],
     ['percentage', 'ten', 'EUR', 'Enter a number.'],
-    ['fixed', '1,50', 'EUR', 'Enter a number.'],
+    ['fixed', '1,50', 'EUR', { type: 'fixed', value: 150 }],
+    ['fixed', '1,5', 'EUR', { type: 'fixed', value: 150 }],
+    ['fixed', '1,2,3', 'EUR', 'Enter a number.'],
     ['percentage', '0', 'EUR', 'Enter a discount above 0.'],
     ['fixed', '-1', 'EUR', 'Enter a discount above 0.'],
     ['percentage', '100.5', 'EUR', 'A percentage can be at most 100.'],
@@ -80,7 +82,34 @@ describe('parseDiscount', () => {
   });
 });
 
-describe('discounts in the cart', () => {
+// Several form round trips per test: past the 5 s default under a full suite on the shared host.
+describe('discounts in the cart', { timeout: 20_000 }, () => {
+  it('refuses a fixed amount above the line, and above what the order has left', () => {
+    start();
+    const plain = totals(sale.order);
+    discount('Discount', 'Amount', '50');
+    expect(within(screen.getByRole('group', { name: 'Discount on Shirt' })).getByRole('alert').textContent).toBe('The discount is more than the line');
+    expect(totals(sale.order)).toEqual(plain);
+    expect(sale.order.lineItems[0].discounts).toEqual([]);
+    expect(screen.queryByRole('button', { name: /^Remove discount/ })).toBeNull();
+    click('Cancel');
+    discount('Order discount', 'Amount', '25');
+    expect(sale.order.totalMinor).toBe(0);
+    discount('Order discount', 'Amount', '1');
+    expect(within(screen.getByRole('group', { name: 'Order discount' })).getByRole('alert').textContent).toBe('The discount is more than the order');
+    expect(sale.order.discounts).toHaveLength(1);
+  });
+
+  it('labels a fixed chip with the amount that comes off, not the amount asked for', () => {
+    start();
+    discount('Discount', 'Amount', '20');
+    expect(screen.getByText(money(2000)!)).toBeTruthy();
+    act(() => sale.setQuantity(sale.order.lineItems[0].id, 1));
+    expect(sale.order.lineItems[0].discounts[0]).toMatchObject({ value: 2000, amountMinor: 1250 });
+    expect(screen.getByText(money(1250)!)).toBeTruthy();
+    expect(screen.queryByText(money(2000)!)).toBeNull();
+  });
+
   it('shows invalid input inline and applies nothing', () => {
     start();
     const before = sale.order;
@@ -108,7 +137,9 @@ describe('discounts in the cart', () => {
     expect(screen.getByText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
     expect(screen.getByText(`Total: ${money(order.totalMinor)}`)).toBeTruthy();
     expect(screen.queryByText(/^Discount: /)).toBeNull();
-    expect(screen.getByText(`Includes discounts of −${money(order.discountMinor)}`)).toBeTruthy();
+    expect(screen.getByText(`Includes discounts of ${money(order.discountMinor)}`)).toBeTruthy();
+    expect(screen.getByText('10%')).toBeTruthy();
+    expect(screen.getByText(`Order discount −${money(50)}`)).toBeTruthy();
     expect(screen.queryByRole('group')).toBeNull();
     click('Remove discount 10%');
     click(`Remove discount ${money(50)}`);
@@ -143,17 +174,20 @@ describe('discounts in the cart', () => {
   it('at order.create 2 records a version 2 order, and the receipt shows the discount', async () => {
     const completed = vi.fn();
     start({ capabilities: { orderCreate: 2 }, onSaleCompleted: completed });
+    discount('Discount', 'Percent', '10');
     discount('Discount', 'Amount', '2.50');
     const order = sale.order;
     act(() => sale.startTender('external'));
     await act(async () => { await sale.complete(); });
     const envelope = toOrderCreateEnvelope(completed.mock.calls[0][0], 'device');
     expect(envelope.version).toBe(2);
-    expect(envelope.payload).toMatchObject({ discountMinor: 250, totalMinor: order.totalMinor, lines: [expect.objectContaining({ discountMinor: 250 })] });
+    expect(envelope.payload).toMatchObject({ discountMinor: 500, totalMinor: order.totalMinor, lines: [expect.objectContaining({ discountMinor: 500 })] });
     cleanup();
     render(<Receipt order={order} settings={{ storeName: 'Shop', currency: 'EUR', location: { id: 'l', name: 'Main', countryCode: 'dk' } }}
       cashier="cashier" registerId="register-1" newSale={() => {}} />);
-    expect(screen.getByText(`Includes discounts of −${money(250)}`)).toBeTruthy();
+    // The line's own discounts label its description; the amounts come from the snapshot.
+    expect(screen.getByText(`2 × ${money(1250)} · 10% off · ${money(250)} off`)).toBeTruthy();
+    expect(screen.getByText(`Includes discounts of ${money(500)}`)).toBeTruthy();
     expect(screen.queryByLabelText(/^Discount/)).toBeNull();
     expect(screen.getByLabelText(`Subtotal: ${money(order.subtotalMinor)}`)).toBeTruthy();
     expect(screen.getByLabelText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
