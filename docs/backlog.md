@@ -25,11 +25,27 @@ Plugin, low priority. Half-cent gap: Medusa stores an unrounded order total
 works out to half a cent (ADR-037); the order shows a 0.005 difference
 between its total and the captured payment.
 
-## 360 px cart layout after a discount
+## TallyUI's CartPanel needs a list-footer slot
 
-UI, next after discounts. 360 px cart layout: after a discount, the chips,
-the Order discount button and the totals push the cart lines out of view in
-the bottom half of a phone screen (the tester's main surface).
+`apps/expo/components/cart.tsx` composes the cart itself (ADR 0009) because
+`CartPanel` scrolls only its items: the order discount has to scroll after
+the last line, above the pinned footer. A `listFooter` slot inside
+`CartPanel`'s scroll area (TallyUI) would let the app use it again.
+
+## A keyboard-wedge scan in the phone cart view has nowhere to land
+
+In phone mode (ADR 0009) the cart view unmounts the catalogue, and with it
+the search field that takes scanner input. A hardware (keyboard-wedge) scan
+made while the cart is open is dropped: nothing is added and nothing is
+shown. Phones mostly scan with the camera, so this is minor; a fix would
+route scans to `sale.add` in either view, e.g. a scan listener above both
+(from the phone-cart review).
+
+## "Sign out" is clipped at 360 px
+
+The header's right side ("Orders", "Sign out") runs past the right edge at
+360 px, on main and with ADR 0009 alike. Give the header actions a right
+inset, or move Sign out into a menu on phones (from #69 review).
 
 ## Tap race when new store settings land
 
