@@ -245,6 +245,72 @@ medusaIntegrationTestRunner({
       expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([totalMinor / 100])
     })
 
+    // ADR 0012: the till's own settlement figures are recorded verbatim as tally_pos_totals, the fiscal record.
+    it.each([[50, 60], [23, 27], [26, 31]])(
+      'tax-exclusive unit price %i pays the POS total %i and records tally_pos_totals exactly as sent (ADR 0012)',
+      async (unitPriceMinor, totalMinor) => {
+        // Medusa's own raw (unrounded) total for each: 0.595, 0.2737, 0.3094 (19% DE).
+        const subtotalMinor = unitPriceMinor
+        const taxMinor = totalMinor - subtotalMinor
+        const sale = command({
+          pricesIncludeTax: false, subtotalMinor, taxMinor, totalMinor,
+          lines: [{ clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor }],
+          payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
+        })
+        const result = await runOrderCreate(container, sale)
+        const order = await readOrder(result)
+        expect(result.warnings).toBeUndefined()
+        expect(order.metadata!.tally_pos_totals).toEqual({
+          v: 1, currency: 'EUR', exponent: 2,
+          settlement: { subtotalMinor, discountMinor: 0, taxMinor, totalMinor },
+        })
+        expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([totalMinor / 100])
+        expect(order.items).toHaveLength(1)
+      }
+    )
+
+    it('records tally_pos_totals for the default inclusive sale', async () => {
+      const sale = command()
+      const order = await readOrder(await runOrderCreate(container, sale))
+      expect(order.metadata!.tally_pos_totals).toEqual({
+        v: 1, currency: 'EUR', exponent: 2,
+        settlement: { subtotalMinor: 840, discountMinor: 0, taxMinor: 160, totalMinor: 1000 },
+      })
+    })
+
+    it('records tally_pos_totals for a v2 zero-total sale, still with no payment collection', async () => {
+      const sale = freeSale()
+      const result = await runOrderCreate(container, sale)
+      const { order } = await discountedItems(result, { free: true })
+      expect(order.metadata!.tally_pos_totals).toEqual({
+        v: 1, currency: 'EUR', exponent: 2,
+        settlement: { subtotalMinor: 0, discountMinor: 1000, taxMinor: 0, totalMinor: 0 },
+      })
+    })
+
+    it('records settlement.discountMinor for a v2 discounted sale', async () => {
+      const sale = command({
+        pricesIncludeTax: false, discountMinor: 100,
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000, discountMinor: 100 }],
+        subtotalMinor: 900, taxMinor: 171, totalMinor: 1071,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 1071 }],
+      })
+      const order = await readOrder(await runOrderCreate(container, { ...sale, version: 2 }))
+      expect(order.metadata!.tally_pos_totals).toMatchObject({ settlement: { discountMinor: 100 } })
+    })
+
+    it('resumes a leftover draft with tally_pos_totals exactly as created', async () => {
+      const sale = command()
+      const draft = await createDraft(sale)
+      expect(draft.metadata!.tally_pos_totals).toEqual({
+        v: 1, currency: 'EUR', exponent: 2,
+        settlement: { subtotalMinor: 840, discountMinor: 0, taxMinor: 160, totalMinor: 1000 },
+      })
+      const order = await readOrder(await runOrderCreate(container, sale))
+      expect(order.id).toBe(draft.id)
+      expect(order.metadata!.tally_pos_totals).toEqual(draft.metadata!.tally_pos_totals)
+    })
+
     it('completes mixed shipping groups with the appropriate number of fulfillments', async () => {
       const sale = command({
         lines: [

@@ -122,6 +122,19 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
           tally_payments: payload.payments,
           ...(payload.registerId !== undefined ? { tally_register_id: payload.registerId } : {}),
           ...(payload.cashierRef !== undefined ? { tally_cashier_ref: payload.cashierRef } : {}),
+          // The till's own settlement figures, as the fiscal record (ADR 0012). Written at create only;
+          // resume.ts never rewrites this key. display and taxByRate join this key with order.create v3 (TallyUI ADR-065).
+          tally_pos_totals: {
+            v: 1,
+            currency: payload.currency,
+            exponent: decimals,
+            settlement: {
+              subtotalMinor: payload.subtotalMinor,
+              discountMinor: payload.discountMinor ?? 0,
+              taxMinor: payload.taxMinor,
+              totalMinor: payload.totalMinor,
+            },
+          },
         },
         items: payload.lines.map(line => ({
           variant_id: line.variantId,

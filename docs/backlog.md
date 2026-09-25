@@ -18,13 +18,6 @@ costs one extra ids read a day. That's harmless, but it could be avoided by
 reading the current headers through a ref instead of restarting on each
 refresh.
 
-## Half-cent gap between Medusa's order total and the captured payment
-
-Plugin, low priority. Half-cent gap: Medusa stores an unrounded order total
-(e.g. 3.875) while the POS captures the rounded amount (3.88) when the tax
-works out to half a cent (ADR-037); the order shows a 0.005 difference
-between its total and the captured payment.
-
 ## Barcode wedge thresholds as store settings
 
 `apps/expo/lib/use-wedge-scan.ts` has its average-key-time, stale-gap and
