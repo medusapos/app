@@ -51,11 +51,10 @@ inset, or move Sign out into a menu on phones (from #69 review).
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
 
-## TALLYUI_REF is pinned to a backport branch
+## A rejected order-store close blocks reopening until a reload
 
-`TALLYUI_REF` pins TallyUI `backport/131-on-e5f540a` (4abbf04): #131's
-`addPosOrderCollection` alone on e5f540a, off TallyUI main. #66 (display
-totals) moves the pin back to TallyUI main. Keep the backport branch
-afterwards, or replace it with a tag on 4abbf04: CI and Vercel fetch the
-pinned commit by SHA, so this app's history can only be rebuilt, reverted or
-bisected while a TallyUI ref still holds that commit (from #68 review).
+`openOrderStore` (`apps/expo/lib/order-store.ts`, the `closing` path): if
+`store.close()` ever rejects, the rejected `closing` promise stays in the
+`stores` map, and every later open for that URL rethrows it until the page
+reloads. Unlikely, since `db.close` rarely rejects; clear the entry when the
+close settles, whatever the result (from #68 review).

@@ -64,16 +64,21 @@ export function DiscountForm({ title, currency, onApply, onClose }: {
 
 /** Applied discounts as badges; pressing one removes it through TallyUI's builder. */
 /** `prefix` names a chip that would otherwise read like a fee, e.g. "Order discount −€0.50". */
-export function DiscountChips({ discounts, currency, onRemove, prefix }: {
+/** `amounts` are order.display's figures by discountId (TallyUI ADR-063): "10% −€0.40", or "−€0.40" for a fixed one. */
+export function DiscountChips({ discounts, currency, onRemove, prefix, amounts = [] }: {
   discounts: AppliedDiscount[]; currency: string; onRemove: (id: string) => void; prefix?: string;
+  amounts?: { discountId: string; amountMinor: number }[];
 }) {
   if (!discounts.length) return null;
   return <View className="flex-row flex-wrap gap-2 px-3">
     {discounts.map((discount) => {
-      const label = discountLabel(discount, currency);
+      const amount = amounts.find((row) => row.discountId === discount.id)?.amountMinor;
+      const own = discountLabel(discount, currency);
+      const label = [prefix, amount === undefined ? (prefix ? `−${own}` : own) : discount.type === 'percentage' ? own : null,
+        amount === undefined ? null : `−${formatMoney({ amount, currency })}`].filter(Boolean).join(' ');
       return <Pressable key={discount.id} accessibilityRole="button" accessibilityLabel={`Remove discount ${label}`}
         onPress={() => onRemove(discount.id)} className="min-h-11 flex-row items-center gap-1">
-        <DiscountBadge label={prefix ? `${prefix} −${label}` : label} className="self-center" /><Text className="text-muted-foreground">✕</Text>
+        <DiscountBadge label={label} className="self-center" /><Text className="text-muted-foreground">✕</Text>
       </Pressable>;
     })}
   </View>;

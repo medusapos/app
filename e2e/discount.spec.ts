@@ -29,18 +29,31 @@ test('a discounted sale is applied as order.create v2, with a "POS discount" adj
   await addE2E1(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '10');
-  await expect(page.getByRole('button', { name: 'Remove discount 10%', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^Remove discount 10% −\D*0\.40$/ })).toBeVisible();
   await discount(page, 'order', 'Amount', '0.50');
   await expect(page.getByRole('button', { name: /^Remove discount .*0\.50/ })).toBeVisible();
-  // The totals read true: three rows that add up, and the discount only as information outside them.
+  // The totals are TallyUI's order.display (ADR-063): Subtotal − Discount + VAT = Total (4.00 − 0.90 + 0.78 = 3.88).
+  // The line reads before its discounts (4.00, adding up to the Subtotal); each chip carries its amount.
+  await expect(page.getByTestId('cart-scroll').getByText('E2E product 1', { exact: true }).locator('../..')).toHaveText(/× 2\D*4\.00$/);
+  await expect(page.getByText(/^10% −\D*0\.40$/)).toBeVisible();
   await expect(page.getByText(/^Order discount −.*0\.50$/)).toBeVisible();
-  await expect(page.getByText(/^Includes discounts of \D*0\.90$/)).toBeVisible();
-  const row = async (label: string) => Number((await page.getByText(label, { exact: true }).locator('..').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
-  expect([await row('Subtotal'), await row('VAT 25%'), await row('Total')]).toEqual([3.1, 0.78, 3.88]);
-  await expect(page.getByText('Discount', { exact: true })).toHaveCount(1); // the line's action, no totals row
+  // The last "Discount" is the totals row; the first is the line's action.
+  const row = async (label: string) => Number((await page.getByText(label, { exact: true }).last().locator('..').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
+  expect([await row('Subtotal'), await row('Discount'), await row('VAT 25%'), await row('Total')]).toEqual([4, 0.9, 0.78, 3.88]);
   const applied = appliedResponse(page);
-  const receiptTotal = await sellBySku(page, [], 'exact');
-  expect(receiptTotal).toBe(3.88);
+  // Exact cash, as sellBySku pays it, stopping on the receipt to read its rows.
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
+  const amount = tender.locator('input');
+  await tender.locator('[tabindex="0"]').first().click();
+  await amount.fill(await amount.inputValue());
+  await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
+  for (const label of [/^2 × \D*2\.00: \D*4\.00$/, /^10% off: −\D*0\.40$/, /^Order discount: −\D*0\.50$/,
+    /^Subtotal: \D*4\.00$/, /^Discount: −\D*0\.90$/, /^VAT 25%: \D*0\.78$/, /^Total: \D*3\.88$/]) {
+    await expect(page.getByLabel(label)).toBeVisible();
+  }
+  await page.getByRole('button', { name: 'New sale', exact: true }).click();
+  const receiptTotal = 3.88;
   const { results } = await (await applied).json();
   expect(results).toHaveLength(1);
   expect(results[0].status).toBe('applied');
