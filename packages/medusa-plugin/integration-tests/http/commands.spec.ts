@@ -93,6 +93,55 @@ medusaIntegrationTestRunner({
       }
     })
 
+    it('serves GET /tally/v1/info to bearer and session users, 401 otherwise, with CORS for adminCors origins (ADR-062)', async () => {
+      const info = (requestHeaders: Record<string, string>) =>
+        api.get('/tally/v1/info', { headers: requestHeaders, validateStatus: () => true })
+      const session = await api.post('/auth/session', {}, { headers: { Authorization: headers.Authorization } })
+      const cookie = session.headers['set-cookie']![0].split(';')[0]
+      for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
+        const response = await info(requestHeaders)
+        expect([response.status, response.data]).toEqual([200, { contracts: { 'order.create': [1, 2] } }])
+      }
+      expect((await info({})).status).toBe(401)
+      for (const origin of ['http://localhost', 'https://untrusted.example']) {
+        const response = await api.options('/tally/v1/info', { headers: {
+          Origin: origin, 'Access-Control-Request-Method': 'GET', 'Access-Control-Request-Headers': 'authorization',
+        } })
+        expect(response.status).toBe(204)
+        expect(response.headers['access-control-allow-origin']).toBe(origin === 'http://localhost' ? origin : undefined)
+        if (origin === 'http://localhost') expect(response.headers['access-control-allow-methods']).toBe('GET,OPTIONS')
+      }
+    })
+
+    // 19% inclusive: 1000 − 100 = 900 gross (net 756, tax 144); and 1000 − 1000 = 0, which has no payment collection.
+    it.each([[100, 756, 144, 900], [1000, 0, 0, 0]])('replays a v2 sale discounted by %i as duplicate twice, with one order and one adjustment',
+      async (discountMinor, subtotalMinor, taxMinor, totalMinor) => {
+        const sale = { ...command({
+          discountMinor, subtotalMinor, taxMinor, totalMinor,
+          lines: [{ clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, discountMinor }],
+          payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
+        }), version: 2 as const }
+        const responses = [await post([sale]), await post([sale]), await post([sale])]
+        expect(responses.map(response => [response.status, response.data.results[0].status])).toEqual([
+          [200, 'applied'], [200, 'duplicate'], [200, 'duplicate'],
+        ])
+        expect(responses[0].data.results[0]).toMatchObject({ serverRefs: { totalMinor } })
+        expect(responses[0].data.results[0].warnings).toBeUndefined()
+        const orders = await liveOrders(sale.payload.clientOrderId)
+        expect(orders).toHaveLength(1)
+        // Medusa copies an item's adjustments into each order version (fulfilment bumps the version), so
+        // count per version: exactly one adjustment in every version, the current one included.
+        const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'order', filters: { id: orders[0].id }, fields: ['items.id'],
+        })
+        expect(order.items).toHaveLength(1)
+        const rows = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order_line_item_adjustment')
+          .where('item_id', order.items[0].id).whereNull('deleted_at')
+        expect(new Set(rows.map(row => row.version)).size).toBe(rows.length)
+        expect(rows.map(row => row.version)).toContain(orders[0].version)
+        expect(rows.map(row => [Number(row.amount), row.description])).toEqual(rows.map(() => [discountMinor / 100, 'POS discount']))
+      })
+
     it('applies two sales in order and replays the original references and warnings exactly once', async () => {
       const sales = [command(), command({
         lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity: 2, unitPriceMinor: 300 }],

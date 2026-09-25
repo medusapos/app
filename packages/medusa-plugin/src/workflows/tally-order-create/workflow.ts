@@ -93,13 +93,16 @@ export const tallyOrderCreateWorkflow = createWorkflow('tally-order-create', fun
   // Medusa fills variant-backed item titles from the product, although its DTO requires title.
   const draft = createOrderWorkflow.runAsStep({ input: input.draftOrder as unknown as CreateOrderWorkflowInput })
   convertDraftOrderWorkflow.runAsStep({ input: { id: draft.id } })
-  const collections = createOrderPaymentCollectionWorkflow.runAsStep({
-    input: { order_id: draft.id, amount: input.paymentAmount },
+  // Medusa cannot capture 0, so a sale discounted to 0 (ADR-062) completes without a payment collection.
+  when('has-payment', { input }, ({ input }) => input.paymentAmount > 0).then(() => {
+    const collections = createOrderPaymentCollectionWorkflow.runAsStep({
+      input: { order_id: draft.id, amount: input.paymentAmount },
+    })
+    const paymentInput = transform({ draft, collections }, ({ draft, collections }) => ({
+      order_id: draft.id, payment_collection_id: collections[0].id,
+    }))
+    markPaymentCollectionAsPaid.runAsStep({ input: paymentInput })
   })
-  const paymentInput = transform({ draft, collections }, ({ draft, collections }) => ({
-    order_id: draft.id, payment_collection_id: collections[0].id,
-  }))
-  markPaymentCollectionAsPaid.runAsStep({ input: paymentInput })
   const { data: orders } = useQueryGraphStep({
     entity: 'order', fields: ['id', 'items.id', 'items.quantity', 'items.detail.quantity', 'items.requires_shipping'],
     filters: { id: draft.id },

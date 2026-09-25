@@ -38,6 +38,18 @@ it('fingerprints lines without taxInclusive exactly as with it undefined, and di
   expect(commandFingerprint(order([{ ...line, taxInclusive: false }]))).not.toBe(commandFingerprint(order([line])))
 })
 
+it('keeps a version 1 order fingerprint byte-identical, and a version 2 one distinct (ADR-062)', () => {
+  const line = { clientLineId: 'line_1', variantId: 'variant_1', quantity: 1, unitPriceMinor: 1000 }
+  const v1 = { type: 'order.create' as const, version: 1 as const, payload: { clientOrderId: 'order_1', lines: [line], totalMinor: 1000 } }
+  const canonical = '{"payload":{"clientOrderId":"order_1","lines":[{"clientLineId":"line_1","quantity":1,"unitPriceMinor":1000,'
+    + '"variantId":"variant_1"}],"totalMinor":1000},"type":"order.create","version":1}'
+  expect(canonicalJson(v1)).toBe(canonical)
+  expect(commandFingerprint(v1)).toBe(createHash('sha256').update(canonical).digest('hex'))
+  const v2 = { ...v1, version: 2 as const, payload: { ...v1.payload, discountMinor: 100, lines: [{ ...line, discountMinor: 100 }] } }
+  expect(commandFingerprint(v2)).not.toBe(commandFingerprint(v1))
+  expect(commandFingerprint({ ...v1, version: 2 })).not.toBe(commandFingerprint(v1))
+})
+
 it('hashes the literal canonical envelope using SHA-256', () => {
   const expected = '{"payload":{"a":1,"b":2},"type":"order.create","version":1}'
   expect(canonicalJson(envelope)).toBe(expected)

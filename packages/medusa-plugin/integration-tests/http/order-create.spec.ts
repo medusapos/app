@@ -9,6 +9,7 @@ import {
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core'
 import { runOrderCreate } from '../../src/workflows'
+import { majorToMinor } from '../../src/workflows/tally-order-create/money'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
 import { takeBackStockWorkflow } from '../../src/workflows/tally-order-create/workflow'
 import { seed } from './seed'
@@ -39,7 +40,8 @@ medusaIntegrationTestRunner({
       }
     }
 
-    async function readOrder(result: CommandResult) {
+    /** `free`: a sale discounted to 0 has no payment collection, since Medusa cannot capture 0. */
+    async function readOrder(result: CommandResult, { free = false } = {}) {
       expect(result.status).toBe('applied')
       const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
         entity: 'order', filters: { id: result.serverRefs!.orderId },
@@ -53,8 +55,8 @@ medusaIntegrationTestRunner({
       const { result: detail } = await getOrderDetailWorkflow(container).run({
         input: { order_id: order.id, fields: ['payment_status', 'currency_code'] },
       })
-      expect(detail.payment_status).toBe('captured')
-      expect(order.payment_collections).toEqual([expect.objectContaining({ status: 'completed' })])
+      expect(detail.payment_status).toBe(free ? 'not_paid' : 'captured')
+      expect(order.payment_collections).toEqual(free ? [] : [expect.objectContaining({ status: 'completed' })])
       expect(result.serverRefs!.displayId).toBe(String(order.display_id))
       return order
     }
@@ -127,6 +129,106 @@ medusaIntegrationTestRunner({
       expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([21.9])
       const modes = Object.fromEntries(order.items.map(item => [item.variant_id, item.is_tax_inclusive]))
       expect(modes).toEqual({ [data.variantA]: true, [data.variantB]: false })
+    })
+
+    // ADR-062 version 2: each discounted line carries one own-mode "POS discount" adjustment, and Medusa's
+    // item totals must equal the client's D2c per-line figures to the cent (ADR-037 guard, no total_mismatch).
+    async function discountedItems(result: CommandResult, options?: { free: boolean }) {
+      const order = await readOrder(result, options)
+      // The order module computes item totals when an order total is requested too.
+      const { data: [detail] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+        entity: 'order', filters: { id: order.id }, fields: ['total', 'items.variant_id', 'items.is_tax_inclusive', 'items.total',
+          'items.tax_total', 'items.discount_total', 'items.discount_subtotal', 'items.adjustments.*'],
+      })
+      const minor = (value: unknown) => majorToMinor(String(value), 2)
+      return { order, items: Object.fromEntries(detail.items.map((item: any) => [item.variant_id, {
+        inclusive: item.is_tax_inclusive, total: minor(item.total), tax: minor(item.tax_total),
+        discount: minor(item.discount_total), discountNet: minor(item.discount_subtotal),
+        adjustments: item.adjustments.map(({ amount, description, is_tax_inclusive }) => ({ amount: Number(amount), description, is_tax_inclusive })),
+      }])) }
+    }
+
+    it('v2 exclusive line discount: 1000 less 100 is taxed on 900 and pays 1071, with a 1.00 POS discount adjustment', async () => {
+      // 19% exclusive: net 1000 − 100 = 900; tax 900 × 0.19 = 171; total 1071. Undiscounted: 1000 + 190 = 1190.
+      // Medusa's discount_total is gross (the discount plus the tax it removes): 1190 − 1071 = 119; its net part is 100.
+      const sale = command({
+        pricesIncludeTax: false, discountMinor: 100,
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000, discountMinor: 100 }],
+        subtotalMinor: 900, taxMinor: 171, totalMinor: 1071,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 1071 }],
+      })
+      const result = await runOrderCreate(container, { ...sale, version: 2 })
+      const { order, items } = await discountedItems(result)
+      expect(result.warnings).toBeUndefined()
+      expect(result.serverRefs!.totalMinor).toBe(1071)
+      expect(Number(order.total)).toBe(10.71)
+      expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([10.71])
+      expect(items[data.variantA]).toEqual({ inclusive: false, total: 1071, tax: 171, discount: 119, discountNet: 100,
+        adjustments: [{ amount: 1, description: 'POS discount', is_tax_inclusive: false }] })
+    })
+
+    it('v2 mixed modes with a 10% order discount: each item is taxed on its own-mode discounted base', async () => {
+      // 19%, shares 100 each (10% of each line's own-mode 1000).
+      // A inclusive: gross 1000 − 100 = 900; net round(900 / 1.19 = 756.30) 756; tax 900 − 756.30 = 143.70, 144.
+      //   Undiscounted gross 1000, so discount_total 1000 − 900 = 100.
+      // B exclusive: net 1000 − 100 = 900; tax 171; total 1071. discount_total 1190 − 1071 = 119 (net 100).
+      // Order: subtotal 756 + 900 = 1656; tax rounded once, 143.70 + 171 = 314.70, 315; total 900 + 1071 = 1971.
+      const sale = command({
+        discountMinor: 200,
+        lines: [
+          { clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000, discountMinor: 100 },
+          { clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, taxInclusive: false, discountMinor: 100 },
+        ],
+        subtotalMinor: 1656, taxMinor: 315, totalMinor: 1971,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+      })
+      const result = await runOrderCreate(container, { ...sale, version: 2 })
+      const { order, items } = await discountedItems(result)
+      expect(result.warnings).toBeUndefined()
+      expect(result.serverRefs!.totalMinor).toBe(1971)
+      expect(Number(order.total)).toBe(19.71)
+      expect(majorToMinor(String(order.tax_total), 2)).toBe(315)
+      expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([19.71])
+      expect(items).toEqual({
+        [data.variantA]: { inclusive: true, total: 900, tax: 144, discount: 100, discountNet: 84,
+          adjustments: [{ amount: 1, description: 'POS discount', is_tax_inclusive: true }] },
+        [data.variantB]: { inclusive: false, total: 1071, tax: 171, discount: 119, discountNet: 100,
+          adjustments: [{ amount: 1, description: 'POS discount', is_tax_inclusive: false }] },
+      })
+    })
+
+    // A 100% discount (ADR-062): inclusive 1000 − 1000 = 0 gross, net 0, tax 0; Medusa's discount_total is 1000.
+    function freeSale() {
+      return { ...command({
+        discountMinor: 1000, subtotalMinor: 0, taxMinor: 0, totalMinor: 0,
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, discountMinor: 1000 }],
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 0 }],
+      }), version: 2 as const }
+    }
+    const freeItem = { inclusive: true, total: 0, tax: 0, discount: 1000, discountNet: 840,
+      adjustments: [{ amount: 10, description: 'POS discount', is_tax_inclusive: true }] }
+
+    it('v2 sale discounted to 0 completes without a payment collection, since Medusa cannot capture 0', async () => {
+      const sale = freeSale()
+      const result = await runOrderCreate(container, sale)
+      const { order, items } = await discountedItems(result, { free: true })
+      expect(result.warnings).toBeUndefined()
+      expect(result.serverRefs!.totalMinor).toBe(0)
+      expect(Number(order.total)).toBe(0)
+      expect(order.metadata).toMatchObject({ tally_client_id: sale.payload.clientOrderId, tally_payments: sale.payload.payments })
+      expect(order.fulfillments).toHaveLength(1)
+      expect(items).toEqual({ [data.variantB]: freeItem })
+      expect(await runOrderCreate(container, sale)).toEqual(result)
+      expect(await ordersFor(sale.payload.clientOrderId)).toHaveLength(1)
+    })
+
+    it('v2 sale discounted to 0 resumes a leftover draft without a payment collection', async () => {
+      const sale = freeSale()
+      const draft = await createDraft(sale)
+      const result = await runOrderCreate(container, sale)
+      const { order, items } = await discountedItems(result, { free: true })
+      expect(order.id).toBe(draft.id)
+      expect(items).toEqual({ [data.variantB]: freeItem })
     })
 
     it.each([31, 30])('unrounded total 0.3094 with POS total %i keeps the POS collection amount and reports rounded server total', async totalMinor => {

@@ -244,3 +244,44 @@ it('has no warning for equal totals', () => {
 it.each([1704, 1706])('warns for server total %s', serverMinor => {
   expect(totalWarnings(1705, serverMinor)).toEqual([{ code: 'total_mismatch', expectedMinor: 1705, serverMinor }])
 })
+
+describe('version 2 discounts (ADR-062)', () => {
+  const adjustment = (amount: string, inclusive: boolean) =>
+    [{ amount, description: 'POS discount', is_tax_inclusive: inclusive }]
+
+  it('leaves a discount-free plan exactly as version 1 planned it, with no adjustments key', () => {
+    const result = planOrderCreate(payload, ctx)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.draftOrder.items).toStrictEqual(itemsIn(true))
+    expect(result.plan.draftOrder.items.some(item => 'adjustments' in item)).toBe(false)
+  })
+
+  it('adds exactly one own-mode adjustment per discounted line and none elsewhere', () => {
+    const lines = [
+      { ...payload.lines[0], discountMinor: 150 }, { ...payload.lines[1], taxInclusive: false },
+      { ...payload.lines[1], clientLineId: 'line_3', taxInclusive: false, discountMinor: 5 },
+    ]
+    const result = planOrderCreate({ ...payload, discountMinor: 155, lines }, ctx)
+    if (!result.ok) throw new Error('Expected a plan')
+    const [first, second] = itemsIn(true)
+    expect(result.plan.draftOrder.items).toStrictEqual([
+      { ...first, adjustments: adjustment('1.50', true) },
+      { ...second, is_tax_inclusive: false },
+      { ...second, is_tax_inclusive: false, metadata: { tally_line_uuid: 'line_3' }, adjustments: adjustment('0.05', false) },
+    ])
+  })
+
+  it.each([[1700, true], [1701, false]])('allows a discount up to the line amount 850 × 2: %i', (discountMinor, ok) => {
+    const lines = [{ ...payload.lines[0], discountMinor }, payload.lines[1]]
+    expect(planOrderCreate({ ...payload, discountMinor, lines }, ctx)).toMatchObject(ok ? { ok: true } : {
+      ok: false, rejection: { code: 'invalid_quantity', message: expect.stringContaining('lines[0].discountMinor') },
+    })
+  })
+
+  it.each([0, -1, 1.5, NaN, Number.MAX_SAFE_INTEGER + 1])('rejects lines[0].discountMinor %s', discountMinor => {
+    const lines = [{ ...payload.lines[0], discountMinor }]
+    expect(planOrderCreate({ ...payload, lines }, ctx)).toEqual({
+      ok: false, rejection: { code: 'invalid_quantity', message: 'Invalid lines[0].discountMinor' },
+    })
+  })
+})

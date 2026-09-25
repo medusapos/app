@@ -20,7 +20,8 @@ export async function resumeOrderCreate(container: MedusaContainer, orderId: str
   if (order.is_draft_order) await convertDraftOrderWorkflow(container).run({ input: { id: orderId } })
   // ADR 0003 amendment, #22 review: skip dead collections; the sale was paid at the till.
   let collections = order.payment_collections.filter(collection => collection.status !== 'canceled' && collection.status !== 'failed')
-  if (!collections.length) {
+  // A sale discounted to 0 (ADR-062) has no collection: Medusa cannot capture 0.
+  if (!collections.length && paymentAmount > 0) {
     const { result } = await createOrderPaymentCollectionWorkflow(container).run({ input: { order_id: orderId, amount: paymentAmount } })
     collections = result
   }
