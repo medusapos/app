@@ -96,8 +96,17 @@ sell only `E2E-1` and check its stock delta, like `smoke.spec.ts`.
 Both seed at `pos_orders` schema v0 (pre-TallyUI #123): the legacy hook, and
 `__medusaposSeedV0Order` into the SQLite order store, whose test signs in with
 `/tally/v1/commands` blocked, sees the migrated sale "Waiting to sync", then
-one Medusa order. `scripts/check-web-bundle.sh` fails any export containing a
-`__medusapos…` hook name, so production builds carry none.
+one Medusa order.
+Both open `pos_orders` through TallyUI's `addPosOrderCollection` (ADR-032 amendment 2); a DM4 has no e2e (production web storage doesn't validate), so `order-store.test.ts` covers DM4 then fix.
+
+Every `window.__medusapos…` hook goes through `apps/expo/lib/e2e-debug.ts`
+(`exposeE2eHook('Catalogue', …)`), the only app code that writes to `window`
+for E2E. Its branch is guarded by `EXPO_PUBLIC_E2E_DEBUG === '1'`, which a
+production export folds away together with the branch's marker
+`medusapos-e2e-debug-hook`. `scripts/check-web-bundle.sh` fails closed: on
+that marker (or a `__medusapos…` name or a key) in any exported `.js`/`.html`,
+on any file it cannot read, and on app source outside that module and tests
+that contains `__medusapos` or writes a `window` property.
 
 The same file proves the storage-health prompts (ADR-061 part B): one test
 kills the storage worker via `window.__medusaposKillStorageWorker()` (another

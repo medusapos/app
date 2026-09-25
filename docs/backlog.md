@@ -35,19 +35,10 @@ the bottom half of a phone screen (the tester's main surface).
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
 
-## The bundle check doesn't fail closed
+## A rejected order-store close blocks reopening until a reload
 
-`scripts/check-web-bundle.sh` rejects debug hooks by their `__medusapos`
-prefix. So a hook renamed without the prefix passes, and a grep read error
-(exit 2) counts as clean. Route every E2E debug export through one named
-module and check for that module instead of the prefix, and treat any grep
-exit other than 0 or 1 as a failure (from #64 review).
-
-## pos_orders migration recovery after a DM4
-
-TallyUI, no app change. After a DM4, RxDB 16.21 keeps an error migration
-status, so recovery takes an extra reload. On SQLite, an open can also close
-the database mid-migration. A stale "done" status after a rollback and
-re-upgrade can open the store before newly written sales have migrated.
-TallyUI will reset a leftover error or stale done status inside
-`posOrderCollection()`. Pin that SHA when it lands (from #64 review).
+`openOrderStore` (`apps/expo/lib/order-store.ts`, the `closing` path): if
+`store.close()` ever rejects, the rejected `closing` promise stays in the
+`stores` map, and every later open for that URL rethrows it until the page
+reloads. Unlikely, since `db.close` rarely rejects; clear the entry when the
+close settles, whatever the result (from #68 review).

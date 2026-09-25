@@ -3,16 +3,20 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
-import { posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
+import { addPosOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { terminateWebStorage, webStorageAvailable } from './web-storage';
 import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
+import { exposeE2eHook } from './e2e-debug';
 
 addRxPlugin(RxDBLocalDocumentsPlugin);
 
 type OrdersDatabase = RxDatabase<{ pos_orders: RxCollection<PosOrder> }>;
 type OrderStore = { orders: RxCollection<PosOrder>; close(): Promise<void> };
 const stores = new Map<string, { opening: Promise<OrderStore>; users: number; closing?: Promise<void> }>();
+// The one open path for pos_orders (ADR-032 amendment 2). It takes an untyped RxDatabase, which a
+// typed one isn't assignable to (RxDB's exportJSON generic), hence the cast; types only.
+const addOrders = (db: OrdersDatabase) => addPosOrderCollection(db as unknown as RxDatabase);
 
 // Local document id recording that `carryOverOrders` copied a legacy database (count and time).
 // A record only: it never causes a delete, nor skips reading a legacy database that exists.
@@ -81,7 +85,7 @@ export async function carryOverOrders({ fromStorage, fromName, to, legacyExists 
     });
     try {
       // Migrates legacy v0 in place; a DM4 throws here, before any copy or marker, so the source stays.
-      await legacy.addCollections({ pos_orders: posOrderCollection() });
+      await addOrders(legacy);
       const docs = (await legacy.pos_orders.find().exec()).map((doc) => doc.toJSON() as PosOrder);
       if (docs.length) {
         const present = await to.pos_orders.findByIds(docs.map((order) => order.id)).exec();
@@ -126,15 +130,15 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
       });
       const unwatch = watched ? watchStorageHealth(watched.health$) : undefined;
       try {
-        // Migrates v0 to v1. A DM4 fails this open, never deletes: the v0 orders stay; a reload retries.
-        await db.addCollections({ pos_orders: posOrderCollection() });
+        // Migrates v0 to v1, all of it. A DM4 fails this open, never deletes: the v0 orders stay; the next open retries.
+        const orders = await addOrders(db);
         if (onWebStorage) {
           await carryOverOrders({
             fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
             legacyExists: () => legacyOrdersDatabaseExists(legacyDexieName('orders', baseUrl)),
           });
         }
-        return { orders: db.pos_orders, close: async () => { unwatch?.(); await db.close(); } };
+        return { orders, close: async () => { unwatch?.(); await db.close(); } };
       } catch (error) { unwatch?.(); await db.close(); throw error; }
     })();
     entry = { opening, users: 0 };
@@ -187,7 +191,7 @@ export function needsAttention(orders: PosOrder[]): PosOrder[] {
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 }
 
-// E2E debug hook (same pattern as `__medusaposCatalogue` in use-replicated-products.ts):
+// E2E debug hooks (see e2e-debug.ts):
 // seeds one order at schema v0 (v1 minus `sessionId`, as builds before TallyUI #123 wrote it) into a backend's legacy
 // Dexie order database, or (…SeedV0Order, then ending the worker) its SQLite order store; resolves to the version.
 if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
@@ -201,9 +205,8 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
       return db.pos_orders.schema.version;
     } finally { await db.close(); }
   };
-  Object.assign(window, {
-    __medusaposSeedLegacyOrder: (baseUrl: string, order: PosOrder) => seedV0(legacyDexieName('orders', baseUrl), getRxStorageDexie(), order),
-    __medusaposSeedV0Order: (baseUrl: string, order: PosOrder) =>
-      seedV0(orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage),
-  });
+  exposeE2eHook('SeedLegacyOrder', (baseUrl: string, order: PosOrder) =>
+    seedV0(legacyDexieName('orders', baseUrl), getRxStorageDexie(), order));
+  exposeE2eHook('SeedV0Order', (baseUrl: string, order: PosOrder) =>
+    seedV0(orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
 }

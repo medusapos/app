@@ -16,6 +16,7 @@ import {
 } from './product-cache';
 import { reportStorageStartFailure } from './live-tab';
 import { watchStorageHealth } from './storage-health';
+import { exposeE2eHook } from './e2e-debug';
 
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error' | 'offline';
 
@@ -70,7 +71,7 @@ export function useReplicatedProducts(
     if (error !== null) debug.current.lastReplicationError = error;
     const traits = connector.traits.product;
     const sellable = products.filter(traits.isSellable);
-    (window as Window & { __medusaposCatalogue?: unknown }).__medusaposCatalogue = {
+    exposeE2eHook('Catalogue', {
       state, replicatedProductCount: products.length, sellableProductCount: sellable.length,
       sellableSkus: sellable.flatMap((product) => traits.getVariants!(product).map((variant) => variant.sku)),
       nonSellableSkus: products.filter((product) => !traits.isSellable(product))
@@ -79,7 +80,7 @@ export function useReplicatedProducts(
       lastReplicationError: debug.current.lastReplicationError,
       lastIdReconcile: debug.current.lastIdReconcile,
       get checkpoint() { try { return debug.current.replication?.internalReplicationState?.lastCheckpointDoc?.down?.checkpointData; } catch { return undefined; } },
-    };
+    });
   }, [connector, products, state, error]);
 
   useEffect(() => {
