@@ -4,6 +4,7 @@ import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, type Order } from '@tallyui/pos';
 import type { StoreSettings } from '../lib/store-settings';
 import { injectPrintStyle } from './print-style';
+import { discountLabel } from './discount-form';
 import { formatDate } from '../lib/format-date';
 import { StripHeightContext } from './store-refused';
 
@@ -30,8 +31,12 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
     <Text className="text-muted-foreground">Cashier: {receipt.header.cashier}</Text>
     {receipt.lineItems.map((line, index) => <View key={index}>
       <Text className="text-foreground">{line.name}</Text>
-      {row(`${line.quantity} × ${money(line.unitPriceMinor)}`, money(line.lineTotalMinor))}
+      {/* The line's own discounts as labels; the order discount's share stays in the line total (ADR-062). */}
+      {row(`${line.quantity} × ${money(line.unitPriceMinor)}${order.lineItems[index].discounts
+        .map((discount) => ` · ${discountLabel(discount, receipt.currency)} off`).join('')}`, money(line.lineTotalMinor))}
     </View>)}
+    {/* Information only: the lines and the subtotal are already after every discount. */}
+    {receipt.totals.discountMinor > 0 ? <Text className="text-muted-foreground">Includes discounts of {money(receipt.totals.discountMinor)}</Text> : null}
     {row('Subtotal', money(receipt.totals.subtotalMinor))}
     {receipt.totals.taxLines.map((line, index) => row(`VAT ${line.ratePpm / 10000}%`, money(line.amountMinor), false, index))}
     {row('Total', money(receipt.totals.totalMinor), true)}

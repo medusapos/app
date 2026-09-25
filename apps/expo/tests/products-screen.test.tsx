@@ -7,6 +7,7 @@ import { createOrderBuilder, finalizeOrder, useStoreSettings, type LineItem, typ
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { saveSession } from '../lib/session';
+import { posConnector } from '../lib/pos-connector';
 import { SessionProvider } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../lib/store-settings';
@@ -45,6 +46,8 @@ vi.mock('@tallyui/components', () => ({
     {taxLines?.map((line, index) => <span key={index}>{line.label}: {formatMoney(line.amount)}</span>)}
     <span>Total: {formatMoney(total)}</span>
   </div>,
+  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  DiscountBadge: () => null,
   ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
     <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
   ),
@@ -84,6 +87,7 @@ beforeEach(() => {
     removeItem: (key: string) => { data.delete(key); },
   });
   saveCachedSettings(localStorage, 'https://store.test', settings);
+  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));

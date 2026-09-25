@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ProductTraits, StoreSettings } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, useTax, type Order, type PosOrder } from '@tallyui/pos';
+import type { ProductTraits, ServerCapabilities, StoreSettings } from '@tallyui/core';
+import { createOrderBuilder, finalizeOrder, useTax, type Discount, type Order, type PosOrder } from '@tallyui/pos';
 import type { CatalogueEntry } from './catalogue';
 import { addEntryToCart, CartError } from './cart';
 
 export type SaleStage = { kind: 'cart' } | { kind: 'tender'; method: 'cash' | 'external' }
   | { kind: 'receipt'; order: Order; posOrder: PosOrder };
+/** TallyUI finalizeOrder's refusal below order.create v2 (c19a203), shown when the discount is applied; finalize stays the backstop. */
+export const DISCOUNTS_UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
 
 /** Call under a `TaxProvider`: its tax context and the settings' currency price every sale. */
 export function useSale(settings: Pick<StoreSettings, 'currency'>, opts: {
-  registerId: string; cashierRef: string; onSaleCompleted?: (posOrder: PosOrder) => Promise<void> | void;
+  registerId: string; cashierRef: string; capabilities?: ServerCapabilities; onSaleCompleted?: (posOrder: PosOrder) => Promise<void> | void;
 }) {
   const taxContext = useTax();
   const madeWith = useRef({ taxContext, currency: settings.currency });
@@ -48,6 +50,23 @@ export function useSale(settings: Pick<StoreSettings, 'currency'>, opts: {
     },
     setQuantity(lineId: string, quantity: number) { builder.updateQuantity(lineId, quantity); },
     remove(lineId: string) { builder.removeItem(lineId); },
+    /** A line's discount, or the order's without a line; returns the refusal to show, or null once applied. */
+    applyDiscount(lineId: string | null, discount: Discount): string | null {
+      if ((opts.capabilities?.orderCreate ?? 1) < 2) return DISCOUNTS_UNSUPPORTED;
+      const applied = (snapshot: Order) => lineId === null ? snapshot.discounts
+        : snapshot.lineItems.find((line) => line.id === lineId)?.discounts ?? [];
+      const before = new Set(applied(builder.getSnapshot()).map((entry) => entry.id));
+      if (lineId === null) builder.applyOrderDiscount(discount);
+      else builder.applyLineDiscount(lineId, discount);
+      // TallyUI caps a fixed amount at what is left; refuse it instead of showing more off than comes off.
+      const added = applied(builder.getSnapshot()).find((entry) => !before.has(entry.id));
+      if (added?.type === 'fixed' && added.amountMinor < added.value) {
+        builder.removeDiscount(added.id);
+        return `The discount is more than the ${lineId === null ? 'order' : 'line'}`;
+      }
+      return null;
+    },
+    removeDiscount(id: string) { builder.removeDiscount(id); },
     startTender(method: 'cash' | 'external') {
       const current = builder.getSnapshot();
       if (!current.lineItems.length) return;
@@ -60,7 +79,7 @@ export function useSale(settings: Pick<StoreSettings, 'currency'>, opts: {
       const current = builder.getSnapshot();
       let posOrder: PosOrder;
       try {
-        posOrder = finalizeOrder(current, { registerId: opts.registerId, cashierRef: opts.cashierRef });
+        posOrder = finalizeOrder(current, { registerId: opts.registerId, cashierRef: opts.cashierRef, capabilities: opts.capabilities });
       } catch (error) {
         setError((error as Error).message);
         return;

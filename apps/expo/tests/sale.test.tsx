@@ -15,6 +15,7 @@ import { catalogueEntries } from '../lib/catalogue';
 import { useSale } from '../lib/use-sale';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
+import { posConnector } from '../lib/pos-connector';
 import ProductsScreen from '../app/index';
 
 vi.mock('@tallyui/components', () => ({
@@ -28,6 +29,8 @@ vi.mock('@tallyui/components', () => ({
     {taxLines?.map((line, index) => <span key={index}>{line.label}: {formatMoney(line.amount)}</span>)}
     <span>Total: {formatMoney(total)}</span>
   </div>,
+  CartLineActions: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
+  DiscountBadge: () => null,
   CashTendered: ({ total, amount, onChangeAmount }: CashTenderedProps) => <div>
     <span>To pay: {formatMoney(total)}</span><span>Tendered: {amount && formatMoney(amount)}</span>
     <input aria-label="Cash tendered" onChange={(event) => {
@@ -99,7 +102,8 @@ beforeEach(() => {
   });
   vi.mocked(fetchStoreSettings).mockReset().mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
-  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn() });
+  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn() });
+  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 

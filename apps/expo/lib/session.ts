@@ -1,7 +1,8 @@
-import { SignInError, type SignInResult } from '@tallyui/core';
+import { SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
 import { authHeaders, posConnector } from './pos-connector';
 
-export type Session = { baseUrl: string; email: string; token: string; name?: string; tokenExpiresAt?: number };
+/** `capabilities`: the store's `order.create` contract (ADR-062), absent until a read was conclusive. */
+export type Session = { baseUrl: string; email: string; token: string; name?: string; tokenExpiresAt?: number; capabilities?: ServerCapabilities };
 export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error' | 'invalid_url' | 'insecure_url';
 export class LoginError extends Error {
   constructor(readonly code: LoginErrorCode, message: string) { super(message); }
@@ -56,6 +57,7 @@ export async function login(baseUrl: string, email: string, password: string, fe
     throw new LoginError('server_error', `The backend could not sign you in (HTTP ${error.status}).`);
   }
   const session: Session = { baseUrl, email, token: result.token };
+  if (result.capabilities) session.capabilities = result.capabilities;
   const expiresAt = result.expiresAt !== undefined ? Date.parse(result.expiresAt) : NaN;
   if (!Number.isNaN(expiresAt)) session.tokenExpiresAt = expiresAt;
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -120,14 +122,16 @@ export function loadSession(storage: SessionStorage | null): Session | null {
     if (!isRecord(value) || typeof value.baseUrl !== 'string' || typeof value.email !== 'string' || typeof value.token !== 'string') return null;
     return { baseUrl: value.baseUrl, email: value.email, token: value.token,
       name: typeof value.name === 'string' ? value.name : undefined,
-      tokenExpiresAt: typeof value.tokenExpiresAt === 'number' ? value.tokenExpiresAt : undefined };
+      tokenExpiresAt: typeof value.tokenExpiresAt === 'number' ? value.tokenExpiresAt : undefined,
+      capabilities: isRecord(value.capabilities) && typeof value.capabilities.orderCreate === 'number'
+        ? { orderCreate: value.capabilities.orderCreate } : undefined };
   } catch { return null; }
 }
 
 export function saveSession(storage: SessionStorage | null, session: Session): void {
   try {
-    const { baseUrl, email, token, name, tokenExpiresAt } = session;
-    storage?.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, email, token, name, tokenExpiresAt }));
+    const { baseUrl, email, token, name, tokenExpiresAt, capabilities } = session;
+    storage?.setItem(STORAGE_KEY, JSON.stringify({ baseUrl, email, token, name, tokenExpiresAt, capabilities }));
   } catch { /* Keep the in-memory session when web storage is unavailable. */ }
 }
 

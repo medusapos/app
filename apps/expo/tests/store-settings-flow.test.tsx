@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CartLineProps, CartPanelProps, CartTotalProps, ProductGrid, SearchInput } from '@tallyui/components';
-import { formatMoney, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
+import { formatMoney, SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
 import type { LineItem } from '@tallyui/pos';
 import ProductsScreen from '../app/index';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -31,6 +31,8 @@ vi.mock('@tallyui/components', async () => ({
     <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}{footer}</div>,
   CartLine: ({ name, quantity, lineTotal }: CartLineProps) => <div>{name} × {quantity} = {formatMoney(lineTotal)}</div>,
   CartTotal: ({ total }: CartTotalProps) => <span>Total: {formatMoney(total)}</span>,
+  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  DiscountBadge: () => null,
   CashTendered: () => null,
   ChangeDisplay: () => null,
   ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) =>
@@ -57,6 +59,8 @@ const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
   variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] };
 const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError('choice_required', 'Choose', choices);
 const storeSettings = vi.spyOn(posConnector, 'storeSettings');
+const capabilities = vi.spyOn(posConnector, 'capabilities');
+const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn() });
 const button = (name: string) => screen.getByRole('button', { name });
 const pos = () => screen.findByPlaceholderText('Search or scan barcode / SKU');
 
@@ -69,8 +73,9 @@ beforeEach(() => {
   });
   // Each test states the calls it expects; any other call fails instead of reaching the network.
   storeSettings.mockReset().mockRejectedValue(new Error('Unexpected storeSettings call'));
+  capabilities.mockReset().mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
-  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn() });
+  vi.mocked(useSession).mockReturnValue(signedIn());
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [],
     record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: null, lastSyncedAt: null,
@@ -302,17 +307,37 @@ describe('store settings flow', () => {
     await pos();
   });
 
-  it('keeps the sync context through a token refresh, without re-resolving, and sends the new token', async () => {
+  it('keeps the sync context and its capabilities through a token refresh, without re-resolving, and sends the new token', async () => {
     storeSettings.mockResolvedValue(pricing);
+    const handlers = signedIn();
+    vi.mocked(useSession).mockReturnValue({ ...handlers, session: { ...session, capabilities: { orderCreate: 2 } } });
     const view = render(<ProductsScreen />);
     await pos();
     const context = vi.mocked(useReplicatedProducts).mock.lastCall![1];
-    vi.mocked(useSession).mockReturnValue({ session: { ...session, token: 'jwt-refreshed' }, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn() });
+    expect(context.capabilities).toEqual({ orderCreate: 2 });
+    vi.mocked(useSession).mockReturnValue({ ...handlers, session: { ...session, token: 'jwt-refreshed', capabilities: { orderCreate: 2 } } });
     await act(async () => { view.rerender(<ProductsScreen />); });
     await pos();
     expect(storeSettings).toHaveBeenCalledOnce();
     expect(vi.mocked(useReplicatedProducts).mock.lastCall![1]).toBe(context);
     expect(context.headers.Authorization).toBe('Bearer jwt-refreshed');
     expect(storeSettings.mock.calls[0][0].headers.Authorization).toBe('Bearer jwt-refreshed');
+    // The restored session's capability read ran once, with the token it opened with.
+    expect(capabilities).toHaveBeenCalledOnce();
+    expect(capabilities.mock.calls[0][0]).toMatchObject({ baseUrl: session.baseUrl, headers: { Authorization: 'Bearer jwt' } });
+  });
+
+  it.each([
+    [{ orderCreate: 2 }, 'mergeCapabilities'], [undefined, 'mergeCapabilities'], [new SignInError('invalid_credentials', '401'), 'reportUnauthorized'],
+  ] as const)('passes the restored session\'s capability read %s to %s', async (read, handler) => {
+    if (read instanceof Error) capabilities.mockRejectedValue(read);
+    else capabilities.mockResolvedValue(read);
+    storeSettings.mockResolvedValue(pricing);
+    render(<ProductsScreen />);
+    await pos();
+    const context = useSession();
+    await vi.waitFor(() => expect(context[handler]).toHaveBeenCalledOnce());
+    if (handler === 'mergeCapabilities') expect(context.mergeCapabilities).toHaveBeenCalledWith(read);
+    else expect(context.mergeCapabilities).not.toHaveBeenCalled();
   });
 });
