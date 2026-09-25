@@ -146,7 +146,10 @@ scrolling to the order discount chip. A tap on `E2E-2` stays on Products with
 "3 items". With the order discount form open the two lines overflow, so
 scrolling to its Cancel moves the first line out of view while Total and Cash
 stay. It pays exact cash, and the new sale opens on Products with "Cart is
-empty".
+empty". A second test opens the cart, keyboard-wedge scans `E2E-2` in (typed
+with `delay: 10`, staying on Cart), scans an unknown code to see the "No
+product matches" alert with nothing added, types into the line's discount
+form without triggering a scan, then pays exact cash for `E2E-1` and `E2E-2`.
 
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.

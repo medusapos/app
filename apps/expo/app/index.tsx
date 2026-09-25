@@ -12,6 +12,7 @@ import { CartBar } from '../components/cart-bar';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
 import { SyncStatus } from '../components/sync-status';
+import { catalogueEntries, findEntryByCode } from '../lib/catalogue';
 import { markBusy } from '../lib/live-tab';
 import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -25,6 +26,7 @@ import {
 } from '../lib/store-settings';
 import { useSale } from '../lib/use-sale';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
+import { useWedgeScan } from '../lib/use-wedge-scan';
 
 const connector = posConnector;
 const traits = connector.traits.product;
@@ -190,6 +192,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       .filter(traits.isSellable).sort((a, b) => traits.getName(a).localeCompare(traits.getName(b))),
     [products, stockOverlay],
   );
+  const entries = useMemo(() => catalogueEntries(sorted, traits), [sorted]);
+  // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
+  const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
+  const [scanMiss, setScanMiss] = useState<string | null>(null);
+  useEffect(() => { if (!wedgeActive) setScanMiss(null); }, [wedgeActive]);
+  useWedgeScan(wedgeActive, (code) => {
+    const entry = findEntryByCode(entries, code);
+    if (entry) { sale.add(entry, traits); setScanMiss(null); } else setScanMiss(code);
+  });
   const sellableCount = sorted.length;
   const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
     + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
@@ -231,6 +242,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
                 <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}
                   className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
               </View>
+              {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
               <Cart sale={sale} />
             </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
         </View>}

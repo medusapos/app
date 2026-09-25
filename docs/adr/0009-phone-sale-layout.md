@@ -50,7 +50,9 @@ From 600 px the existing split stays (a column below 900 px, a row from
   together; a long order discount form scrolls with the lines instead of
   squeezing them.
 - The catalogue unmounts while the phone shows the cart, so its search text
-  and scroll position reset on the way back; the sale itself never does.
+  and scroll position reset on the way back; the sale itself never does. A
+  scan made there still adds the product, through a wedge listener on the
+  cart view itself (web; `apps/expo/lib/use-wedge-scan.ts`).
 - The totals block moved unchanged, so its later replacement (#66) is a
   like-for-like swap in the footer.
 - `e2e/phone-cart.spec.ts` runs at 360 × 740; the other specs stay at
