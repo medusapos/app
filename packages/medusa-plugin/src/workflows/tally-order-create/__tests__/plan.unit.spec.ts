@@ -59,6 +59,40 @@ it('keeps tax-exclusive prices', () => {
   expect(result.plan.draftOrder.items.map(item => item.is_tax_inclusive)).toEqual([false, false])
 })
 
+const itemsIn = (isTaxInclusive: boolean) => [
+  { variant_id: 'variant_1', quantity: 2, unit_price: '8.50', is_tax_inclusive: isTaxInclusive, metadata: { tally_line_uuid: 'line_1' } },
+  { variant_id: 'variant_2', quantity: 1, unit_price: '0.05', is_tax_inclusive: isTaxInclusive, metadata: { tally_line_uuid: 'line_2' } },
+]
+
+it.each([true, false])('keeps today\'s plan when no line carries taxInclusive (pricesIncludeTax %s)', pricesIncludeTax => {
+  const input = { ...payload, pricesIncludeTax }
+  expect(input.lines.some(line => 'taxInclusive' in line)).toBe(false)
+  const result = planOrderCreate(input, ctx)
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(result.plan.draftOrder.items).toStrictEqual(itemsIn(pricesIncludeTax))
+  expect(result.plan.draftOrder.items.every(item => item.is_tax_inclusive === pricesIncludeTax)).toBe(true)
+  const explicitUndefined = input.lines.map(line => ({ ...line, taxInclusive: undefined }))
+  expect(planOrderCreate({ ...input, lines: explicitUndefined }, ctx)).toStrictEqual(result)
+})
+
+it('gives a taxInclusive false line its own mode in a tax-inclusive order, and the others the order\'s', () => {
+  const lines = [payload.lines[0], { ...payload.lines[1], taxInclusive: false }, { ...payload.lines[0], clientLineId: 'line_3' }]
+  const result = planOrderCreate({ ...payload, lines }, ctx)
+  if (!result.ok) throw new Error('Expected a plan')
+  const [first, second] = itemsIn(true)
+  expect(result.plan.draftOrder.items).toStrictEqual([
+    first, { ...second, is_tax_inclusive: false }, { ...first, metadata: { tally_line_uuid: 'line_3' } },
+  ])
+})
+
+it('gives a taxInclusive true line its own mode in a tax-exclusive order', () => {
+  const lines = [{ ...payload.lines[0], taxInclusive: true }, payload.lines[1]]
+  const result = planOrderCreate({ ...payload, pricesIncludeTax: false, lines }, ctx)
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(result.plan.draftOrder.items.map(item => item.is_tax_inclusive)).toEqual([true, false])
+  expect(result.plan.paymentAmount).toBe('17.05')
+})
+
 it.each([undefined, null, {}, { email: '' }])('omits email for customer %j', customer => {
   const result = planOrderCreate({ ...payload, customer }, ctx)
   if (!result.ok) throw new Error('Expected a plan')

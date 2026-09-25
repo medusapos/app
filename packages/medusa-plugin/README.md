@@ -68,6 +68,7 @@ applied) so stock top-ups are recorded on the command's ledger row (ADR 0003 ame
 without it, nothing is recorded there.
 It resolves Medusa data, validates with the pure planner, and runs `tallyOrderCreateWorkflow`:
 draft → convert → collect the POS total → mark paid → fulfill → complete.
+Each draft item is tax-inclusive per its line's optional `taxInclusive`, else the payload's `pricesIncludeTax`.
 The payment collection uses `totalMinor` exactly, including when Medusa's unrounded
 tax total differs; the result reports the rounded server total and any `total_mismatch` warning.
 Payments use the system provider, which moves no money. Later failures compensate
