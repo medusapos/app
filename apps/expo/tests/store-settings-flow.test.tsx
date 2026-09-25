@@ -74,7 +74,7 @@ beforeEach(() => {
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [],
     record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: null, lastSyncedAt: null,
-    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}) });
+    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
@@ -240,7 +240,7 @@ describe('store settings flow', () => {
     // The catalogue follows the replication context's region: Germany's own Shirt price is €20.
     const shirtDe = { ...shirt, variants: [{ ...shirt.variants[0], prices: [{ amount: 20, currency_code: 'eur' }] }] };
     vi.mocked(useReplicatedProducts).mockImplementation((_connector, context) => ({ products: [context.pricingContext?.region_id === 'reg_de' ? shirtDe : shirt],
-      state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}) }));
+      state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined }));
     const region = () => vi.mocked(useReplicatedProducts).mock.lastCall![1].pricingContext?.region_id;
     fireEvent.click(button('Shirt'));
     // Germany's settings (19% inclusive, its own prices) arrive mid-sale: the sale, and the catalogue, stay on Europe's.
@@ -279,6 +279,9 @@ describe('store settings flow', () => {
     await act(async () => { settle.reject(choiceRequired({ regions })); });
     expect(screen.queryByText('Set up this till')).toBeNull();
     expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
+    // A held choose result is not an outage: the status says the change waits for the sale, never "Offline".
+    expect(screen.getByText('Store settings changed; this applies after the current sale')).toBeTruthy();
+    expect(screen.queryByText('Offline')).toBeNull();
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     expect(vi.mocked(useOutboxContext().record).mock.calls[0][0]).toMatchObject({ totalMinor: 1500, taxMinor: 300 });
     expect(screen.queryByText('Set up this till')).toBeNull();

@@ -54,24 +54,41 @@ export function pricedCacheName(connectorId: string, baseUrl: string, pricingCon
   return `${productCacheName(connectorId, baseUrl)}_${fnv1a(key)}`;
 }
 
-// The current product cache name per store, so a sweep and sign-out find it.
+// Every product cache name opened for a store, newline-separated (cache names have none; a single
+// name is the record from before this list), so a sweep and sign-out also find a cache whose
+// first sync never finished (the region switched again, or sign-out mid-sync).
 const recordKey = (baseUrl: string) => `medusapos.product-cache.${baseUrl}`;
+const recorded = (baseUrl: string) => defaultStorage()?.getItem(recordKey(baseUrl))?.split('\n').filter(Boolean) ?? [];
+
+/** Records `name` for the store before it opens, so a sweep or sign-out finds it. Never throws. */
+export function recordProductCache(baseUrl: string, name: string): void {
+  try {
+    const names = recorded(baseUrl);
+    if (!names.includes(name)) defaultStorage()?.setItem(recordKey(baseUrl), [...names, name].join('\n'));
+  } catch { /* Web storage may be unavailable. */ }
+}
 
 /**
- * After the first successful sync under `name`: removes the store's previously recorded cache (or,
- * with none recorded, the unsuffixed cache from before priced replication) if it differs and is
- * not open, then records `name`. Never throws.
+ * After the first successful sync under `name`: removes every other cache of the store (every
+ * recorded name, and the unsuffixed cache from before priced replication) that is not open, and
+ * keeps the rest recorded for a later sweep or sign-out. Never throws.
  */
 export async function sweepProductCaches(connectorId: string, baseUrl: string, name: string): Promise<void> {
-  const storage = defaultStorage();
-  try {
-    const previous = storage?.getItem(recordKey(baseUrl)) ?? productCacheName(connectorId, baseUrl);
-    if (previous !== name && !openCaches.has(previous)) {
-      await closers.get(previous)?.(); // closed already, but the close may still be settling
-      await removeRxDatabase(previous, productCacheStorage());
-    }
-  } catch { /* Cache cleanup must never throw. */ }
-  try { storage?.setItem(recordKey(baseUrl), name); } catch { /* Web storage may be unavailable. */ }
+  let names: string[] = [];
+  try { names = recorded(baseUrl); } catch { /* Web storage may be unavailable. */ }
+  const removed = new Set<string>();
+  for (const other of new Set([...names, productCacheName(connectorId, baseUrl)])) {
+    if (other === name || openCaches.has(other)) continue;
+    try {
+      await closers.get(other)?.(); // closed already, but the close may still be settling
+      await removeRxDatabase(other, productCacheStorage());
+      removed.add(other);
+    } catch { /* Cache cleanup must never throw. */ }
+  }
+  try { // Re-read, so a cache recorded during the sweep stays recorded.
+    const kept = recorded(baseUrl).filter((other) => other !== name && !removed.has(other));
+    defaultStorage()?.setItem(recordKey(baseUrl), [name, ...kept].join('\n'));
+  } catch { /* Web storage may be unavailable. */ }
 }
 
 /**
@@ -151,18 +168,22 @@ export async function closeProductCaches(): Promise<void> {
 }
 
 /**
- * Removes the store's recorded (current) product cache, open or closed, and its record, without
- * throwing. With none recorded, it removes the unsuffixed cache from before priced replication.
+ * Removes every product cache of the store, open or closed (every recorded name, and the
+ * unsuffixed cache from before priced replication), and the record, without throwing.
  */
 export async function clearProductCache(connectorId: string, baseUrl: string): Promise<void> {
-  const storage = defaultStorage();
+  let names: string[] = [];
   try {
-    const name = storage?.getItem(recordKey(baseUrl)) ?? productCacheName(connectorId, baseUrl);
-    storage?.removeItem(recordKey(baseUrl));
-    const db = openCaches.get(name);
-    if (db) await db.remove();
-    else await removeRxDatabase(name, productCacheStorage());
-  } catch { /* Cache cleanup must not prevent sign-out. */ }
+    names = recorded(baseUrl);
+    defaultStorage()?.removeItem(recordKey(baseUrl));
+  } catch { /* Web storage may be unavailable. */ }
+  for (const name of new Set([...names, productCacheName(connectorId, baseUrl)])) {
+    try {
+      const db = openCaches.get(name);
+      if (db) await db.remove();
+      else await removeRxDatabase(name, productCacheStorage());
+    } catch { /* Cache cleanup must not prevent sign-out. */ }
+  }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -77,7 +77,8 @@ Open **Orders** → **Needs attention** to see sales that need a look:
 
 ## Known limitations
 
-Replicated stock and prices are a snapshot from the first sync, not live —
+Prices are re-checked every 30 minutes, and base prices nightly, so they
+are not live to the second —
 see the README's [Known limitations](../README.md#known-limitations)
 section for the full picture.
 

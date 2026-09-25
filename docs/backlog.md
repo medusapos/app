@@ -26,3 +26,7 @@ reconcile runner. The restart runs another id-reconcile start pass, which
 costs one extra ids read a day. That's harmless, but it could be avoided by
 reading the current headers through a ref instead of restarting on each
 refresh.
+
+## Tap race when new store settings land
+
+Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).

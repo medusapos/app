@@ -16,7 +16,7 @@ vi.mock('./web-storage', async (importOriginal) => {
 import { webStorageAvailable, getWebStorage, UnsupportedStorageError, usingMemoryStorageForTests } from './web-storage';
 import {
   clearProductCache, closeProductCaches, deleteLegacyProductCache, isUnauthorizedError, legacyDexieName,
-  openProductCache, pricedCacheName, productCacheName, productCacheStorage, registerOpenCache, sweepProductCaches,
+  openProductCache, pricedCacheName, productCacheName, productCacheStorage, recordProductCache, registerOpenCache, sweepProductCaches,
 } from './product-cache';
 
 afterEach(() => {
@@ -140,6 +140,8 @@ describe('sweepProductCaches and the recorded name', () => {
     await sweepProductCaches('medusa', baseUrl, previous);
     await sweepProductCaches('medusa', baseUrl, pricedCacheName('medusa', baseUrl, { region_id: 'reg_eu' }));
     expect((await db.products.find().exec()).length).toBe(1);
+    // Still recorded, so a later sweep or sign-out removes it once it has closed.
+    expect(record(baseUrl)).toBe([pricedCacheName('medusa', baseUrl, { region_id: 'reg_eu' }), previous].join('\n'));
     await close();
     expect(await docCount(previous)).toBe(1);
   });
@@ -161,6 +163,48 @@ describe('sweepProductCaches and the recorded name', () => {
       expect(record(baseUrl)).toBeNull();
       expect(await docCount(current)).toBe(0);
     }
+  });
+
+  it('after the region switched twice before any sync completed, a successful sync leaves only the current cache', async () => {
+    const baseUrl = 'https://switch-twice.test';
+    const [eu, de, fr] = ['reg_eu', 'reg_de', 'reg_fr'].map((region_id) => pricedCacheName('medusa', baseUrl, { region_id, publishable_key: 'pk_1' }));
+    const legacy = productCacheName('medusa', baseUrl);
+    await (await cacheWithDoc(legacy)).close();
+    // Each context records its cache as it opens; eu and de close before their first sync completes.
+    for (const name of [eu, de]) {
+      recordProductCache(baseUrl, name);
+      await (await cacheWithDoc(name)).close();
+    }
+    recordProductCache(baseUrl, fr);
+    const current = await cacheWithDoc(fr);
+    const close = registerOpenCache(fr, current);
+    try {
+      expect(record(baseUrl)).toBe([eu, de, fr].join('\n'));
+      await sweepProductCaches('medusa', baseUrl, fr);
+      expect(record(baseUrl)).toBe(fr);
+      expect((await current.products.find().exec()).length).toBe(1);
+    } finally { await close(); }
+    for (const name of [legacy, eu, de]) expect(await docCount(name)).toBe(0);
+    expect(await docCount(fr)).toBe(1);
+  });
+
+  it('sign-out mid-sync removes the newest cache too, not only the last synced one', async () => {
+    const baseUrl = 'https://sign-out-mid-sync.test';
+    const [eu, de] = ['reg_eu', 'reg_de'].map((region_id) => pricedCacheName('medusa', baseUrl, { region_id, publishable_key: 'pk_1' }));
+    recordProductCache(baseUrl, eu);
+    const synced = await cacheWithDoc(eu);
+    const closeSynced = registerOpenCache(eu, synced);
+    await sweepProductCaches('medusa', baseUrl, eu);
+    // The region changes: de opens and records itself; its first sync has not finished at sign-out.
+    recordProductCache(baseUrl, de);
+    const newest = await cacheWithDoc(de);
+    const closeNewest = registerOpenCache(de, newest);
+    await closeSynced();
+    expect(record(baseUrl)).toBe([eu, de].join('\n'));
+    try { await clearProductCache('medusa', baseUrl); } finally { await closeNewest(); }
+    expect(record(baseUrl)).toBeNull();
+    expect(await docCount(eu)).toBe(0);
+    expect(await docCount(de)).toBe(0);
   });
 });
 
