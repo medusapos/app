@@ -23,8 +23,8 @@ export type PlanContext = {
 export type DraftOrderItemInput = {
   variant_id: string; quantity: number; unit_price: string; is_tax_inclusive: boolean
   metadata: { tally_line_uuid: string }
-  /** Only on a discounted line (ADR-062): one adjustment of its discountMinor, in its own tax mode. No code:
-   * createOrderWorkflow's promotion refresh deletes every adjustment whose code is not an applied promotion. */
+  /** Only on a discounted line (ADR-062): one adjustment of its discountMinor, in its own tax mode. */
+  // No code: createOrderWorkflow's promotion refresh deletes every adjustment whose code is not an applied promotion.
   adjustments?: Array<{ amount: string; description: 'POS discount'; is_tax_inclusive: boolean }>
 }
 

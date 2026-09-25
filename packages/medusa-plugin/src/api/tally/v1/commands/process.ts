@@ -44,9 +44,14 @@ export async function processBatch(
 ): Promise<BatchOutcome> {
   const results: CommandResult[] = []
   for (const command of commands) {
-    // ADR-062 sends version 2 only with a discount.
-    if (command.version === 2 && command.payload.discountMinor === undefined) {
-      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: 'version 2 requires discountMinor' } })
+    // ADR-062 sends version 2 exactly when there is a discount, so version 1 can never create adjustments.
+    const { lines, discountMinor } = command.payload as { lines?: unknown; discountMinor?: unknown }
+    const discounted = discountMinor !== undefined
+      || (Array.isArray(lines) && lines.some(line => (line as { discountMinor?: unknown } | null)?.discountMinor !== undefined))
+    const versionError = command.version === 2 && discountMinor === undefined ? 'version 2 requires discountMinor'
+      : command.version === 1 && discounted ? 'discountMinor requires version 2' : undefined
+    if (versionError) {
+      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: versionError } })
       continue
     }
     const outcome = await executeOrderCreate(container, command, options)

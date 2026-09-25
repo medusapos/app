@@ -42,6 +42,16 @@ describe('validateBatch', () => {
     } }] } })
   })
 
+  it.each([
+    ['on a line', { lines: [{ clientLineId: 'line_1' }, { clientLineId: 'line_2', discountMinor: 100 }] }],
+    ['on the payload', { lines: [{ clientLineId: 'line_1' }], discountMinor: 100 }],
+  ])('rejects a version 1 command carrying discountMinor %s before touching the container', async (_where, payload) => {
+    const outcome = await processBatch({} as MedusaContainer, [{ ...command, id: 'sale-1', payload } as never], {})
+    expect(outcome).toEqual({ status: 200, body: { results: [{ id: 'sale-1', status: 'rejected', error: {
+      code: 'invalid_payload', message: 'discountMinor requires version 2',
+    } }] } })
+  })
+
   it('rejects a non-object envelope', () => {
     expect(validateBatch({ commands: [null] })).toEqual({
       ok: false, status: 400, message: expect.stringContaining('commands[0]'),
