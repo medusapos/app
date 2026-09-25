@@ -18,8 +18,9 @@ vi.mock('@tallyui/components', () => ({
   CartLine: ({ name, lineTotal }: CartLineProps) => <span>{name}: {formatMoney(lineTotal)}</span>,
   CartLineActions: ({ children, actions }: { children: ReactNode; actions: CartAction[] }) => <div>{children}
     {actions.map((action) => <button key={action.id} onClick={action.onPress}>{action.label}</button>)}</div>,
-  CartTotal: ({ subtotal, discount, total }: CartTotalProps) => <div>
+  CartTotal: ({ subtotal, taxLines, discount, total }: CartTotalProps) => <div>
     <span>Subtotal: {formatMoney(subtotal)}</span>
+    {taxLines?.map((line) => <span key={line.label}>{line.label}: {formatMoney(line.amount)}</span>)}
     {discount && discount.amount > 0 ? <span>Discount: {formatMoney(discount)}</span> : null}
     <span>Total: {formatMoney(total)}</span>
   </div>,
@@ -101,13 +102,18 @@ describe('discounts in the cart', () => {
     const order = expected.getSnapshot();
     expect(totals(sale.order)).toEqual(totals(order));
     expect(sale.order.lineItems[0]).toMatchObject({ discountMinor: 300, orderDiscountMinor: 50, netMinor: 2200 });
-    expect(screen.getByText(`Discount: ${money(order.discountMinor)}`)).toBeTruthy();
+    // The totals are three rows that add up (exclusive: subtotal + VAT = total); the discount is information outside them.
+    expect(order.subtotalMinor + order.taxMinor).toBe(order.totalMinor);
+    expect(screen.getByText(`Subtotal: ${money(order.subtotalMinor)}`)).toBeTruthy();
+    expect(screen.getByText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
     expect(screen.getByText(`Total: ${money(order.totalMinor)}`)).toBeTruthy();
+    expect(screen.queryByText(/^Discount: /)).toBeNull();
+    expect(screen.getByText(`Includes discounts of −${money(order.discountMinor)}`)).toBeTruthy();
     expect(screen.queryByRole('group')).toBeNull();
     click('Remove discount 10%');
     click(`Remove discount ${money(50)}`);
     expect(totals(sale.order)).toEqual(plain);
-    expect(screen.queryByText(/^Discount: /)).toBeNull();
+    expect(screen.queryByText(/^Includes discounts of/)).toBeNull();
   });
 
   it('at order.create 1 shows TallyUI\'s message when applying, and the order stays undiscounted', async () => {
@@ -147,6 +153,10 @@ describe('discounts in the cart', () => {
     cleanup();
     render(<Receipt order={order} settings={{ storeName: 'Shop', currency: 'EUR', location: { id: 'l', name: 'Main', countryCode: 'dk' } }}
       cashier="cashier" registerId="register-1" newSale={() => {}} />);
-    expect(screen.getByLabelText(`Discount: −${money(250)}`)).toBeTruthy();
+    expect(screen.getByText(`Includes discounts of −${money(250)}`)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Discount/)).toBeNull();
+    expect(screen.getByLabelText(`Subtotal: ${money(order.subtotalMinor)}`)).toBeTruthy();
+    expect(screen.getByLabelText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
+    expect(screen.getByLabelText(`Total: ${money(order.subtotalMinor + order.taxMinor)}`)).toBeTruthy();
   });
 });

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { CartLine, CartLineActions, CartPanel, CartTotal } from '@tallyui/components';
+import { formatMoney } from '@tallyui/core';
 import { buildReceiptData } from '@tallyui/pos';
 import type { useSale } from '../lib/use-sale';
 import { DiscountChips, DiscountForm } from './discount-form';
@@ -34,10 +35,12 @@ export function Cart({ sale }: { sale: ReturnType<typeof useSale> }) {
     </View>}
     footer={<View className="gap-3 pb-4">
       <DiscountChips discounts={order.discounts} currency={order.currency} onRemove={sale.removeDiscount} />
+      {/* Information only: the lines and the subtotal are already after every discount, so the totals never subtract it. */}
+      {order.discountMinor > 0 ? <Text className="px-3 text-muted-foreground">Includes discounts of −{formatMoney(money(order.discountMinor))}</Text> : null}
       {form?.lineId === null ? discountForm(null, 'Order discount') : order.lineItems.length ? <Pressable accessibilityRole="button"
         onPress={() => setForm({ lineId: null })} className="self-start rounded-md border border-border bg-card px-4 py-2 min-h-11 justify-center">
         <Text className="text-foreground">Order discount</Text></Pressable> : null}
-      <CartTotal subtotal={money(totals.subtotalMinor)} total={money(totals.totalMinor)} discount={money(order.discountMinor)}
+      <CartTotal subtotal={money(totals.subtotalMinor)} total={money(totals.totalMinor)}
         taxLines={totals.taxLines.map((line) => ({ label: `VAT ${line.ratePpm / 10000}%`, amount: money(line.amountMinor) }))} />
       {sale.error ? <Text accessibilityRole="alert" className="text-destructive">{sale.error}</Text> : null}
       <Pressable accessibilityRole="button" disabled={!order.lineItems.length} onPress={() => sale.startTender('cash')} className={`rounded-md bg-primary px-4 py-3 ${!order.lineItems.length ? 'opacity-50' : ''}`}>

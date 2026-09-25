@@ -32,9 +32,10 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
       <Text className="text-foreground">{line.name}</Text>
       {row(`${line.quantity} × ${money(line.unitPriceMinor)}`, money(line.lineTotalMinor))}
     </View>)}
+    {/* Information only: the lines and the subtotal are already after every discount. */}
+    {receipt.totals.discountMinor > 0 ? <Text className="text-muted-foreground">Includes discounts of −{money(receipt.totals.discountMinor)}</Text> : null}
     {row('Subtotal', money(receipt.totals.subtotalMinor))}
     {receipt.totals.taxLines.map((line, index) => row(`VAT ${line.ratePpm / 10000}%`, money(line.amountMinor), false, index))}
-    {receipt.totals.discountMinor > 0 ? row('Discount', `−${money(receipt.totals.discountMinor)}`) : null}
     {row('Total', money(receipt.totals.totalMinor), true)}
     {receipt.payments.map((payment, index) => row(payment.method === 'cash' ? 'Cash tendered' : 'Card terminal',
       money(payment.amountMinor) + (payment.reference ? ` · ${payment.reference}` : ''), false, index))}

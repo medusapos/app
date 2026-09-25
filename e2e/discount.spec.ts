@@ -40,11 +40,17 @@ test('a discounted sale is applied as order.create v2, with a "POS discount" adj
   await expect(page.getByRole('button', { name: 'Remove discount 10%', exact: true })).toBeVisible();
   await discount(page, 'order', 'Amount', '0.50');
   await expect(page.getByRole('button', { name: /^Remove discount .*0\.50/ })).toBeVisible();
+  // The totals read true: three rows that add up, and the discount only as information outside them.
+  await expect(page.getByText(/^Includes discounts of −.*0\.90$/)).toBeVisible();
+  const row = async (label: string) => Number((await page.getByText(label, { exact: true }).locator('..').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
+  expect([await row('Subtotal'), await row('VAT 25%'), await row('Total')]).toEqual([3.1, 0.78, 3.88]);
+  await expect(page.getByText('Discount', { exact: true })).toHaveCount(1); // the line's action, no totals row
   const applied = page.waitForResponse(async (response) => {
     if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
     return ((await response.json()).results ?? []).some((result: { status: string }) => result.status === 'applied');
   });
   const receiptTotal = await sellBySku(page, [], 'exact');
+  expect(receiptTotal).toBe(3.88);
   const { results } = await (await applied).json();
   expect(results).toHaveLength(1);
   expect(results[0].status).toBe('applied');
