@@ -1,11 +1,11 @@
 import type { ExecArgs } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules, ProductStatus } from "@medusajs/framework/utils"
 import {
-  createAndLinkProductOptionsToProductWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
+  createAndLinkProductOptionsToProductWorkflow, createApiKeysWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
   createProductVariantsWorkflow, createRegionsWorkflow,
   createSalesChannelsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow,
   createStockLocationsWorkflow, createStoresWorkflow, createTaxRegionsWorkflow,
-  linkSalesChannelsToStockLocationWorkflow,
+  linkSalesChannelsToApiKeyWorkflow, linkSalesChannelsToStockLocationWorkflow, updateRegionsWorkflow, updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows"
 
 export default async function seedE2e({ container }: ExecArgs) {
@@ -21,11 +21,41 @@ export default async function seedE2e({ container }: ExecArgs) {
     name: "E2E store", default_sales_channel_id: channel.id,
     supported_currencies: [{ currency_code: "eur", is_default: true }],
   }] } })
-  let [region] = await container.resolve(Modules.REGION).listRegions({ name: "Europe" })
+  // Two regions, so a fresh till must choose (TV4): Europe (dk, exclusive through the EUR currency
+  // preference below) and Germany (de, inclusive through its own region preference, which wins).
+  // Europe had de before Germany existed; a country belongs to one region, so move it first.
+  const regionService = container.resolve(Modules.REGION)
+  let [region] = await regionService.listRegions({ name: "Europe" }, { relations: ["countries"] })
   if (!region) [region] = (await createRegionsWorkflow(container).run({ input: { regions: [{
-    name: "Europe", currency_code: "eur", countries: ["dk", "de"], automatic_taxes: true,
+    name: "Europe", currency_code: "eur", countries: ["dk"], automatic_taxes: true,
     payment_providers: ["pp_system_default"],
   }] } })).result
+  else if (region.countries?.some(country => country.iso_2 === "de")) {
+    await updateRegionsWorkflow(container).run({ input: { selector: { id: region.id }, update: { countries: ["dk"] } } })
+  }
+  const [germany] = await regionService.listRegions({ name: "Germany" })
+  if (!germany) await createRegionsWorkflow(container).run({ input: { regions: [{
+    name: "Germany", currency_code: "eur", countries: ["de"], automatic_taxes: true, is_tax_inclusive: true,
+    payment_providers: ["pp_system_default"],
+  }] } })
+  // No default region: with two regions, a fresh till shows "Set up this till".
+  const [currentStore] = await container.resolve(Modules.STORE).listStores()
+  if (currentStore.default_region_id) await updateStoresWorkflow(container).run({ input: {
+    selector: { id: currentStore.id }, update: { default_region_id: null },
+  } })
+  // The till prices through the store API with a publishable key for the E2E channel (D2b). Medusa
+  // creates a default publishable key at boot; a second one would make the till ask for a channel,
+  // so use the first live key, creating one only when there is none, and link it to the channel.
+  const { data: publishableKeys } = await query.graph({
+    entity: "api_key", fields: ["id", "revoked_at", "sales_channels.id"], filters: { type: "publishable" },
+  })
+  const liveKey = publishableKeys.find(key => !key.revoked_at)
+  const keyId = liveKey?.id ?? (await createApiKeysWorkflow(container).run({ input: { api_keys: [{
+    title: "E2E", type: "publishable", created_by: "seed-e2e",
+  }] } })).result[0].id
+  if (!liveKey?.sales_channels?.some(existing => existing?.id === channel.id)) {
+    await linkSalesChannelsToApiKeyWorkflow(container).run({ input: { id: keyId, add: [channel.id] } })
+  }
   const taxRegions = await container.resolve(Modules.TAX).listTaxRegions({ country_code: ["dk", "de"] })
   const missingTaxRegions = [
     { country_code: "dk", provider_id: "tp_system", default_tax_rate: { name: "Danish VAT", rate: 25, code: "DK25" } },
@@ -107,6 +137,23 @@ export default async function seedE2e({ container }: ExecArgs) {
     ],
   })).filter(product => !products.some(existing => existing.handle === product.handle))
   if (missingProducts.length) await createProductsWorkflow(container).run({ input: { products: missingProducts } })
+  // Priced and stocked, but only in another sales channel: the store API doesn't list it for the
+  // E2E key, so the till replicates it unlisted and hides it (the catalogue still shows 5 products).
+  // Medusa 2.21.0 skips the store API's channel filter only when the store has at most one sales
+  // channel (store/products/middlewares.js); with several, a product in no channel is excluded for
+  // every key. Its own channel keeps it unlisted for the E2E key whatever the channel count.
+  let [otherChannel] = await container.resolve(Modules.SALES_CHANNEL).listSalesChannels({ name: "E2E other channel" })
+  if (!otherChannel) [otherChannel] = (await createSalesChannelsWorkflow(container).run({
+    input: { salesChannelsData: [{ name: "E2E other channel" }] },
+  })).result
+  const [unlisted] = await productService.listProducts({ handle: "e2e-unlisted" })
+  if (!unlisted) await createProductsWorkflow(container).run({ input: { products: [{
+    title: "E2E unlisted", handle: "e2e-unlisted", status: ProductStatus.PUBLISHED, shipping_profile_id: profile.id,
+    sales_channels: [{ id: otherChannel.id }],
+    options: [{ title: "Variant", values: ["Default"] }],
+    variants: [{ title: "Default", sku: "E2E-U", manage_inventory: true, options: { Variant: "Default" },
+      prices: [{ currency_code: "eur", amount: 7 }] }],
+  }] } })
 
   // e2e-4 may already exist from a seed run before this fixture change, with only its Default
   // variant: add the B variant to it non-destructively (new products already got both above).
@@ -125,7 +172,7 @@ export default async function seedE2e({ container }: ExecArgs) {
   }
 
   const inventoryService = container.resolve(Modules.INVENTORY)
-  const inventory = await inventoryService.listInventoryItems({ sku: ["E2E-1", "E2E-2", "E2E-3", "E2E-4", "E2E-4B", "E2E-5"] })
+  const inventory = await inventoryService.listInventoryItems({ sku: ["E2E-1", "E2E-2", "E2E-3", "E2E-4", "E2E-4B", "E2E-5", "E2E-U"] })
   const levels = await inventoryService.listInventoryLevels({ location_id: location.id })
   const missingLevels = inventory.filter(item => !levels.some(level => level.inventory_item_id === item.id))
   if (missingLevels.length) await createInventoryLevelsWorkflow(container).run({ input: { inventory_levels: missingLevels.map(item => ({

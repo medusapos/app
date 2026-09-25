@@ -39,6 +39,25 @@ amounts, inventory deltas (E2E-5 ends at −1), and the stock warning under
 Orders → Needs attention. Both tests use their own client IDs and starting
 stock, so either file can run first; Playwright uses one worker.
 
+The till prices through TallyUI's store settings (TV4) and Medusa's store
+API (D2b), so the seed also has two regions and no default region: Europe
+(dk, prices exclusive through the EUR currency preference) and Germany (de,
+inclusive through its own region preference). It has one publishable key (the
+one Medusa creates at boot) linked to the E2E channel, and an unlisted product, `E2E unlisted` (`E2E-U`), priced and
+stocked but only in another sales channel. (Medusa 2.21.0 skips the store
+API's channel filter only when the store has at most one sales channel; with
+several, a product in no channel is excluded for every key. Its own channel
+keeps it unlisted for the E2E key either way.) A fresh sign-in therefore shows "Set up this
+till"; `signIn` picks Europe (its `region` argument), so the other specs keep
+their Danish 25% exclusive totals. `pricing.spec.ts` proves the choice screen,
+the "does not cover" error for Germany (the Copenhagen location is in dk, and
+the country always follows the stock location), Medusa's calculated Europe
+price for `E2E-1` in the catalogue, an exclusive sale applied with no
+warnings, that `E2E-U` stays hidden ("5 products"), that a region change
+resyncs the catalogue at the new region's price (the test gives `E2E-1` a
+Germany price and moves the location to de, then restores both), and that the
+choice survives a reload. It sells only `E2E-1`.
+
 `E2E product 4` has a second variant (`E2E-4B`, alongside `E2E-4`) so the
 variant chooser — the app's only stock display, which opens only for a
 product with more than one variant — has something to exercise. `live-stock.spec.ts`

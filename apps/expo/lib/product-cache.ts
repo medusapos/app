@@ -1,6 +1,7 @@
 import { removeRxDatabase, type RxStorage } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { Platform } from 'react-native';
+import { defaultStorage } from './session';
 import { getWebStorage, UnsupportedStorageError, usingMemoryStorageForTests, webStorageAvailable } from './web-storage';
 
 type CachedDb = { remove(): Promise<unknown>; close(): Promise<unknown> };
@@ -35,6 +36,42 @@ function encodeBaseUrl(baseUrl: string): string {
 /** Names one backend using an injective encoding of its exact UTF-16 base URL. */
 export function productCacheName(connectorId: string, baseUrl: string): string {
   return `medusapos_sqlite_${connectorId}_${encodeBaseUrl(baseUrl)}`;
+}
+
+// 32-bit FNV-1a as 8 hex digits: stable and synchronous.
+function fnv1a(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 0x01000193);
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
+/**
+ * The product cache for one backend and pricing context: a context change, or the upgrade from
+ * unpriced documents (no context), is a cold resync under a new name (TallyUI's drop-and-resync rule).
+ */
+export function pricedCacheName(connectorId: string, baseUrl: string, pricingContext?: Record<string, string>): string {
+  const key = pricingContext ? `${pricingContext.region_id ?? ''}\n${pricingContext.publishable_key ?? ''}` : 'none';
+  return `${productCacheName(connectorId, baseUrl)}_${fnv1a(key)}`;
+}
+
+// The current product cache name per store, so a sweep and sign-out find it.
+const recordKey = (baseUrl: string) => `medusapos.product-cache.${baseUrl}`;
+
+/**
+ * After the first successful sync under `name`: removes the store's previously recorded cache (or,
+ * with none recorded, the unsuffixed cache from before priced replication) if it differs and is
+ * not open, then records `name`. Never throws.
+ */
+export async function sweepProductCaches(connectorId: string, baseUrl: string, name: string): Promise<void> {
+  const storage = defaultStorage();
+  try {
+    const previous = storage?.getItem(recordKey(baseUrl)) ?? productCacheName(connectorId, baseUrl);
+    if (previous !== name && !openCaches.has(previous)) {
+      await closers.get(previous)?.(); // closed already, but the close may still be settling
+      await removeRxDatabase(previous, productCacheStorage());
+    }
+  } catch { /* Cache cleanup must never throw. */ }
+  try { storage?.setItem(recordKey(baseUrl), name); } catch { /* Web storage may be unavailable. */ }
 }
 
 /**
@@ -113,11 +150,16 @@ export async function closeProductCaches(): Promise<void> {
   await Promise.all(opened.map((o) => o.close()));
 }
 
-/** Removes an open or closed backend cache without throwing. */
+/**
+ * Removes the store's recorded (current) product cache, open or closed, and its record, without
+ * throwing. With none recorded, it removes the unsuffixed cache from before priced replication.
+ */
 export async function clearProductCache(connectorId: string, baseUrl: string): Promise<void> {
-  const name = productCacheName(connectorId, baseUrl);
-  const db = openCaches.get(name);
+  const storage = defaultStorage();
   try {
+    const name = storage?.getItem(recordKey(baseUrl)) ?? productCacheName(connectorId, baseUrl);
+    storage?.removeItem(recordKey(baseUrl));
+    const db = openCaches.get(name);
     if (db) await db.remove();
     else await removeRxDatabase(name, productCacheStorage());
   } catch { /* Cache cleanup must not prevent sign-out. */ }

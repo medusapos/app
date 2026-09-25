@@ -16,6 +16,7 @@ vi.mock('@tallyui/database', async (importOriginal) => {
 
 const baseUrl = 'https://id-reconcile.test';
 const headers = authHeaders('test-admin-jwt');
+const context = { connectorId: posConnector.id, baseUrl, headers };
 const onUnauthorized = vi.fn();
 const enqueue = vi.fn();
 // No stock adapter: this suite is only about the id-reconcile runner.
@@ -45,7 +46,7 @@ async function mount(reconcileImpl: () => Promise<IdReconcileResult>) {
   let started!: (options: Parameters<typeof startIdReconcile>[0]) => void;
   const runnerStarted = new Promise<Parameters<typeof startIdReconcile>[0]>((done) => { started = done; });
   vi.mocked(startIdReconcile).mockImplementation((options) => { started(options); return { reconcileIds, stop }; });
-  const hook = renderHook(() => useReplicatedProducts(connector, headers, baseUrl, onUnauthorized));
+  const hook = renderHook(() => useReplicatedProducts(connector, context, onUnauthorized));
   const options = await runnerStarted;
   return { ...hook, options, reconcileIds, stop, reSync, finishInitial: () => act(async () => finishInitial()) };
 }

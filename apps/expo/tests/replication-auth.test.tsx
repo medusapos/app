@@ -9,10 +9,11 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 const baseUrl = 'https://replication-auth.test';
 const token = 'test-admin-jwt';
 const headers = authHeaders(token);
+const context = { connectorId: posConnector.id, baseUrl, headers };
 const onUnauthorized = vi.fn();
 
 function Harness() {
-  const { state } = useReplicatedProducts(posConnector, headers, baseUrl, onUnauthorized);
+  const { state } = useReplicatedProducts(posConnector, context, onUnauthorized);
   return <span>{state}</span>;
 }
 

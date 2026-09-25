@@ -1,4 +1,4 @@
-import { ratePpmFromPercent, type TaxContext } from '@tallyui/pos';
+import type { StoreSettings as PricingSettings, StoreSettingsChoice } from '@tallyui/core';
 import type { Session, SessionStorage } from './session';
 import { authHeaders } from './pos-connector';
 
@@ -6,17 +6,22 @@ export type StoreSettings = {
   storeName: string;
   currency: string;
   location: { id: string; name: string; addressLine?: string; countryCode: string };
-  taxRatePpm: number;
-  pricesIncludeTax: boolean;
 };
 export class StoreSettingsError extends Error {
   constructor(readonly code: 'unauthorized' | 'unreachable' | 'misconfigured', message: string) { super(message); }
 }
 const CACHE_PREFIX = 'medusapos.settings.';
+// Per store, like the settings cache; signing out clears neither.
+const CHOICE_PREFIX = 'medusapos.settings-choice.';
+const PRICING_PREFIX = 'medusapos.pricing.';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
+function isStrings(value: unknown): value is Record<string, string> {
+  return isRecord(value) && !Array.isArray(value) && Object.values(value).every((entry) => typeof entry === 'string');
+}
+const isPpm = (rate: unknown) => typeof rate === 'number' && Number.isSafeInteger(rate) && rate >= 0;
 
 export async function fetchStoreSettings(session: Session, fetchImpl = globalThis.fetch): Promise<StoreSettings> {
   async function request(path: string): Promise<Record<string, unknown>> {
@@ -55,45 +60,65 @@ export async function fetchStoreSettings(session: Session, fetchImpl = globalThi
   }
   const countryCode = address.country_code.toLowerCase();
   const addressLine = [address.address_1, address.city].filter((part) => typeof part === 'string' && part).join(', ') || undefined;
-  const taxes = await request(`/admin/tax-regions?country_code=${countryCode}&fields=id,country_code,province_code,parent_id,tax_rates.rate,tax_rates.is_default`);
-  if (!Array.isArray(taxes.tax_regions)) throw new StoreSettingsError('unreachable', 'Invalid tax regions response.');
-  const region = taxes.tax_regions.filter(isRecord).find((entry) =>
-    entry.country_code === countryCode && entry.province_code == null && entry.parent_id == null);
-  const rates = region && Array.isArray(region.tax_rates) ? region.tax_rates : [];
-  const rate = rates.filter(isRecord).find((entry) => entry.is_default === true);
-  let taxRatePpm = 0;
-  if (rate) {
-    if (typeof rate.rate !== 'number' && typeof rate.rate !== 'string') {
-      throw new StoreSettingsError('misconfigured', 'Invalid default tax rate.');
-    }
-    taxRatePpm = ratePpmFromPercent(rate.rate);
-  }
-  const preferences = await request(`/admin/price-preferences?attribute=currency_code&value=${currency.toLowerCase()}&fields=id,is_tax_inclusive`);
-  if (!Array.isArray(preferences.price_preferences)) throw new StoreSettingsError('unreachable', 'Invalid price preferences response.');
-  const preference: unknown = preferences.price_preferences[0];
+  // Tax, tax inclusivity and the sale currency come from TallyUI's store settings (TV4), not from here.
   return {
     storeName: store.name, currency,
     location: { id: location.id, name: location.name, addressLine, countryCode },
-    taxRatePpm, pricesIncludeTax: isRecord(preference) && preference.is_tax_inclusive === true,
   };
 }
 
 export function loadCachedSettings(storage: SessionStorage | null, baseUrl: string): StoreSettings | null {
   try {
     const value: unknown = JSON.parse(storage?.getItem(CACHE_PREFIX + baseUrl) ?? 'null');
-    if (!isRecord(value) || typeof value.storeName !== 'string' || typeof value.currency !== 'string'
-      || typeof value.taxRatePpm !== 'number' || !Number.isSafeInteger(value.taxRatePpm) || value.taxRatePpm < 0
-      || typeof value.pricesIncludeTax !== 'boolean') return null;
+    // An older entry may still carry taxRatePpm and pricesIncludeTax; they are ignored.
+    if (!isRecord(value) || typeof value.storeName !== 'string' || typeof value.currency !== 'string') return null;
     const location = value.location;
     if (!isRecord(location) || typeof location.id !== 'string' || typeof location.name !== 'string'
       || typeof location.countryCode !== 'string'
       || (location.addressLine !== undefined && typeof location.addressLine !== 'string')) return null;
     return {
-      storeName: value.storeName, currency: value.currency, taxRatePpm: value.taxRatePpm,
-      pricesIncludeTax: value.pricesIncludeTax,
+      storeName: value.storeName, currency: value.currency,
       location: { id: location.id, name: location.name, countryCode: location.countryCode, addressLine: location.addressLine },
     };
   } catch { return null; }
+}
+
+/** The till's stored region and channel for this store; the country always follows the stock location (D1). */
+export function loadSettingsChoice(storage: SessionStorage | null, baseUrl: string): StoreSettingsChoice | undefined {
+  try {
+    const value: unknown = JSON.parse(storage?.getItem(CHOICE_PREFIX + baseUrl) ?? 'null');
+    if (!isStrings(value)) return undefined;
+    return { ...(value.region !== undefined && { region: value.region }), ...(value.channel !== undefined && { channel: value.channel }) };
+  } catch { return undefined; }
+}
+
+/** Throws when storage does, so useStoreSettings reports it through onSaveError. */
+export function saveSettingsChoice(storage: SessionStorage | null, baseUrl: string, choice: StoreSettingsChoice): void {
+  storage?.setItem(CHOICE_PREFIX + baseUrl, JSON.stringify({ region: choice.region, channel: choice.channel }));
+}
+
+export function clearSettingsRegion(storage: SessionStorage | null, baseUrl: string): void {
+  try { saveSettingsChoice(storage, baseUrl, { ...loadSettingsChoice(storage, baseUrl), region: undefined }); } catch { /* Web storage may be unavailable. */ }
+}
+
+/** The last resolved TallyUI store settings, so the till opens offline (D3). The publishable key in it is public. */
+export function loadCachedPricing(storage: SessionStorage | null, baseUrl: string): PricingSettings | null {
+  try {
+    const value: unknown = JSON.parse(storage?.getItem(PRICING_PREFIX + baseUrl) ?? 'null');
+    if (!isRecord(value) || typeof value.currency !== 'string' || typeof value.pricesIncludeTax !== 'boolean'
+      || !isRecord(value.taxRatesPpm) || Array.isArray(value.taxRatesPpm) || !isPpm(value.taxRatesPpm.default)
+      || !Object.values(value.taxRatesPpm).every(isPpm)
+      || (value.pricingContext !== undefined && !isStrings(value.pricingContext))) return null;
+    return {
+      currency: value.currency, pricesIncludeTax: value.pricesIncludeTax,
+      taxRatesPpm: value.taxRatesPpm as PricingSettings['taxRatesPpm'],
+      ...(value.pricingContext !== undefined && { pricingContext: value.pricingContext }),
+    };
+  } catch { return null; }
+}
+
+export function saveCachedPricing(storage: SessionStorage | null, baseUrl: string, settings: PricingSettings): void {
+  try { storage?.setItem(PRICING_PREFIX + baseUrl, JSON.stringify(settings)); } catch { /* Web storage may be unavailable. */ }
 }
 
 export function saveCachedSettings(storage: SessionStorage | null, baseUrl: string, settings: StoreSettings): void {
@@ -102,8 +127,4 @@ export function saveCachedSettings(storage: SessionStorage | null, baseUrl: stri
 
 export function clearCachedSettings(storage: SessionStorage | null, baseUrl: string): void {
   try { storage?.removeItem(CACHE_PREFIX + baseUrl); } catch { /* Web storage may be unavailable. */ }
-}
-
-export function taxContextFor(settings: StoreSettings): TaxContext {
-  return { getTaxRatePpm: () => settings.taxRatePpm, pricesIncludeTax: settings.pricesIncludeTax };
 }

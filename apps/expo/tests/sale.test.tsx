@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatMoney, moneyFromDecimalString } from '@tallyui/core';
+import { formatMoney, moneyFromDecimalString, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { createOrderBuilder, type LineItem, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, TaxProvider, taxProviderProps, useStoreSettings, type LineItem, type PosOrder } from '@tallyui/pos';
 import type { CartPanelProps, CartLineProps, CartTotalProps, CashTenderedProps, ChangeDisplayProps } from '@tallyui/components';
 import { Cart } from '../components/cart';
 import { Tender } from '../components/tender';
@@ -13,7 +13,7 @@ import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
 import { useOutboxContext } from '../lib/outbox-context';
 import { catalogueEntries } from '../lib/catalogue';
 import { useSale } from '../lib/use-sale';
-import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, taxContextFor, type StoreSettings } from '../lib/store-settings';
+import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
 import ProductsScreen from '../app/index';
 
@@ -51,14 +51,19 @@ vi.mock('../lib/outbox-context', () => ({
 vi.mock('../lib/use-replicated-products', () => ({
   useReplicatedProducts: () => ({ products: [], state: 'synced', error: null }),
 }));
+// store-settings-flow.test.tsx covers the settings states; here the store settings are ready.
+vi.mock('@tallyui/pos', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(),
+}));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
 
 const settings: StoreSettings = {
-  storeName: 'Test shop', currency: 'EUR', pricesIncludeTax: false, taxRatePpm: 250000,
-  location: { id: 'loc', name: 'Main', addressLine: '1 High Street', countryCode: 'dk' },
+  storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', addressLine: '1 High Street', countryCode: 'dk' },
 };
+const pricing: PricingSettings = { currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 } };
+const taxContext = { getTaxRatePpm: () => 250000, pricesIncludeTax: false };
 const session = { baseUrl: 'https://store.test', email: 'cashier@store.test', token: 'token' };
 const traits = medusaConnector.traits.product;
 const product = {
@@ -69,8 +74,12 @@ const product = {
 };
 const entries = catalogueEntries([product], traits);
 let sale: ReturnType<typeof useSale>;
-function SaleHarness({ onSaleCompleted }: { onSaleCompleted?: (order: PosOrder) => Promise<void> | void }) {
-  sale = useSale(settings, { registerId: 'register-1', cashierRef: session.email, onSaleCompleted });
+type HarnessProps = { onSaleCompleted?: (order: PosOrder) => Promise<void> | void; with?: PricingSettings };
+function SaleHarness(props: HarnessProps) {
+  return <TaxProvider {...taxProviderProps(props.with ?? pricing)}><SaleView {...props} /></TaxProvider>;
+}
+function SaleView({ onSaleCompleted, with: shown = pricing }: HarnessProps) {
+  sale = useSale(shown, { registerId: 'register-1', cashierRef: session.email, onSaleCompleted });
   if (sale.stage.kind === 'receipt') return <Receipt order={sale.stage.order} settings={settings}
     cashier={session.email} registerId="register-1" newSale={sale.newSale} />;
   return sale.stage.kind === 'cart' ? <Cart sale={sale} /> : <Tender sale={sale} />;
@@ -89,6 +98,7 @@ beforeEach(() => {
     removeItem: (key: string) => { data.delete(key); },
   });
   vi.mocked(fetchStoreSettings).mockReset().mockResolvedValue(settings);
+  vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn() });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });
@@ -125,7 +135,7 @@ describe('sale', () => {
   it('merges variants and displays builder quantities, unit prices, line totals and order totals', () => {
     render(<SaleHarness />);
     addSaleLines();
-    const expected = createOrderBuilder({ currency: settings.currency, taxContext: taxContextFor(settings) });
+    const expected = createOrderBuilder({ currency: settings.currency, taxContext });
     expected.addLine({ productId: 'shirt', variantId: 'blue', name: 'Shirt · Blue', unitPrice: { amount: 1250, currency: 'EUR' }, quantity: 2 });
     expected.addLine({ productId: 'shirt', variantId: 'red', name: 'Shirt · Red', unitPrice: { amount: 1000, currency: 'EUR' } });
     const order = expected.getSnapshot();
@@ -235,7 +245,7 @@ describe('sale', () => {
   });
 
   it('shows the cashier display name when supplied to the receipt', () => {
-    const order = createOrderBuilder({ currency: settings.currency, taxContext: taxContextFor(settings) }).getSnapshot();
+    const order = createOrderBuilder({ currency: settings.currency, taxContext }).getSnapshot();
     render(<Receipt order={order} settings={settings} cashier="Alex Shopkeeper" registerId="register-1" newSale={() => {}} />);
     expect(screen.getByText('Cashier: Alex Shopkeeper')).toBeTruthy();
     expect(screen.queryByText(/^Register:/)).toBeNull();
@@ -288,6 +298,56 @@ describe('sale', () => {
     act(() => sale.add({ ...entries[0], variant: { ...entries[0].variant, prices: [] } }, traits));
     expect(screen.getByRole('alert').textContent).toBe('No EUR price for Shirt · Blue');
     expect(sale.order.lineItems).toEqual([]);
+  });
+
+  it('takes its tax from the TaxProvider: inclusive settings give pricesIncludeTax with the default rate', () => {
+    const inclusive: PricingSettings = { currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000, reduced: 70000 } };
+    render(<SaleHarness with={inclusive} />);
+    act(() => sale.add(entries[1], traits));
+    expect(sale.order.pricesIncludeTax).toBe(true);
+    expect(sale.order.lineItems[0]).toMatchObject({ taxInclusive: true, taxLines: [expect.objectContaining({ ratePpm: 190000 })] });
+    expect(sale.order.totalMinor).toBe(1000);
+    expect(sale.order.taxMinor).toBe(160); // 1000 × 19/119, rounded
+  });
+
+  it('holds new tax settings while a card sale is in progress: it completes on the old ones, the next sale uses the new', async () => {
+    const completed = vi.fn();
+    const inclusive: PricingSettings = { currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000 } };
+    const view = render(<SaleHarness onSaleCompleted={completed} />);
+    act(() => sale.add(entries[1], traits));
+    view.rerender(<SaleHarness onSaleCompleted={completed} />);
+    expect(sale.order.lineItems).toHaveLength(1);
+    click('Card terminal');
+    const before = sale.order;
+    view.rerender(<SaleHarness onSaleCompleted={completed} with={inclusive} />);
+    expect(sale.stage).toEqual({ kind: 'tender', method: 'external' });
+    expect(sale.order).toBe(before);
+    expect(sale.idle).toBe(false);
+    await act(async () => { click('Payment approved on terminal'); });
+    expect(completed).toHaveBeenCalledOnce();
+    expect(completed.mock.calls[0][0]).toMatchObject({ pricesIncludeTax: false, subtotalMinor: 1000, taxMinor: 250, totalMinor: 1250,
+      lines: [expect.objectContaining({ netMinor: 1000, taxLines: [expect.objectContaining({ ratePpm: 250000 })] })],
+      payments: [expect.objectContaining({ method: 'external', amountMinor: 1250 })] });
+    expect(screen.getByLabelText(`Card terminal: ${money(1250)}`)).toBeTruthy();
+    click('New sale');
+    expect(sale.order.id).not.toBe(before.id);
+    expect(sale.order.pricesIncludeTax).toBe(true);
+    act(() => sale.add(entries[1], traits));
+    expect(sale.order.totalMinor).toBe(1000);
+    expect(sale.order.taxMinor).toBe(160);
+  });
+
+  it('holds new settings while the cart has lines, and applies them once it is empty', () => {
+    const view = render(<SaleHarness />);
+    act(() => sale.add(entries[1], traits));
+    const before = sale.order.id;
+    view.rerender(<SaleHarness with={{ ...pricing, pricesIncludeTax: true }} />);
+    expect(sale.order.id).toBe(before);
+    expect(sale.order.pricesIncludeTax).toBe(false);
+    click('Remove Shirt · Red');
+    expect(sale.idle).toBe(true);
+    expect(sale.order.id).not.toBe(before);
+    expect(sale.order.pricesIncludeTax).toBe(true);
   });
 });
 

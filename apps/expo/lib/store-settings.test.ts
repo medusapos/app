@@ -1,15 +1,19 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { SessionStorage } from './session';
+import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import {
-  clearCachedSettings, fetchStoreSettings, loadCachedSettings, saveCachedSettings,
-  StoreSettingsError, taxContextFor, type StoreSettings,
+  clearCachedSettings, clearSettingsRegion, fetchStoreSettings, loadCachedPricing, loadCachedSettings, loadSettingsChoice,
+  saveCachedPricing, saveCachedSettings, saveSettingsChoice, StoreSettingsError, type StoreSettings,
 } from './store-settings';
 
 const session = { baseUrl: 'http://localhost:9000', email: 'admin@tally.test', token: 'jwt' };
 const settings: StoreSettings = {
   storeName: 'Default Store', currency: 'EUR',
   location: { id: 'loc_1', name: 'European Warehouse', addressLine: 'Street 1, Copenhagen', countryCode: 'dk' },
-  taxRatePpm: 250000, pricesIncludeTax: false,
+};
+const pricing: PricingSettings = {
+  currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000, reduced: 70000 },
+  pricingContext: { region_id: 'reg_de', currency_code: 'eur', publishable_key: 'pk_1' },
 };
 function resources(): Record<string, unknown>[] {
   return [
@@ -20,10 +24,6 @@ function resources(): Record<string, unknown>[] {
       { id: 'loc_1', name: 'European Warehouse', address: { country_code: 'DK', city: 'Copenhagen', address_1: 'Street 1' } },
       { id: 'loc_2', name: 'Other Warehouse', address: { country_code: 'DE' } },
     ] } },
-    { tax_regions: [{ country_code: 'dk', province_code: null, parent_id: null, tax_rates: [
-      { rate: 10, is_default: false }, { rate: 25, is_default: true },
-    ] }] },
-    { price_preferences: [{ is_tax_inclusive: false }] },
   ];
 }
 function fetcher(bodies = resources()) {
@@ -41,42 +41,15 @@ function memoryStorage(): SessionStorage {
 }
 
 describe('fetchStoreSettings', () => {
-  it('reads the default currency, first location, country tax and price preference in order', async () => {
+  it('reads only the store name, default currency and first location, with no tax or price-preference reads', async () => {
     const fetchImpl = fetcher();
     expect(await fetchStoreSettings(session, fetchImpl)).toEqual(settings);
     expect(fetchImpl.mock.calls).toEqual([
       '/admin/stores?fields=id,name,default_sales_channel_id,supported_currencies.currency_code,supported_currencies.is_default',
       '/admin/sales-channels/sc_1?fields=id,name,stock_locations.id,stock_locations.name,stock_locations.address.*',
-      '/admin/tax-regions?country_code=dk&fields=id,country_code,province_code,parent_id,tax_rates.rate,tax_rates.is_default',
-      '/admin/price-preferences?attribute=currency_code&value=eur&fields=id,is_tax_inclusive',
     ].map((path) => [`${session.baseUrl}${path}`, { headers: { Authorization: 'Bearer jwt' } }]));
   });
-  it.each([
-    { regions: [] },
-    { regions: [{ country_code: 'dk', province_code: null, parent_id: null, tax_rates: [] }] },
-    { regions: [{ country_code: 'dk', province_code: null, parent_id: null, tax_rates: [{ rate: 25, is_default: false }] }] },
-  ])('uses zero when there is no default country tax: %j', async ({ regions }) => {
-    const bodies = resources();
-    bodies[2] = { tax_regions: regions };
-    expect((await fetchStoreSettings(session, fetcher(bodies))).taxRatePpm).toBe(0);
-  });
-  it.each([[[], false], [[{ is_tax_inclusive: true }], true]] as const)(
-    'reads price preferences %j as %s', async (preferences, inclusive) => {
-      const bodies = resources();
-      bodies[3] = { price_preferences: preferences };
-      expect((await fetchStoreSettings(session, fetcher(bodies))).pricesIncludeTax).toBe(inclusive);
-    },
-  );
-  it('ignores province and child regions in favour of the country-level default', async () => {
-    const bodies = resources();
-    bodies[2] = { tax_regions: [
-      { country_code: 'dk', province_code: 'capital', parent_id: null, tax_rates: [{ rate: 5, is_default: true }] },
-      { country_code: 'dk', province_code: null, parent_id: 'parent', tax_rates: [{ rate: 7, is_default: true }] },
-      { country_code: 'dk', province_code: null, parent_id: null, tax_rates: [{ rate: '25', is_default: true }] },
-    ] };
-    expect((await fetchStoreSettings(session, fetcher(bodies))).taxRatePpm).toBe(250000);
-  });
-  it.each([0, 1, 2, 3])('maps a 401 at resource %s to unauthorized', async (index) => {
+  it.each([0, 1])('maps a 401 at resource %s to unauthorized', async (index) => {
     const fetchImpl = fetcher(resources().slice(0, index));
     fetchImpl.mockResolvedValueOnce(new Response(null, { status: 401 }));
     await expect(fetchStoreSettings(session, fetchImpl)).rejects.toMatchObject({ code: 'unauthorized' });
@@ -128,9 +101,14 @@ describe('settings cache', () => {
     expect(loadCachedSettings(storage, session.baseUrl)).toBeNull();
     expect(loadCachedSettings(storage, otherUrl)).toEqual(other);
   });
+  it('accepts an older entry that still carries taxRatePpm and pricesIncludeTax, without them', () => {
+    const storage = memoryStorage();
+    storage.setItem(`medusapos.settings.${session.baseUrl}`, JSON.stringify({ ...settings, taxRatePpm: 250000, pricesIncludeTax: false }));
+    expect(loadCachedSettings(storage, session.baseUrl)).toEqual(settings);
+  });
   it.each([
-    '{', 'null', '{}', '[]', JSON.stringify({ ...settings, taxRatePpm: '250000' }),
-    JSON.stringify({ ...settings, pricesIncludeTax: 'false' }),
+    '{', 'null', '{}', '[]', JSON.stringify({ ...settings, currency: 42 }),
+    JSON.stringify({ ...settings, storeName: undefined }),
     JSON.stringify({ ...settings, location: { id: 'loc_1' } }),
     JSON.stringify({ ...settings, location: { ...settings.location, addressLine: 42 } }),
   ])('rejects malformed cached data %s', (value) => {
@@ -152,9 +130,72 @@ describe('settings cache', () => {
   });
 });
 
-it('provides the same tax rate for any tax class and preserves inclusion', () => {
-  const context = taxContextFor(settings);
-  expect(context.pricesIncludeTax).toBe(false);
-  for (const taxClass of [undefined, '', 'standard', 'reduced']) expect(context.getTaxRatePpm(taxClass)).toBe(250000);
-  expect(taxContextFor({ ...settings, pricesIncludeTax: true }).pricesIncludeTax).toBe(true);
+describe('store settings choice', () => {
+  it('round-trips only the region and channel, per backend, under its own key', () => {
+    const storage = memoryStorage();
+    expect(loadSettingsChoice(storage, session.baseUrl)).toBeUndefined();
+    saveSettingsChoice(storage, session.baseUrl, { region: 'reg_eu', country: 'de', channel: 'pk_1' });
+    expect(JSON.parse(storage.getItem(`medusapos.settings-choice.${session.baseUrl}`)!)).toEqual({ region: 'reg_eu', channel: 'pk_1' });
+    expect(loadSettingsChoice(storage, session.baseUrl)).toEqual({ region: 'reg_eu', channel: 'pk_1' });
+    expect(loadSettingsChoice(storage, 'https://other.test')).toBeUndefined();
+    saveSettingsChoice(storage, session.baseUrl, { region: 'reg_eu' });
+    expect(loadSettingsChoice(storage, session.baseUrl)).toEqual({ region: 'reg_eu' });
+  });
+  it('clears only the stored region', () => {
+    const storage = memoryStorage();
+    saveSettingsChoice(storage, session.baseUrl, { region: 'reg_de', channel: 'pk_1' });
+    clearSettingsRegion(storage, session.baseUrl);
+    expect(loadSettingsChoice(storage, session.baseUrl)).toEqual({ channel: 'pk_1' });
+  });
+  it.each(['{', 'null', '[]', '"reg_eu"', JSON.stringify({ region: 42 }), JSON.stringify({ region: 'reg_eu', channel: null })])(
+    'rejects a malformed stored choice %s', (value) => {
+      const storage = memoryStorage();
+      storage.setItem(`medusapos.settings-choice.${session.baseUrl}`, value);
+      expect(loadSettingsChoice(storage, session.baseUrl)).toBeUndefined();
+    },
+  );
+  it('lets a failing save throw, so useStoreSettings reports it, and tolerates unavailable storage when reading', () => {
+    const fail = () => { throw new Error('Storage unavailable'); };
+    const unavailable = { getItem: fail, setItem: fail, removeItem: fail };
+    expect(() => saveSettingsChoice(unavailable, session.baseUrl, { region: 'reg_eu' })).toThrow('Storage unavailable');
+    expect(loadSettingsChoice(unavailable, session.baseUrl)).toBeUndefined();
+    expect(() => clearSettingsRegion(unavailable, session.baseUrl)).not.toThrow();
+    expect(() => saveSettingsChoice(null, session.baseUrl, { region: 'reg_eu' })).not.toThrow();
+  });
+});
+
+describe('pricing cache', () => {
+  it('round-trips per backend, with and without a pricing context', () => {
+    const storage = memoryStorage();
+    expect(loadCachedPricing(storage, session.baseUrl)).toBeNull();
+    saveCachedPricing(storage, session.baseUrl, pricing);
+    const { pricingContext: _, ...withoutContext } = pricing;
+    saveCachedPricing(storage, 'https://other.test', withoutContext);
+    expect(storage.getItem(`medusapos.pricing.${session.baseUrl}`)).toBe(JSON.stringify(pricing));
+    expect(loadCachedPricing(storage, session.baseUrl)).toEqual(pricing);
+    expect(loadCachedPricing(storage, 'https://other.test')).toEqual(withoutContext);
+  });
+  it.each([
+    '{', 'null', '{}', '[]', JSON.stringify({ ...pricing, currency: 1 }),
+    JSON.stringify({ ...pricing, pricesIncludeTax: 'true' }),
+    JSON.stringify({ ...pricing, taxRatesPpm: undefined }),
+    JSON.stringify({ ...pricing, taxRatesPpm: [] }),
+    JSON.stringify({ ...pricing, taxRatesPpm: { reduced: 70000 } }),
+    JSON.stringify({ ...pricing, taxRatesPpm: { default: 19.5 } }),
+    JSON.stringify({ ...pricing, taxRatesPpm: { default: -1 } }),
+    JSON.stringify({ ...pricing, taxRatesPpm: { default: 190000, reduced: '70000' } }),
+    JSON.stringify({ ...pricing, pricingContext: { region_id: 42 } }),
+    JSON.stringify({ ...pricing, pricingContext: ['reg_de'] }),
+  ])('rejects malformed cached pricing %s', (value) => {
+    const storage = memoryStorage();
+    storage.setItem(`medusapos.pricing.${session.baseUrl}`, value);
+    expect(loadCachedPricing(storage, session.baseUrl)).toBeNull();
+  });
+  it('tolerates unavailable storage', () => {
+    const fail = () => { throw new Error('Storage unavailable'); };
+    for (const unavailable of [null, { getItem: fail, setItem: fail, removeItem: fail }]) {
+      expect(loadCachedPricing(unavailable, session.baseUrl)).toBeNull();
+      expect(() => saveCachedPricing(unavailable, session.baseUrl, pricing)).not.toThrow();
+    }
+  });
 });
