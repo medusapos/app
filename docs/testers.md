@@ -5,8 +5,15 @@ setup detail rather than repeating it.
 
 ## Try it
 
-Open `https://app.medusapos.com` in Chrome. Keep just one POS tab open per
-browser — the queue of unsynced sales (the outbox) supports only one tab.
+Open `https://app.medusapos.com` in a current Chrome, Edge, Safari or
+Firefox, over HTTPS or on `localhost`. MedusaPOS stores sales and the
+catalogue in the browser's own private storage; a browser without it shows
+"MedusaPOS can't run in this browser" instead of opening.
+
+Only one tab per store is ever live. Open a second tab and it takes over;
+the first shows "MedusaPOS is open in another tab" with a **Use here**
+button to take it back. Closing the live tab lets a waiting tab take over on
+its own.
 
 ## Use the hosted demo store
 
@@ -47,21 +54,37 @@ queuing on the device and a "Sign in" strip asks for your password again to
 send them.
 
 See the [tester quick-start](QUICKSTART.md) for installing the plugin,
-configuring your store (sales channel, stock location, shipping option, tax)
-and creating an admin user.
+configuring your store (sales channel, stock location, shipping option, tax,
+a publishable API key) and creating an admin user.
+
+## Set up this till
+
+On first sign-in, MedusaPOS resolves your store's region, tax and sales
+channel from Medusa. If your store has more than one region or publishable
+API key, you're asked to pick them on a "Set up this till" screen; the
+till's country always follows its stock location's country, so it's never
+offered as a choice. If the region you pick doesn't cover that country, the
+till says so ("Stock location … is in …, which region … does not cover.")
+and lets you choose another. The choice is remembered for this store.
+
+Prices shown are Medusa's own calculated prices for your chosen region, sale
+prices included; products your sales channel doesn't sell are hidden.
 
 ## Offline
 
-You can keep selling from the catalogue already loaded on the device: sales
-queue locally, and each sale is sent to Medusa exactly once when you're back
-online. The sync status shows how many sales are waiting.
+You can keep selling from the catalogue already loaded on the device: a
+sale queues on the device and is listed under **Orders** as "Waiting to
+sync"; it's sent to Medusa exactly once when you're back online.
 
 You do need a connection for your first sign-in and for the initial
 catalogue load — let the catalogue load while online before you start
-selling offline.
+selling offline. After that, your store settings are cached, so the till
+opens offline too (an "Offline" note with **Retry** while it can't reach the
+store).
 
-There's no offline page cache (no service worker), so keep the POS tab open
-while you're offline: reloading or reopening the app while offline fails.
+There's no offline page cache (no service worker), so reloading or
+reopening the app while offline fails. Once the app is open, a reload while
+you're online keeps any sales still waiting to sync.
 
 ## Orders that need attention
 
@@ -77,12 +100,10 @@ Open **Orders** → **Needs attention** to see sales that need a look:
 
 ## Known limitations
 
-Prices are re-checked every 30 minutes, and base prices nightly, so they
-are not live to the second —
-see the README's [Known limitations](../README.md#known-limitations)
-section for the full picture.
-
-Sale prices from Medusa price lists are not shown yet; base prices only.
+Prices are re-checked every 30 minutes, and base prices nightly, so they are
+not live to the second; stock is reconciled on its own cadence — see the README's
+[Known limitations](../README.md#known-limitations) section for the full
+picture.
 
 ## Report a problem
 
