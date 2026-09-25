@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, moneyFromDecimalString, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { createOrderBuilder, TaxProvider, taxProviderProps, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import { catalogueEntries, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import type { CartLineProps, CartTotalProps, CashTenderedProps, ChangeDisplayProps } from '@tallyui/components';
 import { Cart } from '../components/cart';
 import { Tender } from '../components/tender';
@@ -11,8 +11,6 @@ import { Receipt } from '../components/receipt';
 import { OutboxStrip } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
 import { useOutboxContext } from '../lib/outbox-context';
-import { catalogueEntries } from '../lib/catalogue';
-import { useSale } from '../lib/use-sale';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
 import { posConnector } from '../lib/pos-connector';

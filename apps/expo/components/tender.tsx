@@ -1,7 +1,7 @@
 import { Pressable, Text, TextInput, View } from 'react-native';
 import { CashTendered, ChangeDisplay } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import type { useSale } from '../lib/use-sale';
+import type { useSale } from '@tallyui/pos';
 
 export function Tender({ sale }: { sale: ReturnType<typeof useSale> }) {
   const { order, stage } = sale;
