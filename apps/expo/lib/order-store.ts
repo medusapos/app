@@ -3,9 +3,9 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
-import { posOrderSchema, type PosOrder } from '@tallyui/pos';
+import { posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
-import { webStorageAvailable } from './web-storage';
+import { terminateWebStorage, webStorageAvailable } from './web-storage';
 import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
 
 addRxPlugin(RxDBLocalDocumentsPlugin);
@@ -80,7 +80,8 @@ export async function carryOverOrders({ fromStorage, fromName, to, legacyExists 
       name: fromName, storage: fromStorage, multiInstance: false,
     });
     try {
-      await legacy.addCollections({ pos_orders: { schema: posOrderSchema } });
+      // Migrates legacy v0 in place; a DM4 throws here, before any copy or marker, so the source stays.
+      await legacy.addCollections({ pos_orders: posOrderCollection() });
       const docs = (await legacy.pos_orders.find().exec()).map((doc) => doc.toJSON() as PosOrder);
       if (docs.length) {
         const present = await to.pos_orders.findByIds(docs.map((order) => order.id)).exec();
@@ -125,7 +126,8 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
       });
       const unwatch = watched ? watchStorageHealth(watched.health$) : undefined;
       try {
-        await db.addCollections({ pos_orders: { schema: posOrderSchema } });
+        // Migrates v0 to v1. A DM4 fails this open, never deletes: the v0 orders stay; a reload retries.
+        await db.addCollections({ pos_orders: posOrderCollection() });
         if (onWebStorage) {
           await carryOverOrders({
             fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
@@ -186,19 +188,22 @@ export function needsAttention(orders: PosOrder[]): PosOrder[] {
 }
 
 // E2E debug hook (same pattern as `__medusaposCatalogue` in use-replicated-products.ts):
-// seeds one order into a backend's legacy Dexie order database, so live-tab.spec.ts and
-// storage.spec.ts can plant a pending sale on the login page, before the store opens.
+// seeds one order at schema v0 (v1 minus `sessionId`, as builds before TallyUI #123 wrote it) into a backend's legacy
+// Dexie order database, or (…SeedV0Order, then ending the worker) its SQLite order store; resolves to the version.
 if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
-  (window as Window & { __medusaposSeedLegacyOrder?: (baseUrl: string, order: PosOrder) => Promise<void> })
-    .__medusaposSeedLegacyOrder = async (baseUrl: string, order: PosOrder) => {
-      const legacy = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
-        name: legacyDexieName('orders', baseUrl), storage: getRxStorageDexie(), multiInstance: false,
-      });
-      try {
-        await legacy.addCollections({ pos_orders: { schema: posOrderSchema } });
-        await legacy.pos_orders.insert(order);
-      } finally {
-        await legacy.close();
-      }
-    };
+  const { sessionId: _added, ...v0Properties } = posOrderSchema.properties;
+  const v0Schema = { ...posOrderSchema, version: 0, properties: v0Properties as typeof posOrderSchema.properties };
+  const seedV0 = async (name: string, storage: RxStorage<any, any>, order: PosOrder) => {
+    const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({ name, storage, multiInstance: false });
+    try {
+      await db.addCollections({ pos_orders: { schema: v0Schema } });
+      await db.pos_orders.insert(order);
+      return db.pos_orders.schema.version;
+    } finally { await db.close(); }
+  };
+  Object.assign(window, {
+    __medusaposSeedLegacyOrder: (baseUrl: string, order: PosOrder) => seedV0(legacyDexieName('orders', baseUrl), getRxStorageDexie(), order),
+    __medusaposSeedV0Order: (baseUrl: string, order: PosOrder) =>
+      seedV0(orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage),
+  });
 }

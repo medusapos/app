@@ -82,6 +82,35 @@ test('cold open, offline sale, and reload keep the SQLite catalogue and carry th
   expect(after['E2E-1']).toBe(before['E2E-1'] - 1);
 });
 
+// TallyUI #123 (pos_orders schema v1): a pending sale the SQLite order store holds at schema v0,
+// as a build from before the bump wrote it, survives the v1 build's open and syncs once.
+test('a pending sale in the SQLite order store at schema v0 migrates on open, waits, then syncs once', async ({ page }) => {
+  const token = await adminToken();
+  const before = await stockBySku(token);
+  const order = pendingE2E1Order(await variantIdBySku(token, 'E2E-1'));
+  const sales = captureSales(page);
+
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+  expect(await page.evaluate(([backendUrl, posOrder]) => (window as unknown as {
+    __medusaposSeedV0Order: (base: string, order: unknown) => Promise<number>;
+  }).__medusaposSeedV0Order(backendUrl, posOrder), [backend, order] as const)).toBe(0);
+
+  // signIn loads /login afresh (a new page, as after a build switch); its store open migrates v0 to v1.
+  await page.route('**/tally/v1/commands', (route) => route.abort());
+  await signIn(page);
+  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await expect(page.getByText('· Waiting to sync', { exact: false })).toBeVisible();
+
+  await page.unroute('**/tally/v1/commands');
+  await expect(page.getByText('· Synced', { exact: false })).toBeVisible({ timeout: 30_000 });
+  expect(sales.has(order.id)).toBe(true);
+  const orders = (await ordersByClientId(token)).filter((o) => o.metadata.tally_client_id === order.id);
+  expect(orders).toHaveLength(1);
+  const after = await stockBySku(token);
+  expect(after['E2E-1']).toBe(before['E2E-1'] - 1);
+});
+
 test('a pending order left in the legacy Dexie store carries over on sign-in and syncs', async ({ page }) => {
   const token = await adminToken();
   const before = await stockBySku(token);
@@ -91,9 +120,10 @@ test('a pending order left in the legacy Dexie store carries over on sign-in and
 
   await page.goto('/login');
   await page.waitForLoadState('networkidle');
-  await page.evaluate(([backendUrl, posOrder]) => (window as unknown as {
-    __medusaposSeedLegacyOrder: (base: string, order: unknown) => Promise<void>;
-  }).__medusaposSeedLegacyOrder(backendUrl, posOrder), [backend, order] as const);
+  // Written at schema v0, as by a build from before TallyUI #123: the carry-over's v1 open migrates it.
+  expect(await page.evaluate(([backendUrl, posOrder]) => (window as unknown as {
+    __medusaposSeedLegacyOrder: (base: string, order: unknown) => Promise<number>;
+  }).__medusaposSeedLegacyOrder(backendUrl, posOrder), [backend, order] as const)).toBe(0);
 
   await signIn(page);
   await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
@@ -122,7 +152,7 @@ test('a legacy sale written after the first carry-over is carried over on reload
   const variantId = await variantIdBySku(token, 'E2E-1');
   const sales = captureSales(page);
   const seedLegacy = (order: ReturnType<typeof pendingE2E1Order>) => page.evaluate(([backendUrl, posOrder]) => (window as unknown as {
-    __medusaposSeedLegacyOrder: (base: string, order: unknown) => Promise<void>;
+    __medusaposSeedLegacyOrder: (base: string, order: unknown) => Promise<number>;
   }).__medusaposSeedLegacyOrder(backendUrl, posOrder), [backend, order] as const);
   const legacyDatabases = () => page.evaluate(async () => (await indexedDB.databases())
     .map((db) => db.name).filter((name) => name?.startsWith('rxdb-dexie-medusapos_orders_')));

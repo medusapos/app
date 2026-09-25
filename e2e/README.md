@@ -92,6 +92,11 @@ database via `window.__medusaposSeedLegacyOrder` (an `EXPO_PUBLIC_E2E_DEBUG`
 hook, like `__medusaposCatalogue`) before signing in, then checks the order
 carries over, syncs, and the legacy Dexie database is gone afterwards. Both
 sell only `E2E-1` and check its stock delta, like `smoke.spec.ts`.
+Both seed at `pos_orders` schema v0 (pre-TallyUI #123): the legacy hook, and
+`__medusaposSeedV0Order` into the SQLite order store, whose test signs in with
+`/tally/v1/commands` blocked, sees the migrated sale "Waiting to sync", then
+one Medusa order. `scripts/check-web-bundle.sh` fails any export containing a
+`__medusapos…` hook name, so production builds carry none.
 
 The same file proves the storage-health prompts (ADR-061 part B): one test
 kills the storage worker via `window.__medusaposKillStorageWorker()` (another

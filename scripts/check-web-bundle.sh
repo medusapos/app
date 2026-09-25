@@ -6,7 +6,8 @@ js_count=0
 failed=0
 while IFS= read -r -d '' file; do
   [[ $file != *.js ]] || js_count=$((js_count + 1))
-  if matches=$(LC_ALL=C grep -aEo 'sk_[A-Za-z0-9]{16,}|EXPO_PUBLIC_[A-Z0-9_]*KEY' "$file"); then
+  # __medusapos…: the EXPO_PUBLIC_E2E_DEBUG-only window hooks (e.g. the v0 order seeders), never in production.
+  if matches=$(LC_ALL=C grep -aEo 'sk_[A-Za-z0-9]{16,}|EXPO_PUBLIC_[A-Z0-9_]*KEY|__medusapos[A-Za-z]+' "$file"); then
     while IFS= read -r match; do
       printf '%s: forbidden bundle content: %.12s...\n' "$file" "$match" >&2
     done <<< "$matches"
