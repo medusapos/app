@@ -4,9 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, moneyFromDecimalString, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import { catalogueEntries, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import { Cart, Tender } from '@tallyui/components';
 import type { CartLineProps, CartTotalProps, CashTenderedProps, ChangeDisplayProps } from '@tallyui/components';
-import { Cart } from '../components/cart';
-import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
 import { OutboxStrip } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
@@ -17,7 +16,16 @@ import { posConnector } from '../lib/pos-connector';
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 
-vi.mock('@tallyui/components', () => ({
+// Cart, Tender etc. now live in @tallyui/components (TallyUI TV6a); importOriginal on the whole barrel fails
+// under vitest (see live-tab-gate.test.tsx), so the real ones come from their own submodule, and the
+// primitives they use internally (from '../cart', '../checkout', not the barrel) are mocked below by path.
+vi.mock('@tallyui/components', async () => ({
+  ...await import('../node_modules/@tallyui/components/src/sale'),
+  ProductGrid: ({ emptyState }: { emptyState: React.ReactNode }) => <div>{emptyState}</div>,
+  ProductCard: () => null,
+  SearchInput: () => <input aria-label="Search catalogue" />,
+}));
+vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
     { items: T[]; renderItem: (item: T, index: number) => React.ReactNode; emptyState?: React.ReactNode; afterItems?: React.ReactNode; footer?: React.ReactNode }) => <div>
     {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
@@ -33,6 +41,8 @@ vi.mock('@tallyui/components', () => ({
   </div>,
   CartLineActions: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   DiscountBadge: () => null,
+}));
+vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
   CashTendered: ({ total, amount, onChangeAmount }: CashTenderedProps) => <div>
     <span>To pay: {formatMoney(total)}</span><span>Tendered: {amount && formatMoney(amount)}</span>
     <input aria-label="Cash tendered" onChange={(event) => {
@@ -42,9 +52,6 @@ vi.mock('@tallyui/components', () => ({
     <button onClick={() => onChangeAmount?.(total)}>Exact cash</button>
   </div>,
   ChangeDisplay: ({ change }: ChangeDisplayProps) => <span>Change due: {formatMoney(change)}</span>,
-  ProductGrid: ({ emptyState }: { emptyState: React.ReactNode }) => <div>{emptyState}</div>,
-  ProductCard: () => null,
-  SearchInput: () => <input aria-label="Search catalogue" />,
 }));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
 // expo-localization's native module isn't available under vitest.
@@ -87,7 +94,7 @@ function SaleView({ onSaleCompleted, with: shown = pricing }: HarnessProps) {
   sale = useSale(shown, { registerId: 'register-1', cashierRef: session.email, onSaleCompleted });
   if (sale.stage.kind === 'receipt') return <Receipt order={sale.stage.order} settings={settings}
     cashier={session.email} registerId="register-1" newSale={sale.newSale} />;
-  return sale.stage.kind === 'cart' ? <Cart sale={sale} /> : <Tender sale={sale} />;
+  return sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : <Tender sale={sale} />;
 }
 const money = (amount: number) => formatMoney({ amount, currency: settings.currency });
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));

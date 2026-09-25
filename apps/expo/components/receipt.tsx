@@ -1,10 +1,10 @@
 import { useContext, useEffect } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import { discountLabel } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, type Order } from '@tallyui/pos';
 import type { StoreSettings } from '../lib/store-settings';
 import { injectPrintStyle } from './print-style';
-import { discountLabel } from './discount-form';
 import { formatDate } from '../lib/format-date';
 import { StripHeightContext } from './store-refused';
 

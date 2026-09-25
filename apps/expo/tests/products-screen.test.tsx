@@ -37,23 +37,13 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
-vi.mock('@tallyui/components', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) =>
-    <div>{name}: {formatMoney(unitPrice)} × {quantity} = {formatMoney(lineTotal)}</div>,
-  CartTotal: ({ subtotal, total, taxLines }: CartTotalProps) => <div>
-    <span>Subtotal: {formatMoney(subtotal)}</span>
-    {taxLines?.map((line, index) => <span key={index}>{line.label}: {formatMoney(line.amount)}</span>)}
-    <span>Total: {formatMoney(total)}</span>
-  </div>,
-  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  CashTendered: () => null,
-  ChangeDisplay: () => null,
-  DiscountBadge: () => null,
+// Cart, CartBar, Tender and StoreSettingsChoiceScreen now live in @tallyui/components (TallyUI TV6a);
+// importOriginal on the whole barrel fails under vitest (see live-tab-gate.test.tsx), so the real ones
+// come from their own submodules, and the primitives Cart/Tender use internally (from '../cart',
+// '../checkout', not the barrel) are mocked below by path.
+vi.mock('@tallyui/components', async () => ({
+  ...await import('../node_modules/@tallyui/components/src/sale'),
+  ...await import('../node_modules/@tallyui/components/src/layout/store-settings-choice-screen'),
   ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
     <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
   ),
@@ -71,6 +61,26 @@ vi.mock('@tallyui/components', () => ({
     <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)}
       onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />
   ),
+}));
+vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
+  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
+    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
+    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
+    {afterItems}{footer}
+  </div>,
+  CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) =>
+    <div>{name}: {formatMoney(unitPrice)} × {quantity} = {formatMoney(lineTotal)}</div>,
+  CartTotal: ({ subtotal, total, taxLines }: CartTotalProps) => <div>
+    <span>Subtotal: {formatMoney(subtotal)}</span>
+    {taxLines?.map((line, index) => <span key={index}>{line.label}: {formatMoney(line.amount)}</span>)}
+    <span>Total: {formatMoney(total)}</span>
+  </div>,
+  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  DiscountBadge: () => null,
+}));
+vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
+  CashTendered: () => null,
+  ChangeDisplay: () => null,
 }));
 
 type Replicated = ReturnType<typeof useReplicatedProducts>;

@@ -24,9 +24,22 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
 // The real barrel fails to import under vitest (see live-tab-gate.test.tsx), so the choice screen
-// comes from its own module, and the POS pieces are stand-ins.
+// and the sale components (Cart, CartBar, Tender: TallyUI TV6a) come from their own submodules, and
+// the primitives Cart/Tender use internally (from '../cart', '../checkout', not the barrel) are
+// mocked below by path; the rest of the POS pieces are stand-ins.
 vi.mock('@tallyui/components', async () => ({
   ...await import('../node_modules/@tallyui/components/src/layout/store-settings-choice-screen'),
+  ...await import('../node_modules/@tallyui/components/src/sale'),
+  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) =>
+    <div>{items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}</div>,
+  ProductImage: () => null,
+  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
+  ProductPrice: () => null,
+  ProductStockBadge: () => null,
+  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  SearchInput: ({ placeholder }: ComponentProps<typeof SearchInput>) => <input placeholder={placeholder} />,
+}));
+vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
     { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
     {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
@@ -36,16 +49,10 @@ vi.mock('@tallyui/components', async () => ({
   CartTotal: ({ total }: CartTotalProps) => <span>Total: {formatMoney(total)}</span>,
   CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   DiscountBadge: () => null,
+}));
+vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
   CashTendered: () => null,
   ChangeDisplay: () => null,
-  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) =>
-    <div>{items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}</div>,
-  ProductImage: () => null,
-  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
-  ProductPrice: () => null,
-  ProductStockBadge: () => null,
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  SearchInput: ({ placeholder }: ComponentProps<typeof SearchInput>) => <input placeholder={placeholder} />,
 }));
 
 const session = { baseUrl: 'https://store.test', email: 'cashier@store.test', token: 'jwt' };

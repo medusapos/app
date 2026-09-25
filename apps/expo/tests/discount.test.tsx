@@ -7,12 +7,24 @@ import { medusaConnector } from '@tallyui/connector-medusa';
 import {
   catalogueEntries, createOrderBuilder, DISCOUNTS_UNSUPPORTED, TaxProvider, taxProviderProps, toOrderCreateEnvelope, useSale, type Order, type PosOrder,
 } from '@tallyui/pos';
+import { Cart, parseDiscount } from '@tallyui/components';
 import type { CartAction, CartLineProps, CartTotalProps } from '@tallyui/components';
-import { Cart } from '../components/cart';
-import { parseDiscount } from '../components/discount-form';
 import { Receipt } from '../components/receipt';
 
-vi.mock('@tallyui/components', () => ({
+// Cart etc. now live in @tallyui/components (TallyUI TV6a); importOriginal on the whole barrel fails
+// under vitest (see live-tab-gate.test.tsx), so the real one comes from its own submodule instead.
+// That submodule's index re-exports cart.tsx, cart-bar.tsx, tender.tsx and discount-form.tsx
+// together, so importing any one of them evaluates all four; the primitives they use internally
+// (from '../cart', '../checkout', not the barrel) are mocked below by path, tender.tsx's included,
+// even though this file never renders Tender.
+vi.mock('@tallyui/components', async () => ({
+  ...await import('../node_modules/@tallyui/components/src/sale'),
+}));
+vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
+  CashTendered: () => null,
+  ChangeDisplay: () => null,
+}));
+vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
     { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
     {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
@@ -43,7 +55,7 @@ let sale: ReturnType<typeof useSale>;
 type Props = { capabilities?: ServerCapabilities; onSaleCompleted?: (order: PosOrder) => void; settings?: PricingSettings };
 function SaleView({ settings = pricing, ...props }: Props) {
   sale = useSale(settings, { registerId: 'register-1', cashierRef: 'cashier', ...props });
-  return <Cart sale={sale} />;
+  return <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />;
 }
 const Harness = (props: Props) => <TaxProvider {...taxProviderProps(props.settings ?? pricing)}><SaleView {...props} /></TaxProvider>;
 const receiptSettings = { storeName: 'Shop', currency: 'EUR', location: { id: 'l', name: 'Main', countryCode: 'dk' } };
