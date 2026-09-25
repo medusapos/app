@@ -3,8 +3,8 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, moneyFromDecimalString, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { createOrderBuilder, TaxProvider, taxProviderProps, useStoreSettings, type LineItem, type PosOrder } from '@tallyui/pos';
-import type { CartPanelProps, CartLineProps, CartTotalProps, CashTenderedProps, ChangeDisplayProps } from '@tallyui/components';
+import { createOrderBuilder, TaxProvider, taxProviderProps, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import type { CartLineProps, CartTotalProps, CashTenderedProps, ChangeDisplayProps } from '@tallyui/components';
 import { Cart } from '../components/cart';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
@@ -17,10 +17,9 @@ import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettin
 import { useSession } from '../lib/session-context';
 import { posConnector } from '../lib/pos-connector';
 import ProductsScreen from '../app/index';
+import { setWindowWidth } from './window-width';
 
 vi.mock('@tallyui/components', () => ({
-  CartPanel: ({ items, renderItem, footer, emptyState }: CartPanelProps<LineItem>) =>
-    <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}{footer}</div>,
   CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) => <div role="group" aria-label={name}>
     <span>{name}</span><span>Quantity: {quantity}</span><span>Unit: {formatMoney(unitPrice)}</span><span>Line: {formatMoney(lineTotal)}</span>
   </div>,
@@ -93,6 +92,7 @@ const typeCash = (value: string) => fireEvent.change(screen.getByRole('textbox',
 function addSaleLines() { act(() => { sale.add(entries[0], traits); sale.add(entries[1], traits); sale.add(entries[0], traits); }); }
 
 beforeEach(() => {
+  setWindowWidth(1280);
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], flush: vi.fn(), requeue: vi.fn() });
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {

@@ -176,3 +176,19 @@ export async function variantIdBySku(token: string, sku: string): Promise<string
   const [variant] = variants as { id: string }[];
   return variant.id;
 }
+
+// Adds one E2E-1 by scanning its SKU into the search box.
+export async function addE2E1(page: Page) {
+  const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
+  await search.fill('E2E-1');
+  await search.press('Enter');
+  await expect(search).toHaveValue('');
+}
+
+// Applies a discount from the cart's one line (its Discount action) or the Order discount button.
+export async function discount(page: Page, opener: 'line' | 'order', type: 'Percent' | 'Amount', value: string) {
+  await (opener === 'line' ? page.getByText('Discount', { exact: true }) : page.getByRole('button', { name: 'Order discount', exact: true })).click();
+  await page.getByRole('button', { name: type, exact: true }).click();
+  await page.getByLabel('Discount value', { exact: true }).fill(value);
+  await page.getByRole('button', { name: 'Apply', exact: true }).click();
+}

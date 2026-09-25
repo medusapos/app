@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { adminToken, ordersByClientId, sellBySku, signIn } from './helpers';
+import { addE2E1, adminToken, discount, ordersByClientId, sellBySku, signIn } from './helpers';
 import { E2E_RUN } from './ports';
 
 // Discounts in the cart (TallyUI ADR-062): the plugin reports order.create [1, 2] at GET /tally/v1/info,
@@ -14,18 +14,6 @@ function captureCommands(page: Page): Command[] {
     if (request.method() === 'POST' && request.url() === `${backend}/tally/v1/commands`) commands.push(...request.postDataJSON().commands);
   });
   return commands;
-}
-async function addE2E1(page: Page) {
-  const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
-  await search.fill('E2E-1');
-  await search.press('Enter');
-  await expect(search).toHaveValue('');
-}
-async function discount(page: Page, opener: 'line' | 'order', type: 'Percent' | 'Amount', value: string) {
-  await (opener === 'line' ? page.getByText('Discount', { exact: true }) : page.getByRole('button', { name: 'Order discount', exact: true })).click();
-  await page.getByRole('button', { name: type, exact: true }).click();
-  await page.getByLabel('Discount value', { exact: true }).fill(value);
-  await page.getByRole('button', { name: 'Apply', exact: true }).click();
 }
 const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
   if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;

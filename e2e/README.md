@@ -133,6 +133,19 @@ A third gives `E2E-1` 100% off and completes it with cash at €0.00: applied
 with no warnings, a server `totalMinor` of 0 and one Medusa order (the plugin
 needs no payment collection for it). All three sell only `E2E-1`.
 
+`phone-cart.spec.ts` is the one spec at a phone viewport (360 × 740; the
+others run at Desktop Chrome, 1280 × 720) and proves the phone sale layout
+(ADR 0009). It adds two `E2E-1` by scan and checks that the cart bar is the
+full width, at least 56 px tall and reads "2 items". It opens the cart, gives
+the line 10% off and the order €0.50 off, and goes back to see the bar's
+€3.88. It reopens the cart and expects the line, the Total row and the
+side-by-side Cash and Card terminal buttons in the viewport, and again after
+scrolling to the order discount chip. A tap on `E2E-2` stays on Products with
+"3 items". With the order discount form open the two lines overflow, so
+scrolling to its Cancel moves the first line out of view while Total and Cash
+stay. It pays exact cash, and the new sale opens on Products with "Cart is
+empty".
+
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.

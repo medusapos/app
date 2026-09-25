@@ -8,6 +8,7 @@ import { TaxProvider, taxProviderProps, useStoreSettings, withPricingContext, wi
 
 import { Catalogue } from '../components/catalogue';
 import { Cart } from '../components/cart';
+import { CartBar } from '../components/cart-bar';
 import { Tender } from '../components/tender';
 import { Receipt } from '../components/receipt';
 import { SyncStatus } from '../components/sync-status';
@@ -177,6 +178,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     return () => markBusy('payment', false);
   }, [sale.stage.kind]);
   const { width } = useWindowDimensions();
+  // Phone mode (ADR 0009): products or the cart at full height, the tender over both; a new sale starts on products.
+  const phone = width < 600;
+  const [cartOpen, setCartOpen] = useState(false);
+  useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
 
   // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
@@ -189,10 +194,16 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
     + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
     + (error ? ` · ${error}` : '');
+  const catalogue = <View className="flex-1">
+    <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
+      lastStockCheckAt={lastStockCheckAt}
+      onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
+    <SyncStatus state={outboxState} />
+  </View>;
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
+      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
         <View dataSet={{ print: 'hide' }} className="flex-row gap-4">
         <Pressable accessibilityRole="button" onPress={() => router.push('/orders')}>
           <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>
@@ -208,17 +219,19 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
           {onRetry && sale.idle ? <Pressable accessibilityRole="button" onPress={onRetry}><Text className="text-foreground underline">Retry</Text></Pressable> : null}
-          <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
-            <View className="flex-1">
-              <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
-                lastStockCheckAt={lastStockCheckAt}
-                onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
-              <SyncStatus state={outboxState} />
-            </View>
+          {!phone ? <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
+            {catalogue}
             <View className="flex-1 border-t border-border bg-card">
               {sale.stage.kind === 'cart' ? <Cart sale={sale} /> : <Tender sale={sale} />}
             </View>
-          </View>
+          </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card"><Tender sale={sale} /></View>
+            : cartOpen ? <View className="flex-1 bg-card">
+              <View className="border-b border-border">
+                <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}
+                  className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
+              </View>
+              <Cart sale={sale} />
+            </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
         </View>}
     </ConnectorProvider>
   );
