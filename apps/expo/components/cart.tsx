@@ -9,7 +9,10 @@ import { DiscountChips, DiscountForm } from './discount-form';
 export function Cart({ sale }: { sale: ReturnType<typeof useSale> }) {
   const { order } = sale;
   const money = (amount: number) => ({ amount, currency: order.currency });
+  // order.display's figures (TallyUI ADR-063), with its tax split by rate; never app arithmetic (ADR 0008).
   const { totals } = buildReceiptData(order, { storeName: '' });
+  const vat = totals.taxLines.map((line) => ({ label: `${totals.taxInclusive ? 'Includes ' : ''}VAT ${line.ratePpm / 10000}%`,
+    amount: money(line.amountMinor) }));
   // The open discount form: a line's, or the order's (lineId null).
   const [form, setForm] = useState<{ lineId: string | null } | null>(null);
   const discountForm = (lineId: string | null, title: string) => form?.lineId === lineId
@@ -35,13 +38,15 @@ export function Cart({ sale }: { sale: ReturnType<typeof useSale> }) {
     </View>}
     footer={<View className="gap-3 pb-4">
       <DiscountChips discounts={order.discounts} currency={order.currency} onRemove={sale.removeDiscount} prefix="Order discount" />
-      {/* Information only: the lines and the subtotal are already after every discount, so the totals never subtract it. */}
-      {order.discountMinor > 0 ? <Text className="px-3 text-muted-foreground">Includes discounts of {formatMoney(money(order.discountMinor))}</Text> : null}
       {form?.lineId === null ? discountForm(null, 'Order discount') : order.lineItems.length ? <Pressable accessibilityRole="button"
         onPress={() => setForm({ lineId: null })} className="self-start rounded-md border border-border bg-card px-4 py-2 min-h-11 justify-center">
         <Text className="text-foreground">Order discount</Text></Pressable> : null}
-      <CartTotal subtotal={money(totals.subtotalMinor)} total={money(totals.totalMinor)}
-        taxLines={totals.taxLines.map((line) => ({ label: `VAT ${line.ratePpm / 10000}%`, amount: money(line.amountMinor) }))} />
+      {/* Exclusive: subtotal − discount + VAT = total. Inclusive: subtotal − discount = total, the VAT under it, not added. */}
+      <View><CartTotal subtotal={money(totals.subtotalMinor)} discount={money(totals.discountMinor)} total={money(totals.totalMinor)}
+        taxLines={totals.taxInclusive ? undefined : vat} />
+      {totals.taxInclusive ? vat.map((line) => <View key={line.label} accessibilityLabel={`${line.label}: ${formatMoney(line.amount)}`}
+        className="flex-row justify-between px-3 pb-2"><Text className="text-sm text-muted-foreground">{line.label}</Text>
+        <Text className="text-sm text-muted-foreground">{formatMoney(line.amount)}</Text></View>) : null}</View>
       {sale.error ? <Text accessibilityRole="alert" className="text-destructive">{sale.error}</Text> : null}
       <Pressable accessibilityRole="button" disabled={!order.lineItems.length} onPress={() => sale.startTender('cash')} className={`rounded-md bg-primary px-4 py-3 ${!order.lineItems.length ? 'opacity-50' : ''}`}>
         <Text className="text-center font-semibold text-primary-foreground">Cash</Text>

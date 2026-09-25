@@ -37,12 +37,13 @@ const [blue] = catalogueEntries([{ id: 'shirt', title: 'Shirt', status: 'publish
   variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12.5, currency_code: 'eur' }] }] }], traits);
 const money = (amount: number) => formatMoney({ amount, currency: 'EUR' });
 let sale: ReturnType<typeof useSale>;
-type Props = { capabilities?: ServerCapabilities; onSaleCompleted?: (order: PosOrder) => void };
-function SaleView(props: Props) {
-  sale = useSale(pricing, { registerId: 'register-1', cashierRef: 'cashier', ...props });
+type Props = { capabilities?: ServerCapabilities; onSaleCompleted?: (order: PosOrder) => void; settings?: PricingSettings };
+function SaleView({ settings = pricing, ...props }: Props) {
+  sale = useSale(settings, { registerId: 'register-1', cashierRef: 'cashier', ...props });
   return <Cart sale={sale} />;
 }
-const Harness = (props: Props) => <TaxProvider {...taxProviderProps(pricing)}><SaleView {...props} /></TaxProvider>;
+const Harness = (props: Props) => <TaxProvider {...taxProviderProps(props.settings ?? pricing)}><SaleView {...props} /></TaxProvider>;
+const receiptSettings = { storeName: 'Shop', currency: 'EUR', location: { id: 'l', name: 'Main', countryCode: 'dk' } };
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
 function discount(opener: string, type: 'Percent' | 'Amount', value: string) {
   click(opener);
@@ -108,11 +109,9 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     expect(sale.order.discounts).toHaveLength(1);
   });
 
-  // A known TallyUI gap (order-builder recalculateLine): stacked line discounts are each computed on the line's FULL
-  // price, not on what is left, so 10% then €12.00 on a €12.50 line passes the cap check at amountMinor 1200 while only
-  // €11.25 comes off. This asserts the correct behaviour, so it fails today. The Front desk has queued the fix in
-  // TallyUI; once TallyUI caps per discount this starts failing, and the `.fails` marker must be removed.
-  it.fails('refuses a stacked fixed line discount above what the earlier ones leave, or labels what comes off', () => {
+  // 10% then €12.00 on a €12.50 line: only €11.25 is left, so the fixed discount is refused or labelled €11.25.
+  // TallyUI #129 fixed this: each stacked line discount's amountMinor is what it actually removed.
+  it('refuses a stacked fixed line discount above what the earlier ones leave, or labels what comes off', () => {
     render(<Harness capabilities={{ orderCreate: 2 }} />);
     act(() => sale.add(blue, traits));
     discount('Discount', 'Percent', '10');
@@ -152,20 +151,40 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     const order = expected.getSnapshot();
     expect(totals(sale.order)).toEqual(totals(order));
     expect(sale.order.lineItems[0]).toMatchObject({ discountMinor: 300, orderDiscountMinor: 50, netMinor: 2200 });
-    // The totals are three rows that add up (exclusive: subtotal + VAT = total); the discount is information outside them.
-    expect(order.subtotalMinor + order.taxMinor).toBe(order.totalMinor);
-    expect(screen.getByText(`Subtotal: ${money(order.subtotalMinor)}`)).toBeTruthy();
-    expect(screen.getByText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
-    expect(screen.getByText(`Total: ${money(order.totalMinor)}`)).toBeTruthy();
-    expect(screen.queryByText(/^Discount: /)).toBeNull();
-    expect(screen.getByText(`Includes discounts of ${money(order.discountMinor)}`)).toBeTruthy();
+    expect(screen.getByText(`Discount: ${money(300)}`)).toBeTruthy();
     expect(screen.getByText('10%')).toBeTruthy();
     expect(screen.getByText(`Order discount −${money(50)}`)).toBeTruthy();
     expect(screen.queryByRole('group')).toBeNull();
     click('Remove discount 10%');
     click(`Remove discount ${money(50)}`);
     expect(totals(sale.order)).toEqual(plain);
-    expect(screen.queryByText(/^Includes discounts of/)).toBeNull();
+    expect(screen.queryByText(/^Discount: /)).toBeNull();
+  });
+
+  // Two shirts at €12.50, 10% off the line and €0.50 off the order: €3.00 off, 25% VAT, in each display mode (ADR-063).
+  it.each([
+    [false, { subtotalMinor: 2500, discountMinor: 300, taxMinor: 550, totalMinor: 2750 }],
+    [true, { subtotalMinor: 2500, discountMinor: 300, taxMinor: 440, totalMinor: 2200 }],
+  ])('cart and receipt show order.display\'s rows, which add up (prices include tax: %s)', (inclusive, expected) => {
+    render(<Harness settings={{ ...pricing, pricesIncludeTax: inclusive }} capabilities={{ orderCreate: 2 }} />);
+    act(() => { sale.add(blue, traits); sale.add(blue, traits); });
+    discount('Discount', 'Percent', '10');
+    discount('Order discount', 'Amount', '0.50');
+    const { display } = sale.order;
+    expect(display).toEqual({ taxInclusive: inclusive, ...expected });
+    // Exclusive: subtotal − discount + VAT = total. Inclusive: subtotal − discount = total, the VAT included.
+    expect(display.subtotalMinor - display.discountMinor + (inclusive ? 0 : display.taxMinor)).toBe(display.totalMinor);
+    expect(screen.getByText(`Subtotal: ${money(display.subtotalMinor)}`)).toBeTruthy();
+    expect(screen.getByText(`Discount: ${money(display.discountMinor)}`)).toBeTruthy();
+    expect(screen.getByText(`Total: ${money(display.totalMinor)}`)).toBeTruthy();
+    if (inclusive) expect(screen.getByLabelText(`Includes VAT 25%: ${money(display.taxMinor)}`)).toBeTruthy();
+    expect(screen.queryByText(`VAT 25%: ${money(display.taxMinor)}`)).toEqual(inclusive ? null : expect.anything());
+    const order = sale.order;
+    cleanup();
+    render(<Receipt order={order} settings={receiptSettings} cashier="cashier" registerId="register-1" newSale={() => {}} />);
+    const rows = [`Subtotal: ${money(display.subtotalMinor)}`, `Discount: −${money(display.discountMinor)}`,
+      `${inclusive ? 'Includes ' : ''}VAT 25%: ${money(display.taxMinor)}`, `Total: ${money(display.totalMinor)}`];
+    for (const label of rows) expect(screen.getByLabelText(label)).toBeTruthy();
   });
 
   it('at order.create 1 shows TallyUI\'s message when applying, and the order stays undiscounted', async () => {
@@ -204,14 +223,13 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     expect(envelope.version).toBe(2);
     expect(envelope.payload).toMatchObject({ discountMinor: 500, totalMinor: order.totalMinor, lines: [expect.objectContaining({ discountMinor: 500 })] });
     cleanup();
-    render(<Receipt order={order} settings={{ storeName: 'Shop', currency: 'EUR', location: { id: 'l', name: 'Main', countryCode: 'dk' } }}
-      cashier="cashier" registerId="register-1" newSale={() => {}} />);
+    render(<Receipt order={order} settings={receiptSettings} cashier="cashier" registerId="register-1" newSale={() => {}} />);
     // The line's own discounts label its description; the amounts come from the snapshot.
     expect(screen.getByText(`2 × ${money(1250)} · 10% off · ${money(250)} off`)).toBeTruthy();
-    expect(screen.getByText(`Includes discounts of ${money(500)}`)).toBeTruthy();
-    expect(screen.queryByLabelText(/^Discount/)).toBeNull();
-    expect(screen.getByLabelText(`Subtotal: ${money(order.subtotalMinor)}`)).toBeTruthy();
+    expect(screen.getByLabelText(`Discount: −${money(500)}`)).toBeTruthy();
+    expect(screen.getByLabelText(`Subtotal: ${money(2500)}`)).toBeTruthy();
     expect(screen.getByLabelText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
-    expect(screen.getByLabelText(`Total: ${money(order.subtotalMinor + order.taxMinor)}`)).toBeTruthy();
+    expect(screen.getByLabelText(`Total: ${money(order.totalMinor)}`)).toBeTruthy();
+    expect(screen.queryByText(/^Includes/)).toBeNull();
   });
 });

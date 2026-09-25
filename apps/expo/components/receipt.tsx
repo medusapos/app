@@ -21,6 +21,9 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
     <Text className={`text-foreground ${bold ? 'font-semibold' : ''}`}>{label}</Text>
     <Text className={`text-right text-foreground ${bold ? 'font-semibold' : ''}`}>{amount}</Text>
   </View>;
+  const { totals } = receipt;
+  const vat = totals.taxLines.map((line, index) =>
+    row(`${totals.taxInclusive ? 'Includes ' : ''}VAT ${line.ratePpm / 10000}%`, money(line.amountMinor), false, index));
   return <>
     {stripHeight > 0 ? <View dataSet={{ print: 'hide' }} style={{ height: stripHeight, flexShrink: 0 }} /> : null}
     <View className="w-full max-w-md self-center gap-3 p-4 bg-card">
@@ -35,11 +38,13 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
       {row(`${line.quantity} × ${money(line.unitPriceMinor)}${order.lineItems[index].discounts
         .map((discount) => ` · ${discountLabel(discount, receipt.currency)} off`).join('')}`, money(line.lineTotalMinor))}
     </View>)}
-    {/* Information only: the lines and the subtotal are already after every discount. */}
-    {receipt.totals.discountMinor > 0 ? <Text className="text-muted-foreground">Includes discounts of {money(receipt.totals.discountMinor)}</Text> : null}
-    {row('Subtotal', money(receipt.totals.subtotalMinor))}
-    {receipt.totals.taxLines.map((line, index) => row(`VAT ${line.ratePpm / 10000}%`, money(line.amountMinor), false, index))}
-    {row('Total', money(receipt.totals.totalMinor), true)}
+    {/* order.display's figures (TallyUI ADR-063, ADR 0008). Exclusive: subtotal − discount + VAT = total; inclusive:
+        subtotal − discount = total, and the VAT is shown under it as included, not added. */}
+    {row('Subtotal', money(totals.subtotalMinor))}
+    {totals.discountMinor > 0 ? row('Discount', `−${money(totals.discountMinor)}`) : null}
+    {totals.taxInclusive ? null : vat}
+    {row('Total', money(totals.totalMinor), true)}
+    {totals.taxInclusive ? vat : null}
     {receipt.payments.map((payment, index) => row(payment.method === 'cash' ? 'Cash tendered' : 'Card terminal',
       money(payment.amountMinor) + (payment.reference ? ` · ${payment.reference}` : ''), false, index))}
     {row('Change', money(receipt.changeDueMinor))}
