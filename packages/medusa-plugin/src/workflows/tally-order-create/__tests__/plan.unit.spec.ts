@@ -38,6 +38,8 @@ it('produces the exact EUR tax-inclusive draft plan without mutating its inputs'
         metadata: {
           tally_client_id: 'client_order', tally_created_at: '2026-09-23T10:00:00Z', tally_command_id: 'command_1',
           tally_payments: payload.payments, tally_register_id: 'register_1', tally_cashier_ref: 'cashier_1',
+          tally_pos_totals: { v: 1, currency: 'EUR', exponent: 2,
+            settlement: { subtotalMinor: 1409, discountMinor: 0, taxMinor: 296, totalMinor: 1705 } },
         },
         items: [
           { variant_id: 'variant_1', quantity: 2, unit_price: '8.50', is_tax_inclusive: true, metadata: { tally_line_uuid: 'line_1' } },
@@ -283,5 +285,22 @@ describe('version 2 discounts (ADR-062)', () => {
     expect(planOrderCreate({ ...payload, lines }, ctx)).toEqual({
       ok: false, rejection: { code: 'invalid_quantity', message: 'Invalid lines[0].discountMinor' },
     })
+  })
+})
+
+describe('tally_pos_totals metadata (ADR 0012)', () => {
+  it('records v1, the payload currency and exponent, and settlement as sent, defaulting discountMinor to 0', () => {
+    const result = planOrderCreate(payload, ctx)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.draftOrder.metadata.tally_pos_totals).toEqual({
+      v: 1, currency: 'EUR', exponent: 2,
+      settlement: { subtotalMinor: 1409, discountMinor: 0, taxMinor: 296, totalMinor: 1705 },
+    })
+  })
+
+  it('records settlement.discountMinor from the payload when present', () => {
+    const result = planOrderCreate({ ...payload, discountMinor: 155 }, ctx)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.draftOrder.metadata.tally_pos_totals).toMatchObject({ settlement: { discountMinor: 155 } })
   })
 })
