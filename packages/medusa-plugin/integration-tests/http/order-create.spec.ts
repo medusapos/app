@@ -45,7 +45,7 @@ medusaIntegrationTestRunner({
         entity: 'order', filters: { id: result.serverRefs!.orderId },
         fields: ['id', 'display_id', 'status', 'total', 'raw_total', 'tax_total', 'metadata',
           'items.id', 'items.variant_id', 'items.quantity', 'items.unit_price', 'items.requires_shipping',
-          'items.metadata', 'items.tax_lines.rate', 'payment_collections.amount', 'payment_collections.status',
+          'items.metadata', 'items.is_tax_inclusive', 'items.tax_lines.rate','payment_collections.amount', 'payment_collections.status',
           'fulfillments.id', 'fulfillments.location_id', 'fulfillments.shipping_option_id'],
       })
       expect(order.status).toBe('completed')
@@ -106,6 +106,27 @@ medusaIntegrationTestRunner({
       expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([11.9])
       expect(result.serverRefs!.totalMinor).toBe(1190)
       expect(result.warnings).toBeUndefined()
+    })
+
+    it('mixed modes: a taxInclusive false line in a tax-inclusive order records the till total with no total_mismatch', async () => {
+      // 19%: A inclusive 1000 = net round(1000 / 1.19) 840 + tax 160 (as command()); B exclusive 1000 + tax 190 = 1190.
+      const sale = command({
+        lines: [
+          { clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000 },
+          { clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, taxInclusive: false },
+        ],
+        subtotalMinor: 840 + 1000, taxMinor: 160 + 190, totalMinor: 1000 + 1190,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2190 }],
+      })
+      const result = await runOrderCreate(container, sale)
+      const order = await readOrder(result)
+      expect(result.warnings).toBeUndefined()
+      expect(result.serverRefs!.totalMinor).toBe(2190)
+      expect(Number(order.total)).toBe(21.9)
+      expect(Number(order.tax_total)).toBeCloseTo(3.4966, 4) // 10 - 10 / 1.19 + 1.90
+      expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([21.9])
+      const modes = Object.fromEntries(order.items.map(item => [item.variant_id, item.is_tax_inclusive]))
+      expect(modes).toEqual({ [data.variantA]: true, [data.variantB]: false })
     })
 
     it.each([31, 30])('unrounded total 0.3094 with POS total %i keeps the POS collection amount and reports rounded server total', async totalMinor => {

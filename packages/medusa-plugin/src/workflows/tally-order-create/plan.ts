@@ -121,7 +121,8 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
           variant_id: line.variantId,
           quantity: line.quantity,
           unit_price: minorToMajor(line.unitPriceMinor, decimals),
-          is_tax_inclusive: payload.pricesIncludeTax,
+          // A line's own tax mode wins; absent means the order's (ADR-038 amendment).
+          is_tax_inclusive: line.taxInclusive ?? payload.pricesIncludeTax,
           metadata: { tally_line_uuid: line.clientLineId },
         })),
       },

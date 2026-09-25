@@ -8,7 +8,7 @@ const products = [
   { id: 'shirt', title: 'Shirt', status: 'published', variants: [
     { id: 'small', title: 'Small', sku: 'COLLISION', barcode: '111',
       prices: [{ amount: 20, currency_code: 'eur' }],
-      calculated_price: { currency_code: 'eur', calculated_amount: 12.5,
+      calculated_price: { currency_code: 'eur', calculated_amount: 12.5, original_amount: 20,
         calculated_price: { price_list_type: 'sale' } } },
     { id: 'large', title: 'Large', sku: ' LARGE ', barcode: '222', prices: [] },
   ] },

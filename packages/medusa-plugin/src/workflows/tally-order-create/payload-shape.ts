@@ -31,6 +31,9 @@ export function payloadShapeErrors(payload: unknown): string[] {
       if (item[optionalString] !== undefined) {
         check(typeof item[optionalString] === 'string', `${path}.${optionalString}`, 'a string')
       }
+      if (isLines && item.taxInclusive !== undefined) {
+        check(typeof item.taxInclusive === 'boolean', `${path}.taxInclusive`, 'a boolean')
+      }
       for (const key of isLines ? ['quantity', 'unitPriceMinor'] : ['amountMinor']) number(item[key], `${path}.${key}`)
       if (!isLines) {
         for (const key of ['tenderedMinor', 'changeMinor']) {
