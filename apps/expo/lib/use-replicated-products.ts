@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 
+import { filter, firstValueFrom } from 'rxjs';
+
 import {
-  createTallyDatabase, getStorageHealth, isStorageWorkerFailure, startIdReconcile, startReplication,
-  startStockReconcile, STOCK_LEVELS_COLLECTION, type IdReconcileResult,
+  createTallyDatabase, getStorageHealth, isFingerprintResultCurrent, isStorageWorkerFailure, startFingerprintReconcile,
+  startIdReconcile, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION, type IdReconcileResult,
 } from '@tallyui/database';
 import type { SyncContext, TallyConnector } from '@tallyui/core';
+import { MEDUSA_CALCULATED_PRICE_RECONCILE_INTERVAL_MS } from '@tallyui/connector-medusa';
 import { stockOverlay$ } from '@tallyui/pos';
 import {
-  deleteLegacyProductCache, isUnauthorizedError, openProductCache, pricedCacheName, productCacheStorage, sweepProductCaches,
+  deleteLegacyProductCache, isUnauthorizedError, openProductCache, pricedCacheName, productCacheStorage, recordProductCache,
+  sweepProductCaches,
 } from './product-cache';
 import { reportStorageStartFailure } from './live-tab';
 import { watchStorageHealth } from './storage-health';
@@ -41,6 +45,8 @@ export function useReplicatedProducts(
   const [error, setError] = useState<string | null>(null);
   const [stockOverlay, setStockOverlay] = useState<Map<string, unknown>>();
   const [lastStockCheckAt, setLastStockCheckAt] = useState<Date | null>(null);
+  // Products the sales channel does not list (the calculated-price runner's `unreported`); undefined until its first pass.
+  const [unlisted, setUnlisted] = useState<{ count: number; stale: boolean }>();
   const stockRunner = useRef<ReturnType<typeof startStockReconcile>>(undefined);
   const reconcileStock = useCallback(async () => {
     const runner = stockRunner.current;
@@ -91,6 +97,7 @@ export function useReplicatedProducts(
     (async () => {
       try {
         const name = pricedCacheName(connector.id, baseUrl, context.pricingContext);
+        recordProductCache(baseUrl, name); // before its first sync, so a sweep or sign-out finds it
         const { db, close: closeCache } = await openProductCache(
           name, () => createTallyDatabase({ connector, name, storage: productCacheStorage() }),
         );
@@ -170,6 +177,31 @@ export function useReplicatedProducts(
           cleanup.unshift(() => idRunner!.stop());
         }
 
+        // D2b: calculated prices change with no timestamp bump (a price list starting or ending), so a runner
+        // re-checks them every 30 minutes; D2a: a nightly backstop for drifted base prices. Both only queue
+        // refreshes (refreshOnly), never deletions, and a failed pass is logged and shown as stale, never fatal.
+        const reSync = () => replication.reSync();
+        const calculatedAdapter = connector.reconcile?.calculatedPrices;
+        let priceRunner: ReturnType<typeof startFingerprintReconcile> | undefined;
+        if (calculatedAdapter) {
+          priceRunner = startFingerprintReconcile({
+            collection: db.products, adapter: calculatedAdapter, context, reSync,
+            intervalMs: MEDUSA_CALCULATED_PRICE_RECONCILE_INTERVAL_MS, maxPages: 1000, startDelayMs: null,
+          });
+          const runnerState = priceRunner.state$.subscribe((state) => {
+            if (!cancelled && state.lastResult) {
+              setUnlisted({ count: state.lastResult.unreported, stale: !isFingerprintResultCurrent(state) });
+            }
+          });
+          cleanup.unshift(() => { priceRunner!.stop(); runnerState.unsubscribe(); setUnlisted(undefined); });
+        }
+        const baseAdapter = connector.reconcile?.prices;
+        if (baseAdapter) {
+          // The runner's default 24 h interval, and no start pass.
+          const baseRunner = startFingerprintReconcile({ collection: db.products, adapter: baseAdapter, context, reSync });
+          cleanup.unshift(() => baseRunner.stop());
+        }
+
         setState('syncing');
         await replication.awaitInitialReplication();
         if (!cancelled) {
@@ -179,7 +211,7 @@ export function useReplicatedProducts(
           // One-time cleanup of the pre-SQLite Dexie cache, now that this mount's
           // first pull has landed in the new store; never blocks rendering on it.
           void deleteLegacyProductCache(connector.id, baseUrl);
-          // Likewise the cache of the store's previous pricing context, and records this one's name.
+          // Likewise every other product cache of the store (earlier pricing contexts) that is not open.
           void sweepProductCaches(connector.id, baseUrl, name);
           void reconcileStock();
           idRunner?.reconcileIds().then((result) => {
@@ -191,6 +223,14 @@ export function useReplicatedProducts(
           }, (err) => {
             if (!cancelled) console.warn('Id reconcile failed:', err);
           });
+          // One start pass, so the unlisted count is known at once; only once no pull is in flight, so it
+          // never overlaps the first sync's own priced requests (TallyUI #97).
+          if (priceRunner) {
+            const runner = priceRunner;
+            firstValueFrom(replication.active$.pipe(filter((active) => !active)))
+              .then(() => (cancelled ? undefined : runner.reconcile()))
+              .catch((err) => { if (!cancelled) console.warn('Calculated-price reconcile failed:', err); });
+          }
         }
       } catch (err) {
         if (!cancelled) {
@@ -207,5 +247,5 @@ export function useReplicatedProducts(
     };
   }, [connector, baseUrl, context, onUnauthorized, reconcileStock]);
 
-  return { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock };
+  return { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted };
 }

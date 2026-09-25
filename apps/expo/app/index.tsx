@@ -135,14 +135,15 @@ function PricingScreen(props: PricingProps) {
   if (!pos) return <SettingsMessage text="Loading store settings…" actions={{}} />;
   return <TaxProvider {...taxProviderProps(pos.pricing)}>
     <SignedInProducts {...props} pricing={pos.pricing} syncContext={pos.syncContext} onBusy={setBusy}
-      settingsStatus={props.settingsStatus ?? (store.state !== 'ready' ? 'Offline' : null)} onRetry={store.state === 'error' ? store.retry : undefined} />
+      settingsStatus={props.settingsStatus ?? (store.state === 'error' ? 'Offline'
+        : store.state === 'choose' || store.state === 'unsupported' ? 'Store settings changed; this applies after the current sale' : null)} onRetry={store.state === 'error' ? store.retry : undefined} />
   </TaxProvider>;
 }
 
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
-  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock } =
+  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
   const { record, state: outboxState, recent } = useOutboxContext();
@@ -172,6 +173,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   );
   const sellableCount = sorted.length;
   const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
+    + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
     + (error ? ` · ${error}` : '');
 
   return (

@@ -71,7 +71,7 @@ test('an unlisted product stays hidden', async ({ page }) => {
   const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
   await search.fill('E2E-U');
   await expect(page.getByText('No products match "E2E-U".', { exact: true })).toBeVisible();
-  await expect(page.getByText(/Up to date · 5 products · 0 matching/)).toBeVisible();
+  await expect(page.getByText(/Up to date · 5 products · 1 not sold in this channel · 0 matching/)).toBeVisible();
   await search.press('Enter');
   await expect(search).toHaveValue('E2E-U');
 });
@@ -107,6 +107,8 @@ test('a region change resyncs the catalogue at the new region\'s price', async (
     await chooseRegion(page, 'Germany');
     await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
     await expect(tile(page)).toContainText(germanyPrice);
+    // The calculated-price runner's start pass (D2b): E2E-U is replicated but not in the key's channel.
+    await expect(page.getByText(/Up to date · 5 products · 1 not sold in this channel/)).toBeVisible();
   } finally {
     expect((await moveTo('dk')).ok).toBeTruthy();
     expect((await setPrices([{ currency_code: 'eur', amount: 2 }])).ok).toBeTruthy();

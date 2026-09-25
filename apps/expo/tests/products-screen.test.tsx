@@ -67,7 +67,7 @@ vi.mock('@tallyui/components', () => ({
 type Replicated = ReturnType<typeof useReplicatedProducts>;
 const reconcileStock = vi.fn(async () => {});
 const replicated = (over: Partial<Replicated>): Replicated => ({ products: [], state: 'synced', error: null,
-  lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, ...over });
+  lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, unlisted: undefined, ...over });
 
 const settings: StoreSettings = {
   storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' },
@@ -172,6 +172,29 @@ describe('ProductsScreen catalogue', () => {
     fireEvent.keyDown(screen.getByPlaceholderText('Search or scan barcode / SKU'), { key: 'Enter' });
     expect(screen.getByText('Zebra: €12.50 × 1 = €12.50')).toBeTruthy();
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
+  });
+
+  it.each([
+    [undefined, 'MedusaJS · Up to date · 0 products'],
+    [{ count: 0, stale: false }, 'MedusaJS · Up to date · 0 products'],
+    [{ count: 1, stale: false }, 'MedusaJS · Up to date · 0 products · 1 not sold in this channel'],
+    [{ count: 1200, stale: true }, 'MedusaJS · Up to date · 0 products · 1,200 not sold in this channel (last check failed)'],
+  ])('shows the unlisted count %j on the status line', async (unlisted, text) => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ unlisted }));
+    await mount();
+    expect(screen.getByText(text)).toBeTruthy();
+  });
+
+  it('says a held unsupported settings result applies after the sale, not "Offline"', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt', status: 'published',
+      variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] }));
+    const view = await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    vi.mocked(useStoreSettings).mockReturnValue({ state: 'unsupported' });
+    await act(async () => { view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>); });
+    expect(screen.getByText('Store settings changed; this applies after the current sale')).toBeTruthy();
+    expect(screen.queryByText('Offline')).toBeNull();
+    expect(screen.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
   });
 
   it('shows the outbox status and attention count and pushes Orders without replacing the route', async () => {
