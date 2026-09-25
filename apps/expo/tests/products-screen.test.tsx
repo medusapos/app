@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
-import type { ProductGrid, SearchInput, CartPanelProps, CartLineProps, CartTotalProps } from '@tallyui/components';
+import type { ProductGrid, SearchInput, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, useStoreSettings, type LineItem, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { saveSession } from '../lib/session';
@@ -17,6 +17,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { SyncStatus } from '../components/sync-status';
 import { OutboxStrip, StoreRefused } from '../components/store-refused';
 import { formatStockSyncTime } from '../components/catalogue';
+import { setWindowWidth } from './window-width';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
@@ -37,8 +38,6 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
 vi.mock('@tallyui/components', () => ({
-  CartPanel: ({ items, renderItem, footer, emptyState }: CartPanelProps<LineItem>) =>
-    <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}{footer}</div>,
   CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) =>
     <div>{name}: {formatMoney(unitPrice)} × {quantity} = {formatMoney(lineTotal)}</div>,
   CartTotal: ({ subtotal, total, taxLines }: CartTotalProps) => <div>
@@ -47,6 +46,8 @@ vi.mock('@tallyui/components', () => ({
     <span>Total: {formatMoney(total)}</span>
   </div>,
   CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  CashTendered: () => null,
+  ChangeDisplay: () => null,
   DiscountBadge: () => null,
   ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
     <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
@@ -80,6 +81,7 @@ const pricing: PricingSettings = {
   pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' },
 };
 beforeEach(() => {
+  setWindowWidth(1280);
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -382,6 +384,56 @@ describe('ProductsScreen live stock', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...outbox, recent: [{ ...short }] });
     view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>);
     expect(reconcileStock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('ProductsScreen sale layout (ADR 0009)', () => {
+  const button = (name: string | RegExp) => screen.getByRole('button', { name });
+  const search = () => screen.queryByPlaceholderText('Search or scan barcode / SKU');
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  it('at 360 wide adds stay on Products, the bar opens the cart, Products returns, and tender and new sale take over', async () => {
+    setWindowWidth(360);
+    await mount();
+    expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(button('Shirt'));
+    expect(button('Open cart, 1 item, €15.00').textContent).toBe('Cart · 1 item€15.00');
+    fireEvent.click(button('Shirt'));
+    expect(button('Open cart, 2 items, €30.00').textContent).toBe('Cart · 2 items€30.00');
+    expect(search()).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cash' })).toBeNull();
+    fireEvent.click(button(/^Open cart/));
+    expect(screen.getByText('Shirt: €12.00 × 2 = €24.00')).toBeTruthy();
+    expect(search()).toBeNull();
+    fireEvent.click(button('Products'));
+    expect(search()).toBeTruthy();
+    fireEvent.click(button('Open cart, 2 items, €30.00'));
+    expect(screen.getByText('Shirt: €12.00 × 2 = €24.00')).toBeTruthy();
+    fireEvent.click(button('Cash'));
+    expect(button('Complete sale')).toBeTruthy();
+    for (const name of ['Products', /^Open cart/, 'Cash']) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(search()).toBeNull();
+    fireEvent.click(button('Back'));
+    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    fireEvent.click(button('New sale'));
+    expect(button('Cart is empty')).toBeTruthy();
+    expect(search()).toBeTruthy();
+  });
+
+  it('at 1280 wide shows the catalogue and cart with no bar; the order discount scrolls and pay is pinned', async () => {
+    await mount();
+    fireEvent.click(button('Shirt'));
+    expect(search()).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /^Open cart|^Cart is empty$/ })).toBeNull();
+    const scroll = within(screen.getByTestId('cart-scroll'));
+    expect(scroll.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
+    expect(scroll.getByRole('button', { name: 'Order discount' })).toBeTruthy();
+    expect(scroll.queryByRole('button', { name: 'Cash' })).toBeNull();
+    const footer = within(screen.getByTestId('cart-footer'));
+    for (const name of ['Cash', 'Card terminal']) expect(footer.getByRole('button', { name })).toBeTruthy();
+    expect(footer.getByText('Total: €15.00')).toBeTruthy();
   });
 });
 

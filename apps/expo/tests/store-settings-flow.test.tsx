@@ -2,10 +2,10 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CartLineProps, CartPanelProps, CartTotalProps, ProductGrid, SearchInput } from '@tallyui/components';
+import type { CartLineProps, CartTotalProps, ProductGrid, SearchInput } from '@tallyui/components';
 import { formatMoney, SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
-import type { LineItem } from '@tallyui/pos';
 import ProductsScreen from '../app/index';
+import { setWindowWidth } from './window-width';
 import { useOutboxContext } from '../lib/outbox-context';
 import { posConnector } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
@@ -27,8 +27,6 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
 // comes from its own module, and the POS pieces are stand-ins.
 vi.mock('@tallyui/components', async () => ({
   ...await import('../node_modules/@tallyui/components/src/layout/store-settings-choice-screen'),
-  CartPanel: ({ items, renderItem, footer, emptyState }: CartPanelProps<LineItem>) =>
-    <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}{footer}</div>,
   CartLine: ({ name, quantity, lineTotal }: CartLineProps) => <div>{name} × {quantity} = {formatMoney(lineTotal)}</div>,
   CartTotal: ({ total }: CartTotalProps) => <span>Total: {formatMoney(total)}</span>,
   CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
@@ -65,6 +63,7 @@ const button = (name: string) => screen.getByRole('button', { name });
 const pos = () => screen.findByPlaceholderText('Search or scan barcode / SKU');
 
 beforeEach(() => {
+  setWindowWidth(1280);
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,

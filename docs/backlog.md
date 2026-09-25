@@ -25,11 +25,12 @@ Plugin, low priority. Half-cent gap: Medusa stores an unrounded order total
 works out to half a cent (ADR-037); the order shows a 0.005 difference
 between its total and the captured payment.
 
-## 360 px cart layout after a discount
+## TallyUI's CartPanel needs a list-footer slot
 
-UI, next after discounts. 360 px cart layout: after a discount, the chips,
-the Order discount button and the totals push the cart lines out of view in
-the bottom half of a phone screen (the tester's main surface).
+`apps/expo/components/cart.tsx` composes the cart itself (ADR 0009) because
+`CartPanel` scrolls only its items: the order discount has to scroll after
+the last line, above the pinned footer. A `listFooter` slot inside
+`CartPanel`'s scroll area (TallyUI) would let the app use it again.
 
 ## Tap race when new store settings land
 

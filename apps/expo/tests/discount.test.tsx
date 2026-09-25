@@ -4,8 +4,8 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, type ServerCapabilities, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { createOrderBuilder, TaxProvider, taxProviderProps, toOrderCreateEnvelope, type LineItem, type Order, type PosOrder } from '@tallyui/pos';
-import type { CartAction, CartLineProps, CartPanelProps, CartTotalProps } from '@tallyui/components';
+import { createOrderBuilder, TaxProvider, taxProviderProps, toOrderCreateEnvelope, type Order, type PosOrder } from '@tallyui/pos';
+import type { CartAction, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { Cart } from '../components/cart';
 import { parseDiscount } from '../components/discount-form';
 import { Receipt } from '../components/receipt';
@@ -13,8 +13,6 @@ import { catalogueEntries } from '../lib/catalogue';
 import { DISCOUNTS_UNSUPPORTED, useSale } from '../lib/use-sale';
 
 vi.mock('@tallyui/components', () => ({
-  CartPanel: ({ items, renderItem, footer }: CartPanelProps<LineItem>) =>
-    <div>{items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>)}{footer}</div>,
   CartLine: ({ name, lineTotal }: CartLineProps) => <span>{name}: {formatMoney(lineTotal)}</span>,
   CartLineActions: ({ children, actions }: { children: ReactNode; actions: CartAction[] }) => <div>{children}
     {actions.map((action) => <button key={action.id} onClick={action.onPress}>{action.label}</button>)}</div>,
