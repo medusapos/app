@@ -55,3 +55,38 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(3.88);
   await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toBeVisible();
 });
+
+// ADR 0009 amendment: a keyboard-wedge scan in the phone cart view adds the product (job "wedge scan").
+test('a keyboard-wedge scan in the cart view adds a product, and an unknown code alerts without adding one', async ({ page }) => {
+  await signIn(page);
+  await addE2E1(page);
+  await page.getByRole('button', { name: /^Open cart, / }).click();
+  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+
+  // A tapped Pressable keeps focus in Chromium and activates on Enter; the scan's Enter must not also press it
+  // (review follow-up). Tap "+" (E2E-1 to quantity 2), then scan without clicking anything else.
+  await page.getByRole('button', { name: 'Increase E2E product 1', exact: true }).click();
+  await expect(page.getByText(/× 2$/)).toHaveCount(1);
+  await page.keyboard.type('E2E-2', { delay: 10 });
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
+  await expect(page.getByText(/× 2$/)).toHaveCount(1);
+  await expect(page.getByText(/× 1$/)).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.type('ZZZ-NOPE', { delay: 10 });
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('alert')).toHaveText('No product matches "ZZZ-NOPE"');
+  await expect(page.getByText(/× 2$/)).toHaveCount(1);
+  await expect(page.getByText(/× 1$/)).toHaveCount(1);
+
+  await page.getByText('Discount', { exact: true }).first().click();
+  await page.getByRole('button', { name: 'Amount', exact: true }).click();
+  await page.getByLabel('Discount value', { exact: true }).pressSequentially('0.10', { delay: 10 });
+  await page.getByLabel('Discount value', { exact: true }).press('Enter');
+  await expect(page.getByText(/× 2$/)).toHaveCount(1);
+  await expect(page.getByText(/× 1$/)).toHaveCount(1);
+
+  expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(0);
+});

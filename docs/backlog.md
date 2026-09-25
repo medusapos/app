@@ -25,14 +25,13 @@ Plugin, low priority. Half-cent gap: Medusa stores an unrounded order total
 works out to half a cent (ADR-037); the order shows a 0.005 difference
 between its total and the captured payment.
 
-## A keyboard-wedge scan in the phone cart view has nowhere to land
+## Barcode wedge thresholds as store settings
 
-In phone mode (ADR 0009) the cart view unmounts the catalogue, and with it
-the search field that takes scanner input. A hardware (keyboard-wedge) scan
-made while the cart is open is dropped: nothing is added and nothing is
-shown. Phones mostly scan with the camera, so this is minor; a fix would
-route scans to `sale.add` in either view, e.g. a scan listener above both
-(from the phone-cart review).
+`apps/expo/lib/use-wedge-scan.ts` has its average-key-time, stale-gap and
+minimum-length thresholds as constants (`WEDGE_AVG_KEY_MS`,
+`WEDGE_STALE_GAP_MS`, `WEDGE_MIN_CHARS`). WCPOS mirrors the first two as
+per-store settings (`barcode_scanning_avg_time_input_threshold`,
+`barcode_scanning_min_chars`); once this app has settings, do the same here.
 
 ## Tap race when new store settings land
 
