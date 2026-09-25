@@ -32,6 +32,15 @@ between its total and the captured payment.
 the last line, above the pinned footer. A `listFooter` slot inside
 `CartPanel`'s scroll area (TallyUI) would let the app use it again.
 
+## A keyboard-wedge scan in the phone cart view has nowhere to land
+
+In phone mode (ADR 0009) the cart view unmounts the catalogue, and with it
+the search field that takes scanner input. A hardware (keyboard-wedge) scan
+made while the cart is open is dropped: nothing is added and nothing is
+shown. Phones mostly scan with the camera, so this is minor; a fix would
+route scans to `sale.add` in either view, e.g. a scan listener above both
+(from the phone-cart review).
+
 ## Tap race when new store settings land
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
