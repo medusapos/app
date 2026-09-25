@@ -23,23 +23,26 @@ vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn(
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
-// The real barrel fails to import under vitest (see live-tab-gate.test.tsx), so the choice screen
-// and the sale components (Cart, CartBar, Tender: TallyUI TV6a) come from their own submodules, and
-// the primitives Cart/Tender use internally (from '../cart', '../checkout', not the barrel) are
-// mocked below by path; the rest of the POS pieces are stand-ins.
-vi.mock('@tallyui/components', async () => ({
-  ...await import('../node_modules/@tallyui/components/src/layout/store-settings-choice-screen'),
-  ...await import('../node_modules/@tallyui/components/src/sale'),
+// The choice screen and the sale components (Cart, CartBar, Tender, Catalogue: TallyUI TV6a/TV6b)
+// come from @tallyui/components, real and unmocked (app/index.tsx imports them directly). The
+// primitives Cart/Tender/Catalogue use internally (from '../cart', '../checkout', '../product',
+// '../input', not the barrel) are mocked below at those module ids, not by path; the rest of the
+// POS pieces are stand-ins.
+vi.mock('@tallyui/components/product', () => ({
   ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) =>
     <div>{items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}</div>,
   ProductImage: () => null,
   ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
   ProductPrice: () => null,
   ProductStockBadge: () => null,
+}));
+vi.mock('@tallyui/components/ui', () => ({
   VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+}));
+vi.mock('@tallyui/components/input', () => ({
   SearchInput: ({ placeholder }: ComponentProps<typeof SearchInput>) => <input placeholder={placeholder} />,
 }));
-vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
+vi.mock('@tallyui/components/cart', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
     { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
     {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
@@ -50,7 +53,7 @@ vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
   CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   DiscountBadge: () => null,
 }));
-vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
+vi.mock('@tallyui/components/checkout', () => ({
   CashTendered: () => null,
   ChangeDisplay: () => null,
 }));

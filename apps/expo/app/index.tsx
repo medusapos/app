@@ -1,16 +1,16 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
+import { getCalendars } from 'expo-localization';
 
-import { Cart, CartBar, StoreSettingsChoiceScreen, Tender } from '@tallyui/components';
+import { Cart, CartBar, Catalogue, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
 import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, TaxProvider, taxProviderProps, useSale, useStoreSettings, withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
-import { Catalogue } from '../components/catalogue';
-import { Receipt } from '../components/receipt';
-import { SyncStatus } from '../components/sync-status';
+import { StripHeightContext } from '../components/store-refused';
+import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -159,6 +159,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
   const [registerId] = useState(() => getRegisterId(defaultStorage()));
+  const topInset = useContext(StripHeightContext);
   const { record, state: outboxState, recent } = useOutboxContext();
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {
@@ -202,9 +203,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
     + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
     + (error ? ` · ${error}` : '');
+  // Web has no 12/24-hour API and reports none; keep the locale default in that case.
+  const clock = getCalendars()[0]?.uses24hourClock;
+  const hour12 = clock == null ? undefined : !clock;
   const catalogue = <View className="flex-1">
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
-      lastStockCheckAt={lastStockCheckAt}
+      lastStockCheckAt={lastStockCheckAt} hour12={hour12}
       onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
     <SyncStatus state={outboxState} />
   </View>;
@@ -222,7 +226,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </Pressable>
         </View>
       ) }} />
-      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} settings={settings}
+      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
+        store={{ name: settings.storeName, address: settings.location.addressLine }}
+        topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}
         cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
