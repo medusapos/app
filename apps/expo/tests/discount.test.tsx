@@ -7,24 +7,19 @@ import { medusaConnector } from '@tallyui/connector-medusa';
 import {
   catalogueEntries, createOrderBuilder, DISCOUNTS_UNSUPPORTED, TaxProvider, taxProviderProps, toOrderCreateEnvelope, useSale, type Order, type PosOrder,
 } from '@tallyui/pos';
-import { Cart, parseDiscount } from '@tallyui/components';
+import { Cart, parseDiscount, Receipt } from '@tallyui/components';
 import type { CartAction, CartLineProps, CartTotalProps } from '@tallyui/components';
-import { Receipt } from '../components/receipt';
 
-// Cart etc. now live in @tallyui/components (TallyUI TV6a); importOriginal on the whole barrel fails
-// under vitest (see live-tab-gate.test.tsx), so the real one comes from its own submodule instead.
-// That submodule's index re-exports cart.tsx, cart-bar.tsx, tender.tsx and discount-form.tsx
-// together, so importing any one of them evaluates all four; the primitives they use internally
-// (from '../cart', '../checkout', not the barrel) are mocked below by path, tender.tsx's included,
-// even though this file never renders Tender.
-vi.mock('@tallyui/components', async () => ({
-  ...await import('../node_modules/@tallyui/components/src/sale'),
-}));
-vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
+// Cart and Receipt (imported above) are real, unmocked (TallyUI TV6a/TV6b). Cart's own submodule
+// (sale/index.ts) re-exports cart.tsx, cart-bar.tsx, tender.tsx and discount-form.tsx together, so
+// importing it evaluates all four; the primitives they use internally (from '../cart', '../checkout',
+// not the barrel) are mocked below at those module ids, tender.tsx's included, even though this file
+// never renders Tender.
+vi.mock('@tallyui/components/checkout', () => ({
   CashTendered: () => null,
   ChangeDisplay: () => null,
 }));
-vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
+vi.mock('@tallyui/components/cart', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
     { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
     {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
@@ -58,7 +53,8 @@ function SaleView({ settings = pricing, ...props }: Props) {
   return <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />;
 }
 const Harness = (props: Props) => <TaxProvider {...taxProviderProps(props.settings ?? pricing)}><SaleView {...props} /></TaxProvider>;
-const receiptSettings = { storeName: 'Shop', currency: 'EUR', location: { id: 'l', name: 'Main', countryCode: 'dk' } };
+const receiptStore = { name: 'Shop', address: undefined };
+const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
 function discount(opener: string, type: 'Percent' | 'Amount', value: string) {
   click(opener);
@@ -202,7 +198,7 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
       `Discount: ${money(300)}`, tax, `Total: ${money(display.totalMinor)}`]) expect(screen.getByText(text)).toBeTruthy();
     const order = sale.order;
     cleanup();
-    render(<Receipt order={order} settings={receiptSettings} cashier="cashier" registerId="register-1" newSale={() => {}} />);
+    render(<Receipt order={order} store={receiptStore} taxLabel={taxLabel} cashier="cashier" registerId="register-1" newSale={() => {}} />);
     // In the cart's order: the line, its discount row, the order discount row, then Subtotal, Discount, VAT and Total.
     const rows = [`2 × ${money(1250)}: ${money(2500)}`, `10% off: −${money(250)}`, `Order discount: −${money(50)}`,
       `Subtotal: ${money(2500)}`, `Discount: −${money(300)}`, tax, `Total: ${money(display.totalMinor)}`];
@@ -246,7 +242,7 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     expect(envelope.version).toBe(2);
     expect(envelope.payload).toMatchObject({ discountMinor: 500, totalMinor: order.totalMinor, lines: [expect.objectContaining({ discountMinor: 500 })] });
     cleanup();
-    render(<Receipt order={order} settings={receiptSettings} cashier="cashier" registerId="register-1" newSale={() => {}} />);
+    render(<Receipt order={order} store={receiptStore} taxLabel={taxLabel} cashier="cashier" registerId="register-1" newSale={() => {}} />);
     // The line before its discounts, then each of its own discounts as a row; the amounts come from the snapshot.
     for (const label of [`2 × ${money(1250)}: ${money(2500)}`, `10% off: −${money(250)}`, `${money(250)} off: −${money(250)}`]) {
       expect(screen.getByLabelText(label)).toBeTruthy();

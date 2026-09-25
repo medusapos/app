@@ -4,20 +4,30 @@ import { webcrypto } from 'node:crypto';
 import { Subject } from 'rxjs';
 import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { getCalendars } from 'expo-localization';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import type { SyncContext } from '@tallyui/core';
 import type { ProductGrid, ProductStockBadge, SearchInput } from '@tallyui/components';
-import { Catalogue, formatStockSyncTime } from '../components/catalogue';
+import { Catalogue, formatStockSyncTime } from '@tallyui/components';
 import { createTallyDatabase } from '@tallyui/database';
 import { clearProductCache, pricedCacheName, productCacheStorage } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
-vi.mock('@tallyui/components', () => ({
+// Catalogue and formatStockSyncTime (imported above) are real, from the barrel, unmocked (TallyUI
+// TV6b). The primitives Catalogue composes tiles from come from its own sibling submodules
+// (`../product`, `../input`, `../ui`), not the barrel, so they are mocked at those module ids
+// (aliased in vitest.config.ts) rather than by overriding the barrel itself.
+vi.mock('@tallyui/components/input', () => ({
   SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder, autoFocus }: ComponentProps<typeof SearchInput>) => (
     <input value={value} placeholder={placeholder} autoFocus={autoFocus}
       onChange={(event) => onChangeText(event.target.value)}
       onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />
   ),
+}));
+vi.mock('@tallyui/components/ui', () => ({
+  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+}));
+vi.mock('@tallyui/components/product', () => ({
   ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
     <div data-testid="grid" data-columns={numColumns}>
       {items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}
@@ -28,7 +38,6 @@ vi.mock('@tallyui/components', () => ({
   ProductImage: () => null,
   ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
   ProductPrice: () => null,
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   // Stands in for TallyUI's real badge (which reads useProductStock off a ConnectorProvider):
   // reports the status this doc's own fields resolve to, so a test can tell which product a
   // tile's badge belongs to and confirm the tile never asks it to show an "as of".
@@ -58,10 +67,10 @@ const products = [
 
 afterEach(() => { cleanup(); localization.uses24hourClock = null; });
 
-function mount(items = products, lastSyncedAt: Date | null = null, lastStockCheckAt: Date | null = null) {
+function mount(items = products, lastSyncedAt: Date | null = null, lastStockCheckAt: Date | null = null, hour12?: boolean) {
   const onSelect = vi.fn();
   render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced"
-    lastSyncedAt={lastSyncedAt} lastStockCheckAt={lastStockCheckAt} />);
+    lastSyncedAt={lastSyncedAt} lastStockCheckAt={lastStockCheckAt} hour12={hour12} />);
   const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
   return { input, onSelect };
 }
@@ -100,7 +109,11 @@ describe('Catalogue', () => {
     const time = new Date();
     time.setHours(10, 42, 0, 0);
     const expected = formatStockSyncTime(time, undefined, hour12, time);
-    mount(products, time);
+    // The clock conversion is the app's now (app/index.tsx): mirror its own wiring here rather
+    // than Catalogue's (it just takes hour12 as given).
+    const clock = getCalendars()[0]?.uses24hourClock;
+    const appHour12 = clock == null ? undefined : !clock;
+    mount(products, time, undefined, appHour12);
     fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     const chooser = within(screen.getByLabelText('Choose variant'));
     expect(chooser.getByText(`In Stock · as of ${expected}`)).toBeTruthy();

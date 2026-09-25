@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { useContext } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, moneyFromDecimalString, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import { catalogueEntries, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
-import { Cart, Tender } from '@tallyui/components';
+import { Cart, Receipt, Tender } from '@tallyui/components';
 import type { CartLineProps, CartTotalProps, CashTenderedProps, ChangeDisplayProps } from '@tallyui/components';
-import { Receipt } from '../components/receipt';
-import { OutboxStrip } from '../components/store-refused';
+import { OutboxStrip, StripHeightContext } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
+import { formatDate } from '../lib/format-date';
 import { useOutboxContext } from '../lib/outbox-context';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
@@ -16,16 +17,18 @@ import { posConnector } from '../lib/pos-connector';
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 
-// Cart, Tender etc. now live in @tallyui/components (TallyUI TV6a); importOriginal on the whole barrel fails
-// under vitest (see live-tab-gate.test.tsx), so the real ones come from their own submodule, and the
-// primitives they use internally (from '../cart', '../checkout', not the barrel) are mocked below by path.
-vi.mock('@tallyui/components', async () => ({
-  ...await import('../node_modules/@tallyui/components/src/sale'),
+// Cart, Tender, Receipt etc. live in @tallyui/components (TallyUI TV6a/TV6b) and are imported above,
+// real and unmocked. The primitives they compose internally (from `../cart`, `../checkout`,
+// `../product`, `../input`, not the barrel) are mocked below at those module ids (aliased to their
+// source in vitest.config.ts), not by path.
+vi.mock('@tallyui/components/product', () => ({
   ProductGrid: ({ emptyState }: { emptyState: React.ReactNode }) => <div>{emptyState}</div>,
   ProductCard: () => null,
+}));
+vi.mock('@tallyui/components/input', () => ({
   SearchInput: () => <input aria-label="Search catalogue" />,
 }));
-vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
+vi.mock('@tallyui/components/cart', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
     { items: T[]; renderItem: (item: T, index: number) => React.ReactNode; emptyState?: React.ReactNode; afterItems?: React.ReactNode; footer?: React.ReactNode }) => <div>
     {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
@@ -42,7 +45,7 @@ vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
   CartLineActions: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
   DiscountBadge: () => null,
 }));
-vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
+vi.mock('@tallyui/components/checkout', () => ({
   CashTendered: ({ total, amount, onChangeAmount }: CashTenderedProps) => <div>
     <span>To pay: {formatMoney(total)}</span><span>Tendered: {amount && formatMoney(amount)}</span>
     <input aria-label="Cash tendered" onChange={(event) => {
@@ -74,6 +77,8 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
 const settings: StoreSettings = {
   storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', addressLine: '1 High Street', countryCode: 'dk' },
 };
+const store = { name: settings.storeName, address: settings.location.addressLine };
+const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
 const pricing: PricingSettings = { currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 } };
 const taxContext = { getTaxRatePpm: () => 250000, pricesIncludeTax: false };
 const session = { baseUrl: 'https://store.test', email: 'cashier@store.test', token: 'token' };
@@ -92,7 +97,9 @@ function SaleHarness(props: HarnessProps) {
 }
 function SaleView({ onSaleCompleted, with: shown = pricing }: HarnessProps) {
   sale = useSale(shown, { registerId: 'register-1', cashierRef: session.email, onSaleCompleted });
-  if (sale.stage.kind === 'receipt') return <Receipt order={sale.stage.order} settings={settings}
+  const topInset = useContext(StripHeightContext);
+  if (sale.stage.kind === 'receipt') return <Receipt order={sale.stage.order} store={store} taxLabel={taxLabel}
+    topInset={topInset} formatDate={formatDate}
     cashier={session.email} registerId="register-1" newSale={sale.newSale} />;
   return sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : <Tender sale={sale} />;
 }
@@ -260,7 +267,7 @@ describe('sale', () => {
 
   it('shows the cashier display name when supplied to the receipt', () => {
     const order = createOrderBuilder({ currency: settings.currency, taxContext }).getSnapshot();
-    render(<Receipt order={order} settings={settings} cashier="Alex Shopkeeper" registerId="register-1" newSale={() => {}} />);
+    render(<Receipt order={order} store={store} taxLabel={taxLabel} cashier="Alex Shopkeeper" registerId="register-1" newSale={() => {}} />);
     expect(screen.getByText('Cashier: Alex Shopkeeper')).toBeTruthy();
     expect(screen.queryByText(/^Register:/)).toBeNull();
   });

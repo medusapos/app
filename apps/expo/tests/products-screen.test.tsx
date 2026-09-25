@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
 import type { ProductGrid, SearchInput, CartLineProps, CartTotalProps } from '@tallyui/components';
+import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { createOrderBuilder, finalizeOrder, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,9 +15,7 @@ import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../l
 import ProductsScreen from '../app/index';
 import OrdersScreen from '../app/orders';
 import { useOutboxContext } from '../lib/outbox-context';
-import { SyncStatus } from '../components/sync-status';
 import { OutboxStrip, StoreRefused } from '../components/store-refused';
-import { formatStockSyncTime } from '../components/catalogue';
 import { setWindowWidth } from './window-width';
 
 vi.mock('expo-router', () => ({
@@ -37,13 +36,12 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
-// Cart, CartBar, Tender and StoreSettingsChoiceScreen now live in @tallyui/components (TallyUI TV6a);
-// importOriginal on the whole barrel fails under vitest (see live-tab-gate.test.tsx), so the real ones
-// come from their own submodules, and the primitives Cart/Tender use internally (from '../cart',
-// '../checkout', not the barrel) are mocked below by path.
-vi.mock('@tallyui/components', async () => ({
-  ...await import('../node_modules/@tallyui/components/src/sale'),
-  ...await import('../node_modules/@tallyui/components/src/layout/store-settings-choice-screen'),
+// Cart, CartBar, Tender, Catalogue, SyncStatus and StoreSettingsChoiceScreen come from
+// @tallyui/components (TallyUI TV6a/TV6b), real and unmocked (imported directly where used).
+// The primitives they compose internally (from '../cart', '../checkout', '../product', '../input',
+// not the barrel) are mocked below at those module ids (aliased to their source in
+// vitest.config.ts), not by path.
+vi.mock('@tallyui/components/product', () => ({
   ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
     <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
   ),
@@ -55,14 +53,18 @@ vi.mock('@tallyui/components', async () => ({
   ProductImage: () => null,
   ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
   ProductPrice: () => null,
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   ProductStockBadge: () => null,
+}));
+vi.mock('@tallyui/components/ui', () => ({
+  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+}));
+vi.mock('@tallyui/components/input', () => ({
   SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder }: ComponentProps<typeof SearchInput>) => (
     <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)}
       onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />
   ),
 }));
-vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
+vi.mock('@tallyui/components/cart', () => ({
   CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
     { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
     {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
@@ -78,7 +80,7 @@ vi.mock('../node_modules/@tallyui/components/src/cart', () => ({
   CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
   DiscountBadge: () => null,
 }));
-vi.mock('../node_modules/@tallyui/components/src/checkout', () => ({
+vi.mock('@tallyui/components/checkout', () => ({
   CashTendered: () => null,
   ChangeDisplay: () => null,
 }));
