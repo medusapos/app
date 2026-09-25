@@ -103,6 +103,17 @@ page at the static worker URL and starts a bare `Worker` there to hold the
 opfs-sahpool pool outside the coordinator, then signs in and expects the
 blocked screen with Reload; closing the holder page and reloading recovers.
 
+`discount.spec.ts` proves cart discounts (TallyUI ADR-062). One test signs in
+(the plugin reports `order.create` 1 and 2, so the session stores 2), gives
+two `E2E-1` a 10% line discount and a €0.50 order discount, pays exact cash,
+and expects the outbox result `applied` with no warnings, a version 2 command,
+Medusa's total equal to the till's, and one "POS discount" adjustment of the
+line's `discountMinor`. The other route-intercepts `GET /tally/v1/info` to a
+404 before a fresh sign-in (capability 1): applying a discount shows TallyUI's
+`finalize: discounts are not supported by the server yet (order.create v2)`
+at once, nothing is sent, and the undiscounted sale then goes out as version 1.
+Both sell only `E2E-1`.
+
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.

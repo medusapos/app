@@ -3,7 +3,7 @@ import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 
 import { StoreSettingsChoiceScreen } from '@tallyui/components';
-import { ConnectorProvider, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
+import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
 import { TaxProvider, taxProviderProps, useStoreSettings, withPricingContext, withStockOverlay } from '@tallyui/pos';
 
 import { Catalogue } from '../components/catalogue';
@@ -37,15 +37,25 @@ const STATE_LABEL: Record<SyncState, string> = {
 };
 
 export default function ProductsScreen() {
-  const { session, signOut, reportUnauthorized } = useSession();
+  const { session, signOut, reportUnauthorized, mergeCapabilities } = useSession();
   if (!session) return <Redirect href="/login" />;
-  return <SettingsScreen key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized} />;
+  return <SettingsScreen key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
+    onCapabilities={mergeCapabilities} />;
 }
 
-type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void };
+type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void;
+  onCapabilities: (fresh: ServerCapabilities | undefined) => void };
 
 function SettingsScreen(props: SignedInProps) {
-  const { session, onUnauthorized } = props;
+  const { session, onUnauthorized, onCapabilities } = props;
+  // Once per store (this screen is keyed by it): re-read the order.create capability a restored session was saved with (ADR-062).
+  useEffect(() => {
+    let active = true;
+    connector.capabilities?.({ connectorId: connector.id, baseUrl: session.baseUrl, headers: authHeaders(session.token) })
+      .then((fresh) => { if (active) onCapabilities(fresh); })
+      .catch((error: unknown) => { if (active && error instanceof SignInError) onUnauthorized(); });
+    return () => { active = false; };
+  }, [session.baseUrl, onCapabilities, onUnauthorized]);
   const [settings, setSettings] = useState(() => loadCachedSettings(defaultStorage(), session.baseUrl));
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
@@ -91,8 +101,11 @@ function PricingScreen(props: PricingProps) {
   // D1: the plugin taxes each order by the stock location's address, so the till's country is always its country.
   const country = settings.location.countryCode.toLowerCase();
   // Read per request (as useOutbox), so a token refresh keeps this identity and never re-resolves; a new country does.
+  // The capability is a value dependency: only a new order.create version makes a new context, never a new session object.
+  const orderCreate = session.capabilities?.orderCreate;
   const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
-    headers: { get Authorization() { return authHeaders(token.current).Authorization; } } }), [session.baseUrl, attempt, country]);
+    headers: { get Authorization() { return authHeaders(token.current).Authorization; } },
+    ...(orderCreate === undefined ? {} : { capabilities: { orderCreate } }) }), [session.baseUrl, attempt, country, orderCreate]);
   const store = useStoreSettings({
     connector, context, loadChoice: () => ({ ...loadSettingsChoice(defaultStorage(), session.baseUrl), country }),
     saveChoice: (choice) => saveSettingsChoice(defaultStorage(), session.baseUrl, choice),
@@ -156,7 +169,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     if (fresh.length) void reconcileStock();
   }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
-  const sale = useSale(pricing, { registerId, cashierRef: session.email, onSaleCompleted: record });
+  // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
+  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record });
   useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');

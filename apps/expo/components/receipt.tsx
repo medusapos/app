@@ -34,6 +34,7 @@ export function Receipt({ order, settings, cashier, registerId, newSale }: {
     </View>)}
     {row('Subtotal', money(receipt.totals.subtotalMinor))}
     {receipt.totals.taxLines.map((line, index) => row(`VAT ${line.ratePpm / 10000}%`, money(line.amountMinor), false, index))}
+    {receipt.totals.discountMinor > 0 ? row('Discount', `−${money(receipt.totals.discountMinor)}`) : null}
     {row('Total', money(receipt.totals.totalMinor), true)}
     {receipt.payments.map((payment, index) => row(payment.method === 'cash' ? 'Cash tendered' : 'Card terminal',
       money(payment.amountMinor) + (payment.reference ? ` · ${payment.reference}` : ''), false, index))}

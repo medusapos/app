@@ -94,6 +94,19 @@ describe('SessionProvider', () => {
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(context.session).toEqual(stored);
   });
+  it.each([
+    [undefined, { orderCreate: 2 }, { orderCreate: 2 }],
+    [{ orderCreate: 1 }, { orderCreate: 2 }, { orderCreate: 1 }],
+    [{ orderCreate: 2 }, undefined, { orderCreate: 2 }],
+  ])('merges a fresh read %j over the stored %j into %j, and saves it', async (fresh, kept, merged) => {
+    await mount(kept ? { ...stored, capabilities: kept } : stored);
+    const before = context.session;
+    act(() => context.mergeCapabilities(fresh));
+    expect(context.session).toEqual({ ...stored, capabilities: merged });
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(merged);
+    // An unchanged value keeps the session object, so nothing keyed on it re-runs.
+    if (kept?.orderCreate === merged.orderCreate) expect(context.session).toBe(before);
+  });
   it.each(['signOut', 'reportUnauthorized'] as const)('%s clears state, storage and this backend cache', async (action) => {
     await mount();
     act(() => context[action]());

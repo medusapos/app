@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { medusaConnector } from '@tallyui/connector-medusa';
+import { resolveCapabilities, type ServerCapabilities } from '@tallyui/core';
 import { clearProductCache } from './product-cache';
 import {
   clearSession, defaultStorage, loadSession, login, LoginError, refreshSession,
@@ -11,6 +12,8 @@ type SessionContextValue = {
   signIn(baseUrl: string, email: string, password: string): Promise<void>;
   signOut(): void;
   reportUnauthorized(): void;
+  /** Merges a fresh capabilities read into the session (ADR-062): an inconclusive `undefined` keeps the stored value. */
+  mergeCapabilities(fresh: ServerCapabilities | undefined): void;
 };
 const SessionContext = createContext<SessionContextValue | null>(null);
 
@@ -23,6 +26,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     currentSession.current = null;
     setSession(null);
     if (ended) void clearProductCache(medusaConnector.id, ended.baseUrl);
+  }, []);
+  const mergeCapabilities = useCallback((fresh: ServerCapabilities | undefined) => {
+    const current = currentSession.current;
+    const capabilities = resolveCapabilities(fresh, current?.capabilities);
+    // Unchanged keeps the session's identity, so nothing that depends on it re-runs.
+    if (!current || capabilities?.orderCreate === current.capabilities?.orderCreate) return;
+    const next = { ...current, capabilities };
+    saveSession(defaultStorage(), next);
+    currentSession.current = next;
+    setSession(next);
   }, []);
   async function signIn(baseUrl: string, email: string, password: string) {
     const next = await login(baseUrl, email, password);
@@ -53,7 +66,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => { active = false; clearInterval(timer); };
   }, [signedIn, signOut]);
 
-  return <SessionContext.Provider value={{ session, signIn, signOut, reportUnauthorized: signOut }}>{children}</SessionContext.Provider>;
+  return <SessionContext.Provider value={{ session, signIn, signOut, reportUnauthorized: signOut, mergeCapabilities }}>{children}</SessionContext.Provider>;
 }
 
 export function useSession(): SessionContextValue {

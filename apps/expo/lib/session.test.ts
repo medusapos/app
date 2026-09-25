@@ -11,6 +11,8 @@ const response = (body: unknown, status = 200) => vi.fn<() => Promise<Response>>
 );
 // The connector's sign-in reads GET /tally/v1/info after the token (TallyUI ADR-062); 404 means an old plugin.
 const infoNotFound = () => new Response('{}', { status: 404 });
+// A 404 (or a body without the contract) is an old plugin: order.create 1.
+const signedIn = { ...session, capabilities: { orderCreate: 1 } };
 const jwt = (payload: unknown) => `eyJhbGciOiJIUzI1NiJ9.${btoa(JSON.stringify(payload))
   .replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')}.signature`;
 function memoryStorage(): SessionStorage {
@@ -70,7 +72,7 @@ describe('login', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(3);
       expect(resolved).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
-      expect(resolved).toHaveBeenCalledWith(session);
+      expect(resolved).toHaveBeenCalledWith(signedIn);
       await result;
     } finally { vi.useRealTimers(); }
   });
@@ -79,7 +81,7 @@ describe('login', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
       .mockResolvedValueOnce(infoNotFound());
     const result = await login(session.baseUrl, session.email, 'secret', fetchImpl);
-    expect(result).toEqual({ ...session, name: 'Alex Shopkeeper' });
+    expect(result).toEqual({ ...signedIn, name: 'Alex Shopkeeper' });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(fetchImpl).toHaveBeenNthCalledWith(3, `${session.baseUrl}/admin/users/me`, {
       method: 'GET', headers: { Authorization: 'Bearer jwt' },
@@ -97,7 +99,7 @@ describe('login', () => {
     fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' }))).mockResolvedValueOnce(infoNotFound());
     if (result instanceof Error) fetchImpl.mockRejectedValueOnce(result);
     else fetchImpl.mockResolvedValueOnce(result);
-    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual(session);
+    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual(signedIn);
     expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
   it('still signs in and reads the name when the info endpoint returns 404', async () => {
@@ -105,11 +107,24 @@ describe('login', () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
       .mockResolvedValueOnce(infoNotFound())
       .mockResolvedValueOnce(new Response(JSON.stringify({ user: { first_name: 'Alex' } })));
-    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual({ ...session, name: 'Alex' });
+    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual({ ...signedIn, name: 'Alex' });
     expect(fetchImpl).toHaveBeenCalledTimes(3);
     expect(fetchImpl).toHaveBeenNthCalledWith(2, `${session.baseUrl}/tally/v1/info`, {
       method: 'GET', headers: { Authorization: 'Bearer jwt' },
     });
+  });
+  it.each([
+    [new Response('{"contracts":{"order.create":[1,2]}}'), { orderCreate: 2 }],
+    [new Response('{}', { status: 500 }), undefined],
+  ])('stores the capabilities the sign-in read: %s', async (info, capabilities) => {
+    const fetchImpl = vi.fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' }))).mockResolvedValueOnce(info)
+      .mockResolvedValueOnce(new Response('{}'));
+    const result = await login(session.baseUrl, session.email, 'secret', fetchImpl);
+    expect(result.capabilities).toEqual(capabilities);
+    const storage = memoryStorage();
+    saveSession(storage, result);
+    expect(loadSession(storage)).toEqual(result);
   });
   it('rejects public HTTP before sending the password', async () => {
     const fetchImpl = response({ token: 'jwt' });
@@ -119,7 +134,7 @@ describe('login', () => {
   });
   it('posts credentials and returns a session with a normalized URL', async () => {
     const fetchImpl = response({ token: 'jwt' });
-    await expect(login(` ${session.baseUrl}/ `, session.email, 'secret', fetchImpl)).resolves.toEqual(session);
+    await expect(login(` ${session.baseUrl}/ `, session.email, 'secret', fetchImpl)).resolves.toEqual(signedIn);
     expect(fetchImpl).toHaveBeenCalledWith(`${session.baseUrl}/auth/user/emailpass`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: session.email, password: 'secret' }),
@@ -158,7 +173,7 @@ describe('login', () => {
       .mockResolvedValueOnce(infoNotFound())
       .mockResolvedValueOnce(new Response('not json'));
     await expect(login(session.baseUrl, session.email, 'secret', fetchImpl))
-      .resolves.toEqual({ ...session, token, tokenExpiresAt: expiry });
+      .resolves.toEqual({ ...signedIn, token, tokenExpiresAt: expiry });
   });
 });
 
@@ -233,6 +248,12 @@ describe('session storage', () => {
     expect(loadSession(storage)).toEqual(withExpiry);
     saveSession(storage, session);
     expect(loadSession(storage)).toEqual(session);
+  });
+  it('ignores malformed stored capabilities and keeps the session', () => {
+    const storage = memoryStorage();
+    storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: '2' } }));
+    expect(loadSession(storage)).toEqual(session);
+    expect(loadSession(storage)?.capabilities).toBeUndefined();
   });
   it.each(['not json', 'null', '{}', '[]', '{"baseUrl":1,"email":"a","token":"b"}'])(
     'ignores malformed stored data: %s', (data) => {
