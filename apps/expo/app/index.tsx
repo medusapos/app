@@ -15,6 +15,7 @@ import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, posConnector } from '../lib/pos-connector';
+import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -194,7 +195,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
   useEffect(() => { if (!wedgeActive) setScanMiss(null); }, [wedgeActive]);
-  useWedgeScan(wedgeActive, (code) => {
+  const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  useWedgeScan(wedgeActive, scannerSettings, (code) => {
     const entry = findEntryByCode(entries, code);
     if (entry) { sale.add(entry, traits); setScanMiss(null); } else setScanMiss(code);
   });
@@ -206,6 +208,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const clock = getCalendars()[0]?.uses24hourClock;
   const hour12 = clock == null ? undefined : !clock;
   const catalogue = <View className="flex-1">
+    {/* TODO(scanner minCodeLength): wire minCodeLength={scannerSettings.minChars} once TallyUI's Catalogue takes it and the pin bumps. */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12}
       onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
@@ -219,6 +222,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
         <Pressable accessibilityRole="button" onPress={() => router.push('/orders')} className="min-h-11 justify-center">
           <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => router.push('/settings')} className="min-h-11 justify-center">
+          <Text className="text-foreground">Settings</Text>
         </Pressable>
         <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }} className="min-h-11 justify-center">
           <Text className="text-foreground">Sign out</Text>

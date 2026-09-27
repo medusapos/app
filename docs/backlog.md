@@ -18,14 +18,6 @@ costs one extra ids read a day. That's harmless, but it could be avoided by
 reading the current headers through a ref instead of restarting on each
 refresh.
 
-## Barcode wedge thresholds as store settings
-
-`apps/expo/lib/use-wedge-scan.ts` has its average-key-time, stale-gap and
-minimum-length thresholds as constants (`WEDGE_AVG_KEY_MS`,
-`WEDGE_STALE_GAP_MS`, `WEDGE_MIN_CHARS`). WCPOS mirrors the first two as
-per-store settings (`barcode_scanning_avg_time_input_threshold`,
-`barcode_scanning_min_chars`); once this app has settings, do the same here.
-
 ## Screen tests stub TallyUI primitives through deep aliases
 
 The screen tests use the real TallyUI components (`importOriginal()`), but stub
