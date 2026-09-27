@@ -140,8 +140,13 @@ The pin (`8e86d7a`) also brings three more changes:
     - When the sale screen unmounts for another reason (LiveTabGate's
       park, a blocking storage prompt), the hold is cleared but a pending
       sign-out is not run. Signing out there would tear down under
-      LiveTabGate's close. The request stays pending with its token, and
-      the next sale screen to mount runs it if the token is unchanged.
+      LiveTabGate's close. The request stays pending with its token. The
+      next release that leaves both holds clear runs it, if the token is
+      unchanged. That release is the next sale screen's, or
+      `OutboxProvider`'s when its saves hold clears or it mounts again.
+      After #80's prompt only Reload is possible, and Reload drops the
+      request, since it lives only in memory. That's safe: the session is
+      saved, so the next 401 asks again.
     - While the sale is saving, every sign-out request is deferred:
       - the Sign out button, which is also disabled in place;
       - a product replication 401;

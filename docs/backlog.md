@@ -39,3 +39,13 @@ The sign-out hold on TallyUI's `savesInFlight` (in `SessionProvider`), the visib
 
 - **A Reload hint on the earlier-sale note once storage reports a stall.** A write that never answers keeps Sign out locked until Reload, and the note doesn't say so.
 - **Consider gating the tender's Complete on `orders !== null`,** so a sale can't be paid while the order store is still opening.
+
+From the #86 review:
+- **Show the earlier-sale note off the sale screen.** The store-settings screens (choose, unsupported, error, loading) show neither the note nor Sign out, so a sign-out held by a save that never answers looks like nothing is happening. Render the note above `PricingScreen` whenever `savesInFlight > 0`. Ideally, fold this into the Reload hint above.
+- **Note wording.**
+  - On a receipt, "You'll be signed out once it's saved." leaves out that an automatic sign-out also waits for New sale.
+  - Once the earlier save settles, "Signed out after this sale is saved" shows on a sale that's already saved.
+  - While `sale.saving`, it leaves out an earlier save still in flight.
+  - Branch on the receipt stage, or use a generic "You'll be signed out once saving finishes."
+- **Update the hold comment in `app/index.tsx`** (~194-196): a pending sign-out is also run by `OutboxProvider`'s release, as ADR 0015 now says.
+- **Add a session-context test for the receipt hold plus the saves hold:** the saves hold releasing on `'receipt'` must not run an automatic deferred sign-out, and New sale then runs it once.
