@@ -76,11 +76,14 @@ The pin (`8e86d7a`) also brings three more changes:
   then syncing once.
 - After a failed save, the tender stays locked. "Complete sale" (or
   "Payment approved on terminal") retries with the same ids, and there is no
-  Back. The storage prompt's Reload appears only for a stalled or dead
-  storage worker or a worker start failure. After any other open failure
-  (e.g. DM4), and after a sale is requeued from Orders while the tender is
-  locked (its stored commandId changes, so the retry conflicts), the till
-  stays on the tender until Sign out or a browser reload.
+  Back. The storage prompt's Reload covers a stalled or dead storage worker
+  or a worker start failure; any other order-store open failure (e.g. DM4)
+  now blocks with its own prompt too ("Saved sales can't be opened",
+  `orderStoreOpenFailed$`, `apps/expo/components/storage-health.tsx`) until
+  Reload, so it no longer passes silently. After a sale is requeued from
+  Orders while the tender is locked (its stored commandId changes, so the
+  retry conflicts), the till still stays on the tender until Sign out or a
+  browser reload.
   - A sale that was stored is kept and sent by the outbox.
   - A sale whose insert never landed is lost with the reload, as before this
     change.

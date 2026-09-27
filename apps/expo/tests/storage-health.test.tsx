@@ -7,6 +7,10 @@ import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
 import { watchStorageHealth } from '../lib/storage-health';
 import { StorageHealth } from '../components/storage-health';
 
+// StorageHealth's open-failure prompt links out through expo-linking (Report a problem); the real
+// module pulls in expo-modules-core, which needs Metro's __DEV__ global that vitest never sets.
+vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+
 function health(status: StorageHealthReading['status']): StorageHealthReading {
   return { status, stalledWrites: status === 'stalled' ? 1 : 0 };
 }

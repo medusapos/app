@@ -43,3 +43,13 @@ export function watchStorageHealth(health$: Observable<StorageHealth>): () => vo
     recompute();
   };
 }
+
+export type OrderStoreOpenFailure = { code?: string; message: string } | null;
+const orderStoreOpenFailedSubject = new BehaviorSubject<OrderStoreOpenFailure>(null);
+/** Set for any order-store open failure but a storage-worker start (`storageStartFailed$`'s own case); `StorageHealth` blocks while set. */
+export const orderStoreOpenFailed$: Observable<OrderStoreOpenFailure> = orderStoreOpenFailedSubject.asObservable();
+export function reportOrderStoreOpenFailure(error: unknown): void {
+  const code = typeof (error as { code?: unknown })?.code === 'string' ? (error as { code: string }).code : undefined;
+  orderStoreOpenFailedSubject.next({ code, message: error instanceof Error ? error.message : String(error) });
+}
+export const clearOrderStoreOpenFailure = (): void => orderStoreOpenFailedSubject.next(null);

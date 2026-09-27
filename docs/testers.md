@@ -173,6 +173,9 @@ store yet:
 - **Waiting to sync**: while a sale hasn't reached the store yet, Products
   shows how many sales are waiting to sync, and Orders lists each one as
   "Waiting to sync" — see [Offline](#offline).
+- **Saved sales can't be opened**: if the sales saved on this device fail
+  to open, a full-screen message blocks the till, with a **Reload** button
+  and a **Report a problem** link; nothing is deleted.
 
 ## Offline
 

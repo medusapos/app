@@ -18,6 +18,10 @@ const stores = new Map<string, { opening: Promise<OrderStore>; users: number; cl
 // typed one isn't assignable to (RxDB's exportJSON generic), hence the cast; types only.
 const addOrders = (db: OrdersDatabase) => addPosOrderCollection(db as unknown as RxDatabase);
 
+// E2E debug only (guarded below, folded away in production): sessionStorage, so it survives the
+// reload `e2e/storage.spec.ts` uses to reach a fresh openOrderStore, unlike an in-memory flag.
+const E2E_FAIL_NEXT_OPEN_KEY = 'medusapos-e2e-fail-next-order-store-open';
+
 // Local document id recording that `carryOverOrders` copied a legacy database (count and time).
 // A record only: it never causes a delete, nor skips reading a legacy database that exists.
 const LEGACY_ORDERS_MARKER = 'legacy-orders-migrated';
@@ -120,6 +124,11 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
   }
   if (!entry) {
     const opening = (async () => {
+      if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined' && window.sessionStorage.getItem(E2E_FAIL_NEXT_OPEN_KEY)) {
+        const code = window.sessionStorage.getItem(E2E_FAIL_NEXT_OPEN_KEY) as string;
+        window.sessionStorage.removeItem(E2E_FAIL_NEXT_OPEN_KEY);
+        throw Object.assign(new Error(`E2E FailNextOrderStoreOpen: ${code}`), { code });
+      }
       const baseStorage = productCacheStorage();
       const onWebStorage = webStorageAvailable();
       // ADR-061: order-store.ts opens directly with createRxDatabase (not createTallyDatabase),
@@ -197,7 +206,8 @@ export async function closeOrderStores(): Promise<void> {
 // v1 is the current v2 minus its only additions (`lateSessionId`, `display`, `taxByRate`; TallyUI c1a), and
 // v0 is v1 minus its only addition (`sessionId`; TallyUI #123).
 // - SeedLegacyOrder: v0 into a backend's legacy Dexie order database (the pre-SQLite builds were all v0);
-// - SeedV0Order / SeedV1Order: v0 / v1 into its SQLite order store, then end the worker.
+// - SeedV0Order / SeedV1Order: v0 / v1 into its SQLite order store, then end the worker;
+// - FailNextOrderStoreOpen: arms the check above so the next openOrderStore rejects once with `code`.
 if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
   const { lateSessionId: _late, display: _display, taxByRate: _taxByRate, ...v1Properties } = posOrderSchema.properties;
   const { sessionId: _session, ...v0Properties } = v1Properties;
@@ -222,4 +232,5 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
     seed(0, orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
   exposeE2eHook('SeedV1Order', (baseUrl: string, order: PosOrder) =>
     seed(1, orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
+  exposeE2eHook('FailNextOrderStoreOpen', (code: string) => window.sessionStorage.setItem(E2E_FAIL_NEXT_OPEN_KEY, code));
 }
