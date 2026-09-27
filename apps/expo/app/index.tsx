@@ -37,6 +37,8 @@ const STATE_LABEL: Record<SyncState, string> = {
 };
 
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
+// Sign out's lock message when only an earlier sale's save, abandoned by Continue, is still in flight.
+const EARLIER_SALE_SAVING = 'An earlier sale is still being saved.';
 // Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
@@ -165,7 +167,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     useReplicatedProducts(connector, syncContext, onUnauthorized);
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
-  const { record, isStored, state: outboxState, recent } = useOutboxContext();
+  const { record, isStored, state: outboxState, recent, savesInFlight } = useOutboxContext();
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {
     const fresh = recent.filter((order) => order.syncStatus === 'applied' && !stockWarned.current.has(order.id)
@@ -181,12 +183,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
     isStored });
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
-  // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review).
-  const signOutLocked = sale.saving;
+  // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
+  // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
+  const signOutLocked = sale.saving || savesInFlight > 0;
+  const lockMessage = sale.saving ? SALE_SAVING : EARLIER_SALE_SAVING;
   // The session's sale hold (ADR 0015): every sign-out waits while saving; automatic ones (a 401, a failed refresh)
   // also wait for the receipt to clear. Released on unmount without running a pending sign-out: the next sale screen's
   // release runs it, if the token is unchanged.
-  const saleHold = sale.saving ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
+  const saleHold = signOutLocked ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
   useEffect(() => setSaleHold(saleHold), [saleHold, setSaleHold]);
   useEffect(() => () => setSaleHold(null, false), [setSaleHold]);
   useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
@@ -244,13 +248,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           <Text className="text-foreground">Settings</Text>
         </Pressable>
         {/* Disabled in place while a save is pending (never hidden), so the header doesn't shift; the lock message is its description. */}
-        <Pressable accessibilityRole="button" disabled={signOutLocked} accessibilityHint={signOutLocked ? SALE_SAVING : undefined}
+        <Pressable accessibilityRole="button" disabled={signOutLocked} accessibilityHint={signOutLocked ? lockMessage : undefined}
           aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
           onPress={() => { if (!signOutLocked) signOut(); }}
           className={`min-h-11 justify-center ${signOutLocked ? 'opacity-50' : ''}`}>
           <Text className="text-foreground">Sign out</Text>
         </Pressable>
-        {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{SALE_SAVING}</Text> : null}
+        {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{lockMessage}</Text> : null}
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
