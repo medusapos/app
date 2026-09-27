@@ -59,7 +59,11 @@ describe('StorageHealth: an order-store open failure other than a storage-worker
     dm4.armed = true;
     render(<StorageHealth><Harness session={session} /></StorageHealth>);
     await waitFor(() => expect(screen.getByText("Saved sales can't be opened")).toBeTruthy());
-    expect(screen.getByText(/\(DM4\)/)).toBeTruthy();
+    expect(screen.getByText(
+      "Saved sales can't be opened on this device. Nothing has been deleted. Reload to try again, or report the problem.",
+    )).toBeTruthy();
+    expect(screen.getByText('Error code: DM4')).toBeTruthy();
+    expect(screen.queryByText(/\(DM4\)/)).toBeNull();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Report a problem' })).toBeTruthy();
   });

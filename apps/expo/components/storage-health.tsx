@@ -36,15 +36,19 @@ export function StorageHealth({ children, backendUrl }: { children: ReactNode; b
   }
 
   if (openFailure) {
-    const body = `MedusaPOS couldn't open the sales saved on this device${openFailure.code ? ` (${openFailure.code})` : ''}. `
-      + 'Nothing has been deleted. Reload to try again; if it keeps happening, report it.';
     const report = () => void Linking.openURL(feedbackUrl({
       appVersion, backendUrl, platform: Platform.OS, userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
+      errorCode: openFailure.code,
     }));
     return (
       <View className="flex-1 items-center justify-center gap-4 bg-bg p-6">
         <Text className="text-center text-lg font-bold text-foreground">Saved sales can&apos;t be opened</Text>
-        <Text className="text-center text-sm text-muted-foreground">{body}</Text>
+        <Text className="text-center text-sm text-muted-foreground">
+          Saved sales can&apos;t be opened on this device. Nothing has been deleted. Reload to try again, or report the problem.
+        </Text>
+        {openFailure.code && (
+          <Text className="text-center text-xs text-muted-foreground">Error code: {openFailure.code}</Text>
+        )}
         <View className="flex-row gap-3">
           <Pressable accessibilityRole="button" onPress={() => window.location.reload()} className="items-center rounded-lg bg-primary px-4 py-3">
             <Text className="text-sm font-semibold text-primary-foreground">Reload</Text>

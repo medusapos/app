@@ -288,8 +288,11 @@ test('a non-worker order-store open failure blocks with Reload and Report, and R
   }).__medusaposFailNextOrderStoreOpen(code), 'DM4');
   await page.reload();
 
-  await expect(page.getByText("Saved sales can't be opened")).toBeVisible();
-  await expect(page.getByText('(DM4)', { exact: false })).toBeVisible();
+  await expect(page.getByText("Saved sales can't be opened", { exact: true })).toBeVisible();
+  await expect(page.getByText(
+    "Saved sales can't be opened on this device. Nothing has been deleted. Reload to try again, or report the problem.",
+  )).toBeVisible();
+  await expect(page.getByText('Error code: DM4')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Reload' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Report a problem' })).toBeVisible();
 
