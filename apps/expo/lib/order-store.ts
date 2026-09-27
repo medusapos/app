@@ -125,8 +125,10 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
     // A rejected close still frees the name for a fresh database; the caller that awaited
     // close() itself already sees the rejection on its own reference to that promise.
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const stuck = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(
-      new Error('The previous order store for this backend is still closing')), ORDER_STORE_CLOSE_WAIT_MS); });
+    // The code reaches #80's prompt ("Error code") and Report a problem, telling this apart from other open failures.
+    const stuck = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(Object.assign(
+      new Error('The previous order store for this backend is still closing'), { code: 'ORDER_STORE_CLOSE_TIMEOUT' })),
+    ORDER_STORE_CLOSE_WAIT_MS); });
     try {
       await Promise.race([entry.closing.catch(() => undefined), stuck]);
     } finally { clearTimeout(timer); }

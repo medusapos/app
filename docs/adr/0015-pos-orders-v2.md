@@ -108,32 +108,45 @@ The pin (`8e86d7a`) also brings three more changes:
       Its insert runs inside RxDB's `lockedRun`, and RxDB's close waits for
       every one with no time limit. Signing out then would hang the
       outbox's close, and the next sign-in's open would wait on it forever.
-      - `OutboxProvider` counts the `record` calls in flight
-        (`savesInFlight`; `record` keeps one identity). It lives at the
-        outbox, so a sale screen remount can't forget one.
-      - Sign out's lock and the `saving` hold also hold while any save is in
-        flight. Continue still starts the next sale; only sign-out waits,
-        and Sign out's description is "An earlier sale is still being saved."
+      - The count comes from TallyUI: `useOrderOutbox().savesInFlight`
+        (#163, since the `2ef19c2` pin), the `record` calls not yet
+        settled. `OutboxProvider` passes the outbox through unchanged.
+      - The hold lives in `SessionProvider`, as a second hold next to the
+        sale hold: the saves hold (`setSavesHold`), driven by
+        `OutboxProvider` from `savesInFlight > 0`. It defers every
+        sign-out, and a deferred one runs only once both holds are clear.
+        `OutboxProvider`'s unmount (LiveTabGate's park, #80's prompt)
+        releases it without running a pending sign-out, as the sale
+        screen's does. This closes the #85 re-review's gap: the hold used
+        to be the sale screen's, so store settings that unmounted that
+        screen after Continue (a settings choice, or an unsupported
+        backend) let an automatic sign-out run while the save was still in
+        flight.
+      - Sign out stays disabled while any save is in flight. Continue still
+        starts the next sale; only sign-out waits. Sign out's description
+        is "An earlier sale is still being saved.", and the same note shows
+        visibly under the header. With a sign-out waiting on it, the note
+        reads "An earlier sale is still being saved. You'll be signed out
+        once it's saved."
       - Backstop: `openOrderStore` waits at most `ORDER_STORE_CLOSE_WAIT_MS`
         (10 s) for the backend's previous store to close, then rejects with
-        an ordinary Error. That reaches #80's blocking prompt (Reload,
-        Report a problem) before any sale can be saved. A sale paid during
-        those 10 s gets "Orders are not ready." and is lost when the prompt
-        replaces the screen. That was already true of any slow open.
-      - Known gap (the #85 re-review): the hold is set by the sale screen.
-        If the store settings unmount that screen after Continue (a
-        settings choice, or an unsupported backend), an automatic sign-out
-        can run while the save is still in flight. The backstop then shows
-        the prompt, and Reload recovers with nothing lost. Moving the
-        in-flight hold into `SessionProvider` closes this. It's planned for
-        the pin that brings TallyUI's own `savesInFlight`.
+        an ordinary Error, code `ORDER_STORE_CLOSE_TIMEOUT`. That reaches
+        #80's blocking prompt (Reload, Report a problem), which shows the
+        code, before any sale can be saved. A sale paid during those 10 s
+        gets "Orders are not ready." and is lost when the prompt replaces
+        the screen. That was already true of any slow open.
     - The sale screen sets a sale hold in `SessionProvider`
       (`lib/session-context.tsx`): `saving`, `receipt`, or none.
     - When the sale screen unmounts for another reason (LiveTabGate's
       park, a blocking storage prompt), the hold is cleared but a pending
       sign-out is not run. Signing out there would tear down under
-      LiveTabGate's close. The request stays pending with its token, and
-      the next sale screen to mount runs it if the token is unchanged.
+      LiveTabGate's close. The request stays pending with its token. The
+      next release that leaves both holds clear runs it, if the token is
+      unchanged. That release is the next sale screen's, or
+      `OutboxProvider`'s when its saves hold clears or it mounts again.
+      After #80's prompt only Reload is possible, and Reload drops the
+      request, since it lives only in memory. That's safe: the session is
+      saved, so the next 401 asks again.
     - While the sale is saving, every sign-out request is deferred:
       - the Sign out button, which is also disabled in place;
       - a product replication 401;
@@ -147,7 +160,8 @@ The pin (`8e86d7a`) also brings three more changes:
     - One request is kept, with the token it was made under. It is dropped
       if the session was renewed meanwhile (SignInAgain, or a successful
       refresh). While it waits, the screen shows "Signed out after this
-      sale is saved".
+      sale is saved", or the earlier-sale note above when only an earlier
+      sale's save holds it.
     - This hold is the interim fix. The real fix is a pending completion
       that survives unmount and reload, which belongs to the c2/v3 design.
     - Settings' "‹ Products" goes back to the Products screen under it

@@ -120,7 +120,7 @@ beforeEach(() => {
   vi.mocked(fetchStoreSettings).mockReset().mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
-    setSaleHold: vi.fn(), signOutDeferred: false });
+    setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
   vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });

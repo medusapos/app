@@ -13,7 +13,9 @@ setup detail rather than repeating it.
 - **Sign out** is greyed out while a sale is saving. If the till is signed
   out automatically (for example, your login expired) during a sale, it
   shows "Signed out after this sale is saved" and signs out once the sale
-  and its receipt are done.
+  and its receipt are done. If an earlier sale is still being saved after
+  you pressed **Continue**, the header area says "An earlier sale is still
+  being saved." and Sign out waits for it.
 - A new **Settings** screen, opened from the header, tunes the barcode
   scanner for this till. Set the average time per key (raise it for slow
   Bluetooth scanners) and the minimum code length. Then scan into **Test

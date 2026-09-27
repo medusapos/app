@@ -1,7 +1,7 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isStorageWorkerFailure } from '@tallyui/database';
 import {
-  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type PosOrder, type UseOrderOutboxResult,
+  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { markBusy, reportStorageStartFailure } from './live-tab';
 import { openOrderStore } from './order-store';
@@ -35,25 +35,20 @@ export function useSessionOutbox(session: Session | null, registerId: string): U
   return outbox;
 }
 
-/** The outbox, with `savesInFlight`: how many `record` calls haven't settled yet. */
-export type OutboxContextValue = UseOrderOutboxResult & { savesInFlight: number };
-const OutboxContext = createContext<OutboxContextValue | null>(null);
+const OutboxContext = createContext<UseOrderOutboxResult | null>(null);
 
 export function OutboxProvider({ children }: { children: ReactNode }) {
-  const { session } = useSession();
+  const { session, setSavesHold } = useSession();
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const outbox = useSessionOutbox(session, registerId);
-  // Counted here, not in the sale screen, so a remount can't forget one (#85 review). A save abandoned by Continue
-  // can still hang in its insert, and RxDB's close waits on that write, so the sale screen holds sign-out until it settles.
-  const [savesInFlight, setSavesInFlight] = useState(0);
-  const latestRecord = useRef(outbox.record);
-  latestRecord.current = outbox.record;
-  // Stable: useSale gets it as onSaleCompleted.
-  const record = useCallback(async (posOrder: PosOrder) => {
-    setSavesInFlight((count) => count + 1);
-    try { await latestRecord.current(posOrder); } finally { setSavesInFlight((count) => count - 1); }
-  }, []);
-  return <OutboxContext.Provider value={{ ...outbox, record, savesInFlight }}>
+  // The session's saves hold (ADR 0015): a save abandoned by Continue can still hang in its insert, and RxDB's close
+  // waits on that write, so every sign-out waits while TallyUI counts a save in flight (#163). Held at the outbox, so a
+  // settings screen that unmounts the sale can't release it (#85 re-review). The unmount (a park, the #80 prompt)
+  // releases without signing out: that would tear down under LiveTabGate's close.
+  const saving = outbox.savesInFlight > 0;
+  useEffect(() => setSavesHold(saving), [saving, setSavesHold]);
+  useEffect(() => () => setSavesHold(false, false), [setSavesHold]);
+  return <OutboxContext.Provider value={outbox}>
     {children}
   </OutboxContext.Provider>;
 }

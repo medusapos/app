@@ -20,7 +20,12 @@ type SessionContextValue = {
    * and runs a pending one. `run: false` (the screen's unmount) releases but keeps it pending for the next sale screen.
    */
   setSaleHold(hold: SaleHold, run?: boolean): void;
-  /** A sign-out is waiting for the sale hold to release. */
+  /**
+   * Set by OutboxProvider (ADR 0015): active while a save is in flight, deferring every sign-out; releasing runs a
+   * pending one once the sale hold is clear too. `run: false` (the provider's unmount) releases but keeps it pending.
+   */
+  setSavesHold(active: boolean, run?: boolean): void;
+  /** A sign-out is waiting for the sale hold or the saves hold to release. */
   signOutDeferred: boolean;
 };
 export type SaleHold = 'saving' | 'receipt' | null;
@@ -36,28 +41,31 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setSession(null);
     if (ended) void clearProductCache(medusaConnector.id, ended.baseUrl);
   }, []);
-  // Interim (ADR 0015): signing out unmounts the sale and closes the outbox, so a request while a sale is held is
-  // kept (one, with the token it was made under) and runs on release, unless the session was renewed meanwhile.
+  // Interim (ADR 0015): signing out unmounts the sale and closes the outbox, so a request while a sale or a save is held
+  // is kept (one, with the token it was made under) and runs on release, unless the session was renewed meanwhile.
   const saleHold = useRef<SaleHold>(null);
+  // Saves in flight (OutboxProvider): the outbox's close would wait on their writes, so every sign-out waits.
+  const savesHold = useRef(false);
   const deferredToken = useRef<string | null>(null);
   const [signOutDeferred, setSignOutDeferred] = useState(false);
   const requestSignOut = useCallback((automatic: boolean) => {
     const hold = saleHold.current;
-    if (!currentSession.current || !(hold === 'saving' || (automatic && hold === 'receipt'))) return endSession();
+    if (!currentSession.current || !(hold === 'saving' || savesHold.current || (automatic && hold === 'receipt'))) return endSession();
     deferredToken.current = currentSession.current.token;
     setSignOutDeferred(true);
   }, [endSession]);
   const signOut = useCallback(() => requestSignOut(false), [requestSignOut]);
   const reportUnauthorized = useCallback(() => requestSignOut(true), [requestSignOut]);
-  const setSaleHold = useCallback((hold: SaleHold, run = true) => {
-    saleHold.current = hold;
+  const release = useCallback((run: boolean) => {
     const token = deferredToken.current;
     // An unmount (a park, a blocking storage prompt) must not sign out: that would tear down under LiveTabGate's close.
-    if (hold || token === null || !run) return;
+    if (saleHold.current || savesHold.current || token === null || !run) return;
     deferredToken.current = null;
     setSignOutDeferred(false);
     if (currentSession.current?.token === token) endSession();
   }, [endSession]);
+  const setSaleHold = useCallback((hold: SaleHold, run = true) => { saleHold.current = hold; release(run); }, [release]);
+  const setSavesHold = useCallback((active: boolean, run = true) => { savesHold.current = active; release(run); }, [release]);
   // Debug builds only: lets the e2e request an automatic sign-out during a held save.
   useEffect(() => exposeE2eHook('ReportUnauthorized', reportUnauthorized), [reportUnauthorized]);
   // A renewed session (SignInAgain, a successful refresh) drops the pending request at once.
@@ -106,7 +114,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     return () => { active = false; clearInterval(timer); };
   }, [signedIn, reportUnauthorized]);
 
-  return <SessionContext.Provider value={{ session, signIn, signOut, reportUnauthorized, mergeCapabilities, setSaleHold, signOutDeferred }}>
+  return <SessionContext.Provider value={{ session, signIn, signOut, reportUnauthorized, mergeCapabilities, setSaleHold, setSavesHold,
+    signOutDeferred }}>
     {children}
   </SessionContext.Provider>;
 }
