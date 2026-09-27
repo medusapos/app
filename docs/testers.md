@@ -108,6 +108,11 @@ full-height view instead of showing products and the cart side by side:
   instead of adding anything.
 - Typing into a discount box is never read as a scan, so entering a discount
   value there is never mistaken for a barcode.
+- **Settings → Scanner** holds this till's minimum characters and average
+  time per key, for a scanner that types slower or codes shorter than the
+  defaults expect. Its **Test scan here** field shows the last scan's
+  average and whether it would count, against these same values, without
+  going to Products or the cart to check.
 - Camera scanning isn't available yet — see
   [Known limitations](#known-limitations).
 
