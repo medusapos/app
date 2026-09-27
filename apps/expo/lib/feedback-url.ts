@@ -12,6 +12,8 @@ export type FeedbackUrlOptions = {
   platform: string;
   /** The browser's user agent; pass only on web. */
   userAgent?: string;
+  /** An error code to prefill into the report, e.g. from a blocking storage-health prompt. */
+  errorCode?: string;
 };
 
 /** Never the credentials or path: only the backend URL's host (and port, if any). */
@@ -25,12 +27,13 @@ function backendHost(backendUrl: string | undefined): string {
 }
 
 /** Builds the tester-feedback issue form URL, prefilled and never carrying credentials or a path. */
-export function feedbackUrl({ appVersion, backendUrl, platform, userAgent }: FeedbackUrlOptions): string {
+export function feedbackUrl({ appVersion, backendUrl, platform, userAgent, errorCode }: FeedbackUrlOptions): string {
   const params = new URLSearchParams({
     template: TEMPLATE,
     'app-version': appVersion,
     'backend-host': backendHost(backendUrl),
     device: userAgent ? `${platform} - ${userAgent}` : platform,
   });
+  if (errorCode) params.set('what-happened', `Error code: ${errorCode}`);
   return `${ISSUE_FORM_URL}?${params.toString()}`;
 }

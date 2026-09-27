@@ -277,3 +277,29 @@ test('the opfs-sahpool pool held by another worker blocks the app with Reload', 
   await chooseRegion(page, 'Europe');
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 });
+
+// The production web storage doesn't validate, so a genuine DM4 can't be produced; this arms the
+// debug-only hook (order-store.ts) instead, for any order-store open failure that isn't a storage
+// worker start failure.
+test('a non-worker order-store open failure blocks with Reload and Report, and Reload recovers the app', async ({ page }) => {
+  await signIn(page);
+  await page.evaluate((code) => (window as unknown as {
+    __medusaposFailNextOrderStoreOpen: (code: string) => void;
+  }).__medusaposFailNextOrderStoreOpen(code), 'DM4');
+  await page.reload();
+
+  await expect(page.getByText("Saved sales can't be opened", { exact: true })).toBeVisible();
+  await expect(page.getByText(
+    "Saved sales can't be opened on this device. Nothing has been deleted. Reload to try again, or report the problem.",
+  )).toBeVisible();
+  await expect(page.getByText('Error code: DM4')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Reload' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Report a problem' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Reload' }).click();
+  await expect(page.getByText('Up to date · 5 products')).toBeVisible();
+
+  await sellBySku(page, ['E2E-1'], 'exact');
+  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await expect(page.getByText('· Synced', { exact: false })).toBeVisible({ timeout: 30_000 });
+});

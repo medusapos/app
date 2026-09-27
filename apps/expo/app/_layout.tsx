@@ -20,7 +20,7 @@ function GatedApp() {
   const background = useCSSVariable('--color-background');
   return (
     <LiveTabGate scope={session?.baseUrl}>
-      <StorageHealth><OutboxProvider><Stack
+      <StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
