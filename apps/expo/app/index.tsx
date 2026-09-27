@@ -6,8 +6,8 @@ import { getCalendars } from 'expo-localization';
 import { Cart, CartBar, Catalogue, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
 import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
 import {
-  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, TaxProvider, taxProviderProps, useSale, useStoreSettings, withPricingContext,
-  withStockOverlay,
+  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, SALE_SAVING, TaxProvider, taxProviderProps, useSale, useStoreSettings,
+  withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
 import { StripHeightContext } from '../components/store-refused';
@@ -36,8 +36,6 @@ const STATE_LABEL: Record<SyncState, string> = {
   offline: 'Offline · cached catalogue',
 };
 
-// TallyUI's SALE_SAVING (packages/pos/src/sale/use-sale.ts), the tender's lock message; @tallyui/pos doesn't export it at ce184e6.
-const SALE_SAVING = 'This sale is being saved. Retry to finish it.';
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
@@ -178,7 +176,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
-  // isStored: after a failed save, the tender offers Continue once the outbox confirms the order is stored (TallyUI #149).
+  // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
+  // the outbox confirms the order is stored.
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
     isStored });
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the

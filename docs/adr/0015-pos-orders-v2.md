@@ -86,10 +86,13 @@ The pin (`8e86d7a`) also brings three more changes:
     stored: `record` counts the same id and content as stored, never
     overwrites it, and logs the other commandId at warn. Before, the retry
     conflicted and the till stayed on the tender until Sign out or a reload.
-  - **Hung save.** TallyUI offers Continue for a hung save when a refused
-    `newSale()` asks `isStored` again. This app's tender has no New sale
-    while a save is pending, so a hung save still waits for the save to
-    settle, or for the storage prompt below.
+  - **Hung save.** Since the `7fb86e5` pin (TallyUI #161), a save still in
+    flight and unconfirmed re-asks `isStored` every 5 s. Once the order is
+    confirmed stored with the same money-bearing content, the tender offers
+    Continue with no tap. A hung save whose insert never landed still
+    waits, for the save to settle or for the storage prompt below:
+    `isStored` stays false, so there is no Continue. The sale stays locked,
+    and Sign out waits too.
   - **Content mismatch.** The same id with other money-bearing content fails
     with `OrderContentMismatchError`. Nothing is overwritten, `isStored`
     logs it at error, and Continue is not offered.
@@ -97,8 +100,8 @@ The pin (`8e86d7a`) also brings three more changes:
     Signing out unmounts the sale and closes the outbox, so a failed save
     that isn't stored would lose its order.
     - `useSale().saving` runs from `complete()` until the save lands, or
-      after a failed save until Retry stores it or Continue starts the next
-      sale.
+      after a failed or hung save until Retry stores it or Continue starts
+      the next sale.
     - The sale screen sets a sale hold in `SessionProvider`
       (`lib/session-context.tsx`): `saving`, `receipt`, or none.
     - When the sale screen unmounts for another reason (LiveTabGate's

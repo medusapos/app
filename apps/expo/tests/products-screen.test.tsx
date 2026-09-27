@@ -590,6 +590,72 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(signedOut()).toBe(true);
   });
+
+  // TallyUI #161: while a save is in flight and unconfirmed, useSale re-asks isStored every 5 s (HUNG_SAVE_CHECK_MS),
+  // through this app's own wiring (no hungSaveCheckMs). The outbox record never settles here: a hung post-insert step.
+  async function hungSale(isStored: (order: PosOrder) => Promise<boolean>) {
+    const record = vi.fn((_order: PosOrder) => new Promise<void>(() => {}));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored });
+    await mount();
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    expect(record).toHaveBeenCalledTimes(1);
+    return record.mock.calls[0][0];
+  }
+  const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  const signOutDisabled = () => screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled');
+
+  it('offers Continue with no tap once a hung save is confirmed stored; Continue starts a new sale and releases Sign out', async () => {
+    const isStored = vi.fn<(order: PosOrder) => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValue(true);
+    try {
+      const saved = await hungSale(isStored);
+      await advance(4999);
+      expect(isStored).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+      expect(signOutDisabled()).toBe('true');
+      // The first check, at 5 s, answers not stored yet; the next, at 10 s, confirms it.
+      await advance(1);
+      expect(isStored).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+      await advance(5000);
+      expect(isStored).toHaveBeenCalledTimes(2);
+      expect(isStored).toHaveBeenLastCalledWith(saved);
+      const continueButton = screen.getByRole('button', { name: 'Continue' });
+      // Confirmed stored, but still locked until Continue is pressed.
+      expect(signOutDisabled()).toBe('true');
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(false);
+      fireEvent.click(continueButton);
+      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(signOutDisabled()).toBeNull();
+      expect(screen.queryByText(SALE_SAVING)).toBeNull();
+      // The poll has stopped.
+      await advance(15000);
+      expect(isStored).toHaveBeenCalledTimes(2);
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(true);
+      expect(screen.getByText('redirect:/login')).toBeTruthy();
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('offers no Continue while a hung save is never confirmed stored, and Sign out stays locked', async () => {
+    const isStored = vi.fn<(order: PosOrder) => Promise<boolean>>().mockResolvedValue(false);
+    try {
+      await hungSale(isStored);
+      await advance(15000);
+      expect(isStored).toHaveBeenCalledTimes(3);
+      expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Sign out', description: SALE_SAVING }).getAttribute('aria-disabled')).toBe('true');
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(false);
+      expect(screen.queryByText('redirect:/login')).toBeNull();
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 // Settings → Scanner's minChars is the Products search's minCodeLength (ADR 0016, TallyUI #148).
