@@ -67,19 +67,19 @@ importers:
         version: 3.53.4-build1
       '@tallyui/components':
         specifier: file:../../../tallyui/packages/components
-        version: file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native-svg@15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+        version: file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native-svg@15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
       '@tallyui/connector-medusa':
         specifier: file:../../../tallyui/connectors/medusa
-        version: file:../tallyui/connectors/medusa(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))
+        version: file:../tallyui/connectors/medusa(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))
       '@tallyui/core':
         specifier: file:../../../tallyui/packages/core
-        version: file:../tallyui/packages/core(react@19.2.4)
+        version: file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
       '@tallyui/database':
         specifier: file:../../../tallyui/packages/database
-        version: file:../tallyui/packages/database(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))
+        version: file:../tallyui/packages/database(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))
       '@tallyui/pos':
         specifier: file:../../../tallyui/packages/pos
-        version: file:../tallyui/packages/pos(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
+        version: file:../tallyui/packages/pos(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
       '@tallyui/primitives':
         specifier: file:../../../tallyui/packages/primitives
         version: file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
@@ -2119,6 +2119,13 @@ packages:
     resolution: {directory: ../tallyui/packages/core, type: directory}
     peerDependencies:
       react: '>=18'
+      rxdb: '>=16'
+      rxjs: '>=7'
+    peerDependenciesMeta:
+      rxdb:
+        optional: true
+      rxjs:
+        optional: true
 
   '@tallyui/database@file:../tallyui/packages/database':
     resolution: {directory: ../tallyui/packages/database, type: directory}
@@ -8034,7 +8041,9 @@ snapshots:
       metro-runtime: 0.83.4
     transitivePeerDependencies:
       - '@babel/core'
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
@@ -8283,27 +8292,34 @@ snapshots:
       '@tailwindcss/oxide-win32-arm64-msvc': 4.1.17
       '@tailwindcss/oxide-win32-x64-msvc': 4.1.17
 
-  '@tallyui/components@file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native-svg@15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)':
+  '@tallyui/components@file:../tallyui/packages/components(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))(@tallyui/primitives@file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4)))(@tallyui/theme@file:../tallyui/packages/theme)(react-native-svg@15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)':
     dependencies:
-      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)
+      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
+      '@tallyui/pos': file:../tallyui/packages/pos(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
       '@tallyui/primitives': file:../tallyui/packages/primitives(@types/react@19.2.14)(react-dom@19.2.4(react@19.2.4))(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)(use-sync-external-store@1.6.0(react@19.2.4))
       '@tallyui/theme': file:../tallyui/packages/theme
       class-variance-authority: 0.7.1
       react: 19.2.4
       react-native: 0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4)
       react-native-svg: 15.12.1(react-native@0.81.0(@babel/core@7.29.0)(@react-native/metro-config@0.84.0(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.4))(react@19.2.4)
+    transitivePeerDependencies:
+      - rxdb
+      - rxjs
 
-  '@tallyui/connector-medusa@file:../tallyui/connectors/medusa(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))':
+  '@tallyui/connector-medusa@file:../tallyui/connectors/medusa(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))':
     dependencies:
-      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)
+      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
 
-  '@tallyui/core@file:../tallyui/packages/core(react@19.2.4)':
+  '@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)':
     dependencies:
       react: 19.2.4
+    optionalDependencies:
+      rxdb: 16.21.1(rxjs@7.8.2)
+      rxjs: 7.8.2
 
-  '@tallyui/database@file:../tallyui/packages/database(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))':
+  '@tallyui/database@file:../tallyui/packages/database(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))':
     dependencies:
-      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)
+      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
       rxdb: 16.21.1(rxjs@7.8.2)
       rxjs: 7.8.2
     transitivePeerDependencies:
@@ -8319,9 +8335,9 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  '@tallyui/pos@file:../tallyui/packages/pos(@tallyui/core@file:../tallyui/packages/core(react@19.2.4))(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)':
+  '@tallyui/pos@file:../tallyui/packages/pos(@tallyui/core@file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2))(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)':
     dependencies:
-      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)
+      '@tallyui/core': file:../tallyui/packages/core(react@19.2.4)(rxdb@16.21.1(rxjs@7.8.2))(rxjs@7.8.2)
       react: 19.2.4
       rxdb: 16.21.1(rxjs@7.8.2)
       rxjs: 7.8.2
