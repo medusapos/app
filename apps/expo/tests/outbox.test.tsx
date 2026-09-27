@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
+import type { RxCollection } from 'rxdb';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { ProductGrid, SearchInput } from '@tallyui/components';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
@@ -27,6 +28,17 @@ import { setWindowWidth } from './window-width';
 vi.mock('../lib/live-tab', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/live-tab')>();
   return { ...actual, markBusy: vi.fn(actual.markBusy), reportStorageStartFailure: vi.fn() };
+});
+// The real order store, with a hook that runs on each opened collection before the outbox sees it
+// (the #151 test holds the Orders list's first storage read).
+const openHook = vi.hoisted(() => ({ onOpen: undefined as undefined | ((orders: RxCollection<PosOrder>) => void) }));
+vi.mock('../lib/order-store', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/order-store')>();
+  return { ...actual, openOrderStore: async (baseUrl: string) => {
+    const store = await actual.openOrderStore(baseUrl);
+    openHook.onOpen?.(store.orders);
+    return store;
+  } };
 });
 // For the Products screen on the real outbox (the last describe): only the router, the catalogue's replication,
 // the store settings and the component primitives are stubbed, as in products-screen.test.tsx.
@@ -201,6 +213,38 @@ describe('useSessionOutbox (TallyUI useOrderOutbox) with the TallyUI HTTP transp
     await waitFor(() => expect(outbox.recent[0]).toMatchObject({ id: order.id, syncStatus: 'applied' }));
     expect(fetchStub.mock.lastCall?.[1]?.headers).toMatchObject({ Authorization: 'Bearer signed-in-again' });
     expect(JSON.parse(fetchStub.mock.lastCall![1]!.body as string).commands[0].id).toBe(order.commandId);
+  });
+
+  // TallyUI #151: `recent` (the Orders list) re-reads storage on every change (watchFresh). A cached find().$ could
+  // miss an order written while its first read was in flight, and stay stale until a reload (RxDB 16.21.1 bug 4).
+  it('shows an order recorded while the Orders list\'s first read is in flight, without a reload', async () => {
+    fetchStub.mockRejectedValue(new TypeError('offline'));
+    const order = sale();
+    let readAnswered!: () => void;
+    const answered = new Promise<void>((resolve) => { readAnswered = resolve; });
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    // Holds the list's first read (limit 50) after storage answered, before the list sees the answer.
+    openHook.onOpen = (orders) => {
+      const storage = orders.storageInstance;
+      const query = storage.query.bind(storage);
+      let armed = true;
+      vi.spyOn(storage, 'query').mockImplementation(async (prepared) => {
+        const result = await query(prepared);
+        if (armed && prepared.query.limit === 50) { armed = false; readAnswered(); await released; }
+        return result;
+      });
+    };
+    try {
+      render(<Harness session={session} />);
+      await answered;
+      await waitFor(() => expect(outbox.orders).not.toBeNull());
+      await act(async () => { await outbox.record(order); });
+      release();
+      await waitFor(() => expect(outbox.recent.map((recent) => [recent.id, recent.syncStatus])).toEqual([[order.id, 'pending']]));
+    } finally {
+      openHook.onOpen = undefined;
+    }
   });
 
   it('keeps a live list limited to the newest 50 and closes when switching stores', async () => {
@@ -415,6 +459,37 @@ describe('completing a sale into the outbox', () => {
     expect(sentCommands().map((command) => command.id)).toEqual([order.commandId]);
   });
 
+  // TallyUI #150: no new sale while a save is in flight. This app passes no register session, so complete() builds
+  // its order synchronously and the "building or stamping" window has no await to hold; the save it hands to
+  // record() is what a cashier can wait on.
+  it('refuses newSale() and continueSale() while a save is held in flight, then shows the receipt once it lands', async () => {
+    fetchStub.mockRejectedValue(new TypeError('offline'));
+    renderTill();
+    await tenderByCard();
+    const collection = outbox.orders!;
+    const insert = collection.insert.bind(collection);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(collection, 'insert').mockImplementationOnce(async (doc) => { await held; return insert(doc); });
+    const lines = till.order.lineItems;
+    let completion!: Promise<void>;
+    act(() => { completion = till.complete(); });
+    expect(till.saving).toBe(true);
+    act(() => { till.newSale(); });
+    expect(till.error).toBe('This sale is being saved. Retry to finish it.');
+    act(() => { till.continueSale(); });
+    expect(till.stage).toEqual({ kind: 'tender', method: 'external' });
+    expect(till.order.lineItems).toBe(lines);
+    expect(till.canContinue).toBe(false);
+
+    release();
+    await act(async () => { await completion; });
+    expect(till.stage.kind).toBe('receipt');
+    expect(till.error).toBeNull();
+    expect(recorded).toHaveBeenCalledTimes(1);
+    expect((await collection.find().exec()).map((doc) => doc.id)).toEqual([recorded.mock.calls[0][0].id]);
+  });
+
   // TallyUI #149: after a failed save, newSale() is refused until the outbox's isStored confirms the order.
   it('refuses newSale() after a failed save until isStored confirms the order is stored', async () => {
     fetchStub.mockRejectedValue(new TypeError('offline'));
@@ -540,13 +615,17 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     error.mockRestore();
   });
 
+  function App({ products = true, orders = false }: { products?: boolean; orders?: boolean }) {
+    return <SessionProvider><OutboxProvider>
+      <CaptureOutbox />{products ? <ProductsScreen /> : null}{orders ? <OrdersScreen /> : null}
+    </OutboxProvider></SessionProvider>;
+  }
   async function tenderShirtByCard(withOrders = false) {
-    render(<SessionProvider><OutboxProvider>
-      <CaptureOutbox /><ProductsScreen />{withOrders ? <OrdersScreen /> : null}
-    </OutboxProvider></SessionProvider>);
+    const view = render(<App orders={withOrders} />);
     await waitFor(() => expect(outbox.orders).not.toBeNull());
     fireEvent.click(await screen.findByRole('button', { name: 'Shirt' }));
     fireEvent.click(button('Card terminal'));
+    return view;
   }
   /** Makes the next store insert write `stored(doc)` and then reject; resolves to the order the sale handed over. */
   function insertWritesThenThrows(stored: (doc: PosOrder) => PosOrder = (doc) => doc): Promise<PosOrder> {
@@ -627,6 +706,29 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
       expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
       expect(signOutDisabled()).toBe(false);
     });
+
+  // TallyUI #150: every unconfirmed save failure is logged, mounted or not, and so is an unmount mid-save.
+  it('a save that fails after the sale screen unmounted reaches console.error, as does the unmount itself', async () => {
+    fetchStub.mockRejectedValue(new TypeError('offline'));
+    const view = await tenderShirtByCard();
+    const collection = outbox.orders!;
+    let fail!: (reason: Error) => void;
+    const handed = new Promise<PosOrder>((resolve) => {
+      vi.spyOn(collection, 'insert').mockImplementationOnce((doc) => {
+        resolve(doc as PosOrder);
+        return new Promise((_resolve, reject) => { fail = reject; }) as never;
+      });
+    });
+    await approve();
+    const order = await handed;
+
+    // The sale screen unmounts mid-save; the outbox stays open.
+    view.rerender(<App products={false} />);
+    expect(error).toHaveBeenCalledWith('[sale] useSale unmounted with a save pending or in flight', { orderId: order.id, stage: 'tender' });
+    await act(async () => { fail(new Error('disk full')); });
+    await waitFor(() => expect(error).toHaveBeenCalledWith('[sale] onSaleCompleted failed', { orderId: order.id, error: 'disk full' }));
+    expect(await collection.find().exec()).toEqual([]);
+  });
 
   it('a stored order with the same id and other money content fails the retry with OrderContentMismatchError, overwrites nothing and logs at error', async () => {
     fetchStub.mockRejectedValue(new TypeError('offline'));

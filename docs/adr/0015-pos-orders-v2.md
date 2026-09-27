@@ -109,16 +109,30 @@ The pin (`8e86d7a`) also brings three more changes:
     (e.g. DM4) blocks with its own prompt ("Saved sales can't be opened",
     `orderStoreOpenFailed$`, `apps/expo/components/storage-health.tsx`,
     #80) until Reload, so it no longer passes silently.
+    - Since the `de48528` pin (TallyUI #152), a close during
+      `addPosOrderCollection` waits for the whole open, and the open then
+      rejects with `PosOrderOpenClosedError`. The app doesn't report that
+      error to #80's prompt (`lib/outbox-context.tsx`, matched by
+      `instanceof`). The close is expected on Sign out or park, no order is
+      lost, and the next open retries.
+    - A rare case remains. If a close's 10 s wait
+      (`POS_ORDER_MIGRATION_CLOSE_WAIT_MS`) runs out mid-migration, the
+      open can still end in a raw error rather than
+      `PosOrderOpenClosedError`. No order is lost, since the next open
+      migrates again. The TallyUI fix comes next.
   - A sale that was stored is kept and sent by the outbox. A sale whose
     insert never landed gets no Continue, and is lost with a reload, as
     before this change.
   - `saleLogger` and `outboxLogger` warn and error reach the console
-    (`apps/expo/lib/logging.ts`, installed in `app/_layout.tsx`).
+    (`apps/expo/lib/logging.ts`, installed in `app/_layout.tsx`). Since
+    TallyUI #150 that includes every save failure not yet confirmed stored,
+    and a sale screen unmounting with a save pending.
 - `useOrderOutbox.recent` (the Orders list and the Needs attention badge)
-  still reads through a cached RxDB query, so right after the store opens it
-  can briefly show a stale list until the next change or a reload. This is
-  display only: the outbox sends from fresh reads. A TallyUI follow-up
-  (from the #79 review).
+  re-reads storage on every change since the `de48528` pin (TallyUI #151,
+  `watchFresh`). It used to read through a cached RxDB query, which could
+  miss an order written while its first read was in flight and stay stale
+  until a reload (from the #79 review). A unit test holds that first read
+  and records an order during it.
 - A sale taken while the outbox is reading its pending sales is sent with no
   restart. A unit test holds that read to hit the race every time. An e2e
   completes a second cash sale as the first one's send is let go. The race
