@@ -56,6 +56,30 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toBeVisible();
 });
 
+// ADR 0015 (#82 review): an automatic sign-out during a save that can't finish waits, with a note that fits at 360 px.
+test('a sign-out requested during a stuck save waits, and its note fits beside Sign out at 360 px', async ({ page }) => {
+  await signIn(page);
+  await page.evaluate(() => (window as unknown as { __medusaposKillStorageWorker: () => void }).__medusaposKillStorageWorker());
+  await addE2E1(page);
+  await page.getByRole('button', { name: /^Open cart, / }).click();
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
+  await tender.locator('[tabindex="0"]').first().click();
+  await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('Saving is slow…');
+
+  // The same request a 401 or a refused refresh makes.
+  await page.evaluate(() => (window as unknown as { __medusaposReportUnauthorized: () => void }).__medusaposReportUnauthorized());
+  const note = page.getByText('Signed out after this sale is saved', { exact: true });
+  await expect(note).toBeVisible();
+  await expectSignOutInViewport(page);
+  const box = (await note.boundingBox())!;
+  expect([box.x >= 0, box.x + box.width <= 360]).toEqual([true, true]);
+  // Still signed in, on the sale's tender.
+  await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login/);
+});
+
 // ADR 0009 amendment: a keyboard-wedge scan in the phone cart view adds the product (job "wedge scan").
 test('a keyboard-wedge scan in the cart view adds a product, and an unknown code alerts without adding one', async ({ page }) => {
   await signIn(page);

@@ -93,13 +93,30 @@ The pin (`8e86d7a`) also brings three more changes:
   - **Content mismatch.** The same id with other money-bearing content fails
     with `OrderContentMismatchError`. Nothing is overwritten, `isStored`
     logs it at error, and Continue is not offered.
-  - **Sign out** is disabled while `useSale().saving` is true: from
-    `complete()` until the save lands, or after a failed save until Retry
-    stores it or Continue starts the next sale. Signing out unmounts the
-    sale and closes the outbox (the #150 review). Two other ways out of the
-    sale wait on it too:
-    - A product replication 401 during a save is deferred, and signs out
-      once `saving` turns false. The local save needs no token.
+  - **Every sign-out waits for a saving sale** (the #150 and #82 reviews).
+    Signing out unmounts the sale and closes the outbox, so a failed save
+    that isn't stored would lose its order.
+    - `useSale().saving` runs from `complete()` until the save lands, or
+      after a failed save until Retry stores it or Continue starts the next
+      sale.
+    - The sale screen sets a sale hold in `SessionProvider`
+      (`lib/session-context.tsx`): `saving`, `receipt`, or none. It is
+      released on unmount.
+    - While the sale is saving, every sign-out request is deferred:
+      - the Sign out button, which is also disabled in place;
+      - a product replication 401;
+      - the capabilities check;
+      - the store-settings fetch;
+      - a token refresh refused with `invalid_credentials`.
+    - Automatic sign-outs (all but the button) also wait for the receipt
+      to clear, so the till never jumps to login over a receipt. They run
+      after New sale. A cashier can still sign out from the receipt.
+    - One request is kept, with the token it was made under. It is dropped
+      if the session was renewed meanwhile (SignInAgain, or a successful
+      refresh). While it waits, the screen shows "Signed out after this
+      sale is saved".
+    - This hold is the interim fix. The real fix is a pending completion
+      that survives unmount and reload, which belongs to the c2/v3 design.
     - Settings' "‹ Products" goes back to the Products screen under it
       (`router.back()`), and replaces only when opened by URL with no
       history. A replace mounted a second, empty Products screen over the
@@ -113,8 +130,10 @@ The pin (`8e86d7a`) also brings three more changes:
       `addPosOrderCollection` waits for the whole open, and the open then
       rejects with `PosOrderOpenClosedError`. The app doesn't report that
       error to #80's prompt (`lib/outbox-context.tsx`, matched by
-      `instanceof`). The close is expected on Sign out or park, no order is
-      lost, and the next open retries.
+      `instanceof`). This is defensive: it covers a close during an open,
+      and this app doesn't do that today. `openOrderStore` hands out
+      `close()` only once the open resolves, and `closeOrderStores` waits
+      on the open. No order would be lost, and the next open retries.
     - A rare case remains. If a close's 10 s wait
       (`POS_ORDER_MIGRATION_CLOSE_WAIT_MS`) runs out mid-migration, the
       open can still end in a raw error rather than

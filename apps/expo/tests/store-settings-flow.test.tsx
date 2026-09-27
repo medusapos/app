@@ -73,7 +73,8 @@ const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
 const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError('choice_required', 'Choose', choices);
 const storeSettings = vi.spyOn(posConnector, 'storeSettings');
 const capabilities = vi.spyOn(posConnector, 'capabilities');
-const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn() });
+const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
+  setSaleHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
 const pos = () => screen.findByPlaceholderText('Search or scan barcode / SKU');
 

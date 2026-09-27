@@ -23,7 +23,8 @@ export function useSessionOutbox(session: Session | null, registerId: string): U
     onBusy: (busy) => markBusy('outbox', busy),
     onOpenError: (error) => {
       if (isStorageWorkerFailure(error)) reportStorageStartFailure();
-      // Expected on Sign out or park (a close during the open); no order is lost, and the next open retries.
+      // Defensive: a close during the open (no order lost; the next open retries). This app doesn't do that today:
+      // openOrderStore hands out close() only once the open resolves, and closeOrderStores waits on the open.
       else if (error instanceof PosOrderOpenClosedError) return;
       else reportOrderStoreOpenFailure(error);
     },

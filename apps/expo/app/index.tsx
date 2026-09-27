@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
+import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
@@ -162,16 +162,9 @@ function PricingScreen(props: PricingProps) {
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
-  // A replication 401 while a save is pending (`saving`, set below) waits: signing out would unmount the sale and close
-  // the outbox, and the local save needs no token. It signs out once `saving` turns false (effect below).
-  const saving = useRef(false);
-  const unauthorizedWhileSaving = useRef(false);
-  const onReplicationUnauthorized = useCallback(() => {
-    if (saving.current) unauthorizedWhileSaving.current = true;
-    else onUnauthorized();
-  }, [onUnauthorized]);
+  const { setSaleHold, signOutDeferred } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
-    useReplicatedProducts(connector, syncContext, onReplicationUnauthorized);
+    useReplicatedProducts(connector, syncContext, onUnauthorized);
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
   const { record, isStored, state: outboxState, recent } = useOutboxContext();
@@ -191,12 +184,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review).
   const signOutLocked = sale.saving;
-  saving.current = sale.saving;
-  useEffect(() => {
-    if (sale.saving || !unauthorizedWhileSaving.current) return;
-    unauthorizedWhileSaving.current = false;
-    onUnauthorized();
-  }, [sale.saving, onUnauthorized]);
+  // The session's sale hold (ADR 0015): every sign-out waits while saving; automatic ones (a 401, a failed refresh)
+  // also wait for the receipt to clear. Released on unmount, so a screen that goes never holds the session.
+  const saleHold = sale.saving ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
+  useEffect(() => setSaleHold(saleHold), [saleHold, setSaleHold]);
+  useEffect(() => () => setSaleHold(null), [setSaleHold]);
   useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
@@ -261,6 +253,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{SALE_SAVING}</Text> : null}
         </View>
       ) }} />
+      {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
+      {signOutDeferred ? <View dataSet={{ print: 'hide' }} className="px-4 py-1">
+        <Text className="text-sm text-muted-foreground">Signed out after this sale is saved</Text></View> : null}
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
         store={{ name: settings.storeName, address: settings.location.addressLine }}
         topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}
