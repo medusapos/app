@@ -74,8 +74,23 @@ The pin (`8e86d7a`) also brings three more changes:
   Unit tests (memory storage) and the Chromium e2e (SQLite) cover it from
   v0 and from v1, and from the legacy store. Each shows the sale waiting,
   then syncing once.
-- After a failed save, the tender stays locked on Retry. A till whose
-  storage stays broken recovers through the storage prompt's Reload.
+- After a failed save, the tender stays locked. "Complete sale" (or
+  "Payment approved on terminal") retries with the same ids, and there is no
+  Back. The storage prompt's Reload appears only for a stalled or dead
+  storage worker or a worker start failure. After any other open failure
+  (e.g. DM4), and after a sale is requeued from Orders while the tender is
+  locked (its stored commandId changes, so the retry conflicts), the till
+  stays on the tender until Sign out or a browser reload.
+  - A sale that was stored is kept and sent by the outbox.
+  - A sale whose insert never landed is lost with the reload, as before this
+    change.
+  - A TallyUI follow-up is to offer an explicit way out once the stored order
+    is confirmed (from the #79 review).
+- `useOrderOutbox.recent` (the Orders list and the Needs attention badge)
+  still reads through a cached RxDB query, so right after the store opens it
+  can briefly show a stale list until the next change or a reload. This is
+  display only: the outbox sends from fresh reads. A TallyUI follow-up
+  (from the #79 review).
 - A sale taken while the outbox is reading its pending sales is sent with no
   restart. A unit test holds that read to hit the race every time. An e2e
   completes a second cash sale as the first one's send is let go. The race

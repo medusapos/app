@@ -215,6 +215,9 @@ Open **Orders** → **Needs attention** to see sales that need a look:
   release.
 - If a sale stays "Waiting to sync" while you're online, reload the app and
   report it; a fix is in this release.
+- If a sale can't be saved, the payment screen stays on it with "This sale
+  is being saved", and **Complete sale** tries again. If it keeps failing,
+  write the sale down, reload the app and report it.
 
 ## Report a problem
 
