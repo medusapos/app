@@ -4,6 +4,7 @@
     "strict": true,
     "paths": {
       "@tallyui/core": ["./node_modules/@tallyui/core/src/index.ts"],
+      "@tallyui/core/rxdb": ["./node_modules/@tallyui/core/src/rxdb/index.ts"],
       "@tallyui/components": ["./node_modules/@tallyui/components/src/index.ts"],
       "@tallyui/database": ["./node_modules/@tallyui/database/src/index.ts"],
       "@tallyui/pos": ["./node_modules/@tallyui/pos/src/index.ts"],
