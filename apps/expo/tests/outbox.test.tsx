@@ -7,7 +7,7 @@ import type { ProductGrid, SearchInput } from '@tallyui/components';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import {
-  catalogueEntries, createOrderBuilder, finalizeOrder, needsAttention, OrderContentMismatchError, outboxLogger, saleLogger,
+  catalogueEntries, createOrderBuilder, finalizeOrder, needsAttention, OrderContentMismatchError, outboxLogger, posOrdersLogger, saleLogger,
   TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder,
 } from '@tallyui/pos';
 import { StorageWorkerStartError } from '@tallyui/storage-sqlite/web';
@@ -530,11 +530,11 @@ describe('completing a sale into the outbox', () => {
   });
 });
 
-// lib/logging.ts: the app's console sink on TallyUI's sale and outbox loggers.
+// lib/logging.ts: the app's console sink on TallyUI's sale, outbox and pos-orders loggers.
 describe('the money-path log sinks', () => {
   beforeAll(() => installLogSinks());
 
-  it('sends saleLogger and outboxLogger warn and error to the console with scope, message and data, and nothing below warn', () => {
+  it('sends saleLogger, outboxLogger and posOrdersLogger warn and error to the console with scope, message and data, and nothing below warn', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -542,9 +542,11 @@ describe('the money-path log sinks', () => {
     try {
       saleLogger.warn('A probe', { orderId: 'order-1' });
       outboxLogger.error('Another probe', { orderId: 'order-2' });
+      posOrdersLogger.warn('A third probe', { database: 'db-1' });
       saleLogger.info('Not sent');
       saleLogger.debug('Not sent either');
-      expect(warn).toHaveBeenCalledExactlyOnceWith('[sale] A probe', { orderId: 'order-1' });
+      expect(warn).toHaveBeenNthCalledWith(1, '[sale] A probe', { orderId: 'order-1' });
+      expect(warn).toHaveBeenNthCalledWith(2, '[pos-orders] A third probe', { database: 'db-1' });
       expect(error).toHaveBeenCalledExactlyOnceWith('[outbox] Another probe', { orderId: 'order-2' });
       expect(log).not.toHaveBeenCalled();
       expect(info).not.toHaveBeenCalled();
@@ -559,7 +561,8 @@ describe('the money-path log sinks', () => {
     try {
       expect(() => saleLogger.warn('A probe')).not.toThrow();
       expect(() => outboxLogger.error('A probe', { orderId: 'order-1' })).not.toThrow();
-      expect(warn).toHaveBeenCalledTimes(1);
+      expect(() => posOrdersLogger.warn('A probe')).not.toThrow();
+      expect(warn).toHaveBeenCalledTimes(2);
       expect(error).toHaveBeenCalledTimes(1);
     } finally {
       warn.mockRestore(); error.mockRestore();

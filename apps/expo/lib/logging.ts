@@ -1,8 +1,9 @@
-import { outboxLogger, saleLogger, type LogEntry, type LogSink } from '@tallyui/pos';
+import { outboxLogger, posOrdersLogger, saleLogger, type LogEntry, type LogSink } from '@tallyui/pos';
 
 /**
  * The money path's log sinks (TallyUI ce184e6): `saleLogger` logs a save that failed for an abandoned attempt,
- * `outboxLogger` a retried order stored under another commandId (warn) and a content mismatch (error). Without a
+ * `outboxLogger` a retried order stored under another commandId (warn) and a content mismatch (error),
+ * `posOrdersLogger` a status write TallyUI #155 dropped rather than let reach closed storage. Without a
  * sink those go nowhere. This console sink is the only one for now; a later remote-logging job can add another
  * sink next to it (`addSink`, keyed by id) without touching this one.
  */
@@ -26,8 +27,10 @@ export function consoleLogSink(): LogSink {
   };
 }
 
-/** Adds the console sink to `saleLogger` and `outboxLogger`. Called once at app start (`app/_layout.tsx`); a repeat replaces it. */
+/** Adds the console sink to `saleLogger`, `outboxLogger` and `posOrdersLogger`. Called once at app start
+ * (`app/_layout.tsx`); a repeat replaces it. */
 export function installLogSinks(): void {
   saleLogger.addSink(consoleLogSink());
   outboxLogger.addSink(consoleLogSink());
+  posOrdersLogger.addSink(consoleLogSink());
 }
