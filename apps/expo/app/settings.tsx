@@ -1,6 +1,6 @@
 import { useRef, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, router, Stack } from 'expo-router';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { DEFAULT_SCANNER_SETTINGS, useScannerSettings } from '../lib/scanner-settings';
@@ -53,11 +53,15 @@ function ScannerSection({ session }: { session: Session }) {
   const counts = lastScan !== null && lastScan.code.length >= settings.minChars && lastScan.avgMs <= settings.avgKeyMs;
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
     <Stack.Screen options={{ title: 'Settings' }} />
+    <View className="border-b border-border">
+      <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => router.replace('/')}
+        className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
+    </View>
     <View className="w-full max-w-md gap-4 self-center">
       <Text className="text-lg font-semibold text-foreground">Scanner</Text>
       <Field accessibilityLabel="Average time per key (ms)" label="Average time per key (ms)" help="A scan is faster than typing. Raise this for slow Bluetooth scanners."
         value={avgKeyMsInput} onChangeText={setAvgKeyMsInput} keyboardType="number-pad" />
-      <Field accessibilityLabel="Minimum characters" label="Minimum characters"
+      <Field accessibilityLabel="Minimum characters" label="Minimum characters" help="Codes shorter than this are treated as typing, not a scan"
         value={minCharsInput} onChangeText={setMinCharsInput} keyboardType="number-pad" />
       {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
       <View className="flex-row gap-3">
@@ -69,7 +73,7 @@ function ScannerSection({ session }: { session: Session }) {
         </Pressable>
       </View>
       <View className="gap-1 border-t border-border pt-4">
-        <Field accessibilityLabel="Test scan here" label="Test scan here" value={testValue} onChangeText={setTestValue} onKeyPress={onTestKeyPress} />
+        <Field accessibilityLabel="Test scan here" label="Test scan here" help="Scan a barcode into this field to check it counts as a scan" value={testValue} onChangeText={setTestValue} onKeyPress={onTestKeyPress} />
         {lastScan ? <Text className="text-sm text-muted-foreground">{`Last scan: ${lastScan.code} · ${lastScan.code.length} characters · average ${Math.round(lastScan.avgMs)} ms per key`}</Text> : null}
         {lastScan ? <Text className={`text-sm ${counts ? 'text-foreground' : 'text-destructive'}`}>{counts ? 'Counts as a scan' : 'Too slow / too short'}</Text> : null}
       </View>

@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { router } from 'expo-router';
 import { DEFAULT_SCANNER_SETTINGS, loadScannerSettings, useScannerSettings } from '../lib/scanner-settings';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
@@ -9,6 +10,7 @@ import SettingsScreen from '../app/settings';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
+  router: { replace: vi.fn(), navigate: vi.fn() },
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() ?? null },
 }));
 
@@ -104,5 +106,17 @@ describe('SettingsScreen', () => {
     vi.setSystemTime(start + 4 * 150);
     fireEvent.keyDown(field, { key: 'Enter' });
     expect(screen.getByText('Too slow / too short')).toBeTruthy();
+  });
+
+  it('shows help text for minimum characters and the test field', async () => {
+    await mount();
+    expect(screen.getByText('Codes shorter than this are treated as typing, not a scan')).toBeTruthy();
+    expect(screen.getByText('Scan a barcode into this field to check it counts as a scan')).toBeTruthy();
+  });
+
+  it('the Products link navigates home, for when Settings was opened directly by URL', async () => {
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Products' }));
+    expect(router.replace).toHaveBeenCalledWith('/');
   });
 });

@@ -47,3 +47,11 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
   await page.keyboard.press('Enter');
   await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
 });
+
+test('opening /settings directly by URL still lands back on Products', async ({ page }) => {
+  await signIn(page);
+  await page.goto('/settings');
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Products', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
+});
