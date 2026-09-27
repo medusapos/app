@@ -48,6 +48,45 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
   await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
 });
 
+// The same minChars is the Products search's minCodeLength (TallyUI #148): below it, Enter does no code lookup.
+test('a saved minChars gates Enter in the Products search: a shorter code stays a search', async ({ page }) => {
+  await signIn(page);
+  const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
+
+  await openSettings(page);
+  await setMinChars(page, '6');
+  await page.goBack();
+  await search.fill('E2E-2');
+  await search.press('Enter');
+  await expect(search).toHaveValue('E2E-2');
+  await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toBeVisible();
+
+  await openSettings(page);
+  await setMinChars(page, '3');
+  await page.goBack();
+  await search.fill('E2E-2');
+  await search.press('Enter');
+  await expect(search).toHaveValue('');
+  await expect(page.getByRole('button', { name: /^Open cart, 1 item, / })).toBeVisible();
+});
+
+// "‹ Products" goes back to the Products screen under Settings: a replace mounted a second, empty one over it,
+// hiding the sale in progress (and any pending save) behind a fresh cart.
+test('"‹ Products" from Settings returns to the same sale, with one Products screen mounted', async ({ page }) => {
+  await signIn(page);
+  await addE2E1(page);
+  const cartBar = page.getByRole('button', { name: /^Open cart, 1 item, / });
+  await expect(cartBar).toBeVisible();
+
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Products', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
+  await expect(cartBar).toBeVisible();
+  // Hidden stack screens stay in the DOM, so this counts every mounted Products screen.
+  await expect(page.getByPlaceholder('Search or scan barcode / SKU', { exact: true })).toHaveCount(1);
+  await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toHaveCount(0);
+});
+
 test('opening /settings directly by URL still lands back on Products', async ({ page }) => {
   await signIn(page);
   await page.goto('/settings');

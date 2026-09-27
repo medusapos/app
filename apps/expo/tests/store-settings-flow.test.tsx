@@ -73,7 +73,8 @@ const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
 const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError('choice_required', 'Choose', choices);
 const storeSettings = vi.spyOn(posConnector, 'storeSettings');
 const capabilities = vi.spyOn(posConnector, 'capabilities');
-const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn() });
+const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
+  setSaleHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
 const pos = () => screen.findByPlaceholderText('Search or scan barcode / SKU');
 
@@ -91,7 +92,7 @@ beforeEach(() => {
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useSession).mockReturnValue(signedIn());
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [],
-    record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
+    record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: null, lastSyncedAt: null,
     stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
 });

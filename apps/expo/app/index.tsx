@@ -36,6 +36,12 @@ const STATE_LABEL: Record<SyncState, string> = {
   offline: 'Offline · cached catalogue',
 };
 
+// TallyUI's SALE_SAVING (packages/pos/src/sale/use-sale.ts), the tender's lock message; @tallyui/pos doesn't export it at ce184e6.
+const SALE_SAVING = 'This sale is being saved. Retry to finish it.';
+const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
+// Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
+const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
+
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized, mergeCapabilities } = useSession();
   if (!session) return <Redirect href="/login" />;
@@ -156,11 +162,12 @@ function PricingScreen(props: PricingProps) {
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
+  const { setSaleHold, signOutDeferred } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
-  const { record, state: outboxState, recent } = useOutboxContext();
+  const { record, isStored, state: outboxState, recent } = useOutboxContext();
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {
     const fresh = recent.filter((order) => order.syncStatus === 'applied' && !stockWarned.current.has(order.id)
@@ -171,7 +178,18 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
-  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record });
+  // isStored: after a failed save, the tender offers Continue once the outbox confirms the order is stored (TallyUI #149).
+  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
+    isStored });
+  // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
+  // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review).
+  const signOutLocked = sale.saving;
+  // The session's sale hold (ADR 0015): every sign-out waits while saving; automatic ones (a 401, a failed refresh)
+  // also wait for the receipt to clear. Released on unmount without running a pending sign-out: the next sale screen's
+  // release runs it, if the token is unchanged.
+  const saleHold = sale.saving ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
+  useEffect(() => setSaleHold(saleHold), [saleHold, setSaleHold]);
+  useEffect(() => () => setSaleHold(null, false), [setSaleHold]);
   useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
@@ -208,9 +226,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const clock = getCalendars()[0]?.uses24hourClock;
   const hour12 = clock == null ? undefined : !clock;
   const catalogue = <View className="flex-1">
-    {/* TODO(scanner minCodeLength): wire minCodeLength={scannerSettings.minChars} once TallyUI's Catalogue takes it and the pin bumps. */}
+    {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
-      lastStockCheckAt={lastStockCheckAt} hour12={hour12}
+      lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
     <SyncStatus state={outboxState} />
   </View>;
@@ -226,11 +244,19 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <Pressable accessibilityRole="button" onPress={() => router.push('/settings')} className="min-h-11 justify-center">
           <Text className="text-foreground">Settings</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }} className="min-h-11 justify-center">
+        {/* Disabled in place while a save is pending (never hidden), so the header doesn't shift; the lock message is its description. */}
+        <Pressable accessibilityRole="button" disabled={signOutLocked} accessibilityHint={signOutLocked ? SALE_SAVING : undefined}
+          aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
+          onPress={() => { if (!signOutLocked) signOut(); }}
+          className={`min-h-11 justify-center ${signOutLocked ? 'opacity-50' : ''}`}>
           <Text className="text-foreground">Sign out</Text>
         </Pressable>
+        {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{SALE_SAVING}</Text> : null}
         </View>
       ) }} />
+      {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
+      {signOutDeferred ? <View dataSet={{ print: 'hide' }} className="px-4 py-1">
+        <Text className="text-sm text-muted-foreground">Signed out after this sale is saved</Text></View> : null}
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
         store={{ name: settings.storeName, address: settings.location.addressLine }}
         topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}

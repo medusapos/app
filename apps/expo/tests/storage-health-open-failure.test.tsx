@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PosOrderOpenClosedError, type PosOrder } from '@tallyui/pos';
 import { StorageWorkerStartError } from '@tallyui/storage-sqlite/web';
 import { reportStorageStartFailure } from '../lib/live-tab';
 import { useSessionOutbox } from '../lib/outbox-context';
@@ -16,13 +17,15 @@ vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 // A DM4-like failure from `addPosOrderCollection` (order-store.ts's one open path), armed for
 // exactly the next call: real enough to drive `onOpenError` without reconstructing RxDB's own
 // invalid-document DM4 (order-store.test.ts already covers a genuine one).
-const dm4 = vi.hoisted(() => ({ armed: false }));
+// `closed` arms TallyUI #152's PosOrderOpenClosedError instead: the database closed during the open (Sign out or park).
+const dm4 = vi.hoisted(() => ({ armed: false, closed: false }));
 vi.mock('@tallyui/pos', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@tallyui/pos')>();
   return {
     ...actual,
     addPosOrderCollection: vi.fn((...args: Parameters<typeof actual.addPosOrderCollection>) => {
       if (dm4.armed) { dm4.armed = false; return Promise.reject(Object.assign(new Error('COL19: invalid document'), { code: 'DM4' })); }
+      if (dm4.closed) { dm4.closed = false; return Promise.reject(new actual.PosOrderOpenClosedError('medusapos-orders')); }
       return actual.addPosOrderCollection(...args);
     }),
   };
@@ -43,6 +46,7 @@ function Harness({ session }: { session: Session | null }) {
 beforeEach(() => {
   session = { baseUrl: `https://open-failure-${++sequence}.test`, email: 'cashier@test.com', token: 'token' };
   dm4.armed = false;
+  dm4.closed = false;
   vi.mocked(reportStorageStartFailure).mockClear();
 });
 afterEach(async () => {
@@ -97,6 +101,25 @@ describe('StorageHealth: an order-store open failure other than a storage-worker
       view.rerender(<Harness session={{ ...session, baseUrl: `${session.baseUrl}/retry` }} />);
       await waitFor(() => expect(outbox.orders).not.toBeNull());
       expect(latest).toBeNull();
+    } finally { subscription.unsubscribe(); }
+  });
+
+  it('a close during the open (PosOrderOpenClosedError) is not reported, while a DM4 still is', async () => {
+    let latest: OrderStoreOpenFailure = null;
+    const subscription = orderStoreOpenFailed$.subscribe((value) => { latest = value; });
+    try {
+      dm4.closed = true;
+      const view = render(<StorageHealth><Harness session={session} /></StorageHealth>);
+      // record() rejects with the opening error only after the open's catch ran, onOpenError included.
+      await waitFor(() => expect(outbox.record({} as PosOrder)).rejects.toBeInstanceOf(PosOrderOpenClosedError));
+      expect(latest).toBeNull();
+      expect(screen.queryByText("Saved sales can't be opened")).toBeNull();
+      expect(reportStorageStartFailure).not.toHaveBeenCalled();
+
+      dm4.armed = true;
+      view.rerender(<StorageHealth><Harness session={{ ...session, baseUrl: `${session.baseUrl}/dm4` }} /></StorageHealth>);
+      await waitFor(() => expect(latest).toMatchObject({ code: 'DM4' }));
+      expect(screen.getByText("Saved sales can't be opened")).toBeTruthy();
     } finally { subscription.unsubscribe(); }
   });
 });

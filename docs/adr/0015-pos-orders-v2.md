@@ -76,24 +76,87 @@ The pin (`8e86d7a`) also brings three more changes:
   then syncing once.
 - After a failed save, the tender stays locked. "Complete sale" (or
   "Payment approved on terminal") retries with the same ids, and there is no
-  Back. The storage prompt's Reload covers a stalled or dead storage worker
-  or a worker start failure; any other order-store open failure (e.g. DM4)
-  now blocks with its own prompt too ("Saved sales can't be opened",
-  `orderStoreOpenFailed$`, `apps/expo/components/storage-health.tsx`) until
-  Reload, so it no longer passes silently. After a sale is requeued from
-  Orders while the tender is locked (its stored commandId changes, so the
-  retry conflicts), the till still stays on the tender until Sign out or a
-  browser reload.
-  - A sale that was stored is kept and sent by the outbox.
-  - A sale whose insert never landed is lost with the reload, as before this
-    change.
-  - A TallyUI follow-up is to offer an explicit way out once the stored order
-    is confirmed (from the #79 review).
+  Back. Since the `ce184e6` pin (TallyUI #149) the app passes
+  `useOrderOutbox`'s `isStored` to `useSale`. Once that primary-key read
+  confirms the order is stored with the same money-bearing content,
+  whatever its commandId, the tender also offers Continue. Continue starts
+  the next sale, and the outbox sends the stored order.
+  - **Requeue.** This covers a sale requeued from Orders while the tender is
+    locked. Its stored commandId changes, and the retry now resolves as
+    stored: `record` counts the same id and content as stored, never
+    overwrites it, and logs the other commandId at warn. Before, the retry
+    conflicted and the till stayed on the tender until Sign out or a reload.
+  - **Hung save.** TallyUI offers Continue for a hung save when a refused
+    `newSale()` asks `isStored` again. This app's tender has no New sale
+    while a save is pending, so a hung save still waits for the save to
+    settle, or for the storage prompt below.
+  - **Content mismatch.** The same id with other money-bearing content fails
+    with `OrderContentMismatchError`. Nothing is overwritten, `isStored`
+    logs it at error, and Continue is not offered.
+  - **Every sign-out waits for a saving sale** (the #150 and #82 reviews).
+    Signing out unmounts the sale and closes the outbox, so a failed save
+    that isn't stored would lose its order.
+    - `useSale().saving` runs from `complete()` until the save lands, or
+      after a failed save until Retry stores it or Continue starts the next
+      sale.
+    - The sale screen sets a sale hold in `SessionProvider`
+      (`lib/session-context.tsx`): `saving`, `receipt`, or none.
+    - When the sale screen unmounts for another reason (LiveTabGate's
+      park, a blocking storage prompt), the hold is cleared but a pending
+      sign-out is not run. Signing out there would tear down under
+      LiveTabGate's close. The request stays pending with its token, and
+      the next sale screen to mount runs it if the token is unchanged.
+    - While the sale is saving, every sign-out request is deferred:
+      - the Sign out button, which is also disabled in place;
+      - a product replication 401;
+      - the capabilities check;
+      - the store-settings fetch;
+      - a token refresh refused with `invalid_credentials`.
+    - Automatic sign-outs (all but the button) also wait for the receipt
+      to clear, so the till never jumps to login over a receipt. They run
+      after New sale. The receipt hides the header, so there is no Sign out
+      button on it; a manual sign-out is available after New sale.
+    - One request is kept, with the token it was made under. It is dropped
+      if the session was renewed meanwhile (SignInAgain, or a successful
+      refresh). While it waits, the screen shows "Signed out after this
+      sale is saved".
+    - This hold is the interim fix. The real fix is a pending completion
+      that survives unmount and reload, which belongs to the c2/v3 design.
+    - Settings' "‹ Products" goes back to the Products screen under it
+      (`router.back()`), and replaces only when opened by URL with no
+      history. A replace mounted a second, empty Products screen over the
+      sale, hiding it and leaving that screen's Sign out enabled.
+  - **Storage.** The storage prompt's Reload covers a stalled or dead storage
+    worker, or a worker start failure. Any other order-store open failure
+    (e.g. DM4) blocks with its own prompt ("Saved sales can't be opened",
+    `orderStoreOpenFailed$`, `apps/expo/components/storage-health.tsx`,
+    #80) until Reload, so it no longer passes silently.
+    - Since the `de48528` pin (TallyUI #152), a close during
+      `addPosOrderCollection` waits for the whole open, and the open then
+      rejects with `PosOrderOpenClosedError`. The app doesn't report that
+      error to #80's prompt (`lib/outbox-context.tsx`, matched by
+      `instanceof`). This is defensive: it covers a close during an open,
+      and this app doesn't do that today. `openOrderStore` hands out
+      `close()` only once the open resolves, and `closeOrderStores` waits
+      on the open. No order would be lost, and the next open retries.
+    - A rare case remains. If a close's 10 s wait
+      (`POS_ORDER_MIGRATION_CLOSE_WAIT_MS`) runs out mid-migration, the
+      open can still end in a raw error rather than
+      `PosOrderOpenClosedError`. No order is lost, since the next open
+      migrates again. The TallyUI fix comes next.
+  - A sale that was stored is kept and sent by the outbox. A sale whose
+    insert never landed gets no Continue, and is lost with a reload, as
+    before this change.
+  - `saleLogger` and `outboxLogger` warn and error reach the console
+    (`apps/expo/lib/logging.ts`, installed in `app/_layout.tsx`). Since
+    TallyUI #150 that includes every save failure not yet confirmed stored,
+    and a sale screen unmounting with a save pending.
 - `useOrderOutbox.recent` (the Orders list and the Needs attention badge)
-  still reads through a cached RxDB query, so right after the store opens it
-  can briefly show a stale list until the next change or a reload. This is
-  display only: the outbox sends from fresh reads. A TallyUI follow-up
-  (from the #79 review).
+  re-reads storage on every change since the `de48528` pin (TallyUI #151,
+  `watchFresh`). It used to read through a cached RxDB query, which could
+  miss an order written while its first read was in flight and stay stale
+  until a reload (from the #79 review). A unit test holds that first read
+  and records an order during it.
 - A sale taken while the outbox is reading its pending sales is sent with no
   restart. A unit test holds that read to hit the race every time. An e2e
   completes a second cash sale as the first one's send is let go. The race

@@ -110,7 +110,7 @@ function addSaleLines() { act(() => { sale.add(entries[0], traits); sale.add(ent
 
 beforeEach(() => {
   setWindowWidth(1280);
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], flush: vi.fn(), requeue: vi.fn() });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -119,7 +119,8 @@ beforeEach(() => {
   });
   vi.mocked(fetchStoreSettings).mockReset().mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
-  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn() });
+  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
+    setSaleHold: vi.fn(), signOutDeferred: false });
   vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });

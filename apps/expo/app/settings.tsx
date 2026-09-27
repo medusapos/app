@@ -54,7 +54,10 @@ function ScannerSection({ session }: { session: Session }) {
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
     <Stack.Screen options={{ title: 'Settings' }} />
     <View className="border-b border-border">
-      <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => router.replace('/')}
+      {/* Back to the Products screen under this one: a replace would mount a second, empty one over it, hiding the
+          sale (and any pending save). Replace only with no history, opened by URL, where no sale exists yet. */}
+      <Pressable accessibilityRole="button" accessibilityLabel="Products"
+        onPress={() => { if (router.canGoBack()) router.back(); else router.replace('/'); }}
         className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
     </View>
     <View className="w-full max-w-md gap-4 self-center">

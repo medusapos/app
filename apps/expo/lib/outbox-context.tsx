@@ -1,6 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { isStorageWorkerFailure } from '@tallyui/database';
-import { createHttpCommandTransport, getDeviceId, useOrderOutbox, type UseOrderOutboxResult } from '@tallyui/pos';
+import {
+  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type UseOrderOutboxResult,
+} from '@tallyui/pos';
 import { markBusy, reportStorageStartFailure } from './live-tab';
 import { openOrderStore } from './order-store';
 import { authHeaders } from './pos-connector';
@@ -19,7 +21,13 @@ export function useSessionOutbox(session: Session | null, registerId: string): U
     transport: (baseUrl) => createHttpCommandTransport({ baseUrl, getHeaders: () => authHeaders(tokenRef.current ?? '') }),
     deviceId: registerId,
     onBusy: (busy) => markBusy('outbox', busy),
-    onOpenError: (error) => { if (isStorageWorkerFailure(error)) reportStorageStartFailure(); else reportOrderStoreOpenFailure(error); },
+    onOpenError: (error) => {
+      if (isStorageWorkerFailure(error)) reportStorageStartFailure();
+      // Defensive: a close during the open (no order lost; the next open retries). This app doesn't do that today:
+      // openOrderStore hands out close() only once the open resolves, and closeOrderStores waits on the open.
+      else if (error instanceof PosOrderOpenClosedError) return;
+      else reportOrderStoreOpenFailure(error);
+    },
   });
   useEffect(() => { if (outbox.orders) clearOrderStoreOpenFailure(); }, [outbox.orders]);
   return outbox;

@@ -3,15 +3,17 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import type { ComponentProps, ReactNode } from 'react';
 import type { ProductGrid, SearchInput, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
-import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
+import { formatMoney, SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { createOrderBuilder, finalizeOrder, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
-import { saveSession } from '../lib/session';
+import { clearProductCache } from '../lib/product-cache';
+import { saveScannerSettings } from '../lib/scanner-settings';
+import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { posConnector } from '../lib/pos-connector';
-import { SessionProvider } from '../lib/session-context';
+import { SessionProvider, useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
-import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../lib/store-settings';
+import { fetchStoreSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import ProductsScreen from '../app/index';
 import OrdersScreen from '../app/orders';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -29,6 +31,10 @@ vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn(
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
+// The session's network calls, driven per test (the sign-out paths below); everything else in it is real.
+vi.mock('../lib/session', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/session')>(), login: vi.fn(), refreshSession: vi.fn(),
+}));
 // store-settings-flow.test.tsx covers the settings states; here the store settings are ready.
 vi.mock('@tallyui/pos', async (importOriginal) => ({
   ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(),
@@ -110,7 +116,7 @@ beforeEach(() => {
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -182,7 +188,8 @@ describe('ProductsScreen catalogue', () => {
         prices: [{ amount: 12.5, currency_code: 'eur' }] }],
     });
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
-      products: [product('z', 'Zebra'), product('draft', 'Draft', 'draft'), product('a', 'Apple')],
+      // SKU "zebra": Enter looks a code up only from the till's minimum scan length (3 by default, ADR 0016).
+      products: [product('zebra', 'Zebra'), product('draft', 'Draft', 'draft'), product('a', 'Apple')],
       state: 'offline', error: 'Failed to fetch',
     }));
     await mount();
@@ -191,7 +198,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByLabelText('Sync status').textContent).toBe('All sales synced');
     fireEvent.click(screen.getByRole('button', { name: 'Apple' }));
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
-    fireEvent.change(screen.getByPlaceholderText('Search or scan barcode / SKU'), { target: { value: 'z' } });
+    fireEvent.change(screen.getByPlaceholderText('Search or scan barcode / SKU'), { target: { value: 'zebra' } });
     fireEvent.keyDown(screen.getByPlaceholderText('Search or scan barcode / SKU'), { key: 'Enter' });
     expect(screen.getByText('Zebra: €12.50 × 1 = €12.50')).toBeTruthy();
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
@@ -460,12 +467,13 @@ describe('ProductsScreen session routing', () => {
     expect(screen.getByText('redirect:/login')).toBeTruthy();
     expect(useReplicatedProducts).not.toHaveBeenCalled();
   });
-  it('clears the session and replaces the route when Sign out is pressed', async () => {
+  it('clears the session and redirects to login when Sign out is pressed', async () => {
     await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(localStorage.getItem('medusapos.session')).toBeNull();
+    // The screen's own <Redirect href="/login">, with no extra navigation.
     expect(screen.getByText('redirect:/login')).toBeTruthy();
-    expect(router.replace).toHaveBeenCalledExactlyOnceWith('/login');
+    expect(router.replace).not.toHaveBeenCalled();
   });
   it('signs out when product replication reports unauthorized', async () => {
     await mount();
@@ -476,5 +484,251 @@ describe('ProductsScreen session routing', () => {
     expect(localStorage.getItem('medusapos.session')).toBeNull();
     expect(screen.getByText('redirect:/login')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+  });
+});
+
+// Sign out unmounts the sale and closes the outbox, so it waits for a pending save (the #150 review).
+// outbox.test.tsx covers the same lock on the real outbox.
+describe('ProductsScreen Sign out while a sale is saving', () => {
+  const SALE_SAVING = 'This sale is being saved. Retry to finish it.';
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+  const signedOut = () => localStorage.getItem('medusapos.session') === null;
+
+  it.each(['stored', 'continue'] as const)('is disabled with the lock message during a held save and does nothing, then works once the save settles (%s)', async (settles) => {
+    let save!: () => void;
+    let fail!: (error: Error) => void;
+    const record = vi.fn(() => new Promise<void>((resolve, reject) => { save = resolve; fail = reject; }));
+    const isStored = vi.fn().mockResolvedValue(settles === 'continue');
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored });
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    expect(record).toHaveBeenCalledTimes(1);
+
+    // Held: disabled in place, described by the tender's lock message, and a press signs nothing out.
+    const signOut = screen.getByRole('button', { name: 'Sign out', description: SALE_SAVING });
+    expect(signOut.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getAllByRole('button').slice(0, 3).map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out']);
+    fireEvent.click(signOut);
+    expect(signedOut()).toBe(false);
+    expect(router.replace).not.toHaveBeenCalled();
+    expect(screen.queryByText('redirect:/login')).toBeNull();
+    // Orders and Settings stay live: they push onto the stack, over the mounted sale.
+    fireEvent.click(screen.getByRole('button', { name: 'Orders' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(vi.mocked(router.push).mock.calls).toEqual([['/orders'], ['/settings']]);
+
+    if (settles === 'stored') {
+      await act(async () => { save(); });
+      expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    } else {
+      await act(async () => { fail(new Error('Storage full')); });
+      const continueButton = await screen.findByRole('button', { name: 'Continue' });
+      expect(isStored).toHaveBeenCalledTimes(1);
+      // Confirmed stored, but still locked until Continue is pressed.
+      expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBe('true');
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(false);
+      fireEvent.click(continueButton);
+      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    }
+    const unlocked = screen.getByRole('button', { name: 'Sign out' });
+    expect(unlocked.getAttribute('aria-disabled')).toBeNull();
+    expect(screen.queryByText(SALE_SAVING)).toBeNull();
+    fireEvent.click(unlocked);
+    expect(signedOut()).toBe(true);
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+  });
+
+  // The central sale hold (ADR 0015): an automatic sign-out also waits for the receipt to clear.
+  it('defers a replication 401 during a held save; the receipt shows and stays, and it signs out once after New sale', async () => {
+    let save!: () => void;
+    const record = vi.fn(() => new Promise<void>((resolve) => { save = resolve; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    // Replication reports 401 twice while the save is held: nothing signs out or navigates.
+    const onUnauthorized = vi.mocked(useReplicatedProducts).mock.lastCall![2];
+    act(() => { onUnauthorized(); onUnauthorized(); });
+    expect(signedOut()).toBe(false);
+    expect(screen.queryByText('redirect:/login')).toBeNull();
+    expect(screen.getByText('Signed out after this sale is saved')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
+
+    await act(async () => { save(); });
+    expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    expect(signedOut()).toBe(false);
+    expect(screen.getByText('Signed out after this sale is saved')).toBeTruthy();
+    expect(clearProductCache).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New sale' })); });
+    expect(signedOut()).toBe(true);
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+    expect(screen.queryByText('Signed out after this sale is saved')).toBeNull();
+    expect(clearProductCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays disabled after a failed save that is not confirmed stored, until Retry stores it', async () => {
+    const record = vi.fn().mockRejectedValueOnce(new Error('Storage full')).mockResolvedValue(undefined);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(signedOut()).toBe(false);
+    expect(router.replace).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(signedOut()).toBe(true);
+  });
+});
+
+// Settings → Scanner's minChars is the Products search's minCodeLength (ADR 0016, TallyUI #148).
+describe('ProductsScreen search minCodeLength', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  it.each([[6, false], [3, true]])('with minChars %i, Enter on the 5-character code "AB123" adds the product: %s', async (minChars, adds) => {
+    saveScannerSettings(localStorage, 'https://store.test', { avgKeyMs: 100, minChars });
+    await mount();
+    const search = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
+    fireEvent.change(search, { target: { value: 'AB123' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    if (adds) {
+      expect(screen.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
+      expect(search.value).toBe('');
+    } else {
+      // No code lookup: the text stays a search, still showing its match, and the cart stays empty.
+      expect(screen.queryByText(/× 1 =/)).toBeNull();
+      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(search.value).toBe('AB123');
+      expect(screen.getByRole('button', { name: 'Shirt' })).toBeTruthy();
+    }
+  });
+});
+
+// The #82 review: every sign-out path honours SessionProvider's sale hold, through the real provider and screen.
+describe('ProductsScreen: every sign-out waits for a saving sale', () => {
+  const NOTE = 'Signed out after this sale is saved';
+  const jwt = (exp: number) => `header.${btoa(JSON.stringify({ exp }))}.signature`;
+  const inADay = () => jwt(Math.floor(Date.now() / 1000) + 86400);
+  let context: ReturnType<typeof useSession>;
+  function SessionProbe() { context = useSession(); return null; }
+  let reject!: (error: Error) => void;
+  const held = () => new Promise<never>((_resolve, fail) => { reject = fail; });
+  const signedIn = () => localStorage.getItem('medusapos.session') !== null;
+  const button = (name: string) => screen.getByRole('button', { name });
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+  afterEach(() => { vi.mocked(refreshSession).mockReset(); vi.mocked(login).mockReset(); });
+
+  async function mountTill(token = inADay()) {
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token });
+    await act(async () => { render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
+  }
+  /** Tenders the shirt by card; the first save fails and isn't stored, the retry stores it. */
+  async function failedSave(token?: string) {
+    const record = vi.fn().mockRejectedValueOnce(new Error('Storage full')).mockResolvedValue(undefined);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
+    await mountTill(token);
+    fireEvent.click(button('Shirt'));
+    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
+  }
+
+  const paths: Record<string, { token?: () => string; arm?: () => void; request: () => void }> = {
+    // Disabled while saving (a press does nothing); the request it would make is the context's signOut.
+    'the Sign out button': { request: () => { fireEvent.click(button('Sign out')); context.signOut(); } },
+    'a product replication 401': { request: () => vi.mocked(useReplicatedProducts).mock.lastCall![2]() },
+    'the capabilities check': {
+      arm: () => { vi.mocked(posConnector.capabilities!).mockImplementation(held); },
+      request: () => reject(new SignInError('invalid_credentials', 'Token expired', 401)),
+    },
+    'the store-settings fetch': {
+      arm: () => { vi.mocked(fetchStoreSettings).mockImplementation(held); },
+      request: () => reject(new StoreSettingsError('unauthorized', 'Please sign in again.')),
+    },
+    'a refresh refused with invalid_credentials': {
+      token: () => jwt(Math.floor(Date.now() / 1000) + 3600),
+      arm: () => { vi.mocked(refreshSession).mockImplementation(held); },
+      request: () => reject(new LoginError('invalid_credentials', 'Token expired')),
+    },
+  };
+
+  it.each(Object.keys(paths))('%s: deferred during a failed save, then signs out once after Retry and New sale', async (name) => {
+    const path = paths[name];
+    path.arm?.();
+    await failedSave(path.token?.());
+    await act(async () => { path.request(); });
+    // The sale stays mounted on its tender, and the session stays.
+    expect(button('Payment approved on terminal')).toBeTruthy();
+    expect(signedIn()).toBe(true);
+    expect(screen.queryByText('redirect:/login')).toBeNull();
+    expect(screen.getByText(NOTE)).toBeTruthy();
+
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    expect(button('Print receipt')).toBeTruthy();
+    expect(signedIn()).toBe(true);
+    expect(clearProductCache).not.toHaveBeenCalled();
+
+    await act(async () => { fireEvent.click(button('New sale')); });
+    expect(signedIn()).toBe(false);
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+    expect(clearProductCache).toHaveBeenCalledTimes(1);
+  });
+
+  // The #82 re-review: the sale screen can unmount for other reasons (LiveTabGate's park, a blocking storage prompt).
+  // Its release must not run the pending sign-out then; the next mounted sale screen's release does.
+  it('keeps a deferred sign-out pending when the sale screen unmounts mid-save, and runs it once a sale screen remounts', async () => {
+    const record = vi.fn(() => new Promise<void>(() => {}));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
+    const Root = ({ sale }: { sale: boolean }) => <SessionProvider><SessionProbe />{sale ? <ProductsScreen /> : null}</SessionProvider>;
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token: inADay() });
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<Root sale />); });
+    fireEvent.click(button('Shirt'));
+    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    act(() => { vi.mocked(useReplicatedProducts).mock.lastCall![2](); });
+    expect(screen.getByText(NOTE)).toBeTruthy();
+
+    await act(async () => { view.rerender(<Root sale={false} />); });
+    expect(signedIn()).toBe(true);
+    expect(clearProductCache).not.toHaveBeenCalled();
+    expect(context.signOutDeferred).toBe(true);
+
+    await act(async () => { view.rerender(<Root sale />); });
+    expect(signedIn()).toBe(false);
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+    expect(clearProductCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a request deferred under one token once the session is renewed to another, and never signs out', async () => {
+    const renewed = jwt(Math.floor(Date.now() / 1000) + 2 * 86400);
+    vi.mocked(login).mockResolvedValue({ baseUrl: 'https://store.test', email: 'admin@store.test', token: renewed });
+    await failedSave();
+    act(() => { vi.mocked(useReplicatedProducts).mock.lastCall![2](); });
+    expect(screen.getByText(NOTE)).toBeTruthy();
+    // SignInAgain's renewal: the pending request goes, and so does the note.
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    expect(context.session?.token).toBe(renewed);
+    expect(screen.queryByText(NOTE)).toBeNull();
+
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    await act(async () => { fireEvent.click(button('New sale')); });
+    expect(signedIn()).toBe(true);
+    expect(screen.queryByText('redirect:/login')).toBeNull();
+    expect(clearProductCache).not.toHaveBeenCalled();
+    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
   });
 });
