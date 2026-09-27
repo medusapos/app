@@ -1,17 +1,16 @@
 // @vitest-environment jsdom
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
-import { useOutbox } from '../lib/use-outbox';
-import { needsAttention } from '../lib/order-store';
+import { createOrderBuilder, finalizeOrder, needsAttention, type PosOrder } from '@tallyui/pos';
+import { useSessionOutbox } from '../lib/outbox-context';
 import type { Session } from '../lib/session';
 
-let outbox: ReturnType<typeof useOutbox>;
+let outbox: ReturnType<typeof useSessionOutbox>;
 let session: Session;
 let sequence = 0;
 const fetchStub = vi.fn<typeof fetch>();
 function Harness({ session }: { session: Session | null }) {
-  outbox = useOutbox(session, 'register-1');
+  outbox = useSessionOutbox(session, 'register-1');
   return null;
 }
 function sale(now?: Date): PosOrder {
@@ -36,7 +35,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-describe('useOutbox with the TallyUI HTTP transport', () => {
+describe('useSessionOutbox (TallyUI useOrderOutbox) with the TallyUI HTTP transport', () => {
   it('stores pending before returning and sends one command, then stores applied server refs', async () => {
     let respond!: (response: Response) => void;
     fetchStub.mockImplementation(() => new Promise((resolve) => { respond = resolve; }));

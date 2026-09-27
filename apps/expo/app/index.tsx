@@ -6,17 +6,16 @@ import { getCalendars } from 'expo-localization';
 import { Cart, CartBar, Catalogue, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
 import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
 import {
-  catalogueEntries, findEntryByCode, TaxProvider, taxProviderProps, useSale, useStoreSettings, withPricingContext, withStockOverlay,
+  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, TaxProvider, taxProviderProps, useSale, useStoreSettings, withPricingContext,
+  withStockOverlay,
 } from '@tallyui/pos';
 
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
-import { needsAttention } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, posConnector } from '../lib/pos-connector';
-import { getRegisterId } from '../lib/register';
-import { defaultStorage, type Session } from '../lib/session';
+import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
   clearSettingsRegion, fetchStoreSettings, loadCachedPricing, loadCachedSettings, loadSettingsChoice, saveCachedPricing,
@@ -100,7 +99,7 @@ function PricingScreen(props: PricingProps) {
   const [attempt, setAttempt] = useState(0);
   // D1: the plugin taxes each order by the stock location's address, so the till's country is always its country.
   const country = settings.location.countryCode.toLowerCase();
-  // Read per request (as useOutbox), so a token refresh keeps this identity and never re-resolves; a new country does.
+  // Read per request (as the outbox's transport), so a token refresh keeps this identity and never re-resolves; a new country does.
   // The capability is a value dependency: only a new order.create version makes a new context, never a new session object.
   const orderCreate = session.capabilities?.orderCreate;
   const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
@@ -158,7 +157,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
 }) {
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
-  const [registerId] = useState(() => getRegisterId(defaultStorage()));
+  const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
   const { record, state: outboxState, recent } = useOutboxContext();
   const stockWarned = useRef(new Set<string>());

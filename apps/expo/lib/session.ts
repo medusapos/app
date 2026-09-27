@@ -11,6 +11,8 @@ export class LoginError extends Error {
 // Refresh with six hours left: Medusa's default token lifetime is one day.
 export const REFRESH_WINDOW_MS = 6 * 60 * 60 * 1000;
 const STORAGE_KEY = 'medusapos.session';
+/** This till's register id (`getDeviceId` from `@tallyui/pos`) lives under this key; unchanged, so every till keeps its id. */
+export const REGISTER_ID_KEY = 'medusapos.register_id';
 export type SessionStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 function isRecord(value: unknown): value is Record<string, unknown> {

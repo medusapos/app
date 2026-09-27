@@ -5,7 +5,7 @@ import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { addPosOrderCollection, createOrderBuilder, finalizeOrder, posOrderSchema, type PosOrder } from '@tallyui/pos';
-import { carryOverOrders, closeOrderStores, needsAttention, openOrderStore, orderDatabaseName } from './order-store';
+import { carryOverOrders, closeOrderStores, openOrderStore, orderDatabaseName } from './order-store';
 
 addRxPlugin(RxDBDevModePlugin);
 addRxPlugin(RxDBLocalDocumentsPlugin);
@@ -98,17 +98,6 @@ describe('order store', () => {
     try {
       expect((await reopened.orders.findOne(order.id).exec())?.toJSON()).toEqual(order);
     } finally { await reopened.close(); }
-  });
-
-  it('selects rejected and applied-with-warnings orders newest first without changing the input', () => {
-    const base = sale();
-    const rejected: PosOrder = { ...base, id: 'rejected', syncStatus: 'rejected', createdAt: '2026-01-01T00:00:00Z' };
-    const warned: PosOrder = { ...base, id: 'warned', syncStatus: 'applied', createdAt: '2026-01-03T00:00:00Z',
-      warnings: [{ code: 'insufficient_stock', variantId: 'blue', quantity: 1 }] };
-    const orders: PosOrder[] = [rejected, base, { ...base, syncStatus: 'applied', warnings: [] }, warned,
-      { ...base, syncStatus: 'applied' }, { ...base, warnings: warned.warnings }];
-    expect(needsAttention(orders)).toEqual([warned, rejected]);
-    expect(orders[0]).toBe(rejected);
   });
 });
 
