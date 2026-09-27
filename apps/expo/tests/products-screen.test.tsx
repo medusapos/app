@@ -467,12 +467,13 @@ describe('ProductsScreen session routing', () => {
     expect(screen.getByText('redirect:/login')).toBeTruthy();
     expect(useReplicatedProducts).not.toHaveBeenCalled();
   });
-  it('clears the session and replaces the route when Sign out is pressed', async () => {
+  it('clears the session and redirects to login when Sign out is pressed', async () => {
     await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(localStorage.getItem('medusapos.session')).toBeNull();
+    // The screen's own <Redirect href="/login">, with no extra navigation.
     expect(screen.getByText('redirect:/login')).toBeTruthy();
-    expect(router.replace).toHaveBeenCalledExactlyOnceWith('/login');
+    expect(router.replace).not.toHaveBeenCalled();
   });
   it('signs out when product replication reports unauthorized', async () => {
     await mount();
@@ -539,7 +540,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     expect(screen.queryByText(SALE_SAVING)).toBeNull();
     fireEvent.click(unlocked);
     expect(signedOut()).toBe(true);
-    expect(router.replace).toHaveBeenCalledExactlyOnceWith('/login');
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
   });
 
   // The central sale hold (ADR 0015): an automatic sign-out also waits for the receipt to clear.
@@ -681,6 +682,32 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     expect(clearProductCache).not.toHaveBeenCalled();
 
     await act(async () => { fireEvent.click(button('New sale')); });
+    expect(signedIn()).toBe(false);
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+    expect(clearProductCache).toHaveBeenCalledTimes(1);
+  });
+
+  // The #82 re-review: the sale screen can unmount for other reasons (LiveTabGate's park, a blocking storage prompt).
+  // Its release must not run the pending sign-out then; the next mounted sale screen's release does.
+  it('keeps a deferred sign-out pending when the sale screen unmounts mid-save, and runs it once a sale screen remounts', async () => {
+    const record = vi.fn(() => new Promise<void>(() => {}));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
+    const Root = ({ sale }: { sale: boolean }) => <SessionProvider><SessionProbe />{sale ? <ProductsScreen /> : null}</SessionProvider>;
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token: inADay() });
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<Root sale />); });
+    fireEvent.click(button('Shirt'));
+    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    act(() => { vi.mocked(useReplicatedProducts).mock.lastCall![2](); });
+    expect(screen.getByText(NOTE)).toBeTruthy();
+
+    await act(async () => { view.rerender(<Root sale={false} />); });
+    expect(signedIn()).toBe(true);
+    expect(clearProductCache).not.toHaveBeenCalled();
+    expect(context.signOutDeferred).toBe(true);
+
+    await act(async () => { view.rerender(<Root sale />); });
     expect(signedIn()).toBe(false);
     expect(screen.getByText('redirect:/login')).toBeTruthy();
     expect(clearProductCache).toHaveBeenCalledTimes(1);

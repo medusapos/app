@@ -185,10 +185,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review).
   const signOutLocked = sale.saving;
   // The session's sale hold (ADR 0015): every sign-out waits while saving; automatic ones (a 401, a failed refresh)
-  // also wait for the receipt to clear. Released on unmount, so a screen that goes never holds the session.
+  // also wait for the receipt to clear. Released on unmount without running a pending sign-out: the next sale screen's
+  // release runs it, if the token is unchanged.
   const saleHold = sale.saving ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
   useEffect(() => setSaleHold(saleHold), [saleHold, setSaleHold]);
-  useEffect(() => () => setSaleHold(null), [setSaleHold]);
+  useEffect(() => () => setSaleHold(null, false), [setSaleHold]);
   useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
@@ -246,7 +247,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         {/* Disabled in place while a save is pending (never hidden), so the header doesn't shift; the lock message is its description. */}
         <Pressable accessibilityRole="button" disabled={signOutLocked} accessibilityHint={signOutLocked ? SALE_SAVING : undefined}
           aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
-          onPress={() => { if (signOutLocked) return; signOut(); router.replace('/login'); }}
+          onPress={() => { if (!signOutLocked) signOut(); }}
           className={`min-h-11 justify-center ${signOutLocked ? 'opacity-50' : ''}`}>
           <Text className="text-foreground">Sign out</Text>
         </Pressable>

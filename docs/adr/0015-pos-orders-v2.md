@@ -100,8 +100,12 @@ The pin (`8e86d7a`) also brings three more changes:
       after a failed save until Retry stores it or Continue starts the next
       sale.
     - The sale screen sets a sale hold in `SessionProvider`
-      (`lib/session-context.tsx`): `saving`, `receipt`, or none. It is
-      released on unmount.
+      (`lib/session-context.tsx`): `saving`, `receipt`, or none.
+    - When the sale screen unmounts for another reason (LiveTabGate's
+      park, a blocking storage prompt), the hold is cleared but a pending
+      sign-out is not run. Signing out there would tear down under
+      LiveTabGate's close. The request stays pending with its token, and
+      the next sale screen to mount runs it if the token is unchanged.
     - While the sale is saving, every sign-out request is deferred:
       - the Sign out button, which is also disabled in place;
       - a product replication 401;
@@ -110,7 +114,8 @@ The pin (`8e86d7a`) also brings three more changes:
       - a token refresh refused with `invalid_credentials`.
     - Automatic sign-outs (all but the button) also wait for the receipt
       to clear, so the till never jumps to login over a receipt. They run
-      after New sale. A cashier can still sign out from the receipt.
+      after New sale. The receipt hides the header, so there is no Sign out
+      button on it; a manual sign-out is available after New sale.
     - One request is kept, with the token it was made under. It is dropped
       if the session was renewed meanwhile (SignInAgain, or a successful
       refresh). While it waits, the screen shows "Signed out after this

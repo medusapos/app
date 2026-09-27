@@ -15,8 +15,11 @@ type SessionContextValue = {
   reportUnauthorized(): void;
   /** Merges a fresh capabilities read into the session (ADR-062): an inconclusive `undefined` keeps the stored value. */
   mergeCapabilities(fresh: ServerCapabilities | undefined): void;
-  /** Set by the sale screen (ADR 0015): `saving` defers every sign-out; `receipt` defers automatic ones; null releases. */
-  setSaleHold(hold: SaleHold): void;
+  /**
+   * Set by the sale screen (ADR 0015): `saving` defers every sign-out; `receipt` defers automatic ones; null releases
+   * and runs a pending one. `run: false` (the screen's unmount) releases but keeps it pending for the next sale screen.
+   */
+  setSaleHold(hold: SaleHold, run?: boolean): void;
   /** A sign-out is waiting for the sale hold to release. */
   signOutDeferred: boolean;
 };
@@ -46,10 +49,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [endSession]);
   const signOut = useCallback(() => requestSignOut(false), [requestSignOut]);
   const reportUnauthorized = useCallback(() => requestSignOut(true), [requestSignOut]);
-  const setSaleHold = useCallback((hold: SaleHold) => {
+  const setSaleHold = useCallback((hold: SaleHold, run = true) => {
     saleHold.current = hold;
     const token = deferredToken.current;
-    if (hold || token === null) return;
+    // An unmount (a park, a blocking storage prompt) must not sign out: that would tear down under LiveTabGate's close.
+    if (hold || token === null || !run) return;
     deferredToken.current = null;
     setSignOutDeferred(false);
     if (currentSession.current?.token === token) endSession();
