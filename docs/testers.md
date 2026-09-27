@@ -5,6 +5,24 @@ setup detail rather than repeating it.
 
 ## What changed since your last round
 
+- If saving a sale fails but the order did reach the till's storage, the
+  pay screen says "This sale is stored and will be sent" and offers
+  **Continue** to start the next sale. Pressing the pay button again to
+  retry a failed save never saves the sale twice.
+- A sale that went unsent no longer stays stuck in Orders until a reload.
+- **Sign out** is greyed out while a sale is saving. If the till is signed
+  out automatically (for example, your login expired) during a sale, it
+  shows "Signed out after this sale is saved" and signs out once the sale
+  and its receipt are done.
+- A new **Settings** screen, opened from the header, tunes the barcode
+  scanner for this till. Set the average time per key (raise it for slow
+  Bluetooth scanners) and the minimum code length. Then scan into **Test
+  scan here** to check whether a scan counts.
+- If the till can't open its saved sales, it now says so with **Reload**
+  and **Report a problem**, instead of failing silently. Nothing is deleted.
+- Sales saved before an update carry over when the till upgrades its
+  storage. A slow upgrade no longer leaves the till unable to save until
+  the browser restarts.
 - You can give a discount on a single line or on the whole order, and each
   discount's chip shows the amount actually taken off.
 - On a phone, Products has a cart bar pinned to the bottom; open it for a
