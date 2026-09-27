@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
-import { addRxPlugin, createRevision, createRxDatabase, fillWithDefaultSettings, now, type RxCollection, type RxDatabase, type RxJsonSchema } from 'rxdb';
+import {
+  addRxPlugin, createRevision, createRxDatabase, fillWithDefaultSettings, now, type RxCollection, type RxCollectionCreator, type RxDatabase, type RxJsonSchema,
+} from 'rxdb';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
-import { addPosOrderCollection, createOrderBuilder, finalizeOrder, posOrderSchema, type PosOrder } from '@tallyui/pos';
+import { addPosOrderCollection, createOrderBuilder, finalizeOrder, posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
 import { carryOverOrders, closeOrderStores, openOrderStore, orderDatabaseName } from './order-store';
 
 addRxPlugin(RxDBDevModePlugin);
@@ -112,34 +114,50 @@ async function memoryOrdersDb(name: string, localDocuments = false) {
 
 const memoryStorage = () => wrappedValidateAjvStorage({ storage: getRxStorageMemory() });
 
-/** The shipped version-0 schema: version 1 minus its only addition, `sessionId` (TallyUI #123). */
-function versionZero(): RxJsonSchema<PosOrder> {
+/** A stored older `pos_orders` version, which the store's open migrates to the current one. */
+type Origin = 0 | 1;
+
+/**
+ * The shipped older schemas, as TallyUI's open.test-helper builds them: version 1 is version 2
+ * minus its only additions (`lateSessionId`, `display`, `taxByRate`; TallyUI c1a), and version 0
+ * is version 1 minus its only addition (`sessionId`; TallyUI #123).
+ */
+function olderSchema(from: Origin): RxJsonSchema<PosOrder> {
   const schema = structuredClone(posOrderSchema);
-  delete (schema.properties as Record<string, unknown>).sessionId;
-  return { ...schema, version: 0 };
+  const properties = schema.properties as Record<string, unknown>;
+  for (const key of ['lateSessionId', 'display', 'taxByRate', ...(from === 0 ? ['sessionId'] : [])]) delete properties[key];
+  return { ...schema, version: from };
 }
 
-/** The version-0 `pos_orders` storage beneath RxDB's collection (shared by name, like all memory storage). */
-const rawV0 = (databaseName: string) => getRxStorageMemory().createStorageInstance<PosOrder>({
-  databaseName, collectionName: 'pos_orders', schema: fillWithDefaultSettings(versionZero()),
+/** `pos_orders` as the shipped app at `from` added it: version 1 came with its identity strategy. */
+function olderCollection(from: Origin): RxCollectionCreator<PosOrder> {
+  posOrderCollection(); // loads the migration plugin that a version above 0 needs
+  return from === 0 ? { schema: olderSchema(0) } : { schema: olderSchema(1), migrationStrategies: { 1: (doc: PosOrder) => doc } };
+}
+
+/** The version-`from` `pos_orders` storage beneath RxDB's collection (shared by name, like all memory storage). */
+const rawOlder = (databaseName: string, from: Origin) => getRxStorageMemory().createStorageInstance<PosOrder>({
+  databaseName, collectionName: 'pos_orders', schema: fillWithDefaultSettings(olderSchema(from)),
   options: {}, multiInstance: false, devMode: false, databaseInstanceToken: 'test',
 });
 
 /**
- * A database written at version 0 holding `orders`, plus `invalid` written beneath RxDB (as an
- * unvalidated production build could have): it fails version 1's validation, so a validating
+ * A database written at version `from` holding `orders`, plus `invalid` written beneath RxDB (as
+ * an unvalidated production build could have): it fails version 2's validation, so a validating
  * open's migration stops with DM4.
  */
-async function seedV0(name: string, orders: PosOrder[], invalid?: PosOrder) {
+async function seedOlder(from: Origin, name: string, orders: PosOrder[], invalid?: PosOrder) {
   const db = await createRxDatabase({ name, storage: memoryStorage(), multiInstance: false });
-  await (await db.addCollections({ pos_orders: { schema: versionZero() } })).pos_orders.bulkInsert(orders);
+  const { pos_orders: collection } = await db.addCollections({ pos_orders: olderCollection(from) });
+  expect(collection.schema.version).toBe(from);
+  await collection.bulkInsert(orders);
   await db.close();
-  if (invalid) await writeRawV0(name, invalid);
+  if (invalid) await writeRawOlder(from, name, invalid);
 }
 
-/** Writes `order` into the version-0 storage beneath RxDB, over any stored copy (as a version-0 build could). */
-async function writeRawV0(name: string, order: PosOrder) {
-  const raw = await rawV0(name);
+/** Writes `order` into the version-`from` storage beneath RxDB, over any stored copy (as that build could). */
+async function writeRawOlder(from: Origin, name: string, order: PosOrder) {
+  const raw = await rawOlder(name, from);
   try {
     const [previous] = await raw.findDocumentsById([order.id], false);
     const document = { ...order, _deleted: false, _attachments: {}, _meta: { lwt: now() }, _rev: createRevision('test', previous) };
@@ -147,60 +165,71 @@ async function writeRawV0(name: string, order: PosOrder) {
   } finally { await raw.close(); }
 }
 
-/** The version-0 documents still in storage, without their storage metadata. */
-async function v0Documents(name: string, ids: string[]) {
-  const raw = await rawV0(name);
+/** The version-`from` documents still in storage, without their storage metadata. */
+async function olderDocuments(from: Origin, name: string, ids: string[]) {
+  const raw = await rawOlder(name, from);
   try {
     return (await raw.findDocumentsById(ids, false)).map(({ _deleted, _attachments, _meta, _rev, ...doc }) => doc);
   } finally { await raw.close(); }
 }
 
-// Valid at version 0 when it was written, but not at version 1 (an unknown syncStatus).
-const invalidSale = () => ({ ...sale(), syncStatus: 'queued' }) as unknown as PosOrder;
+/** A pending sale as the version-`from` app took it: a version-1 one carries its session (ADR-032). */
+const olderSale = (from: Origin): PosOrder => ({ ...sale(), ...(from === 1 ? { sessionId: 'session-1' } : {}) });
+// Valid at the older version when it was written, but not at version 2 (an unknown syncStatus).
+const invalidSale = (from: Origin = 0) => ({ ...olderSale(from), syncStatus: 'queued' }) as unknown as PosOrder;
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
 
-describe('pos_orders schema v0 to v1', () => {
-  it('reopens a version-0 order store through addPosOrderCollection(): the pending order is there, unchanged', async () => {
-    const url = 'https://v0-store.test';
-    const pending = sale();
-    await seedV0(orderDatabaseName(url), [pending]);
+describe.each([0, 1] as const)('pos_orders schema v%i to v2', (from) => {
+  it(`reopens a version-${from} order store through openOrderStore: the pending order is there, unchanged`, async () => {
+    const url = `https://v${from}-store.test`;
+    const name = orderDatabaseName(url);
+    const pending = olderSale(from);
+    const original = structuredClone(pending);
+    await seedOlder(from, name, [pending]);
+    expect(await olderDocuments(from, name, [pending.id])).toEqual([original]);
     const store = await openOrderStore(url);
     try {
+      expect(store.orders.schema.version).toBe(2);
       const found = (await store.orders.findOne(pending.id).exec())?.toJSON();
-      expect(found).toEqual(pending);
-      expect(found?.syncStatus).toBe('pending');
-      expect(store.orders.schema.version).toBe(1);
+      // Identity migrations: byte for byte the order that was stored, and none of version 2's fields added.
+      expect(found).toStrictEqual(original);
+      for (const added of ['lateSessionId', 'display', 'taxByRate']) expect(found).not.toHaveProperty(added);
+      // The outbox's own query still finds it.
+      expect((await store.orders.find({ selector: { syncStatus: 'pending' } }).exec()).map((doc) => doc.id)).toEqual([pending.id]);
     } finally { await store.close(); }
+    // Moved, not copied: nothing is left at the older version to migrate again.
+    expect(await olderDocuments(from, name, [pending.id])).toEqual([]);
   });
 
   it('a DM4 fails the store open and deletes nothing; the next open retries it', async () => {
-    const url = 'https://v0-store-dm4.test';
+    const url = `https://v${from}-store-dm4.test`;
     const name = orderDatabaseName(url);
-    const pending = sale();
-    const invalid = invalidSale();
-    await seedV0(name, [pending], invalid);
+    const pending = olderSale(from);
+    const invalid = invalidSale(from);
+    await seedOlder(from, name, [pending], invalid);
     for (let open = 0; open < 2; open++) {
       await expect(openOrderStore(url)).rejects.toMatchObject({ code: 'DM4' });
-      expect((await v0Documents(name, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
+      expect((await olderDocuments(from, name, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
     }
   });
 
-  it('after a DM4 and a fix to the v0 data, the very next open migrates every order unchanged', async () => {
-    const url = 'https://v0-store-dm4-fix.test';
+  it(`after a DM4 and a fix to the v${from} data, the very next open migrates every order unchanged`, async () => {
+    const url = `https://v${from}-store-dm4-fix.test`;
     const name = orderDatabaseName(url);
-    const pending = sale();
-    const invalid = invalidSale();
-    await seedV0(name, [pending], invalid);
+    const pending = olderSale(from);
+    const invalid = invalidSale(from);
+    await seedOlder(from, name, [pending], invalid);
     await expect(openOrderStore(url)).rejects.toMatchObject({ code: 'DM4' });
-    expect((await v0Documents(name, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
+    expect((await olderDocuments(from, name, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
 
     const fixed: PosOrder = { ...invalid, syncStatus: 'pending' };
-    await writeRawV0(name, fixed);
+    await writeRawOlder(from, name, fixed);
     const store = await openOrderStore(url);
     try {
+      expect(store.orders.schema.version).toBe(2);
       expect((await store.orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].sort(byId));
     } finally { await store.close(); }
-    expect(await v0Documents(name, [pending.id, invalid.id])).toEqual([]);
+    expect(await olderDocuments(from, name, [pending.id, invalid.id])).toEqual([]);
   });
 });
 // The legacy database "exists" (memory storages have no IndexedDB to list).
@@ -326,24 +355,26 @@ describe('carryOverOrders', () => {
     await to.remove();
   });
 
-  it('carries over a pending order from a version-0 legacy source through the version-1 open', async () => {
-    const fromName = 'legacy-carry-v0';
-    const pending = sale();
-    await seedV0(fromName, [pending]);
-    const to = await memoryOrdersDb('target-carry-v0', true);
+  it.each([0, 1] as const)('carries over a pending order from a version-%i legacy source through the version-2 open', async (from) => {
+    const fromName = `legacy-carry-v${from}`;
+    const pending = olderSale(from);
+    const original = structuredClone(pending);
+    await seedOlder(from, fromName, [pending]);
+    const to = await memoryOrdersDb(`target-carry-v${from}`, true);
+    expect(to.pos_orders.schema.version).toBe(2);
     await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
-    expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toEqual([pending]);
+    expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual([original]);
     expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 1 });
-    expect(await v0Documents(fromName, [pending.id])).toEqual([]);
+    expect(await olderDocuments(from, fromName, [pending.id])).toEqual([]);
     await to.remove();
   });
 
-  it('a DM4 on the legacy open keeps the source and writes no marker; after a fix, the next carry-over copies all once', async () => {
-    const fromName = 'legacy-carry-dm4';
-    const pending = sale();
-    const invalid = invalidSale();
-    await seedV0(fromName, [pending], invalid);
-    const to = await memoryOrdersDb('target-carry-dm4', true);
+  it.each([0, 1] as const)('a DM4 on a version-%i legacy open keeps the source and writes no marker; after a fix, the next carry-over copies all once', async (from) => {
+    const fromName = `legacy-carry-dm4-v${from}`;
+    const pending = olderSale(from);
+    const invalid = invalidSale(from);
+    await seedOlder(from, fromName, [pending], invalid);
+    const to = await memoryOrdersDb(`target-carry-dm4-v${from}`, true);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const bulkInsert = vi.spyOn(to.pos_orders, 'bulkInsert');
     try {
@@ -351,17 +382,17 @@ describe('carryOverOrders', () => {
       expect(warn).toHaveBeenCalledWith(expect.stringContaining('carry-over'), expect.objectContaining({ code: 'DM4' }));
       expect(await to.getLocal('legacy-orders-migrated')).toBeNull();
       expect(await to.pos_orders.find().exec()).toEqual([]);
-      expect((await v0Documents(fromName, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
+      expect((await olderDocuments(from, fromName, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
 
       const fixed: PosOrder = { ...invalid, syncStatus: 'pending' };
-      await writeRawV0(fromName, fixed);
+      await writeRawOlder(from, fromName, fixed);
       warn.mockClear();
       await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
       expect(warn).not.toHaveBeenCalled();
       expect(bulkInsert).toHaveBeenCalledTimes(1);
       expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].sort(byId));
       expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 2 });
-      expect(await v0Documents(fromName, [pending.id, invalid.id])).toEqual([]);
+      expect(await olderDocuments(from, fromName, [pending.id, invalid.id])).toEqual([]);
     } finally {
       warn.mockRestore();
       await to.remove();
