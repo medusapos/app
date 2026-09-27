@@ -211,6 +211,13 @@ Open **Orders** → **Needs attention** to see sales that need a look:
 - Camera scanning isn't available yet — use a USB or Bluetooth barcode
   scanner set to type like a keyboard instead (see
   [Scanning barcodes](#scanning-barcodes)).
+- If an order appears twice in **Orders**, report it; a fix is in this
+  release.
+- If a sale stays "Waiting to sync" while you're online, reload the app and
+  report it; a fix is in this release.
+- If a sale can't be saved, the payment screen stays on it with "This sale
+  is being saved", and **Complete sale** tries again. If it keeps failing,
+  write the sale down, reload the app and report it.
 
 ## Report a problem
 

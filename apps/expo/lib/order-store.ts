@@ -3,7 +3,7 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
-import { addPosOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
+import { addPosOrderCollection, posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { terminateWebStorage, webStorageAvailable } from './web-storage';
 import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
@@ -84,7 +84,7 @@ export async function carryOverOrders({ fromStorage, fromName, to, legacyExists 
       name: fromName, storage: fromStorage, multiInstance: false,
     });
     try {
-      // Migrates legacy v0 in place; a DM4 throws here, before any copy or marker, so the source stays.
+      // Migrates legacy v0 (or v1) to v2 in place; a DM4 throws here, before any copy or marker, so the source stays.
       await addOrders(legacy);
       const docs = (await legacy.pos_orders.find().exec()).map((doc) => doc.toJSON() as PosOrder);
       if (docs.length) {
@@ -132,7 +132,7 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
       });
       const unwatch = watched ? watchStorageHealth(watched.health$) : undefined;
       try {
-        // Migrates v0 to v1, all of it. A DM4 fails this open, never deletes: the v0 orders stay; the next open retries.
+        // Migrates v0 or v1 to v2, all of it. A DM4 fails this open, never deletes: the older orders stay; the next open retries.
         const orders = await addOrders(db);
         if (onWebStorage) {
           await carryOverOrders({
@@ -192,22 +192,34 @@ export async function closeOrderStores(): Promise<void> {
   }));
 }
 
-// E2E debug hooks (see e2e-debug.ts):
-// seeds one order at schema v0 (v1 minus `sessionId`, as builds before TallyUI #123 wrote it) into a backend's legacy
-// Dexie order database, or (…SeedV0Order, then ending the worker) its SQLite order store; resolves to the version.
+// E2E debug hooks (see e2e-debug.ts): each seeds one order into a store at an older `pos_orders` schema, exactly
+// as the shipped builds wrote it, and resolves to that version. Faithful schemas, like TallyUI's open.test-helper:
+// v1 is the current v2 minus its only additions (`lateSessionId`, `display`, `taxByRate`; TallyUI c1a), and
+// v0 is v1 minus its only addition (`sessionId`; TallyUI #123).
+// - SeedLegacyOrder: v0 into a backend's legacy Dexie order database (the pre-SQLite builds were all v0);
+// - SeedV0Order / SeedV1Order: v0 / v1 into its SQLite order store, then end the worker.
 if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
-  const { sessionId: _added, ...v0Properties } = posOrderSchema.properties;
-  const v0Schema = { ...posOrderSchema, version: 0, properties: v0Properties as typeof posOrderSchema.properties };
-  const seedV0 = async (name: string, storage: RxStorage<any, any>, order: PosOrder) => {
+  const { lateSessionId: _late, display: _display, taxByRate: _taxByRate, ...v1Properties } = posOrderSchema.properties;
+  const { sessionId: _session, ...v0Properties } = v1Properties;
+  const olderSchemas = {
+    0: { ...posOrderSchema, version: 0, properties: v0Properties as typeof posOrderSchema.properties },
+    1: { ...posOrderSchema, version: 1, properties: v1Properties as typeof posOrderSchema.properties },
+  };
+  const seed = async (version: 0 | 1, name: string, storage: RxStorage<any, any>, order: PosOrder) => {
     const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({ name, storage, multiInstance: false });
     try {
-      await db.addCollections({ pos_orders: { schema: v0Schema } });
+      // Version 1 shipped with its identity strategy; posOrderCollection() loads the migration plugin it needs.
+      posOrderCollection();
+      await db.addCollections({ pos_orders: version === 0 ? { schema: olderSchemas[0] }
+        : { schema: olderSchemas[1], migrationStrategies: { 1: (doc: PosOrder) => doc } } });
       await db.pos_orders.insert(order);
       return db.pos_orders.schema.version;
     } finally { await db.close(); }
   };
   exposeE2eHook('SeedLegacyOrder', (baseUrl: string, order: PosOrder) =>
-    seedV0(legacyDexieName('orders', baseUrl), getRxStorageDexie(), order));
+    seed(0, legacyDexieName('orders', baseUrl), getRxStorageDexie(), order));
   exposeE2eHook('SeedV0Order', (baseUrl: string, order: PosOrder) =>
-    seedV0(orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
+    seed(0, orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
+  exposeE2eHook('SeedV1Order', (baseUrl: string, order: PosOrder) =>
+    seed(1, orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
 }
