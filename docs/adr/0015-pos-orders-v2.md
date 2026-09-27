@@ -117,7 +117,16 @@ The pin (`8e86d7a`) also brings three more changes:
       - Backstop: `openOrderStore` waits at most `ORDER_STORE_CLOSE_WAIT_MS`
         (10 s) for the backend's previous store to close, then rejects with
         an ordinary Error. That reaches #80's blocking prompt (Reload,
-        Report a problem) before the next sale takes any money.
+        Report a problem) before any sale can be saved. A sale paid during
+        those 10 s gets "Orders are not ready." and is lost when the prompt
+        replaces the screen. That was already true of any slow open.
+      - Known gap (the #85 re-review): the hold is set by the sale screen.
+        If the store settings unmount that screen after Continue (a
+        settings choice, or an unsupported backend), an automatic sign-out
+        can run while the save is still in flight. The backstop then shows
+        the prompt, and Reload recovers with nothing lost. Moving the
+        in-flight hold into `SessionProvider` closes this. It's planned for
+        the pin that brings TallyUI's own `savesInFlight`.
     - The sale screen sets a sale hold in `SessionProvider`
       (`lib/session-context.tsx`): `saving`, `receipt`, or none.
     - When the sale screen unmounts for another reason (LiveTabGate's
