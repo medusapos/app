@@ -192,12 +192,6 @@ export async function closeOrderStores(): Promise<void> {
   }));
 }
 
-export function needsAttention(orders: PosOrder[]): PosOrder[] {
-  return orders.filter((order) => order.syncStatus === 'rejected'
-    || (order.syncStatus === 'applied' && !!order.warnings?.length))
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-}
-
 // E2E debug hooks (see e2e-debug.ts):
 // seeds one order at schema v0 (v1 minus `sessionId`, as builds before TallyUI #123 wrote it) into a backend's legacy
 // Dexie order database, or (…SeedV0Order, then ending the worker) its SQLite order store; resolves to the version.

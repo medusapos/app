@@ -62,7 +62,7 @@ const storageStartFailedSubject = new BehaviorSubject<boolean>(false);
 /** The gate renders the blocked screen while this is true, whatever the coordinator state. */
 export const storageStartFailed$: Observable<boolean> = storageStartFailedSubject.asObservable();
 
-/** Marks that a store's open failed with a StorageWorkerStartError (`useOutbox`, `useReplicatedProducts`). */
+/** Marks that a store's open failed with a StorageWorkerStartError (the outbox's `onOpenError`, `useReplicatedProducts`). */
 export function reportStorageStartFailure(): void {
   storageStartFailedSubject.next(true);
 }
