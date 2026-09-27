@@ -35,9 +35,7 @@ Tap race: a line added at the instant new store settings land is dropped from th
 
 ## Saves in flight after Continue: follow-ups (from the #85 re-review)
 
-Do these at the pin that brings TallyUI's `useOrderOutbox().savesInFlight`, which replaces the app's own count in `OutboxProvider`.
+The sign-out hold on TallyUI's `savesInFlight` (in `SessionProvider`), the visible "An earlier sale is still being saved." note and the backstop's `ORDER_STORE_CLOSE_TIMEOUT` code are done (ADR 0015). Two smaller items remain.
 
-- **Move the in-flight hold into `SessionProvider`.** Today the sale screen sets it, so a store-settings screen that unmounts the sale after Continue lets an automatic sign-out run while a save is in flight. The 10 s backstop then shows #80's prompt. ADR 0015 records this gap.
-- **Show why Sign out is locked.** "An earlier sale is still being saved." is only an accessible description. A sighted cashier sees a dimmed Sign out and nothing else, and a write that never answers keeps it locked until Reload. Show it visibly while `savesInFlight > 0 && !sale.saving` (the banner slot), with a Reload hint once storage reports a stall. The deferred sign-out banner also says "this sale" when it means an earlier one.
-- **Give the backstop error a `code`** (`ORDER_STORE_CLOSE_TIMEOUT`), so #80's prompt and Report a problem can tell it apart.
+- **A Reload hint on the earlier-sale note once storage reports a stall.** A write that never answers keeps Sign out locked until Reload, and the note doesn't say so.
 - **Consider gating the tender's Complete on `orders !== null`,** so a sale can't be paid while the order store is still opening.

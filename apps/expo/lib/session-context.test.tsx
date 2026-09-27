@@ -117,3 +117,57 @@ describe('SessionProvider', () => {
     expect(clearProductCache).toHaveBeenCalledExactlyOnceWith(medusaConnector.id, stored.baseUrl);
   });
 });
+
+// ADR 0015: the sale screen's sale hold and OutboxProvider's saves hold (TallyUI's savesInFlight) both defer a sign-out.
+describe('SessionProvider sale and saves holds', () => {
+  const signedOut = () => context.session === null;
+  it.each(['sale hold', 'saves hold'] as const)('runs a deferred sign-out once, only after both holds clear (the %s last)', async (last) => {
+    await mount();
+    act(() => { context.setSaleHold('saving'); context.setSavesHold(true); });
+    act(() => context.reportUnauthorized());
+    expect(signedOut()).toBe(false);
+    expect(context.signOutDeferred).toBe(true);
+    act(() => { if (last === 'sale hold') context.setSavesHold(false); else context.setSaleHold(null); });
+    expect(signedOut()).toBe(false);
+    expect(context.signOutDeferred).toBe(true);
+    act(() => { if (last === 'sale hold') context.setSaleHold(null); else context.setSavesHold(false); });
+    expect(signedOut()).toBe(true);
+    expect(context.signOutDeferred).toBe(false);
+    expect(clearProductCache).toHaveBeenCalledOnce();
+  });
+  it.each([false, true])('the saves hold alone defers a sign-out (automatic: %s)', async (automatic) => {
+    await mount();
+    act(() => context.setSavesHold(true));
+    act(() => (automatic ? context.reportUnauthorized() : context.signOut()));
+    expect(signedOut()).toBe(false);
+    act(() => context.setSavesHold(false));
+    expect(signedOut()).toBe(true);
+  });
+  it('keeps it pending when the saves hold is released with run = false, and runs it on the next release', async () => {
+    await mount();
+    act(() => context.setSavesHold(true));
+    act(() => context.reportUnauthorized());
+    act(() => context.setSavesHold(false, false));
+    expect(signedOut()).toBe(false);
+    expect(context.signOutDeferred).toBe(true);
+    expect(clearProductCache).not.toHaveBeenCalled();
+    act(() => context.setSavesHold(false));
+    expect(signedOut()).toBe(true);
+    expect(clearProductCache).toHaveBeenCalledOnce();
+  });
+  it('drops a request deferred on the saves hold once the session is renewed, and never signs out', async () => {
+    fetchImpl.mockResolvedValue(new Response(JSON.stringify({ token: stored.token })));
+    const expiring = { ...stored, token: token(now + REFRESH_WINDOW_MS + 60_000) };
+    await mount(expiring);
+    act(() => context.setSavesHold(true));
+    act(() => context.reportUnauthorized());
+    expect(context.signOutDeferred).toBe(true);
+    // The five-minute check refreshes it to another token.
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); });
+    expect(context.session?.token).toBe(stored.token);
+    expect(context.signOutDeferred).toBe(false);
+    act(() => context.setSavesHold(false));
+    expect(signedOut()).toBe(false);
+    expect(clearProductCache).not.toHaveBeenCalled();
+  });
+});

@@ -117,7 +117,7 @@ describe('order store', () => {
     return { order, closing: handle.close(), release };
   }
 
-  it('rejects an open still waiting on a stuck close after ORDER_STORE_CLOSE_WAIT_MS, with an ordinary Error', async () => {
+  it('rejects an open still waiting on a stuck close after ORDER_STORE_CLOSE_WAIT_MS, with an ordinary Error and its code', async () => {
     const url = 'https://stuck-close.test';
     const { closing, release } = await closeHeldOpen(url);
     // Fakes only the timeouts; setImmediate stays real, to let every pending promise step run.
@@ -134,6 +134,8 @@ describe('order store', () => {
       expect(outcome).toBeInstanceOf(Error);
       expect(outcome).not.toBeInstanceOf(PosOrderOpenClosedError);
       expect((outcome as Error).message).toBe('The previous order store for this backend is still closing');
+      // #80's prompt and Report a problem show this code.
+      expect((outcome as Error & { code?: string }).code).toBe('ORDER_STORE_CLOSE_TIMEOUT');
       expect(vi.getTimerCount()).toBe(0);
     } finally { vi.useRealTimers(); }
     // Once the stuck close does finish, the name is free again.

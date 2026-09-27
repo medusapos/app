@@ -1,55 +1,56 @@
 // @vitest-environment jsdom
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { useOrderOutbox, type PosOrder, type UseOrderOutboxResult } from '@tallyui/pos';
-import { OutboxProvider, useOutboxContext, type OutboxContextValue } from '../lib/outbox-context';
+import { useOrderOutbox, type UseOrderOutboxResult } from '@tallyui/pos';
+import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 
-// A stand-in for TallyUI's outbox, whose `record` is a new function on every render, as the real one's is.
+// A stand-in for TallyUI's outbox, whose `savesInFlight` (#163) each test sets.
 vi.mock('@tallyui/pos', async (importOriginal) => ({
   ...await importOriginal<typeof import('@tallyui/pos')>(), useOrderOutbox: vi.fn(),
 }));
-vi.mock('../lib/session-context', () => ({ useSession: () => ({ session: null }) }));
+const setSavesHold = vi.fn();
+vi.mock('../lib/session-context', () => ({ useSession: () => ({ session: null, setSavesHold }) }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
-// The #85 review: the provider counts `record` calls in flight, so the sale screen can hold sign-out on them.
+// The #85 re-review: TallyUI counts the saves in flight, and OutboxProvider holds the session's sign-out on them.
 describe('OutboxProvider savesInFlight', () => {
-  it('counts each record until it resolves or rejects, passes the order and outcome through, and keeps record stable', async () => {
-    const saves: { resolve: () => void; reject: (error: Error) => void }[] = [];
-    const inner = vi.fn((_order: PosOrder) => new Promise<void>((resolve, reject) => { saves.push({ resolve, reject }); }));
-    const records: UseOrderOutboxResult['record'][] = [];
-    vi.mocked(useOrderOutbox).mockImplementation(() => {
-      const record = (order: PosOrder) => inner(order);
-      records.push(record);
-      return { orders: null, state: { pending: 0, sending: false }, recent: [], record,
-        isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn() };
-    });
-    const seen: OutboxContextValue[] = [];
-    function Probe() { seen.push(useOutboxContext()); return null; }
-    await act(async () => { render(<OutboxProvider><Probe /></OutboxProvider>); });
-    const latest = () => seen[seen.length - 1];
-    const { record } = latest();
-    expect(latest().savesInFlight).toBe(0);
+  it('passes TallyUI\'s outbox through and holds sign-out while a save is in flight; its unmount releases without running', async () => {
+    let outbox!: UseOrderOutboxResult;
+    const next = (savesInFlight: number) => {
+      outbox = { orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn(),
+        isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), savesInFlight };
+    };
+    vi.mocked(useOrderOutbox).mockImplementation(() => outbox);
+    let seen!: UseOrderOutboxResult;
+    function Probe() { seen = useOutboxContext(); return null; }
+    const tree = () => <OutboxProvider><Probe /></OutboxProvider>;
+    next(0);
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(tree()); });
+    expect(seen).toBe(outbox);
+    expect(setSavesHold.mock.calls).toEqual([[false]]);
 
-    const first = { id: 'first' } as PosOrder;
-    const second = { id: 'second' } as PosOrder;
-    let firstSave!: Promise<void>;
-    let secondSave!: Promise<void>;
-    act(() => { firstSave = record(first); secondSave = record(second); });
-    const secondOutcome = secondSave.catch((error: unknown) => error);
-    expect(latest().savesInFlight).toBe(2);
-    expect(inner.mock.calls).toEqual([[first], [second]]);
-    // Re-rendered, with a new TallyUI record each time: the context's record keeps its identity.
-    expect(new Set(records).size).toBeGreaterThan(1);
-    expect(seen.every((value) => value.record === record)).toBe(true);
+    next(1);
+    await act(async () => { view.rerender(tree()); });
+    expect(seen).toBe(outbox);
+    expect(seen.savesInFlight).toBe(1);
+    expect(setSavesHold.mock.lastCall).toEqual([true]);
+    // A second save in flight changes nothing: the hold is on the count being above 0.
+    next(2);
+    await act(async () => { view.rerender(tree()); });
+    expect(setSavesHold).toHaveBeenCalledTimes(2);
 
-    await act(async () => { saves[0].resolve(); });
-    await expect(firstSave).resolves.toBeUndefined();
-    expect(latest().savesInFlight).toBe(1);
-    const failure = new Error('Storage full');
-    await act(async () => { saves[1].reject(failure); });
-    expect(await secondOutcome).toBe(failure);
-    expect(latest().savesInFlight).toBe(0);
-    expect(latest().record).toBe(record);
+    next(0);
+    await act(async () => { view.rerender(tree()); });
+    expect(setSavesHold.mock.lastCall).toEqual([false]);
+    next(1);
+    await act(async () => { view.rerender(tree()); });
+    expect(setSavesHold.mock.lastCall).toEqual([true]);
+
+    // A park or #80's prompt unmounts it: released, but a pending sign-out isn't run under LiveTabGate's close.
+    setSavesHold.mockClear();
+    view.unmount();
+    expect(setSavesHold.mock.calls).toEqual([[false, false]]);
   });
 });

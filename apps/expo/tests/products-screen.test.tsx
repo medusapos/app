@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { ComponentProps, ReactNode } from 'react';
+import { useState, type ComponentProps, type ReactNode } from 'react';
 import type { ProductGrid, SearchInput, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { formatMoney, SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
@@ -600,17 +600,32 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
 
   // TallyUI #161: while a save is in flight and unconfirmed, useSale re-asks isStored every 5 s (HUNG_SAVE_CHECK_MS),
   // through this app's own wiring (no hungSaveCheckMs). The outbox record doesn't settle until the test settles it: a
-  // hung insert. The real OutboxProvider counts it in flight (#85 review), over a stand-in for TallyUI's useOrderOutbox.
+  // hung insert. The real SessionProvider and OutboxProvider hold sign-out on it, over a stand-in for TallyUI's
+  // useOrderOutbox whose savesInFlight counts its record calls not yet settled, as TallyUI's does (#163).
   const EARLIER_SALE_SAVING = 'An earlier sale is still being saved.';
   let settle: { resolve: () => void; reject: (error: Error) => void };
+  let hungSession: ReturnType<typeof useSession>;
+  let hungOutbox: ReturnType<typeof useOutboxContext>;
+  function HungSessionProbe() { hungSession = useSession(); return null; }
+  function HungOutboxProbe() { hungOutbox = useOutboxContext(); return null; }
+  const hungTree = () => <SessionProvider><HungSessionProbe />
+    <OutboxProvider><HungOutboxProbe /><ProductsScreen /></OutboxProvider></SessionProvider>;
+  let hungView: ReturnType<typeof render>;
   async function hungSale(isStored: (order: PosOrder) => Promise<boolean>) {
     const record = vi.fn((_order: PosOrder) => new Promise<void>((resolve, reject) => { settle = { resolve, reject }; }));
-    vi.mocked(useOrderOutbox).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [],
-      flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), record, isStored });
+    vi.mocked(useOrderOutbox).mockImplementation(function useHungOutbox() {
+      const [savesInFlight, setSavesInFlight] = useState(0);
+      return { orders: null, state: { pending: 0, sending: false }, recent: [], savesInFlight, isStored,
+        flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
+        async record(order: PosOrder) {
+          setSavesInFlight((count) => count + 1);
+          try { await record(order); } finally { setSavesInFlight((count) => count - 1); }
+        } };
+    });
     vi.mocked(useOutboxContext).mockImplementation(realOutbox.useOutboxContext);
     saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
       token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
-    await act(async () => { render(<SessionProvider><OutboxProvider><ProductsScreen /></OutboxProvider></SessionProvider>); });
+    await act(async () => { hungView = render(hungTree()); });
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
     fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
@@ -722,6 +737,64 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
       expect(signedOut()).toBe(false);
       expect(screen.queryByText('redirect:/login')).toBeNull();
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // (d) The #85 re-review's gap: store settings that unmount the sale screen after Continue release its sale hold, but
+  // the saves hold is OutboxProvider's, so an automatic sign-out still waits for the abandoned save.
+  it('keeps an automatic sign-out waiting on the abandoned hung save after store settings unmount the sale, then signs out once it settles', async () => {
+    try {
+      await hungSale(vi.fn().mockResolvedValue(true));
+      await continuePastHungSave();
+      vi.mocked(useStoreSettings).mockReturnValue({ state: 'unsupported' });
+      await act(async () => { hungView.rerender(hungTree()); });
+      expect(screen.getByText('This backend can\'t supply store settings')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+      act(() => { hungSession.reportUnauthorized(); });
+      expect(hungOutbox.savesInFlight).toBe(1);
+      expect(hungSession.signOutDeferred).toBe(true);
+      expect(signedOut()).toBe(false);
+      await advance(15000);
+      expect(hungOutbox.savesInFlight).toBe(1);
+      expect(signedOut()).toBe(false);
+      expect(screen.queryByText('redirect:/login')).toBeNull();
+      expect(clearProductCache).not.toHaveBeenCalled();
+
+      await act(async () => { settle.resolve(); });
+      expect(hungOutbox.savesInFlight).toBe(0);
+      expect(signedOut()).toBe(true);
+      expect(screen.getByText('redirect:/login')).toBeTruthy();
+      expect(clearProductCache).toHaveBeenCalledTimes(1);
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // (e) Sign out's lock, shown: the visible note under the header, not the hidden description (#sign-out-locked).
+  it.each(['without', 'with'] as const)('shows why Sign out is locked after Continue on a hung save (%s a deferred 401) until the save settles', async (deferred) => {
+    const DEFERRED_NOTE = 'An earlier sale is still being saved. You\'ll be signed out once it\'s saved.';
+    const visible = (text: string) => screen.queryByText(text, { ignore: '#sign-out-locked, script, style' });
+    try {
+      await hungSale(vi.fn().mockResolvedValue(true));
+      expect(visible(EARLIER_SALE_SAVING)).toBeNull();
+      await continuePastHungSave();
+      expect(visible(EARLIER_SALE_SAVING)!.closest('[data-print="hide"]')).toBeTruthy();
+      expect(visible(DEFERRED_NOTE)).toBeNull();
+      expect(screen.queryByText('Signed out after this sale is saved')).toBeNull();
+      if (deferred === 'with') {
+        act(() => { hungSession.reportUnauthorized(); });
+        expect(visible(EARLIER_SALE_SAVING)).toBeNull();
+        expect(visible(DEFERRED_NOTE)).toBeTruthy();
+        expect(screen.queryByText('Signed out after this sale is saved')).toBeNull();
+      }
+      // The accessible description is unchanged.
+      expect(screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING })).toBeTruthy();
+
+      await act(async () => { settle.resolve(); });
+      expect(visible(EARLIER_SALE_SAVING)).toBeNull();
+      expect(visible(DEFERRED_NOTE)).toBeNull();
+      expect(signedOut()).toBe(deferred === 'with');
+      if (deferred === 'without') expect(signOutDisabled()).toBeNull();
       cleanup();
     } finally { vi.useRealTimers(); }
   });

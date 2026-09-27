@@ -752,9 +752,9 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     const stored = (await outbox.orders!.find().exec()).map((doc) => doc.toJSON());
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({ id: order.id, commandId: order.commandId, totalMinor: order.totalMinor + 1 });
-    // Logged again for the retry's own isStored check.
-    await waitFor(() => expect(error.mock.calls.filter(([message]) => message === '[outbox] A stored order has this id with different content'))
-      .toHaveLength(2));
+    // Logged once per order (TallyUI #163): the retry's own isStored check finds the same mismatch and doesn't log it again.
+    expect(error.mock.calls.filter(([message]) => message === '[outbox] A stored order has this id with different content'))
+      .toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Print receipt' })).toBeNull();
     expect(signOutDisabled()).toBe(true);

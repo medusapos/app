@@ -187,10 +187,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
   const signOutLocked = sale.saving || savesInFlight > 0;
   const lockMessage = sale.saving ? SALE_SAVING : EARLIER_SALE_SAVING;
+  // Shown under the header: why Sign out is locked by an earlier sale, and a sign-out waiting on either save.
+  const earlierSaving = savesInFlight > 0 && !sale.saving;
+  const note = earlierSaving ? (signOutDeferred ? `${EARLIER_SALE_SAVING} You'll be signed out once it's saved.` : EARLIER_SALE_SAVING)
+    : signOutDeferred ? 'Signed out after this sale is saved' : null;
   // The session's sale hold (ADR 0015): every sign-out waits while saving; automatic ones (a 401, a failed refresh)
   // also wait for the receipt to clear. Released on unmount without running a pending sign-out: the next sale screen's
-  // release runs it, if the token is unchanged.
-  const saleHold = signOutLocked ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
+  // release runs it, if the token is unchanged. OutboxProvider holds for the saves in flight.
+  const saleHold = sale.saving ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
   useEffect(() => setSaleHold(saleHold), [saleHold, setSaleHold]);
   useEffect(() => () => setSaleHold(null, false), [setSaleHold]);
   useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
@@ -258,8 +262,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
-      {signOutDeferred ? <View dataSet={{ print: 'hide' }} className="px-4 py-1">
-        <Text className="text-sm text-muted-foreground">Signed out after this sale is saved</Text></View> : null}
+      {note ? <View dataSet={{ print: 'hide' }} className="px-4 py-1">
+        <Text className="text-sm text-muted-foreground">{note}</Text></View> : null}
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
         store={{ name: settings.storeName, address: settings.location.addressLine }}
         topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}
