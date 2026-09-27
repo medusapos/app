@@ -25,7 +25,7 @@ beforeEach(() => {
   });
   vi.mocked(useOutboxContext).mockReturnValue({
     orders: null, state: { pending: 0, sending: false }, recent: [],
-    record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
+    record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false),
   });
 });
 afterEach(() => {

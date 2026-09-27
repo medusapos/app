@@ -1,17 +1,26 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, waitFor } from '@testing-library/react';
-import type { ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ComponentProps, ReactNode } from 'react';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
+import type { ProductGrid, SearchInput } from '@tallyui/components';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import {
-  catalogueEntries, createOrderBuilder, finalizeOrder, needsAttention, TaxProvider, taxProviderProps, useSale, type PosOrder,
+  catalogueEntries, createOrderBuilder, finalizeOrder, needsAttention, OrderContentMismatchError, outboxLogger, saleLogger,
+  TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder,
 } from '@tallyui/pos';
 import { StorageWorkerStartError } from '@tallyui/storage-sqlite/web';
+import ProductsScreen from '../app/index';
+import OrdersScreen from '../app/orders';
 import { markBusy, reportStorageStartFailure } from '../lib/live-tab';
-import { useSessionOutbox } from '../lib/outbox-context';
-import type { Session } from '../lib/session';
+import { installLogSinks } from '../lib/logging';
+import { OutboxProvider, useOutboxContext, useSessionOutbox } from '../lib/outbox-context';
+import { posConnector } from '../lib/pos-connector';
+import { saveSession, type Session } from '../lib/session';
+import { SessionProvider } from '../lib/session-context';
+import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../lib/store-settings';
 import { terminateWebStorage } from '../lib/web-storage';
+import { setWindowWidth } from './window-width';
 
 // The outbox's two live-tab hooks, observed where they live (TV7 review): markBusy still runs for real;
 // reportStorageStartFailure only records, since the real one latches the blocked screen for the whole run.
@@ -19,6 +28,58 @@ vi.mock('../lib/live-tab', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../lib/live-tab')>();
   return { ...actual, markBusy: vi.fn(actual.markBusy), reportStorageStartFailure: vi.fn() };
 });
+// For the Products screen on the real outbox (the last describe): only the router, the catalogue's replication,
+// the store settings and the component primitives are stubbed, as in products-screen.test.tsx.
+vi.mock('expo-router', () => ({
+  Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
+  router: { replace: vi.fn(), push: vi.fn() },
+  Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() ?? null },
+}));
+vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
+vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+const shirt = vi.hoisted(() => ({ id: 'shirt', title: 'Shirt', status: 'published', variants: [
+  { id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12.5, currency_code: 'eur' }] },
+] }));
+vi.mock('../lib/use-replicated-products', () => {
+  const replicated = { products: [shirt], state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined,
+    lastStockCheckAt: null, reconcileStock: async () => {}, unlisted: undefined };
+  return { useReplicatedProducts: () => replicated };
+});
+vi.mock('@tallyui/pos', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(),
+}));
+vi.mock('../lib/store-settings', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
+}));
+vi.mock('@tallyui/components/product', () => ({
+  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) => (
+    <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
+  ),
+  ProductImage: () => null,
+  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
+  ProductPrice: () => null,
+  ProductStockBadge: () => null,
+}));
+vi.mock('@tallyui/components/ui', () => ({
+  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+}));
+vi.mock('@tallyui/components/input', () => ({
+  SearchInput: ({ value, onChangeText, placeholder }: ComponentProps<typeof SearchInput>) => (
+    <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)} />
+  ),
+}));
+vi.mock('@tallyui/components/cart', () => ({
+  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
+    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
+    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
+    {afterItems}{footer}
+  </div>,
+  CartLine: ({ name }: { name: string }) => <div>{name}</div>,
+  CartTotal: () => null,
+  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
+  DiscountBadge: () => null,
+}));
+vi.mock('@tallyui/components/checkout', () => ({ CashTendered: () => null, ChangeDisplay: () => null }));
 
 let outbox: ReturnType<typeof useSessionOutbox>;
 let session: Session;
@@ -281,11 +342,11 @@ describe('completing a sale into the outbox', () => {
   const recorded = vi.fn<(order: PosOrder) => void>();
   function Till({ session }: { session: Session }) {
     outbox = useSessionOutbox(session, 'register-1');
-    // As app/index.tsx wires it: no session, and onSaleCompleted is the outbox's record.
+    // As app/index.tsx wires it: no session, onSaleCompleted is the outbox's record, and isStored is the outbox's.
     till = useSale(pricing, { registerId: 'register-1', cashierRef: session.email, onSaleCompleted: (order) => {
       recorded(order);
       return outbox.record(order);
-    } });
+    }, isStored: outbox.isStored });
     return null;
   }
   const renderTill = () => render(<Till session={session} />, { wrapper: ({ children }: { children: ReactNode }) =>
@@ -352,5 +413,245 @@ describe('completing a sale into the outbox', () => {
     await waitFor(() => expect(outbox.recent[0]).toMatchObject({ id: order.id, syncStatus: 'applied' }));
     expect((await outbox.orders!.find().exec()).map((doc) => doc.id)).toEqual([order.id]);
     expect(sentCommands().map((command) => command.id)).toEqual([order.commandId]);
+  });
+
+  // TallyUI #149: after a failed save, newSale() is refused until the outbox's isStored confirms the order.
+  it('refuses newSale() after a failed save until isStored confirms the order is stored', async () => {
+    fetchStub.mockRejectedValue(new TypeError('offline'));
+    renderTill();
+    await tenderByCard();
+    const collection = outbox.orders!;
+    const insert = collection.insert.bind(collection);
+    // The first save never lands; the retry's lands, then its promise rejects.
+    vi.spyOn(collection, 'insert')
+      .mockImplementationOnce(async () => { throw new Error('disk full'); })
+      .mockImplementationOnce(async (doc) => { await insert(doc); throw new Error('storage acknowledged late'); });
+
+    await act(async () => { await till.complete(); });
+    expect(till.error).toBe('The sale could not be saved: disk full');
+    // isStored has answered (not stored) once the store's read settles.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(till.canContinue).toBe(false);
+    const lines = till.order.lineItems;
+    act(() => { till.newSale(); });
+    expect(till.error).toBe('This sale is being saved. Retry to finish it.');
+    expect(till.stage).toEqual({ kind: 'tender', method: 'external' });
+    expect(till.order.lineItems).toBe(lines);
+    expect(till.saving).toBe(true);
+    expect(await collection.find().exec()).toEqual([]);
+
+    await act(async () => { await till.complete(); });
+    expect(till.error).toBe('The sale could not be saved: storage acknowledged late');
+    await waitFor(() => expect(till.canContinue).toBe(true));
+    act(() => { till.newSale(); });
+    expect(till.stage).toEqual({ kind: 'cart' });
+    expect(till.order.lineItems).toEqual([]);
+    expect(till.saving).toBe(false);
+    expect(till.error).toBeNull();
+    // Both attempts handed over the same order; it is stored once.
+    const [first] = recorded.mock.calls[0];
+    expect(recorded.mock.calls.map(([order]) => order)).toEqual([first, first]);
+    expect((await collection.find().exec()).map((doc) => doc.id)).toEqual([first.id]);
+  });
+});
+
+// lib/logging.ts: the app's console sink on TallyUI's sale and outbox loggers.
+describe('the money-path log sinks', () => {
+  beforeAll(() => installLogSinks());
+
+  it('sends saleLogger and outboxLogger warn and error to the console with scope, message and data, and nothing below warn', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      saleLogger.warn('A probe', { orderId: 'order-1' });
+      outboxLogger.error('Another probe', { orderId: 'order-2' });
+      saleLogger.info('Not sent');
+      saleLogger.debug('Not sent either');
+      expect(warn).toHaveBeenCalledExactlyOnceWith('[sale] A probe', { orderId: 'order-1' });
+      expect(error).toHaveBeenCalledExactlyOnceWith('[outbox] Another probe', { orderId: 'order-2' });
+      expect(log).not.toHaveBeenCalled();
+      expect(info).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore(); error.mockRestore(); log.mockRestore(); info.mockRestore();
+    }
+  });
+
+  it('never throws, even when the console does', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { throw new Error('console is gone'); });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => { throw new Error('console is gone'); });
+    try {
+      expect(() => saleLogger.warn('A probe')).not.toThrow();
+      expect(() => outboxLogger.error('A probe', { orderId: 'order-1' })).not.toThrow();
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(error).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore(); error.mockRestore();
+    }
+  });
+});
+
+// The Products screen's own useSale call (app/index.tsx) on the real session, outbox provider, order store and
+// HTTP transport (TallyUI ce184e6, #149): Continue after a failed save, a requeued order's retry, a content
+// mismatch, and the Sign out lock while a save is pending.
+describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
+  const storeSettings: StoreSettings = {
+    storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' },
+  };
+  const screenPricing: PricingSettings = { currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 } };
+  const button = (name: string | RegExp) => screen.getByRole('button', { name });
+  const sent = () => fetchStub.mock.calls.flatMap(([, init]) => (JSON.parse(init!.body as string).commands as Array<{ id: string }>)
+    .map((command) => command.id));
+  // The server answers every command it is sent with this status.
+  const answerAll = (status: 'applied' | 'rejected') => async (_url: unknown, init?: RequestInit) => new Response(JSON.stringify({
+    results: (JSON.parse(init!.body as string).commands as Array<{ id: string; payload: { totalMinor: number } }>).map((command) =>
+      status === 'applied'
+        ? { id: command.id, status, serverRefs: { orderId: `server-${command.id}`, totalMinor: command.payload.totalMinor } }
+        : { id: command.id, status, error: { code: 'unknown_variant', message: 'Variant was removed' } }),
+  }));
+  function CaptureOutbox() {
+    outbox = useOutboxContext();
+    return null;
+  }
+  let warn: MockInstance<typeof console.warn>;
+  let error: MockInstance<typeof console.error>;
+  beforeAll(() => installLogSinks());
+  beforeEach(() => {
+    setWindowWidth(1280);
+    // jsdom's own localStorage throws on its opaque origin; unstubbed by the file's afterEach.
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); },
+      removeItem: (key: string) => { data.delete(key); },
+    });
+    saveSession(localStorage, { ...session, token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
+    saveCachedSettings(localStorage, session.baseUrl, storeSettings);
+    vi.mocked(fetchStoreSettings).mockResolvedValue(storeSettings);
+    vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: screenPricing });
+    vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+    warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  });
+  afterEach(() => {
+    vi.mocked(posConnector.capabilities!).mockRestore();
+    warn.mockRestore();
+    error.mockRestore();
+  });
+
+  async function tenderShirtByCard(withOrders = false) {
+    render(<SessionProvider><OutboxProvider>
+      <CaptureOutbox /><ProductsScreen />{withOrders ? <OrdersScreen /> : null}
+    </OutboxProvider></SessionProvider>);
+    await waitFor(() => expect(outbox.orders).not.toBeNull());
+    fireEvent.click(await screen.findByRole('button', { name: 'Shirt' }));
+    fireEvent.click(button('Card terminal'));
+  }
+  /** Makes the next store insert write `stored(doc)` and then reject; resolves to the order the sale handed over. */
+  function insertWritesThenThrows(stored: (doc: PosOrder) => PosOrder = (doc) => doc): Promise<PosOrder> {
+    const collection = outbox.orders!;
+    const insert = collection.insert.bind(collection);
+    return new Promise((handed) => {
+      vi.spyOn(collection, 'insert').mockImplementationOnce(async (doc) => {
+        handed(doc as PosOrder);
+        await insert(stored(doc as PosOrder));
+        throw new Error('storage acknowledged late');
+      });
+    });
+  }
+  const approve = () => act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+  const signOutDisabled = () => button('Sign out').getAttribute('aria-disabled') === 'true';
+
+  it('offers Continue once isStored confirms an order whose insert wrote and then threw; Continue starts a new sale, with one order and one command', async () => {
+    let respond!: (response: Response) => void;
+    fetchStub.mockImplementation(() => new Promise((resolve) => { respond = resolve; }));
+    await tenderShirtByCard();
+    const handed = insertWritesThenThrows();
+    await approve();
+    const order = await handed;
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: storage acknowledged late'));
+    const continueButton = await screen.findByRole('button', { name: 'Continue' });
+    expect(screen.getByText('This sale is stored and will be sent. Continue to the next sale.')).toBeTruthy();
+    expect(signOutDisabled()).toBe(true);
+
+    fireEvent.click(continueButton);
+    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Print receipt' })).toBeNull();
+    expect(signOutDisabled()).toBe(false);
+
+    await waitFor(() => expect(fetchStub).toHaveBeenCalledTimes(1));
+    await act(async () => { respond(applied(order)); });
+    await waitFor(() => expect(outbox.recent[0]).toMatchObject({ id: order.id, syncStatus: 'applied' }));
+    await waitFor(() => expect(outbox.state).toMatchObject({ pending: 0, sending: false }));
+    const stored = (await outbox.orders!.find().exec()).map((doc) => doc.toJSON());
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ id: order.id, commandId: order.commandId });
+    expect(sent()).toEqual([order.commandId]);
+  });
+
+  it.each([['works', false], ['throws', true]])(
+    'a failed save requeued from Orders, then retried on the tender, resolves as stored: one order, and the till continues (console %s)',
+    async (_console, throwing) => {
+      if (throwing) warn.mockImplementation(() => { throw new Error('console is gone'); });
+      // The server rejects the first command with a requeueable code, then applies whatever it is sent.
+      fetchStub.mockImplementationOnce(answerAll('rejected')).mockImplementation(answerAll('applied'));
+      await tenderShirtByCard(true);
+      const handed = insertWritesThenThrows();
+      await approve();
+      const order = await handed;
+      await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: storage acknowledged late'));
+      await waitFor(() => expect(outbox.recent[0]).toMatchObject({ id: order.id, syncStatus: 'rejected' }));
+
+      // Orders' Retry is the outbox's requeue: the stored order is pending again under a new commandId, and is sent.
+      await act(async () => { fireEvent.click(button('Retry')); });
+      await waitFor(() => expect(outbox.recent[0]).toMatchObject({ id: order.id, syncStatus: 'applied' }));
+      const requeued = outbox.recent[0].commandId;
+      expect(requeued).not.toBe(order.commandId);
+
+      // The tender's retry hands over the same order under its original commandId: stored, never overwritten.
+      await approve();
+      expect(await screen.findByRole('button', { name: 'Print receipt' })).toBeTruthy();
+      expect(screen.queryByRole('alert')).toBeNull();
+      expect(warn).toHaveBeenCalledWith('[outbox] Recorded an order stored under another commandId',
+        { orderId: order.id, storedCommandId: requeued, recordedCommandId: order.commandId });
+      const stored = (await outbox.orders!.find().exec()).map((doc) => doc.toJSON());
+      expect(stored).toHaveLength(1);
+      expect(stored[0]).toMatchObject({ id: order.id, commandId: requeued, syncStatus: 'applied' });
+      await waitFor(() => expect(outbox.state).toMatchObject({ pending: 0, sending: false }));
+      expect(sent()).toEqual([order.commandId, requeued]);
+
+      fireEvent.click(button('New sale'));
+      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(signOutDisabled()).toBe(false);
+    });
+
+  it('a stored order with the same id and other money content fails the retry with OrderContentMismatchError, overwrites nothing and logs at error', async () => {
+    fetchStub.mockRejectedValue(new TypeError('offline'));
+    await tenderShirtByCard();
+    const handed = insertWritesThenThrows((doc) => ({ ...doc, totalMinor: doc.totalMinor + 1 }));
+    await approve();
+    const order = await handed;
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: storage acknowledged late'));
+    // isStored finds the id with other content: not stored, logged at error, and no Continue.
+    await waitFor(() => expect(error).toHaveBeenCalledWith('[outbox] A stored order has this id with different content', { orderId: order.id }));
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+
+    await approve();
+    await waitFor(() => expect(screen.getByRole('alert').textContent)
+      .toBe(`The sale could not be saved: Order ${order.id} is already stored with different content`));
+    // The retry's record is exactly this call; it throws the mismatch rather than counting the order as stored.
+    await expect(outbox.record(order)).rejects.toBeInstanceOf(OrderContentMismatchError);
+    const stored = (await outbox.orders!.find().exec()).map((doc) => doc.toJSON());
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ id: order.id, commandId: order.commandId, totalMinor: order.totalMinor + 1 });
+    // Logged again for the retry's own isStored check.
+    await waitFor(() => expect(error.mock.calls.filter(([message]) => message === '[outbox] A stored order has this id with different content'))
+      .toHaveLength(2));
+    expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Print receipt' })).toBeNull();
+    expect(signOutDisabled()).toBe(true);
   });
 });

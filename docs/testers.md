@@ -112,7 +112,8 @@ full-height view instead of showing products and the cart side by side:
   time per key, for a scanner that types slower or codes shorter than the
   defaults expect. Its **Test scan here** field shows the last scan's
   average and whether it would count, against these same values, without
-  going to Products or the cart to check.
+  going to Products or the cart to check. The minimum applies to the
+  Products search box too: shorter text followed by Enter stays a search.
 - Camera scanning isn't available yet — see
   [Known limitations](#known-limitations).
 
@@ -225,9 +226,12 @@ Open **Orders** → **Needs attention** to see sales that need a look:
   release.
 - If a sale stays "Waiting to sync" while you're online, reload the app and
   report it; a fix is in this release.
-- If a sale can't be saved, the payment screen stays on it with "This sale
-  is being saved", and **Complete sale** tries again. If it keeps failing,
-  write the sale down, reload the app and report it.
+- If a sale can't be saved, the payment screen stays on it and **Complete
+  sale** tries again. Once the app confirms the sale is saved on this till,
+  **Continue** appears: it starts the next sale, and the saved sale is sent
+  as usual. **Sign out** stays greyed out until the sale is saved or you
+  continue. If it keeps failing and **Continue** never appears, write the
+  sale down, reload the app and report it.
 
 ## Report a problem
 

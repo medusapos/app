@@ -5,12 +5,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { LiveTabGate } from '../components/live-tab-gate';
 import { StorageHealth } from '../components/storage-health';
+import { installLogSinks } from '../lib/logging';
 import { SessionProvider, useSession } from '../lib/session-context';
 import { OutboxProvider } from '../lib/outbox-context';
 import { OutboxStrip } from '../components/store-refused';
 
 // The POS ships the light theme; no dark design yet.
 Uniwind.setTheme('light');
+// Once at app start: the sale and outbox loggers' warn and error reach the console.
+installLogSinks();
 
 // Needs SessionProvider above it, so it is its own component under RootLayout.
 function GatedApp() {

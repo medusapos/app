@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useContext } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
@@ -35,6 +35,12 @@ const STATE_LABEL: Record<SyncState, string> = {
   error: 'Sync error',
   offline: 'Offline · cached catalogue',
 };
+
+// TallyUI's SALE_SAVING (packages/pos/src/sale/use-sale.ts), the tender's lock message; @tallyui/pos doesn't export it at ce184e6.
+const SALE_SAVING = 'This sale is being saved. Retry to finish it.';
+const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
+// Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
+const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized, mergeCapabilities } = useSession();
@@ -156,11 +162,19 @@ function PricingScreen(props: PricingProps) {
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
+  // A replication 401 while a save is pending (`saving`, set below) waits: signing out would unmount the sale and close
+  // the outbox, and the local save needs no token. It signs out once `saving` turns false (effect below).
+  const saving = useRef(false);
+  const unauthorizedWhileSaving = useRef(false);
+  const onReplicationUnauthorized = useCallback(() => {
+    if (saving.current) unauthorizedWhileSaving.current = true;
+    else onUnauthorized();
+  }, [onUnauthorized]);
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
-    useReplicatedProducts(connector, syncContext, onUnauthorized);
+    useReplicatedProducts(connector, syncContext, onReplicationUnauthorized);
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
-  const { record, state: outboxState, recent } = useOutboxContext();
+  const { record, isStored, state: outboxState, recent } = useOutboxContext();
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {
     const fresh = recent.filter((order) => order.syncStatus === 'applied' && !stockWarned.current.has(order.id)
@@ -171,7 +185,18 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
-  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record });
+  // isStored: after a failed save, the tender offers Continue once the outbox confirms the order is stored (TallyUI #149).
+  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
+    isStored });
+  // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
+  // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review).
+  const signOutLocked = sale.saving;
+  saving.current = sale.saving;
+  useEffect(() => {
+    if (sale.saving || !unauthorizedWhileSaving.current) return;
+    unauthorizedWhileSaving.current = false;
+    onUnauthorized();
+  }, [sale.saving, onUnauthorized]);
   useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
@@ -208,9 +233,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const clock = getCalendars()[0]?.uses24hourClock;
   const hour12 = clock == null ? undefined : !clock;
   const catalogue = <View className="flex-1">
-    {/* TODO(scanner minCodeLength): wire minCodeLength={scannerSettings.minChars} once TallyUI's Catalogue takes it and the pin bumps. */}
+    {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
-      lastStockCheckAt={lastStockCheckAt} hour12={hour12}
+      lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
     <SyncStatus state={outboxState} />
   </View>;
@@ -226,9 +251,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <Pressable accessibilityRole="button" onPress={() => router.push('/settings')} className="min-h-11 justify-center">
           <Text className="text-foreground">Settings</Text>
         </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => { signOut(); router.replace('/login'); }} className="min-h-11 justify-center">
+        {/* Disabled in place while a save is pending (never hidden), so the header doesn't shift; the lock message is its description. */}
+        <Pressable accessibilityRole="button" disabled={signOutLocked} accessibilityHint={signOutLocked ? SALE_SAVING : undefined}
+          aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
+          onPress={() => { if (signOutLocked) return; signOut(); router.replace('/login'); }}
+          className={`min-h-11 justify-center ${signOutLocked ? 'opacity-50' : ''}`}>
           <Text className="text-foreground">Sign out</Text>
         </Pressable>
+        {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{SALE_SAVING}</Text> : null}
         </View>
       ) }} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}

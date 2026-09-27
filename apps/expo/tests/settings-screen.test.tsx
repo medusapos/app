@@ -10,7 +10,7 @@ import SettingsScreen from '../app/settings';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
-  router: { replace: vi.fn(), navigate: vi.fn() },
+  router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() ?? null },
 }));
 
@@ -118,5 +118,15 @@ describe('SettingsScreen', () => {
     await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Products' }));
     expect(router.replace).toHaveBeenCalledWith('/');
+    expect(router.back).not.toHaveBeenCalled();
+  });
+
+  // A replace would mount a second, empty Products screen over the one holding the sale.
+  it('the Products link goes back to the Products screen under Settings when there is history', async () => {
+    vi.mocked(router.canGoBack).mockReturnValueOnce(true);
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Products' }));
+    expect(router.back).toHaveBeenCalledTimes(1);
+    expect(router.replace).not.toHaveBeenCalled();
   });
 });

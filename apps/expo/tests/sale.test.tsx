@@ -110,7 +110,7 @@ function addSaleLines() { act(() => { sale.add(entries[0], traits); sale.add(ent
 
 beforeEach(() => {
   setWindowWidth(1280);
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], flush: vi.fn(), requeue: vi.fn() });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,

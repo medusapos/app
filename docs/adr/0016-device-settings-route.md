@@ -30,8 +30,8 @@ device, not the store.
   per-backend caches (`medusapos.settings.` + baseUrl). The scanner's key is
   `medusapos.scanner.` + baseUrl (`lib/scanner-settings.ts`).
 - **Minimum characters** applies on both paths that can read a scan: the
-  phone-cart wedge listener (`use-wedge-scan.ts`) and, once TallyUI's
-  `Catalogue` takes a `minCodeLength` prop (staged, not in this change), the
+  phone-cart wedge listener (`use-wedge-scan.ts`) and, through TallyUI
+  `Catalogue`'s `minCodeLength` prop (#148, wired at the `ce184e6` pin), the
   Products search submit. Both are asked "is this code long enough to be a
   barcode rather than a stray keypress or an empty submit?" — the same
   question.
@@ -52,6 +52,6 @@ device, not the store.
   own averaging function (`averageKeyMs`, exported from `use-wedge-scan.ts`),
   so a tester's read of "counts as a scan" always agrees with what scanning
   in the cart view will actually do.
-- The Products path's `minCodeLength` wiring is staged: `app/index.tsx` leaves
-  a `// TODO(scanner minCodeLength)` at the `Catalogue` call until TallyUI
-  ships the prop and the pin bumps.
+- The Products path's `minCodeLength` is wired at the TallyUI `ce184e6` pin:
+  `app/index.tsx` passes `scannerSettings.minChars` to `Catalogue`, so Enter
+  on shorter text in the Products search stays a search.
