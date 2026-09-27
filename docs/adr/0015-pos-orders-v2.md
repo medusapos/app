@@ -138,16 +138,20 @@ The pin (`8e86d7a`) also brings three more changes:
       `instanceof`). This is defensive: it covers a close during an open,
       and this app doesn't do that today. `openOrderStore` hands out
       `close()` only once the open resolves, and `closeOrderStores` waits
-      on the open. No order would be lost, and the next open retries.
-    - A rare case remains. If a close's 10 s wait
-      (`POS_ORDER_MIGRATION_CLOSE_WAIT_MS`) runs out mid-migration, the
-      open can still end in a raw error rather than
-      `PosOrderOpenClosedError`. No order is lost, since the next open
-      migrates again. The TallyUI fix comes next.
+      on the open. No order would be lost; the outbox would have no store
+      until the store key changes or the app reloads, and that open retries.
+    - TallyUI #155 (pinned at `03ad08a`) fixed the rare case that remained: a close's 10 s wait
+      (`POS_ORDER_MIGRATION_CLOSE_WAIT_MS`) running out mid-migration could
+      still let a migration write reach closed storage. Both that open, and
+      a close that gives up waiting after the migration, now reject with
+      `PosOrderOpenClosedError`. A migration status or record read or write
+      that the give-up dropped logs at warn through the new exported
+      `posOrdersLogger`, sunk to the console like `saleLogger` and
+      `outboxLogger`.
   - A sale that was stored is kept and sent by the outbox. A sale whose
     insert never landed gets no Continue, and is lost with a reload, as
     before this change.
-  - `saleLogger` and `outboxLogger` warn and error reach the console
+  - `saleLogger`, `outboxLogger` and `posOrdersLogger` warn and error reach the console
     (`apps/expo/lib/logging.ts`, installed in `app/_layout.tsx`). Since
     TallyUI #150 that includes every save failure not yet confirmed stored,
     and a sale screen unmounting with a save pending.
