@@ -24,7 +24,8 @@ export function useSessionOutbox(session: Session | null, registerId: string): U
     onOpenError: (error) => {
       if (isStorageWorkerFailure(error)) reportStorageStartFailure();
       // Defensive: a close during the open, or (TallyUI #155) a close that gives up waiting on a stuck
-      // migration. Either way no order is lost and the next open retries. This app doesn't do that today:
+      // migration. Either way no order is lost; the outbox has no store until the store key changes or the
+      // app reloads, and that open retries. This app doesn't do that today:
       // openOrderStore hands out close() only once the open resolves, and closeOrderStores waits on the open.
       else if (error instanceof PosOrderOpenClosedError) return;
       else reportOrderStoreOpenFailure(error);

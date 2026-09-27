@@ -3,7 +3,8 @@ import { outboxLogger, posOrdersLogger, saleLogger, type LogEntry, type LogSink 
 /**
  * The money path's log sinks (TallyUI ce184e6): `saleLogger` logs a save that failed for an abandoned attempt,
  * `outboxLogger` a retried order stored under another commandId (warn) and a content mismatch (error),
- * `posOrdersLogger` a status write TallyUI #155 dropped rather than let reach closed storage. Without a
+ * `posOrdersLogger` a migration status or record read or write that TallyUI #155 dropped rather than let reach
+ * closed storage. Without a
  * sink those go nowhere. This console sink is the only one for now; a later remote-logging job can add another
  * sink next to it (`addSink`, keyed by id) without touching this one.
  */
