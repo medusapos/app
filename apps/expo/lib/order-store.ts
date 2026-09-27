@@ -26,6 +26,11 @@ const E2E_FAIL_NEXT_OPEN_KEY = 'medusapos-e2e-fail-next-order-store-open';
 // A record only: it never causes a delete, nor skips reading a legacy database that exists.
 const LEGACY_ORDERS_MARKER = 'legacy-orders-migrated';
 
+// How long an open waits on the previous store for its backend to close (#85 review). RxDB's close waits, with no
+// time limit, for every write in flight, and a hung save's insert may never finish. Past this, the open fails with an
+// ordinary Error, so the outbox's onOpenError shows #80's blocking prompt before the next sale takes any money.
+export const ORDER_STORE_CLOSE_WAIT_MS = 10_000;
+
 export function orderDatabaseName(baseUrl: string): string {
   return productCacheName('orders', baseUrl);
 }
@@ -119,7 +124,12 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
   if (entry?.closing) {
     // A rejected close still frees the name for a fresh database; the caller that awaited
     // close() itself already sees the rejection on its own reference to that promise.
-    await entry.closing.catch(() => undefined);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stuck = new Promise<never>((_, reject) => { timer = setTimeout(() => reject(
+      new Error('The previous order store for this backend is still closing')), ORDER_STORE_CLOSE_WAIT_MS); });
+    try {
+      await Promise.race([entry.closing.catch(() => undefined), stuck]);
+    } finally { clearTimeout(timer); }
     return openOrderStore(baseUrl);
   }
   if (!entry) {

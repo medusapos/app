@@ -6,8 +6,10 @@ import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
-import { addPosOrderCollection, createOrderBuilder, finalizeOrder, posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
-import { carryOverOrders, closeOrderStores, openOrderStore, orderDatabaseName } from './order-store';
+import {
+  addPosOrderCollection, createOrderBuilder, finalizeOrder, PosOrderOpenClosedError, posOrderCollection, posOrderSchema, type PosOrder,
+} from '@tallyui/pos';
+import { carryOverOrders, closeOrderStores, openOrderStore, ORDER_STORE_CLOSE_WAIT_MS, orderDatabaseName } from './order-store';
 
 addRxPlugin(RxDBDevModePlugin);
 addRxPlugin(RxDBLocalDocumentsPlugin);
@@ -100,6 +102,65 @@ describe('order store', () => {
     try {
       expect((await reopened.orders.findOne(order.id).exec())?.toJSON()).toEqual(order);
     } finally { await reopened.close(); }
+  });
+
+  // The #85 review: RxDB's close waits, with no time limit, for a write in flight, and a hung save's insert may never
+  // finish. The next open for that backend gives up after ORDER_STORE_CLOSE_WAIT_MS, so #80's prompt shows.
+  async function closeHeldOpen(url: string) {
+    const handle = await openOrderStore(url);
+    const order = sale();
+    await handle.orders.insert(order);
+    const realClose = handle.orders.database.close.bind(handle.orders.database);
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => { release = resolve; });
+    vi.spyOn(handle.orders.database, 'close').mockImplementationOnce(async () => { await released; return realClose(); });
+    return { order, closing: handle.close(), release };
+  }
+
+  it('rejects an open still waiting on a stuck close after ORDER_STORE_CLOSE_WAIT_MS, with an ordinary Error', async () => {
+    const url = 'https://stuck-close.test';
+    const { closing, release } = await closeHeldOpen(url);
+    // Fakes only the timeouts; setImmediate stays real, to let every pending promise step run.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const settled = () => new Promise((resolve) => { setImmediate(resolve); });
+    try {
+      let outcome: unknown = 'pending';
+      void openOrderStore(url).then(() => { outcome = 'opened'; }, (error: unknown) => { outcome = error; });
+      await vi.advanceTimersByTimeAsync(ORDER_STORE_CLOSE_WAIT_MS - 1);
+      await settled();
+      expect(outcome).toBe('pending');
+      await vi.advanceTimersByTimeAsync(1);
+      await settled();
+      expect(outcome).toBeInstanceOf(Error);
+      expect(outcome).not.toBeInstanceOf(PosOrderOpenClosedError);
+      expect((outcome as Error).message).toBe('The previous order store for this backend is still closing');
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+    // Once the stuck close does finish, the name is free again.
+    release();
+    await closing;
+    const reopened = await openOrderStore(url);
+    await reopened.close();
+  });
+
+  it('waits for a close that settles within ORDER_STORE_CLOSE_WAIT_MS, then opens, and clears its timer', async () => {
+    const url = 'https://slow-close.test';
+    const { order, closing, release } = await closeHeldOpen(url);
+    // Real timers: RxDB's own close and open need them. The limit's timer is found by its delay.
+    const setTimer = vi.spyOn(globalThis, 'setTimeout');
+    const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
+    try {
+      const reopening = openOrderStore(url);
+      const limit = setTimer.mock.calls.findIndex(([, delay]) => delay === ORDER_STORE_CLOSE_WAIT_MS);
+      expect(limit).toBeGreaterThanOrEqual(0);
+      release();
+      await closing;
+      const reopened = await reopening;
+      try {
+        expect(clearTimer).toHaveBeenCalledWith(setTimer.mock.results[limit].value);
+        expect((await reopened.orders.findOne(order.id).exec())?.toJSON()).toEqual(order);
+      } finally { await reopened.close(); }
+    } finally { setTimer.mockRestore(); clearTimer.mockRestore(); }
   });
 });
 

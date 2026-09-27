@@ -86,19 +86,47 @@ The pin (`8e86d7a`) also brings three more changes:
     stored: `record` counts the same id and content as stored, never
     overwrites it, and logs the other commandId at warn. Before, the retry
     conflicted and the till stayed on the tender until Sign out or a reload.
-  - **Hung save.** TallyUI offers Continue for a hung save when a refused
-    `newSale()` asks `isStored` again. This app's tender has no New sale
-    while a save is pending, so a hung save still waits for the save to
-    settle, or for the storage prompt below.
+  - **Hung save.** Since the `7fb86e5` pin (TallyUI #161), a save still in
+    flight and unconfirmed re-asks `isStored` every 5 s. Once the order is
+    confirmed stored with the same money-bearing content, the tender offers
+    Continue with no tap. A hung save whose insert never landed still
+    waits for the save to settle: `isStored` stays false, so there is no
+    Continue, and a Retry while it's in flight only rejoins the same save.
+    The sale stays locked, and Sign out waits too. A write that stalls while
+    reads still work shows only the non-blocking "Saving is slow…" note; the
+    blocking storage prompt below needs the reads to go silent too.
   - **Content mismatch.** The same id with other money-bearing content fails
     with `OrderContentMismatchError`. Nothing is overwritten, `isStored`
     logs it at error, and Continue is not offered.
   - **Every sign-out waits for a saving sale** (the #150 and #82 reviews).
     Signing out unmounts the sale and closes the outbox, so a failed save
     that isn't stored would lose its order.
-    - `useSale().saving` runs from `complete()` until the save lands, or
-      after a failed save until Retry stores it or Continue starts the next
-      sale.
+    - `useSale().saving` runs from `complete()` until the save lands. After
+      a failed save it runs until Retry stores it or Continue starts the
+      next sale; after a hung save, until the save settles or Continue.
+    - A save that Continue abandoned can still be in flight (#85 review).
+      Its insert runs inside RxDB's `lockedRun`, and RxDB's close waits for
+      every one with no time limit. Signing out then would hang the
+      outbox's close, and the next sign-in's open would wait on it forever.
+      - `OutboxProvider` counts the `record` calls in flight
+        (`savesInFlight`; `record` keeps one identity). It lives at the
+        outbox, so a sale screen remount can't forget one.
+      - Sign out's lock and the `saving` hold also hold while any save is in
+        flight. Continue still starts the next sale; only sign-out waits,
+        and Sign out's description is "An earlier sale is still being saved."
+      - Backstop: `openOrderStore` waits at most `ORDER_STORE_CLOSE_WAIT_MS`
+        (10 s) for the backend's previous store to close, then rejects with
+        an ordinary Error. That reaches #80's blocking prompt (Reload,
+        Report a problem) before any sale can be saved. A sale paid during
+        those 10 s gets "Orders are not ready." and is lost when the prompt
+        replaces the screen. That was already true of any slow open.
+      - Known gap (the #85 re-review): the hold is set by the sale screen.
+        If the store settings unmount that screen after Continue (a
+        settings choice, or an unsupported backend), an automatic sign-out
+        can run while the save is still in flight. The backstop then shows
+        the prompt, and Reload recovers with nothing lost. Moving the
+        in-flight hold into `SessionProvider` closes this. It's planned for
+        the pin that brings TallyUI's own `savesInFlight`.
     - The sale screen sets a sale hold in `SessionProvider`
       (`lib/session-context.tsx`): `saving`, `receipt`, or none.
     - When the sale screen unmounts for another reason (LiveTabGate's

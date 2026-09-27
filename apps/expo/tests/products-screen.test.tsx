@@ -4,7 +4,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import type { ProductGrid, SearchInput, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { formatMoney, SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { clearProductCache } from '../lib/product-cache';
@@ -16,7 +16,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { fetchStoreSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import ProductsScreen from '../app/index';
 import OrdersScreen from '../app/orders';
-import { useOutboxContext } from '../lib/outbox-context';
+import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 import { OutboxStrip, StoreRefused } from '../components/store-refused';
 import { setWindowWidth } from './window-width';
 
@@ -28,7 +28,14 @@ vi.mock('expo-router', () => ({
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
-vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
+// A fixed outbox value, except in the hung-save tests: those run the real OutboxProvider and useOutboxContext
+// (kept in `realOutbox`) over a stand-in for TallyUI's useOrderOutbox.
+const realOutbox = vi.hoisted(() => ({} as { useOutboxContext: typeof import('../lib/outbox-context').useOutboxContext }));
+vi.mock('../lib/outbox-context', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/outbox-context')>();
+  realOutbox.useOutboxContext = actual.useOutboxContext;
+  return { ...actual, useOutboxContext: vi.fn() };
+});
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
 // The session's network calls, driven per test (the sign-out paths below); everything else in it is real.
@@ -37,7 +44,7 @@ vi.mock('../lib/session', async (importOriginal) => ({
 }));
 // store-settings-flow.test.tsx covers the settings states; here the store settings are ready.
 vi.mock('@tallyui/pos', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(),
+  ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(), useOrderOutbox: vi.fn(),
 }));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
@@ -116,7 +123,7 @@ beforeEach(() => {
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -589,6 +596,134 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(signedOut()).toBe(true);
+  });
+
+  // TallyUI #161: while a save is in flight and unconfirmed, useSale re-asks isStored every 5 s (HUNG_SAVE_CHECK_MS),
+  // through this app's own wiring (no hungSaveCheckMs). The outbox record doesn't settle until the test settles it: a
+  // hung insert. The real OutboxProvider counts it in flight (#85 review), over a stand-in for TallyUI's useOrderOutbox.
+  const EARLIER_SALE_SAVING = 'An earlier sale is still being saved.';
+  let settle: { resolve: () => void; reject: (error: Error) => void };
+  async function hungSale(isStored: (order: PosOrder) => Promise<boolean>) {
+    const record = vi.fn((_order: PosOrder) => new Promise<void>((resolve, reject) => { settle = { resolve, reject }; }));
+    vi.mocked(useOrderOutbox).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [],
+      flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), record, isStored });
+    vi.mocked(useOutboxContext).mockImplementation(realOutbox.useOutboxContext);
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
+      token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
+    await act(async () => { render(<SessionProvider><OutboxProvider><ProductsScreen /></OutboxProvider></SessionProvider>); });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    expect(record).toHaveBeenCalledTimes(1);
+    return record.mock.calls[0][0];
+  }
+  const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+  const signOutDisabled = () => screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled');
+  /** Continue on a hung save confirmed stored at the first 5 s check: the new sale shows, Sign out waits for the old save. */
+  async function continuePastHungSave() {
+    await advance(5000);
+    fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
+    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    const signOut = screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING });
+    expect(signOut.getAttribute('aria-disabled')).toBe('true');
+    expect(screen.queryByText(SALE_SAVING)).toBeNull();
+    fireEvent.click(signOut);
+    expect(signedOut()).toBe(false);
+    expect(screen.queryByText('redirect:/login')).toBeNull();
+  }
+
+  it('offers Continue with no tap once a hung save is confirmed stored; Continue starts a new sale, and Sign out waits for that save', async () => {
+    const isStored = vi.fn<(order: PosOrder) => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValue(true);
+    try {
+      const saved = await hungSale(isStored);
+      await advance(4999);
+      expect(isStored).not.toHaveBeenCalled();
+      expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+      expect(signOutDisabled()).toBe('true');
+      // The first check, at 5 s, answers not stored yet; the next, at 10 s, confirms it.
+      await advance(1);
+      expect(isStored).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+      await advance(5000);
+      expect(isStored).toHaveBeenCalledTimes(2);
+      expect(isStored).toHaveBeenLastCalledWith(saved);
+      const continueButton = screen.getByRole('button', { name: 'Continue' });
+      // Confirmed stored, but still locked until Continue is pressed.
+      expect(signOutDisabled()).toBe('true');
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(false);
+      fireEvent.click(continueButton);
+      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      // The #85 review: the abandoned save is still in flight, and RxDB's close would wait on it, so Sign out stays
+      // locked, described as an earlier sale's. The next sale isn't held.
+      expect(screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING }).getAttribute('aria-disabled')).toBe('true');
+      expect(screen.queryByText(SALE_SAVING)).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(false);
+      fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+      expect(screen.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
+      // The poll has stopped.
+      await advance(15000);
+      expect(isStored).toHaveBeenCalledTimes(2);
+      expect(signOutDisabled()).toBe('true');
+      // Once the old save settles, Sign out is released and works.
+      await act(async () => { settle.resolve(); });
+      expect(signOutDisabled()).toBeNull();
+      expect(screen.queryByText(EARLIER_SALE_SAVING)).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(true);
+      expect(screen.getByText('redirect:/login')).toBeTruthy();
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('keeps a deferred 401 pending past Continue while the abandoned hung save is in flight, then signs out once it settles', async () => {
+    try {
+      await hungSale(vi.fn().mockResolvedValue(true));
+      act(() => { vi.mocked(useReplicatedProducts).mock.lastCall![2](); });
+      expect(screen.getByText('Signed out after this sale is saved')).toBeTruthy();
+      await continuePastHungSave();
+      expect(clearProductCache).not.toHaveBeenCalled();
+      await advance(15000);
+      expect(signedOut()).toBe(false);
+      await act(async () => { settle.resolve(); });
+      expect(signedOut()).toBe(true);
+      expect(screen.getByText('redirect:/login')).toBeTruthy();
+      expect(clearProductCache).toHaveBeenCalledTimes(1);
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('releases Sign out when the abandoned hung save rejects late, after Continue', async () => {
+    try {
+      await hungSale(vi.fn().mockResolvedValue(true));
+      await continuePastHungSave();
+      await act(async () => { settle.reject(new Error('Storage full')); });
+      // The new sale carries on, with no error from the old one.
+      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(screen.queryByText(/could not be saved/)).toBeNull();
+      expect(signOutDisabled()).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(true);
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('offers no Continue while a hung save is never confirmed stored, and Sign out stays locked', async () => {
+    const isStored = vi.fn<(order: PosOrder) => Promise<boolean>>().mockResolvedValue(false);
+    try {
+      await hungSale(isStored);
+      await advance(15000);
+      expect(isStored).toHaveBeenCalledTimes(3);
+      expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
+      expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Sign out', description: SALE_SAVING }).getAttribute('aria-disabled')).toBe('true');
+      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signedOut()).toBe(false);
+      expect(screen.queryByText('redirect:/login')).toBeNull();
+      cleanup();
+    } finally { vi.useRealTimers(); }
   });
 });
 
