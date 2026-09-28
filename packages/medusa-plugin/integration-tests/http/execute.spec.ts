@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, MedusaError, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, MedusaError, Modules, ProductStatus } from '@medusajs/framework/utils'
+import { createProductsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
@@ -277,6 +278,93 @@ medusaIntegrationTestRunner({
           .toMatchObject({ status: 'rejected', error: { code: 'idempotency_mismatch' } })
       }
       expect((await liveOrders(payload.clientOrderId))[0].metadata).toEqual(order.metadata)
+    })
+    describe('shipping profiles', () => {
+      let optionP2: string
+      let variantP2: string
+      let variantP3: string
+      // The runner restores the DB snapshot before every test, so fixtures created after the top-level beforeAll must be created per test.
+      beforeEach(async () => {
+        const { result: profiles } = await createShippingProfilesWorkflow(container).run({ input: { data: [
+          { name: 'POS profile P2', type: 'default' }, { name: 'POS profile P3', type: 'default' },
+        ] } })
+        const query = container.resolve(ContainerRegistrationKeys.QUERY)
+        const { data: [seededOption] } = await query.graph({
+          entity: 'shipping_option', fields: ['id', 'created_at', 'service_zone_id'],
+          filters: { id: data.berlinShippingOptionId },
+        })
+        const { result: [option] } = await createShippingOptionsWorkflow(container).run({ input: [{
+          name: 'P2 pickup', price_type: 'flat', provider_id: 'manual_manual',
+          service_zone_id: seededOption.service_zone_id, shipping_profile_id: profiles[0].id,
+          type: { label: 'Pickup', description: 'Collect in store', code: 'pickup' },
+          prices: [{ currency_code: 'eur', amount: 0 }, { region_id: data.regionId, amount: 0 }],
+        }] })
+        optionP2 = option.id
+        expect(new Date(option.created_at).getTime()).toBeGreaterThan(new Date(seededOption.created_at).getTime())
+        const { result: products } = await createProductsWorkflow(container).run({ input: { products: profiles.map((profile, i) => ({
+          title: `POS profile P${i + 2} product`, handle: `pos-profile-p${i + 2}`, status: ProductStatus.PUBLISHED,
+          shipping_profile_id: profile.id, sales_channels: [{ id: data.channelId }],
+          options: [{ title: 'Variant', values: ['Standard'] }],
+          variants: [{ title: 'Standard', manage_inventory: false, options: { Variant: 'Standard' },
+            prices: [{ currency_code: 'eur', amount: 10 }] }],
+        })) } })
+        variantP2 = products[0].variants[0].id
+        variantP3 = products[1].variants[0].id
+      })
+
+      it('the automatic pick skips an older option on another shipping profile', async () => {
+        for (const [variantId, shippingOptionId] of [[variantP2, optionP2], [data.variantA, data.berlinShippingOptionId]]) {
+          const sale = command({ locationId: data.berlinId,
+            lines: [{ clientLineId: randomUUID(), variantId, quantity: 1, unitPriceMinor: 1000 }],
+          })
+          const applied = result(await executeOrderCreate(container, sale))
+          expect(applied.status).toBe('applied')
+          if (applied.status !== 'applied') throw new Error(`Expected applied, received ${JSON.stringify(applied)}`)
+          const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+            entity: 'order', fields: ['id', 'fulfillments.shipping_option_id'], filters: { id: applied.serverRefs!.orderId },
+          })
+          expect(order.fulfillments).toEqual([expect.objectContaining({ shipping_option_id: shippingOptionId })])
+        }
+      })
+
+      it('a sale spanning two shipping profiles is rejected as store_configuration', async () => {
+        const sale = command({ locationId: data.berlinId,
+          lines: [data.variantA, variantP2].map(variantId => ({ clientLineId: randomUUID(), variantId, quantity: 1, unitPriceMinor: 1000 })),
+          subtotalMinor: 1680, taxMinor: 320, totalMinor: 2000,
+          payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+        })
+        expect(await executeOrderCreate(container, sale)).toEqual({
+          kind: 'result', result: { id: sale.id, status: 'rejected', error: {
+            code: 'store_configuration', message: expect.stringMatching(/several shipping profiles/),
+          } },
+        })
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      })
+
+      it('an explicit shippingOptionId on another profile is rejected as store_configuration', async () => {
+        const sale = command({ locationId: data.berlinId })
+        expect(await executeOrderCreate(container, sale, { shippingOptionId: optionP2 })).toEqual({
+          kind: 'result', result: { id: sale.id, status: 'rejected', error: {
+            code: 'store_configuration', message: expect.stringMatching(/uses shipping profile/),
+          } },
+        })
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      })
+
+      it('no option at the location for the products\' profile is rejected as store_configuration', async () => {
+        const sale = command({ locationId: data.berlinId,
+          lines: [{ clientLineId: randomUUID(), variantId: variantP3, quantity: 1, unitPriceMinor: 1000 }],
+        })
+        expect(await executeOrderCreate(container, sale)).toEqual({
+          kind: 'result', result: { id: sale.id, status: 'rejected', error: {
+            code: 'store_configuration', message: expect.stringMatching(/No shipping option at stock location/),
+          } },
+        })
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      })
     })
   },
 })

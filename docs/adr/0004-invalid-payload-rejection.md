@@ -30,8 +30,8 @@ The TallyUI contract docs should list `invalid_payload`.
 
 **Decision.** Add the rejection code `store_configuration`:
 - **When it applies:** the plugin's own checks that run before any write throw a dedicated `StoreConfigurationError`, and `executeOrderCreate` turns that class, and only that class, into a per-command rejection whose message is the reason.
-  - Today those checks are the missing sales channel, the missing stock location or address, and the missing shipping option.
-  - A later change adds the shipping-profile check before the workflow runs.
+  - Those checks are the missing sales channel, the missing stock location or address, the missing shipping option, and the shipping-profile checks (next amendment).
+  - When the sale resumes an existing order (a retry after a crash left a draft or a paid order), the same failures stay transient, because writes have already happened.
 - **It isn't stored in the ledger:** the claim is released, as for `invalid_payload`. So the same command applies once the store is fixed, and the till's Retry works without a new command id.
 - **Everything else stays `transient`,** including every error Medusa throws inside its workflows.
 
@@ -49,3 +49,16 @@ Only errors raised before any write are safe to reject. **Don't widen this rule 
 - Stock top-ups carried from an earlier attempt stay applied when a later attempt is rejected, and stock stays too high by them. That's ADR 0003's accepted bias.
 - A permanent failure inside Medusa's workflows still retries forever. Surfacing the reason in the till after repeated retries is a TallyUI outbox item.
 - TallyUI's contract docs should list `store_configuration`.
+
+## Amendment: one shipping profile per POS sale (2026-09-28)
+
+**Context.** When plugin option `shippingOptionId` wasn't set, the plugin picked the earliest shipping option at the sale's stock location and ignored shipping profiles. Medusa's `createOrderFulfillmentWorkflow` refuses a shipped item whose product's profile differs from the option's (`core-flows` `create-fulfillment.js:78-83`). So any store with two profiles at one location could lose sales that way.
+
+**Decision.** Before any write, the plugin reads the shipping profiles of the sale's products (a product without a profile isn't checked; see the backlog for the one case where Medusa still requires shipping for it):
+- **One profile:** the automatic pick takes the earliest option at the location on that profile. An explicit `shippingOptionId` must use that profile.
+- **No matching option,** or an explicit option on another profile: a `store_configuration` rejection naming the ids.
+- **Several profiles:** a `store_configuration` rejection naming the profiles.
+
+**Consequences.**
+- Multi-profile carts, which would need one shipping method and fulfillment per profile, are out of scope for the MVP. Stores sell each profile's products in separate sales, or put POS products on one profile.
+- For a new sale the rejection is raised before any write, so it follows this ADR's store-configuration rule: not stored, and it applies once the store is fixed. For a resumed order the same failure stays transient (previous amendment).
