@@ -12,7 +12,9 @@ TallyUI ADR-067 (Accepted 2026-09-28) makes the WCPOS sync engine (`@wcpos/sync-
 The G4 row says a narrow, real Medusa experiment on the seeded demo store decides this, not a paper argument. The experiment has three parts:
 - products loaded on demand through `require()`;
 - a deletion, and checkpoint recovery after a missed window;
-- an offline order replayed, with the server's authoritative totals and revisions coming back.
+- an offline order replayed, with the server's authoritative totals and revisions coming back. (Ruling Q2 changes this to "the server's reconciliation totals" for Medusa.)
+
+The plan says "the seeded demo store". This ADR runs G4's write steps on the Mac mini dev store instead, and keeps the demo read-only (Decision 4).
 
 The report compares the engine's way with what Medusa offers natively, mechanism by mechanism:
 - the polled change tick and journal of pointers against server push;
@@ -47,7 +49,7 @@ The engine half (running `require()`, the recovery and the offline replay throug
   - calculated prices, every 30 minutes, because "price-list edits and sale start/end bump no timestamp" (`reconcile/calculated-prices.ts:5-6`);
   - base prices, a nightly backstop (`reconcile/prices.ts:7-8`).
 
-The app wires all of them (`apps/expo/lib/use-replicated-products.ts:131-193`). The push side is the command outbox on `POST /tally/v1/commands`, with the plugin's own idempotency ledger (ADR 0001, ADR 0019).
+medusapos's own app wires all of them (`apps/expo/lib/use-replicated-products.ts:131-193`). That file is in this repo, not TallyUI's. The push side is the command outbox on `POST /tally/v1/commands`, with the plugin's own idempotency ledger (ADR 0001, ADR 0019).
 
 ## Decision
 
@@ -60,7 +62,7 @@ From the Medusa side the answer is **driver-typed `payload`**. The engine keeps 
 - the change marker;
 - the promoted query columns (name, SKU, barcode, sort keys), through a driver-declared field map.
 
-`payload` is the driver's own document type, read by the driver's traits (TallyUI ADR-002). The reasons, all on the demo store or in the source:
+`payload` is the driver's own document type, read by the driver's traits (TallyUI ADR-002). The envelope plus the promoted columns **is** the thin engine-owned projection; there is no second projection (Ruling Q1). The reasons, all on the demo store or in the source:
 
 1. **A Woo product can't hold a Medusa product without loss.** The connector's document (`MEDUSA_PRODUCT_FIELDS`, `replication/products.ts:36-47`) carries:
    - variants embedded in the product, where Woo has a separate variations collection;
@@ -83,71 +85,107 @@ What the driver-typed model asks of the engine is G2/G3's cost, not this ADR's t
 
 | WCPOS engine mechanism | Why WCPOS has it | Medusa driver | Medusa primitive and reason |
 |---|---|---|---|
-| **Mutation queue**: durable, `Idempotency-Key` = mutation id, drain lease, dead letters, coalesce/annihilate | Flaky tills and several windows; not a WordPress limit (wiki `client/mutation-queue-concurrency.md`) | **Keep** | The plugin already has the server half. `POST /tally/v1/commands` claims each command id in a ledger with a payload fingerprint and returns `duplicate` on replay or `idempotency_mismatch` on new bytes (`execute.ts:32-51`, ADR 0001). Medusa's own workflow idempotency isn't a substitute (see E2.7): the command id stays the key. |
-| **Revisions**: `If-Match` = base revision, 409/412/428 | Woo's revisions are opaque, and bare for acked orders (wiki `client/write-path.md`) | **Replace with typed revisions** | Orders: Medusa's integer `order.version` (measured, E4). Catalogue: the POS never writes products (`replication/products.ts:57-59`). Customers: no version column, so the revision is the journal sequence of the row's last change (§3). |
-| **Conflict states**: `write-conflict`, `retry-with-server-base`, `requeue-rebuilt`, `discard`; catalogue reject-revert | Generic engine logic (wiki `client/dead-letter-recovery.md`, `client/catalog-write-safety.md`) | **Keep; driver maps codes** | The plugin answers business refusals per command in a 200 (`invalid_payload`, `store_configuration`, `idempotency_mismatch`, `unsupported_version`, the five `register_*` codes; `process.ts:52-113`, ADR 0019). The driver maps them onto the engine's conflict states (ADR-068 decision 12). |
-| **Money authority**: the server's totals win, and a divergence is a failed invariant | Woo's aggregates are read-only and recomputed (wiki `decisions/2026-08-23-money-authority.md`) | **Replace (inverted)** | ADR 0012: the till's totals are the fiscal record, and Medusa's `raw_total` is a recomputed view. The ack returns Medusa's figures as a reconciliation view, and the driver declares `moneyAuthority: 'till'`. |
+| **Mutation queue**: durable, `Idempotency-Key` = mutation id, drain lease, dead letters, coalesce/annihilate | Flaky tills; not a WordPress limit. The drain lease guards against another window taking a row mid-push (wiki `client/mutation-queue-concurrency.md`). | **Keep; drop the drain lease** | Single-instance storage means one drainer (Paul, 2026-09-24), so the lease has no second window to guard against. A crash mid-drain leaves the row pending, and the re-push under the same command id gets `duplicate` from the ledger if the first push landed (ADR 0001). The plugin already has the server half. `POST /tally/v1/commands` claims each command id in a ledger with a payload fingerprint and returns `duplicate` on replay or `idempotency_mismatch` on new bytes (`execute.ts:32-51`, ADR 0001). Medusa's own workflow idempotency isn't a substitute (see E2.7): the command id stays the key. |
+| **Revisions**: `If-Match` = base revision, 409/412/428 | Woo's revisions are opaque, and bare for acked orders (wiki `client/write-path.md`) | **Replace with typed revisions** | Orders: Medusa's integer `order.version` (measured, E4). Catalogue: the POS never writes products (`replication/products.ts:57-59`). Customers: no version column, so the revision is the journal sequence of the row's last change (§3; Ruling Q6). |
+| **Conflict states**: `write-conflict`, `retry-with-server-base`, `requeue-rebuilt`, `discard`; catalogue reject-revert | Generic engine logic (wiki `client/dead-letter-recovery.md`, `client/catalog-write-safety.md`) | **Keep; driver maps codes** | The plugin answers business refusals per command in a 200 (`invalid_payload`, `store_configuration`, `idempotency_mismatch`, `unsupported_version`, the five `register_*` codes; `process.ts:52-113`, ADR 0019). The driver maps them onto the engine's conflict states (ADR-068 decision 12). **`unsupported_version` needs its own state**, so the outbox's version fallback survives the move to the engine queue (below). |
+| **Money authority**: the server's totals win, and a divergence is a failed invariant | Woo's aggregates are read-only and recomputed (wiki `decisions/2026-08-23-money-authority.md`) | **Replace (inverted)** | ADR 0012: the till's totals are the fiscal record, and Medusa's `raw_total` is a recomputed view. Money authority becomes a driver capability: `'server'` for Woo, `'till'` for Medusa. The ack returns Medusa's figures as a reconciliation view, as TallyUI ADR-068 decision 13 does for registers (Ruling Q2). |
 | **Demand-driven partial replicas**: require plane, lanes, coverage | Big catalogues on small devices (wiki `client/require-plane-outcomes.md`, `client/census-and-coverage.md`) | **Keep** | Medusa list routes already serve demand: `id[]`, `q`, `order` and `limit`/`offset`, with no cap on `limit` (`medusa/dist/api/utils/validators.js:47-78`; 5,000 honoured, E1). |
 | **Census**: server count per collection (`X-WP-Total`) | WordPress gives counts only in a header, and some need their own route (wiki `client/census-and-coverage.md`) | **Replace** | Every Medusa list response carries `count` (E1). The one limit: the store API counts only what the sales channel lists (1,956 of 2,011 products, E1). |
-| **Change signal**: polled `changes/tick`, ETag/304, jitter, idle decay | "No push" is **inferred**, since no wiki page states it (wiki `client/change-signal.md`). ADR-067 names the polled tick as a PHP constraint. | **Replace with push, plus a slow poll fallback** | Medusa has an event bus and subscribers, but its only client push is SSE for workflow-execution progress; there's no data-change stream (E2.1, E2.2). The plugin adds an SSE stream that sends `{epoch, head}` whenever the journal head moves. The engine's tick becomes a fallback poll, every 5 minutes (a proposal) or on reconnect. A tick costs 45 ms here, and 41 ms of that is round trip (E5). The Express ETag doesn't revalidate (E6), so the fallback tick carries its own 304 on `since == head`. |
-| **Journal of pointers**: `sequence`, `object_type`, `object_id`, `deleted`, `revision` | Written from WP hooks, re-pulled by id (wiki `plugin-free/v2-change-log-and-integrity.md`) | **Keep, fed by Medusa events** | Not kept because the server can't push, but because an offline till needs a replayable, gap-free log, and push alone can't recover a missed window. `updated_at` can't replace it: children don't bump the product (connector, above), the inventory route rejects `updated_at` filters (E3), and bulk writes tie at the millisecond (E4). Subscribers on product, variant, inventory-level, customer and order events write one pointer row per affected document in a plugin table with a `bigserial` sequence (§3). |
-| **Checkpoints**: `{since, head, horizon, epoch}`, backlog guard, cursor persisted after success | Retention purge and table re-creation (wiki `plugin-free/v2-change-log-and-integrity.md`, `client/change-signal.md`) | **Keep as is** | The same shape over the plugin journal. The epoch is minted when the journal table is created, and the horizon tracks retention. |
-| **Existence audit**: integer-id buckets, xor64 digest gate, two drills per tick | Sparse `wp_posts` ids, hook-bypassing writes (wiki `client/existence-audit-politeness.md`) | **Replace buckets; keep the gate** | Medusa ids are ULID strings (`prod_01M3…`), so integer ranges don't apply (ADR 0029 decision 2 already makes this a driver capability). The plugin buckets by `hash(id) mod 256` and digests `(id, revision)` per bucket in SQL. A full client-side manifest is also cheap here: all 2,011 product ids with `updated_at` in one 144 ms, 163 KB request (E5). The audit remains the backstop for events lost between commit and subscriber (E2.1). |
+| **Change signal**: polled `changes/tick`, ETag/304, jitter, idle decay | "No push" is **inferred**, since no wiki page states it (wiki `client/change-signal.md`). ADR-067 names the polled tick as a PHP constraint. | **Keep the polled tick, with jitter and idle decay, on every host** (Ruling Q4) | Medusa has an event bus and subscribers, but its only client push is SSE for workflow-execution progress; there's no data-change stream (E2.1, E2.2). A tick costs 45 ms here, and 41 ms of that is round trip (E5). The Express ETag doesn't revalidate (E6), so `/changes/tick` carries its own 304 on `since == head`. SSE is not part of G4 or P3. It comes later only if G4's numbers show the tick misses "within a tick", and then only over streaming `expo/fetch`, with no new dependency. |
+| **Journal of pointers**: `sequence`, `object_type`, `object_id`, `deleted`, `revision` | Written from WP hooks, re-pulled by id (wiki `plugin-free/v2-change-log-and-integrity.md`) | **Keep, fed by Medusa events** | Not kept because the server can't push, but because an offline till needs a replayable, gap-free log, and push alone can't recover a missed window. `updated_at` can't replace it: children don't bump the product (connector, above), the inventory route rejects `updated_at` filters (E3), and bulk writes tie at the millisecond (E4). Subscribers on product, variant, inventory and price events write one pointer row per affected document in a plugin table with a `bigserial` sequence (§3). Customer and order subscribers wait for P3. |
+| **Checkpoints**: `{since, head, horizon, epoch}`, backlog guard, cursor persisted after success | Retention purge and table re-creation (wiki `plugin-free/v2-change-log-and-integrity.md`, `client/change-signal.md`) | **Keep as is** | The same shape over the plugin journal. The epoch is minted at install, together with the backfill (§3), and the horizon tracks retention. |
+| **Existence audit**: integer-id buckets, xor64 digest gate, two drills per tick | Sparse `wp_posts` ids, hook-bypassing writes (wiki `client/existence-audit-politeness.md`) | **Replace buckets; keep the gate** | Medusa ids are ULID strings (`prod_01M3…`), so integer ranges don't apply (ADR 0029 decision 2 already makes this a driver capability). The plugin buckets by `hash(id) mod 256`. Each bucket's digest covers the id and a **content hash** of the document, not the revision (§3, Deferred to P3). A full client-side manifest is also cheap here: all 2,011 product ids with `updated_at` in one 144 ms, 163 KB request (E5). The audit remains the backstop for events lost between commit and subscriber (E2.1). G4 designs it; P3 builds it. |
 | **Tombstones** | The journal's `deleted` flag (wiki `plugin-free/v2-change-log-and-integrity.md`) | **Keep, via events** | `product.deleted`, `product-variant.deleted`, `customer.deleted` and `inventory-level.deleted` exist (`utils/dist/core-flows/events.js:548,587,108,1112`). Medusa soft-deletes (E2.4), but the admin list routes are no way to find deletions (E3), so the journal row is the tombstone. |
-| **Server politeness**: per-lane request bounds, pressure ladder (429, 5xx, median over 2 s), maintenance defers | "Shared PHP hosting: a handful of PHP-FPM workers, a full WordPress bootstrap per REST hit" (wiki `decisions/2026-08-11-sync-engine-politeness-invariant.md`) | **Keep the ladder; relax the budgets with numbers** | The ladder is backend-agnostic and cheap to keep: the demo runs on a shared VPS, and one Node process serves both admin and POS. The per-tick budgets were sized for PHP-FPM. Medusa serves a 5,000-row id manifest in 0.5 s and a 100-product page in 0.46 s (E5), so the Medusa driver declares its own `maxRequestsPerTick` from G4's measurements, not Woo's. |
+| **Server politeness**: per-lane request bounds, pressure ladder (429, 5xx, median over 2 s), maintenance defers | "Shared PHP hosting: a handful of PHP-FPM workers, a full WordPress bootstrap per REST hit" (wiki `decisions/2026-08-11-sync-engine-politeness-invariant.md`) | **Keep the ladder; relax the budgets with numbers** | The ladder is backend-agnostic and cheap to keep: the demo runs on a shared VPS, and one Node process serves both admin and POS. The per-tick budgets were sized for PHP-FPM. Medusa serves a 5,000-row id manifest in 0.5 s and a 100-product page in 0.46 s (E5), so the Medusa driver declares its own `maxRequestsPerTick` from G4's measurements, not Woo's. E5's timings are single-client and sequential. G4 adds one bounded concurrent-till measurement on the Mac mini dev store, never on the VPS. |
 | **Full-document REST writes** | wc/v3 is a document API | **Replace with commands** | The till never writes catalogue. Sales and register facts go as commands (`order.create` v1–3, `register.*` v1) into plugin workflows (`workflow.ts:74-130`). A command states intent, and the server runs the Medusa workflow. |
 | **Cross-resource transactions** | WordPress has none | **Partly replace** | Inside a plugin module, one service call is one Postgres transaction (ADR 0019: row locks, partial unique indexes). Across Medusa modules, a workflow is a saga with compensation, not one transaction (E2.8). So the ledger lease (ADR 0001), the per-order advisory lock (`execute.ts:57-60`) and the `metadata.tally_client_id` dedupe stay. |
 | **Web multi-tab write leader** | Web opens several tabs on one database (wiki `client/mutation-queue-concurrency.md`) | **Drop** | Single-instance storage: one tab, one database (Paul, 2026-09-24; WCPOS v1.11.0 storage notes). |
 | **GMT bare-date format, `?rest_route=` transport, `X-WCPOS-Store`** | WordPress wire quirks (wiki `client/gmt-dates-and-reconciliation.md`, `decisions/2026-08-21-rest-route-transport-mode.md`) | **Drop** | Medusa returns ISO-8601 `Z` timestamps (E4). Routes are plain paths. Store scope is the sales channel and publishable key. |
 
+**The outbox's version fallback becomes a conflict state.** Today TallyUI's outbox (ADR-065 orders) handles `unsupported_version` itself:
+- it re-sends the order at the lower `order.create` version the server names in `error.data.orderCreate`;
+- it keeps the same command id, and records `sentVersion` and `downgradedFrom`;
+- a second `unsupported_version` after a downgrade is terminal (`~/agent/handoff/spec-outbox-version-fallback-tallyui-2026-09-28.md`).
+
+The same command id is safe because the plugin checks the version before the ledger claim, so nothing is recorded under it (same spec; medusapos #90). No engine state fits this. `requeue-rebuilt` mints a fresh `mutationId` and runs only on an explicit `resolveConflict`, and `retry-with-server-base` throws on a `rejected` row (wiki `client/dead-letter-recovery.md`). So the Medusa driver maps `unsupported_version` with `data.orderCreate` to a new state for G2, proposed as `retry-downgraded`: rebuild at the server's version, keep the command id, re-send without a cashier. A second refusal dead-letters the row. Without this, the fallback is lost when orders move to the engine's mutation queue.
+
 ### 3. The plugin surface for the driver
 
 Auth is unchanged for every route: `authenticate('user', ['bearer', 'session'])` and the `tallyCors` middleware (`packages/medusa-plugin/src/api/middlewares.ts:18-31`). The store API's calculated prices need the publishable key (`pricing/calculated.ts:18-23`). Every new route is additive and gated by a capability in `/tally/v1/info`.
+
+**The `sync` contract is experimental.** The `/changes` shape and the `sync: [1]` capability are unversioned sketches until G2 names the driver interface. They may change without a version bump, so this ADR doesn't prejudge P2.
 
 **Already there:**
 
 | Route | Shape (sketch) | Role for the driver |
 |---|---|---|
 | `POST /tally/v1/commands` | `X-Tally-Protocol: 1`; `{ commands: CommandEnvelope[] }`, at most 50 and 1 MB → `{ results: [{ id, status: applied\|duplicate\|rejected, error?, serverRefs?, register? }] }`; 409 `in_progress`; 503 `transient` (`commands/route.ts`, `process.ts:17-116`, `middlewares.ts:21-27`) | The push side. The envelope `id` is the `Idempotency-Key`. `order.create` v1–3 and the five `register.*` v1 commands. |
-| `GET /tally/v1/info` | `{ contracts: { 'order.create': [1,2,3], register: [1] } }` (measured on the demo; `info/route.ts:5-7`) | Capabilities. Gains `sync: [1]` and `push: ['sse']`. |
+| `GET /tally/v1/info` | `{ contracts: { 'order.create': [1,2,3], register: [1] } }` (measured on the demo; `info/route.ts:5-7`) | Capabilities. Gains `sync: [1]`, experimental (above). |
 | `GET /tally/v1/registers/{id}` | Register state, with the open session's `expected` and `salesCount` (`registers/[id]/route.ts`) | Register reads (ADR 0019, P2). Not a replicated collection. |
 
-**New for G4** (sketch; version 1 of a `sync` contract):
+**New for G4** (sketch; experimental, as above). G4's surface is only the `tally_change` journal with its backfill, its product, variant, inventory and price subscribers, and these two routes:
 
 | Route | Request | Response | Fed by |
 |---|---|---|---|
-| `GET /tally/v1/changes` | `since=<seq>&limit=<n≤1000>`, plus optional `collections=products,customers,orders` | `{ epoch, head, horizon, changes: [{ seq, collection, id, op: 'upsert'\|'delete', revision }], more }`. A `since` below `horizon`, or a different `epoch`, answers `410 { code: 'cursor_expired', epoch, head }`, and the engine then takes its backlog-guard path. | The `tally_change` table (below) |
+| `GET /tally/v1/changes` | `since=<seq>&limit=<n≤1000>`, plus optional `collections=products` (`customers` and `orders` from P3) | `{ epoch, head, horizon, changes: [{ seq, collection, id, op: 'upsert'\|'delete', revision }], more }`. A `since` below `horizon`, or a different `epoch`, answers `410 { code: 'cursor_expired', epoch, head }`, and the engine then takes its backlog-guard path. | The `tally_change` table (below) |
 | `GET /tally/v1/changes/tick` | `since=<seq>&epoch=<e>` | `304` when `since == head`, otherwise `{ epoch, head, horizon }` | Same table |
-| `GET /tally/v1/changes/stream` | SSE with `Accept: text/event-stream`. The browser `EventSource` can't set headers, so the bearer token goes in the query string or a session cookie. | `event: head` `data: {epoch, head}` on each commit, coalesced to at most 1 per second, and a `: ping` every 25 s. The client re-ticks on reconnect. | An in-process listener on journal inserts. With more than one server instance, Redis pub/sub or Postgres `LISTEN/NOTIFY`. |
-| `GET /tally/v1/digests/{collection}` | – | `{ count, buckets: [{ b, n, digest }] }`, with 256 buckets by `hash(id)`, `digest = xor64(hash(id‖revision))` | SQL over the source tables and the journal revision |
-| `GET /tally/v1/digests/{collection}/{bucket}` | – | `{ ids: [{ id, revision }] }` | Same |
 
-**The journal table** (`tally_change`, in a new `tally_sync` module): `seq bigserial primary key`, `collection`, `object_id`, `op`, `created_at`, and an index on `(collection, object_id)`. The revision is the `seq` of the object's latest row. Retention purges superseded rows and advances `horizon`. The subscribers:
+**The journal table** (`tally_change`, in a new `tally_sync` module): `seq bigserial primary key`, `collection`, `object_id`, `op`, `created_at`, and an index on `(collection, object_id)`. The revision is the `seq` of the object's latest row. Retention purges superseded rows and advances `horizon`.
+
+**Backfill at install.** On module install (the migration, or first boot), the plugin mints the epoch and writes one row per existing document. A document untouched since install then still has a revision, and a digest entry once P3 adds the audit.
+
+The subscribers for G4:
 
 | Medusa event (`utils/dist/core-flows/events.js`) | Journal rows |
 |---|---|
 | `product.created/updated/deleted` (554-588) | `products:{id}` |
 | `product-variant.created/updated/deleted` (515-549) | `products:{product_id}`, since variants live inside the product document |
 | Module events `pricing.price.created/updated/deleted` and `pricing.price-set.*` (`utils/dist/pricing/events.js:8-9`; internal, E2.1) | Resolved price → price set → variant (`product_variant_price_set` link) → `products:{product_id}`. This covers price edits on any route, including ones that bypass the variant workflow. |
-| `inventory-level.created/updated/deleted` (1071-1113) and `inventory-item.*` (1026-1066) | Resolved to `products:{product_id}` through the variant–inventory-item link. The payload carries `order_id` when an order flow caused it (1094-1095). |
-| `product-option.*`, `product-option-value.*`, `product-tag/type/category/collection.*` | The affected products, or their own reference collections |
-| `customer.created/updated/deleted` (75-109) | `customers:{id}` |
-| `order.placed/updated/completed/canceled/archived`, `order-edit.confirmed` (114-309) | `orders:{id}`, for the till's own order history |
 | Module events `pricing.price-list.*` (internal) | Every product with a price in that list |
-| **No event at all when time passes.** A price list's `starts_at`/`ends_at` boundary or a sale ending writes nothing. | A plugin scheduled job every minute (a proposal) journals the products of every price list whose `starts_at` or `ends_at` fell since its last run. Together with the price events above, this replaces the connector's 30-minute calculated-price pass and nightly base-price pass. |
+| `inventory-level.created/updated/deleted` (1071-1113) and `inventory-item.*` (1026-1066) | Resolved to `products:{product_id}` through the variant–inventory-item link. The payload carries `order_id` when an order flow caused it (1094-1095). |
+| Product ↔ sales-channel link changes | No subscriber exists today. G4 adds one or records the gap (Ruling Q3). |
+
+G4 counts these events against writes before anything depends on them (Ruling Q3).
+
+**Deferred to P3 (milestone M-b).** Kept here so the design isn't lost.
+
+| Item | Design |
+|---|---|
+| `GET /tally/v1/changes/stream` | Only if G4's numbers show the tick misses "within a tick", and then over streaming `expo/fetch` (Ruling Q4). Sketch: SSE sending `event: head` `data: {epoch, head}` on each commit, coalesced to at most 1 per second, with a `: ping` every 25 s; the client re-ticks on reconnect. Fed by an in-process listener on journal inserts. |
+| `GET /tally/v1/digests/{collection}` | `{ count, buckets: [{ b, n, digest }] }`, with 256 buckets by `hash(id)` and `digest = xor64(hash(id‖content_hash))`. SQL over the source tables. |
+| `GET /tally/v1/digests/{collection}/{bucket}` | `{ ids: [{ id, revision, content_hash }] }` |
+| Subscribers on `customer.created/updated/deleted` (75-109) | `customers:{id}` |
+| Subscribers on `order.placed/updated/completed/canceled/archived`, `order-edit.confirmed` (114-309) | `orders:{id}`, for the till's own order history. Through G4 the till keeps TallyUI ADR-024's outbox view (Ruling Q5). |
+| Subscribers on `product-option.*`, `product-option-value.*`, `product-tag/type/category/collection.*` | The affected products, or their own reference collections |
+| The price-window job. **No event at all fires when time passes**: a price list's `starts_at`/`ends_at` boundary or a sale ending writes nothing. | A plugin scheduled job every minute (a proposal) journals the products of every price list whose `starts_at` or `ends_at` fell since its last run. Together with the price events above, this replaces the connector's 30-minute calculated-price pass and nightly base-price pass. It stays out until G4's event numbers exist (Ruling Q3). |
+
+**The digest hashes content, not the revision.** A revision that is only the journal `seq` can't catch a lost update event. The id and revision stay the same, so the audit would pass.
+- Each digest entry is `hash(id ‖ content_hash)`.
+- `content_hash` is computed in SQL from the source tables. It covers the promoted columns and the fields that define the document's content, including the price and stock inputs.
+- A missed update therefore changes the bucket's digest.
+- The driver hashes the same driver-declared field list from its stored document.
+- A supplement, not a replacement: the product workflow hooks run inside the workflow (E2.3), so they could journal product and variant writes. The inventory workflows have no hooks, and price module events reach no hook (E2.3), so the content hash stays the catch.
+
+G4 only designs this; P3 builds it.
 
 **Fetch by id and browse windows stay on Medusa's own routes for G4.**
 - `/admin/products?id[]=…&fields=<MEDUSA_PRODUCT_FIELDS>`: 100 full documents in 468 ms (E5). The URL is 4.4 KB for 100 ids, within Node's 16 KB limit (`reconcile/ids.ts:10-14`).
 - `/store/products?id[]=…&region_id=…` for calculated prices: 100 products in 197 ms (E5).
 - A plugin `GET /tally/v1/products?ids=` that does both in one `query.graph` call is an optimisation for after G4, and only if the two-request fetch shows up in the numbers.
 
-**What the driver stops doing.** The combined pull (products, variants, the id re-delivery feed) and the four reconcile runners (stock, ids, calculated prices, base prices) collapse into one journal cursor and one digest audit. On the demo, one full pass of the current reconcile runners (not counting the product and variant feeds) costs about 35 requests, from the counts in E1:
+**What the driver stops doing (at P3).** The combined pull (products, variants, the id re-delivery feed) and the four reconcile runners (stock, ids, calculated prices, base prices) collapse into one journal cursor and one digest audit. On the demo, one full pass of the current reconcile runners (not counting the product and variant feeds) costs about 35 requests, from the counts in E1:
 - ids: 3;
 - stock: 6;
 - calculated prices: 20;
 - base prices: 6.
 
-An idle store costs one SSE connection and no requests.
+An idle store costs the polled tick: one request per tick at the engine's tick cadence, with jitter, and fewer as idle decay slows it. There is no SSE connection (Ruling Q4).
+
+### 4. Where G4 runs
+
+- G4's write steps run on the Mac mini dev store: the deletion, the offline replay, the price-latency and event-coverage counts (Ruling Q3), and the concurrent-till measurement.
+- The demo on the VPS stays read-only, as in E1–E6: one auth POST and GETs.
+- The adoption plan's G4 row says "the seeded demo store". It should say the same.
 
 ## Evidence
 
@@ -185,7 +223,7 @@ The inventory route's validator is `.strict()` and has no date fields (`medusa/d
 
 **E4: timestamp precision and revisions.** API timestamps are ISO-8601 with milliseconds (`2026-09-28T18:34:05.085Z`). The columns are `timestamptz`, but the app sets the value from a JS `Date` on its own clock (E2.4), not the database's. Bulk writes tie: 4 of the 5 most recent products share `…05.085Z`, and 2 of 3 variants share `…05.176Z`. A millisecond `updated_at` cursor therefore needs `$gte` and an id tie-break, as the connector already does (`replication/products.ts:86-94`). Orders carry `version: 1` (integer).
 
-**E5: response times**
+**E5: response times** (one client, requests sent one at a time; no concurrent load was measured)
 
 | Request | Median | Size |
 |---|---|---|
@@ -298,7 +336,7 @@ There is no websocket, `socket.io` or data-change stream in `medusa/dist`, `fram
 
 ### Baseline cited from TallyUI
 
-These connector citations, and those in the Context section, describe TallyUI's code at `origin/main` `e151099`. The TallyUI track confirmed them on 2026-09-29, correcting the runner count to one combined pull (three sub-feeds) plus four reconcilers. The handoff copies of ADR-067, ADR-068 and the adoption plan (`~/agent/handoff/tallyui-*.md`) are the TallyUI inputs.
+These connector citations, and those in the Context section, describe TallyUI's code at `origin/main` `e151099`. The one exception is `apps/expo/lib/use-replicated-products.ts:131-193`, which is medusapos's own app file. The TallyUI track confirmed them on 2026-09-29, correcting the runner count to one combined pull (three sub-feeds) plus four reconcilers. The handoff copies of ADR-067, ADR-068 and the adoption plan (`~/agent/handoff/tallyui-*.md`) are the TallyUI inputs.
 
 Cited at `origin/main` `e151099`:
 - `connectors/medusa/src/replication/products.ts:22-137`: the offset-in-window pull, and "Medusa 2.21 honours only the operator form; `updated_at[gte]` is silently dropped" (line 93), confirmed by E3;
@@ -309,23 +347,33 @@ Cited at `origin/main` `e151099`:
 ## Consequences
 
 - **G4's answer from Medusa is "driver-typed `payload`",** backed by the data a Woo shape would lose (Decision 1). The monorepo half of G4 still has to run the three experiments through the engine. This ADR gives it the server surface and the numbers to beat.
-- **The plugin grows a `tally_sync` module:** the journal table, subscribers, one scheduled job, and four read routes plus SSE. All are additive and gated by `contracts.sync` in `/tally/v1/info`. The command endpoint is unchanged, and `order.create` and `register.*` keep their ledger.
+- **The plugin grows a `tally_sync` module in two steps.**
+  - For G4: the journal table with its backfill, the product, variant, inventory and price subscribers, and two read routes (`/changes`, `/changes/tick`). Their shape and `sync: [1]` are experimental until G2.
+  - At P3 (M-b): the digest routes, the customer and order subscribers and the price-window job (§3, Deferred to P3).
+  - All are additive and gated by `contracts.sync` in `/tally/v1/info`. The command endpoint is unchanged, and `order.create` and `register.*` keep their ledger.
 - **The connector's combined pull and four reconcile runners retire when the driver lands (P3).** They stay in service for testers until then (ADR-067 decision 7).
-- **A lost event is caught by the digest audit, not by the journal.** Medusa's event bus releases events after the workflow finishes (E2.1), so a crash between commit and subscriber loses the pointer. The audit's cadence bounds how long that lasts. G4 measures it.
-- **Politeness budgets become per driver.** Woo's PHP-sized ceilings don't bind Medusa. The pressure ladder stays for the shared VPS.
-- **Candidates for WCPOS v2** (ADR-067: "an improvement proven on Medusa … is a candidate for WCPOS v2"):
-  - a push-hinted tick;
-  - hash buckets instead of id ranges, for any backend with non-integer ids.
+- **A lost event is caught by the digest audit, once P3 builds it, because the digest hashes content.** Medusa's event bus releases events after the workflow finishes (E2.1), so a crash between commit and subscriber loses the pointer. The id and revision then stay the same, but the content hash doesn't, so the bucket's digest changes (§3). The audit's cadence bounds how long the loss lasts. Until P3, nothing catches it.
+- **No long-lived connection in G4 or P3.** Every host polls the tick with jitter and idle decay (Ruling Q4).
+- **Politeness budgets become per driver.** Woo's PHP-sized ceilings don't bind Medusa. The pressure ladder stays for the shared VPS. E5's timings are single-client and sequential, so G4 adds one bounded concurrent-till measurement on the Mac mini dev store, never on the VPS.
+- **G4's writes stay off the VPS.** The deletion, the replay and the price-latency counts run on the Mac mini dev store, and the demo stays read-only (Decision 4). The adoption plan's G4 row should say the same.
+- **The Medusa driver needs an engine state for `unsupported_version`** so the outbox's version fallback survives the move to the engine queue (§2).
+- **Candidate for WCPOS v2** (ADR-067: "an improvement proven on Medusa … is a candidate for WCPOS v2"): the content-hash digest (§3), which catches a lost update that an id-and-revision digest misses. It goes to Paul with numbers after G4, not before.
 
-  Both go to Paul with G4's numbers, not before.
-- **The SSE route is the only long-lived connection this plugin serves.** Its per-till cost (one socket and a 25 s ping) must be measured on the demo before any tester uses it. Traefik on the VPS must not buffer `text/event-stream`. That's a read-only check the front desk makes; this worker changes nothing on the server.
+## Rulings (Front desk, 2026-09-29)
+
+1. **Payload.** Driver-typed `payload` with a driver-declared promoted-column map. The engine-owned envelope plus the promoted columns is the thin projection; there is no second projection.
+2. **Money authority.** It becomes a driver capability: `'server'` for Woo, `'till'` for Medusa. Medusa's figures are a reconciliation view, exactly as TallyUI ADR-068 decision 13. The adoption plan's G4 row changes to "the server's reconciliation totals". The Front desk tells TallyUI.
+3. **Internal module events as a feed.** G4 measures both latency and coverage on the Mac mini dev store, counting events against writes. It covers:
+   - bulk price-list edits;
+   - the `upsertWithReplace` query-builder path, which may bypass the ORM hooks that emit events;
+   - product ↔ sales-channel link changes, which have no subscriber today. G4 adds one or records it as a gap.
+
+   The price-window job stays out until those numbers exist.
+4. **Change signal.** A polled tick with jitter and idle decay on every host, for G4 and P3. SSE comes only later, on streaming `expo/fetch` (no new dependency), and only if the numbers show the tick misses "within a tick".
+5. **Order history.** Keep TallyUI ADR-024's outbox view through G4. Decide at P3, against the P1 acceptance scenarios.
+6. **Customers.** The journal `seq` is their revision. A metadata revision would emit `customer.updated` and loop. This is moot until a `customer.update` command exists.
+7. **Index module.** Stay on `query.graph` and the list routes. The Index module is feature-flagged, returns estimated counts and can't be a change feed (E2.5).
 
 ## Open questions
 
-1. **For TallyUI and the monorepo:** does the engine accept a driver-typed `payload` with a driver-declared promoted-column map, or does G2 want a thin engine-owned projection alongside a typed payload? This ADR assumes the first.
-2. **Money authority:** G4's replay step expects "the server's authoritative totals". On Medusa the till's totals are the fiscal record (ADR 0012). Should the engine's money-authority invariant become a driver capability (`'server'` for Woo, `'till'` for Medusa), with Medusa's figures shown as a reconciliation view as ADR-068 decision 13 does for registers?
-3. **Internal module events as a feed:** price changes reach subscribers only as `internal: true` module events, at the lowest Redis priority (E2.1). Is their latency acceptable for "a price edited in the admin reaches the till within a tick" (plan P3)? G4 measures this on the Mac mini dev store, since a write is needed. The demo on the shared VPS gets no writes.
-4. **SSE on native:** the engine's React Native hosts need an SSE client (`EventSource` isn't built into React Native). Is a push-hinted tick worth a dependency, or should native keep the polled tick with jitter and idle decay, and web use SSE?
-5. **Order history as a collection:** should the till replicate its own orders (`orders:{id}` journal rows, revision = `order.version`), or keep ADR-024's outbox view until an order-edit command exists?
-6. **Customers:** customers have no version column. Is the journal `seq` acceptable as their revision for `If-Match` on a future `customer.update` command, or should the plugin add a `tally_revision` in customer metadata?
-7. **Index module:** `index_engine` is off on the demo (E6). Does TallyUI want the driver to rely on `query.index` for filtered browse windows on linked data (for example stock by location), or stay on `query.graph` and list routes, which is what this ADR assumes?
+1. **For G2:** the name and exact shape of the engine state for `unsupported_version` (§2 proposes `retry-downgraded`).
