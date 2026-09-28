@@ -24,6 +24,8 @@ const addOrders = (db: OrdersDatabase) => addPosOrderCollection(db as unknown as
 // E2E debug only (guarded below, folded away in production): sessionStorage, so it survives the
 // reload `e2e/storage.spec.ts` uses to reach a fresh openOrderStore, unlike an in-memory flag.
 const E2E_FAIL_NEXT_OPEN_KEY = 'medusapos-e2e-fail-next-order-store-open';
+// E2E debug only: the hold HoldOrderInserts sets and ReleaseOrderInserts resolves (hooks below).
+let e2eInsertHold: { promise: Promise<void>; release(): void } | undefined;
 
 // Local document id recording that `carryOverOrders` copied a legacy database (count and time).
 // A record only: it never causes a delete, nor skips reading a legacy database that exists.
@@ -170,6 +172,8 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
       try {
         // Migrates v0 or v1 to v2, all of it. A DM4 fails this open, never deletes: the older orders stay; the next open retries.
         const orders = await addOrders(db);
+        // E2E debug only (folded away in production): while HoldOrderInserts holds, an insert waits before its write.
+        if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') orders.preInsert(() => e2eInsertHold?.promise, false);
         if (onWebStorage) {
           await carryOverOrders({
             fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
@@ -265,4 +269,11 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
   exposeE2eHook('SeedV1Order', (baseUrl: string, order: PosOrder) =>
     seed(1, orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
   exposeE2eHook('FailNextOrderStoreOpen', (code: string) => window.sessionStorage.setItem(E2E_FAIL_NEXT_OPEN_KEY, code));
+  // A stuck insert without a dead storage worker: `record()` hangs before its write until released.
+  exposeE2eHook('HoldOrderInserts', () => {
+    if (e2eInsertHold) return;
+    let release!: () => void;
+    e2eInsertHold = { promise: new Promise<void>((resolve) => { release = resolve; }), release: () => release() };
+  });
+  exposeE2eHook('ReleaseOrderInserts', () => { e2eInsertHold?.release(); e2eInsertHold = undefined; });
 }

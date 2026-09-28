@@ -64,10 +64,10 @@ test('a sign-out requested during a stuck save waits, and its note fits beside S
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
   const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
   await tender.locator('[tabindex="0"]').first().click();
-  // After the tender starts: its register check (ADR 0017) reads storage, so a worker killed before it stops there.
-  await page.evaluate(() => (window as unknown as { __medusaposKillStorageWorker: () => void }).__medusaposKillStorageWorker());
+  // A stuck save: the order's insert waits before its write (an E2E debug hook; a dead storage worker would stop
+  // the sale's register stamp first, ADR 0017).
+  await page.evaluate(() => (window as unknown as { __medusaposHoldOrderInserts: () => void }).__medusaposHoldOrderInserts());
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
-  await expect(page.getByRole('alert')).toHaveText('Saving is slow…');
 
   // The same request a 401 or a refused refresh makes.
   await page.evaluate(() => (window as unknown as { __medusaposReportUnauthorized: () => void }).__medusaposReportUnauthorized());
@@ -79,6 +79,15 @@ test('a sign-out requested during a stuck save waits, and its note fits beside S
   // Still signed in, on the sale's tender.
   await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toBeVisible();
   await expect(page).not.toHaveURL(/\/login/);
+
+  // The save lands: the receipt shows, and the deferred sign-out waits for it to clear, then runs.
+  await page.evaluate(() => (window as unknown as { __medusaposReleaseOrderInserts: () => void }).__medusaposReleaseOrderInserts());
+  const newSale = page.getByRole('button', { name: 'New sale', exact: true });
+  await expect(newSale).toBeVisible();
+  await expect(page.getByText("You'll be signed out when you start a new sale.", { exact: true })).toBeVisible();
+  await expect(page).not.toHaveURL(/\/login/);
+  await newSale.click();
+  await expect(page).toHaveURL(/\/login/);
 });
 
 // ADR 0009 amendment: a keyboard-wedge scan in the phone cart view adds the product (job "wedge scan").
