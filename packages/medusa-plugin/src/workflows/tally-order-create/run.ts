@@ -27,6 +27,9 @@ export async function runOrderCreate(
   let orderId = existing?.id
   let stockWarnings: ReturnType<typeof planStockTopUp>['warnings'] = []
   if (existing?.status !== 'completed') {
+    // An existing order may already be paid, so its configuration failures stay transient (ADR 0004).
+    const configurationError = (message: string) =>
+      existing ? new Error(message) : new StoreConfigurationError(message)
     const { data: stores } = await query.graph({ entity: 'store', fields: ['default_sales_channel_id'] })
     const salesChannelId = options.salesChannelId ?? stores[0]?.default_sales_channel_id
     const { data: channels } = await query.graph({
@@ -34,7 +37,7 @@ export async function runOrderCreate(
       filters: { id: salesChannelId ?? [] },
     })
     if (!channels[0]) {
-      throw new StoreConfigurationError('Missing sales channel; set plugin option salesChannelId')
+      throw configurationError('Missing sales channel; set plugin option salesChannelId')
     }
     const locationId = payload.locationId ?? options.locationId ?? channels[0].stock_locations?.[0]?.id
     const { data: locations } = await query.graph({
@@ -42,7 +45,7 @@ export async function runOrderCreate(
     })
     const location = locations[0]
     if (!location?.address) {
-      throw new StoreConfigurationError('Missing stock location or address; set plugin option locationId')
+      throw configurationError('Missing stock location or address; set plugin option locationId')
     }
     const { data: shippingVariants } = await query.graph({
       entity: 'product_variant', fields: ['id', 'product.shipping_profile.id'],
@@ -52,7 +55,7 @@ export async function runOrderCreate(
       variant.product?.shipping_profile?.id ? [variant.product.shipping_profile.id] : []
     ))]
     if (profileIds.length > 1) {
-      throw new StoreConfigurationError(`This sale's products use several shipping profiles (${profileIds.join(', ')}); POS sales need one profile per sale, so put these products on one shipping profile`)
+      throw configurationError(`This sale's products use several shipping profiles (${profileIds.join(', ')}); POS sales need one profile per sale, so put these products on one shipping profile`)
     }
     const profileId = profileIds[0]
     const { data: shippingOptions } = await query.graph({
@@ -62,18 +65,18 @@ export async function runOrderCreate(
     if (shippingOptionId) {
       const option = shippingOptions.find(option => option.id === shippingOptionId)
       if (option && profileId && option.shipping_profile_id !== profileId) {
-        throw new StoreConfigurationError(`Shipping option ${shippingOptionId} (plugin option shippingOptionId) uses shipping profile ${option.shipping_profile_id}, but the sale's products use ${profileId}`)
+        throw configurationError(`Shipping option ${shippingOptionId} (plugin option shippingOptionId) uses shipping profile ${option.shipping_profile_id}, but the sale's products use ${profileId}`)
       }
     } else {
       const locationOptions = shippingOptions.filter(option => option.service_zone?.fulfillment_set?.location?.id === location.id)
       if (!locationOptions.length) {
-        throw new StoreConfigurationError('Missing shipping option; set plugin option shippingOptionId')
+        throw configurationError('Missing shipping option; set plugin option shippingOptionId')
       }
       // Medusa createOrderFulfillmentWorkflow rejects shipped items whose product profile differs from the option's.
       shippingOptionId = locationOptions.filter(option => !profileId || option.shipping_profile_id === profileId)
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]?.id
       if (!shippingOptionId) {
-        throw new StoreConfigurationError(`No shipping option at stock location ${location.id} uses shipping profile ${profileId}; add one, or set plugin option shippingOptionId`)
+        throw configurationError(`No shipping option at stock location ${location.id} uses shipping profile ${profileId}; add one, or set plugin option shippingOptionId`)
       }
     }
     if (orderId) {

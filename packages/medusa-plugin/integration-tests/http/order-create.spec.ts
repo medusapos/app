@@ -11,6 +11,7 @@ import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyu
 import { runOrderCreate } from '../../src/workflows'
 import { majorToMinor } from '../../src/workflows/tally-order-create/money'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
+import { isStoreConfigurationError } from '../../src/workflows/tally-order-create/store-configuration-error'
 import { takeBackStockWorkflow } from '../../src/workflows/tally-order-create/workflow'
 import { seed } from './seed'
 
@@ -508,6 +509,29 @@ medusaIntegrationTestRunner({
       expect(order.metadata).toMatchObject({ tally_client_id: sale.payload.clientOrderId, tally_stock_topups_reversed: true })
       expect(await ordersFor(sale.payload.clientOrderId).whereNull('deleted_at').whereNot('status', 'canceled')).toHaveLength(1)
       await expectStock(data.inventoryC, -1)
+    })
+
+    it('a resumed paid order with a configuration failure stays retryable, then completes once fixed', async () => {
+      const sale = shortSale()
+      const draft = await createDraft(sale, 1)
+      await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+      const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+        input: { order_id: draft.id, amount: 6 },
+      })
+      await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+      const fulfillment = container.resolve(Modules.FULFILLMENT)
+      await fulfillment.softDeleteShippingOptions([data.berlinShippingOptionId])
+      try {
+        const attempt = runOrderCreate(container, sale)
+        await expect(attempt).rejects.toThrow(/Missing shipping option/)
+        expect(isStoreConfigurationError(await attempt.catch(error => error))).toBe(false)
+      } finally {
+        await fulfillment.restoreShippingOptions([data.berlinShippingOptionId])
+      }
+      const order = await readOrder(await runOrderCreate(container, sale))
+      expect(order.id).toBe(draft.id)
+      expect(order.payment_collections).toHaveLength(1)
+      expect(order.fulfillments).toHaveLength(1)
     })
 
     it('converts and completes the same leftover draft without top-ups', async () => {
