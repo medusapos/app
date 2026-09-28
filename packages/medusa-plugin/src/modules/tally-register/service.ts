@@ -161,6 +161,24 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   @InjectManager()
+  async figuresInput(sessionId: string, @MedusaContext() sharedContext: Context = {}): Promise<{
+    countedFloatMinor: number
+    movements: { id: string; type: 'paid_in' | 'paid_out' | 'no_sale' | 'void'; amountMinor: number; voids: string | null }[]
+    closure: { orderIds: string[]; movementIds: string[]; counted: Record<string, number> } | null
+  } | null> {
+    return (sharedContext.manager as EntityManager).transactional(async (em) => {
+      const [session] = await em.execute(`select json_build_object('countedFloatMinor', counted_float_minor) as input
+        from tally_register_session where id = ?`, [sessionId])
+      if (!session) return null
+      const movements = await em.execute(`select json_build_object('id', id, 'type', type,
+        'amountMinor', amount_minor, 'voids', voids) as movement from tally_register_movement where session_id = ?`, [sessionId])
+      const [closure] = await em.execute(`select json_build_object('orderIds', order_ids, 'movementIds', movement_ids,
+        'counted', counted) as closure from tally_register_closure where session_id = ?`, [sessionId])
+      return { ...session.input, movements: movements.map(row => row.movement), closure: closure?.closure ?? null }
+    })
+  }
+
+  @InjectManager()
   async registerState(registerId: string, @MedusaContext() sharedContext: Context = {}): Promise<{
     session?: RegisterCommandResult['session']; counters?: RegisterCounters
   } | null> {

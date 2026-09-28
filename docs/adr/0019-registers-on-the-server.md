@@ -48,7 +48,7 @@ Rows are never deleted or rewritten. The exceptions are a session's status field
 `register_approval_required` waits for c2c (P3).
 
 **Two cross-track rules** (TallyUI ADR-068 is the contract both sides follow):
-- **Order, not clocks.** The server applies a register's commands in the order it receives them: batches apply in array order, and the till sends one register's commands serially, in its ledger order, stopping at the first one not applied. `at` and `createdAt` are facts carried in the payload, never ordering keys. A till's clock can be corrected, and comparing timestamps would drop a legitimate later command.
+- **Order, not clocks** (the Front desk and TallyUI ruling of 2026-09-28, TallyUI #188 round 3; it supersedes the earlier ADR-068 5a wording that ignored "a transition older than the status time"). The server applies a register's commands in the order it receives them: batches apply in array order, and the till sends one register's commands serially, in its ledger order, stopping at the first one not applied. `at` and `createdAt` are facts carried in the payload, never ordering keys. A till's clock can be corrected, and comparing timestamps would drop a legitimate later command.
 - **A transition is a state snapshot, not an edge.** A till can go counting → open → counting between reconciles, and only the latest state reaches the server.
   - The last applied transition sets the status. Any transition from a non-closed session is accepted, and only a transition out of `closed` is refused.
   - A same-status transition is an applied no-op.
@@ -73,5 +73,7 @@ Rows are never deleted or rewritten. The exceptions are a session's status field
   - P3: approval.
 - `approvedBy` is stored as the till sends it, and isn't verified until c2c.
 - A `closure.submit` whose `registerId` isn't its session's drawer is `invalid_payload`. ADR-068 decision 8 (unknown register ids accepted as written) covers `session.open`, which creates the register.
+- **What's stored in the ledger:** applied results and the `register_*` business conflicts are stored, so a replay returns them exactly. `invalid_payload` isn't stored, whether it's a shape error or a state-dependent refusal (unknown session, void target missing, closure `registerId` mismatch). That follows ADR 0004, so a resend re-evaluates against the current state.
+- **The claim check:** the register write path checks it still holds its ledger claim (`assertClaim`) just before the service call, as order.create does. The check and the write aren't one transaction, so a stalled worker whose lease was taken over can still write in that narrow window (ADR 0001). A stale transition would then flip open and counting until the next transition.
 - A refused register command stops that register's queue on the till (ADR-068 decision 4). So the server refuses only what the till can't produce, and never turns a retry into a refusal.
 - Refunds stay 0 in c2.

@@ -26,5 +26,7 @@ export default defineMiddlewares({
     },
     { matcher: '/tally/v1/info', middlewares: [tallyCors('GET')] },
     { matcher: '/tally/v1/info', method: 'GET', middlewares: [authenticate('user', ['bearer', 'session'])] },
+    { matcher: '/tally/v1/registers/:id', middlewares: [tallyCors('GET')] },
+    { matcher: '/tally/v1/registers/:id', method: 'GET', middlewares: [authenticate('user', ['bearer', 'session'])] },
   ],
 })

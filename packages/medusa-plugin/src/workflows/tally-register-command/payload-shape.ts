@@ -48,7 +48,8 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
       string('createdBy', true)
       if (type === 'register.movement.void') string('voids')
       else {
-        string('reason')
+        check(typeof payload.reason === 'string' && payload.reason.trim().length > 0 && payload.reason.length <= 500,
+          'reason', 'a non-empty string after trim of at most 500 characters')
         check(['paid_in', 'paid_out', 'no_sale'].includes(payload.type as string), 'type', 'paid_in, paid_out or no_sale')
         integer('amountMinor', payload.type === 'no_sale' ? 0 : 1)
         if (payload.type === 'no_sale') check(payload.amountMinor === 0, 'amountMinor', '0 for no_sale')
@@ -60,6 +61,8 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
       integer('number', 1)
       for (const field of ['periodSalesTotalMinor', 'periodRefundsTotalMinor', 'perpetualSalesTotalMinor',
         'perpetualRefundsTotalMinor', 'unsyncedCount', 'unsyncedTotalMinor']) integer(field, 0)
+      for (const field of ['number', 'unsyncedCount'])
+        check((payload[field] as number) <= 2147483647, field, 'at most 2147483647')
       for (const field of ['tillExpected', 'counted']) record(field)
       for (const field of ['orderIds', 'movementIds']) {
         const value = payload[field]

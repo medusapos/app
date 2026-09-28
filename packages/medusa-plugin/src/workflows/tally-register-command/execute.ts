@@ -12,6 +12,7 @@ import type { ExecuteOutcome } from '../tally-order-create/execute'
 import type { CommandErrorWithData } from '../tally-order-create/fiscal-figures'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
 import { registerPayloadErrors } from './payload-shape'
+import { loadSessionFigures } from './figures'
 
 // BRIDGE (TallyUI c2a-1)
 type RegisterResult = CommandResult & { register?: RegisterCommandResult; error?: CommandErrorWithData }
@@ -50,6 +51,13 @@ export async function executeRegisterCommand(container: MedusaContainer, command
     try {
       const service = container.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE)
       let outcome: RegisterOutcome
+      // The claim check and service transaction aren't atomic, same as order.create; ADR 0001.
+      try {
+        await ledger.assertClaim(id, claim.claimToken)
+      } catch (error) {
+        if (MedusaError.isMedusaError(error) && error.type === MedusaError.Types.CONFLICT) return { kind: 'in_progress', id }
+        throw error
+      }
       switch (command.type as string) {
         case 'register.session.open': outcome = await service.openSession(payload as RegisterSessionOpenPayload); break
         case 'register.session.transition': outcome = await service.transition(payload as RegisterSessionTransitionPayload); break
@@ -58,10 +66,20 @@ export async function executeRegisterCommand(container: MedusaContainer, command
         case 'register.closure.submit': outcome = await service.submitClosure(payload as RegisterClosureSubmitPayload); break
         default: throw new Error('Unknown register command type')
       }
+      if (outcome.kind === 'ok') {
+        const register = outcome.register
+        const figures = await loadSessionFigures(container, register.session?.id ?? (payload as RegisterClosureSubmitPayload).sessionId)
+        if (figures) {
+          if (register.session) Object.assign(register.session, { expected: figures.expected, salesCount: figures.salesCount })
+          if (register.closure) Object.assign(register.closure, { expected: figures.expected, variance: figures.variance })
+        }
+      }
       const result: RegisterResult = outcome.kind === 'ok' ? { id, status: 'applied', register: outcome.register }
         : { id, status: 'rejected', error: outcome.kind === 'conflict'
           ? { code: outcome.code, message: conflictMessages[outcome.code], data: outcome.data }
           : { code: 'invalid_payload', message: outcome.message } }
+      // ADR 0004: invalid_payload must be re-evaluated against current state on resend.
+      if (outcome.kind === 'invalid') return { kind: 'result', result }
       await ledger.complete(id, claim.claimToken, result)
       completed = true
       return { kind: 'result', result }
