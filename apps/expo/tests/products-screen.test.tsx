@@ -1048,7 +1048,7 @@ describe('ProductsScreen tender gated on the order store opening', () => {
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
   it('says it couldn\'t check the register, and logs why, when the check fails for another reason', async () => {
     const fixture = openRegisterFixture();
-    vi.mocked(fixture.register.requireOpen).mockRejectedValue(new Error('storage went away'));
+    vi.mocked(fixture.register.requireSaleSession).mockRejectedValue(new Error('storage went away'));
     vi.mocked(useRegister).mockReturnValue(fixture);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {

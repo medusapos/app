@@ -111,8 +111,23 @@ close can't complete over the threshold without an approver.
   therefore opens the cart view when the session starts counting, or when a
   close didn't finish, even with an empty cart. The pill opens the panel
   only for an open session; otherwise it brings up the gate.
-- The tender still pins its session (ADR 0017, TallyUI #170). `RegisterCount`
-  can't start while a sale is at tender (`RegisterTenderInProgressError`).
+- **The tender pins the session the gate confirmed** (TallyUI `c5fe200`,
+  #172). `useGatedSale`'s Cash and Card await `register.requireSaleSession()`
+  (requireOpen's checks, returning `{ id, sessions }`, or `null` while
+  sessions are off), then call `startTender(method, { session })`, and
+  `useSale` pins that explicit session for the tender. This replaces part A's
+  wait for the rendered session (ADR 0017, "The tender waits for the
+  rendered session": the `pending` state and its 3 s timeout are gone),
+  since a session opened just before the tap is now passed in directly.
+  Everything else in the gate stays: taps are ignored while a check is
+  pending; the tender starts only if the sale is still at the cart; "Getting
+  ready to save sales…" shows until the order store opens; and the refusals
+  "Open the register to take payment." and "Couldn't check the register. Try
+  again." are unchanged. A close during the tender still makes the sale late
+  (`lateSessionId`). TallyUI's backstop covers a tender that pinned no
+  session but has one rendered by `complete()`: it stamps that session and
+  logs a warning. `RegisterCount` can't start while a sale is at tender
+  (`RegisterTenderInProgressError`).
 
 ## Consequences
 

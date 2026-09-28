@@ -118,7 +118,9 @@ movements and closures are local-only collections, never replicated.
   is short, to fit one line beside the pill (TallyUI #169 cuts the rest
   with an ellipsis): the sync state, any error, then the product count,
   without the connector name or the unlisted count.
-- **The tender waits for the rendered session.** TallyUI's `useSale` pins
+- **The tender waits for the rendered session** (superseded by ADR 0018:
+  since TallyUI #172 the gate passes the session `requireSaleSession()`
+  confirmed to `startTender`). TallyUI's `useSale` pins
   the session it was rendered with at `startTender`, while `requireOpen()`
   reads storage, which can be ahead (a session opened a moment before the
   tap). `useGatedSale` starts the tender only once the rendered

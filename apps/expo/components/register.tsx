@@ -15,13 +15,11 @@ export const GETTING_READY = 'Getting ready to save sales…';
 export const CHECK_FAILED = "Couldn't check the register. Try again.";
 
 type Sale = ReturnType<typeof useSale>;
-// How long a confirmed session may take to reach the render before the tender start gives up (a second tap retries).
-const PENDING_SESSION_MS = 3000;
 
 /**
- * The sale the Cart gets: its Cash and Card start the tender only once `requireOpen()` confirms an open session
- * (TallyUI c1's gate at tender start; `complete()` stamps the session useSale pinned then, TallyUI #170). Also
- * reports the tender to the register.
+ * The sale the Cart gets: its Cash and Card start the tender only once `requireSaleSession()` confirms an open
+ * session (TallyUI c1's gate at tender start), and pin that session for the tender (`complete()` stamps it, TallyUI
+ * #170, #172). Also reports the tender to the register.
  */
 export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null } {
   const { register, setTenderInProgress } = useRegister();
@@ -35,37 +33,19 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
   const tender = sale.stage.kind === 'tender';
   useEffect(() => setTenderInProgress(tender), [tender, setTenderInProgress]);
   useEffect(() => () => setTenderInProgress(false), [setTenderInProgress]);
-  // useSale pins the RENDERED session at startTender (TallyUI #170), and requireOpen() reads storage, which can be
-  // ahead of the render (a session just opened). So the tender starts only once the rendered session is the one
-  // requireOpen() confirmed; until then it waits as `pending`, and taps stay ignored.
-  const saleSessionId = register.saleSession?.id;
-  const saleSessionRef = useRef(saleSessionId);
-  saleSessionRef.current = saleSessionId;
-  const [pending, setPending] = useState<{ method: 'cash' | 'external'; id: string } | null>(null);
-  useEffect(() => {
-    if (!pending) return;
-    const settle = () => { setPending(null); checking.current = false; };
-    if (saleSessionId === pending.id) {
-      settle();
-      if (latest.current.stage.kind === 'cart') latest.current.startTender(pending.method);
-      return;
-    }
-    if (saleSessionId) return settle(); // Another session: drop it.
-    const timer = setTimeout(() => { settle(); setRefused(CHECK_FAILED); }, PENDING_SESSION_MS);
-    return () => clearTimeout(timer);
-  }, [pending, saleSessionId]);
   const startTender = (method: 'cash' | 'external') => {
     if (checking.current) return;
     // Before the order store opens there is no session to check, nor one to stamp the sale with.
     if (!register.enabled) return setRefused(GETTING_READY);
     checking.current = true;
-    // Resolves null only while sessions are off; then the tender starts as it did before registers.
-    register.requireOpen().then((id) => {
-      if (latest.current.stage.kind !== 'cart') { checking.current = false; return; }
-      setRefused(null);
-      if (id && saleSessionRef.current !== id) return setPending({ method, id });
+    // requireSaleSession() reads storage, which can be ahead of the render (a session opened just before the tap), so
+    // the confirmed session is passed to startTender explicitly, and useSale pins it for this tender (TallyUI #172).
+    // It resolves null only while sessions are off; the tender then starts as it did before registers.
+    register.requireSaleSession().then((session) => {
       checking.current = false;
-      latest.current.startTender(method);
+      if (latest.current.stage.kind !== 'cart') return;
+      setRefused(null);
+      latest.current.startTender(method, { session: session ?? undefined });
     }, (error: unknown) => {
       checking.current = false;
       if (error instanceof RegisterSessionRequiredError) return setRefused(OPEN_TO_PAY);
