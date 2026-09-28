@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, MedusaError, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
@@ -123,6 +123,38 @@ medusaIntegrationTestRunner({
       expect(capture).toHaveBeenCalledTimes(1)
       expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
       expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+    })
+
+    it('a missing shipping option is rejected as store_configuration, not stored, and the same command applies once fixed', async () => {
+      const sale = command({ locationId: data.berlinId })
+      const fulfillment = container.resolve(Modules.FULFILLMENT)
+      await fulfillment.softDeleteShippingOptions([data.berlinShippingOptionId])
+      try {
+        expect(await executeOrderCreate(container, sale)).toEqual({
+          kind: 'result', result: { id: sale.id, status: 'rejected', error: {
+            code: 'store_configuration', message: expect.stringMatching(/Missing shipping option/),
+          } },
+        })
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      } finally {
+        await fulfillment.restoreShippingOptions([data.berlinShippingOptionId])
+      }
+      const retried = result(await executeOrderCreate(container, sale))
+      expect(retried).toMatchObject({ id: sale.id, status: 'applied' })
+      const orders = await liveOrders(sale.payload.clientOrderId)
+      expect(orders).toHaveLength(1)
+      expect(orders[0]).toMatchObject({ id: retried.serverRefs!.orderId, status: 'completed' })
+      expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result: retried })
+    })
+
+    it('a Medusa INVALID_DATA inside the workflow stays transient', async () => {
+      const sale = command()
+      const capture = jest.spyOn(container.resolve(Modules.PAYMENT), 'capturePayment')
+        .mockRejectedValueOnce(new MedusaError(MedusaError.Types.INVALID_DATA, 'probe'))
+      expect(await executeOrderCreate(container, sale)).toEqual({ kind: 'transient', id: sale.id, message: 'probe' })
+      expect(capture).toHaveBeenCalledTimes(1)
+      expect(result(await executeOrderCreate(container, sale))).toMatchObject({ id: sale.id, status: 'applied' })
     })
 
     it('a stock race on the first attempt is retried and applies', async () => {
