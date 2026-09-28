@@ -12,7 +12,7 @@ import {
 
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import {
-  GETTING_READY, IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale, type TenderSession,
+  GETTING_READY, IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
@@ -186,14 +186,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
   // the outbox confirms the order is stored.
-  // `session`: complete() stamps the sale with the open register session (ADR 0017); the Cart's tender start
-  // (useGatedSale) refuses until one is open, and pins it for that tender: once the session closes, saleSession is
-  // undefined, and the pin still hands complete() the session to stamp, which then makes the sale late.
+  // `session`: complete() stamps the sale with the register session (ADR 0017). The Cart's tender start
+  // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
+  // close during the tender still reaches the stamp, which then makes the sale late.
   const { register } = useRegister();
-  const [tenderSession, pinTenderSession] = useState<TenderSession | undefined>();
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
-    isStored, session: register.saleSession ?? tenderSession });
-  const { sale: cartSale, refused } = useGatedSale(sale, pinTenderSession);
+    isStored, session: register.saleSession });
+  const { sale: cartSale, refused } = useGatedSale(sale);
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).

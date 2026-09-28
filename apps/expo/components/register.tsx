@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { OpenRegisterCard, RegisterBar, RegisterColumn, RegisterPanel, RegisterPicker } from '@tallyui/components';
-import { RegisterSessionRequiredError, type RegisterSessionCollection, type useRegisterSession, type useSale } from '@tallyui/pos';
+import { RegisterSessionRequiredError, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
 
 // The refusals at tender start (ADR 0017): paying needs an open register; browsing and the cart don't.
@@ -11,17 +11,14 @@ export const GETTING_READY = 'Getting ready to save sales…';
 export const CHECK_FAILED = "Couldn't check the register. Try again.";
 
 type Sale = ReturnType<typeof useSale>;
-/** The session a tender started under, as `useSale`'s `session` option takes it. */
-export type TenderSession = { id: string; sessions: RegisterSessionCollection };
 
 /**
  * The sale the Cart gets: its Cash and Card start the tender only once `requireOpen()` confirms an open session
- * (TallyUI c1's gate at tender start; `complete()` stamps the session). The confirmed session is pinned (`pin`) for
- * that tender, so a close during it still reaches `complete()`'s stamp, which then makes the sale late. Also
+ * (TallyUI c1's gate at tender start; `complete()` stamps the session useSale pinned then, TallyUI #170). Also
  * reports the tender to the register.
  */
-export function useGatedSale(sale: Sale, pin: (session: TenderSession | undefined) => void): { sale: Sale; refused: string | null } {
-  const { register, sessions, setTenderInProgress } = useRegister();
+export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null } {
+  const { register, setTenderInProgress } = useRegister();
   const latest = useRef(sale);
   latest.current = sale;
   const [refused, setRefused] = useState<string | null>(null);
@@ -32,18 +29,15 @@ export function useGatedSale(sale: Sale, pin: (session: TenderSession | undefine
   const tender = sale.stage.kind === 'tender';
   useEffect(() => setTenderInProgress(tender), [tender, setTenderInProgress]);
   useEffect(() => () => setTenderInProgress(false), [setTenderInProgress]);
-  // The pin lasts one tender: it goes once the stage leaves it (the receipt, back to the cart, a new sale).
-  useEffect(() => { if (!tender) pin(undefined); }, [tender, pin]);
   const startTender = (method: 'cash' | 'external') => {
     if (checking.current) return;
     // Before the order store opens there is no session to check, nor one to stamp the sale with.
     if (!register.enabled) return setRefused(GETTING_READY);
     checking.current = true;
     // Resolves null only while sessions are off; then the tender starts as it did before registers.
-    register.requireOpen().then((id) => {
+    register.requireOpen().then(() => {
       if (latest.current.stage.kind !== 'cart') return;
       setRefused(null);
-      if (id && sessions) pin({ id, sessions });
       latest.current.startTender(method);
     }, (error: unknown) => {
       if (error instanceof RegisterSessionRequiredError) return setRefused(OPEN_TO_PAY);

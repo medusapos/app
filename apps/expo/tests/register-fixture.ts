@@ -25,7 +25,7 @@ export function openRegisterFixture({ enabled = true }: { enabled?: boolean } = 
       recordMovement: vi.fn(), voidMovement: vi.fn(),
     },
   } as unknown as RegisterContextValue['register'];
-  return { register, boundRegisterId: 'register-1', registerName: 'Register 1', registers: DEFAULT_REGISTERS, sessions: null,
+  return { register, boundRegisterId: 'register-1', registerName: 'Register 1', registers: DEFAULT_REGISTERS,
     bind: vi.fn(async () => {}), setTenderInProgress: vi.fn() };
 }
 

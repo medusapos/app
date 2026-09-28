@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { RxCollection } from 'rxdb';
 import {
-  bindRegister, getBoundRegisterId, observeRegister$, useRegisterSession, type PosOrder, type RegisterHost, type RegisterSessionCollection,
+  bindRegister, getBoundRegisterId, observeRegister$, useRegisterSession, type PosOrder,
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
 import { registerCollections, type RegisterCollections } from './order-store';
@@ -21,8 +21,6 @@ export type RegisterContextValue = {
   boundRegisterId: string | null | undefined;
   registerName: string | null;
   registers: typeof DEFAULT_REGISTERS;
-  /** `register_sessions`, `null` until the order store is open: a tender pins its session in it (useGatedSale). */
-  sessions: RegisterSessionCollection | null;
   bind(id: string): Promise<void>;
   /** The sale screen reports its tender here: counting and closing refuse while a sale is at tender. */
   setTenderInProgress(inProgress: boolean): void;
@@ -50,15 +48,13 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
   const register = useRegisterSession({
     sessions: collections?.sessions ?? null, movements: collections?.movements ?? null, closures: collections?.closures ?? null,
     orders,
-    // Read only while `enabled`, that is once the collections are open.
-    register: collections?.sessions as RegisterHost,
+    register: collections?.sessions ?? null,
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
     actor: { id: session?.email ?? '', name: session?.email ?? '' },
     timezone: 'device', softwareVersion: appVersion, tenderInProgress,
   });
   const value: RegisterContextValue = {
     register, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,
-    sessions: collections?.sessions ?? null,
     async bind(id) {
       const choice = DEFAULT_REGISTERS.find((entry) => entry.id === id);
       if (collections && choice) await bindRegister(collections.sessions, storeKey, choice);

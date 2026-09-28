@@ -22,9 +22,11 @@ movements and closures are local-only collections, never replicated.
 - **Pin.** Part A was built on `TALLYUI_REF` `451a0ca` (TallyUI #164) and
   finished on `562e62e` (TallyUI #167: `RegisterBar`'s `onPressPill`,
   Catalogue's `statusAccessory`, the open card's float label with its
-  currency, picker and open card that size to their content). `562e62e`
-  also carries Job B (#166), which part A doesn't wire: its counting stays
-  the placeholder below until part B.
+  currency, picker and open card that size to their content), and is pinned
+  at `1b0c094` (#170: `useSale` pins the tender's session; #168: a nullable
+  register host; #169: the catalogue status on one line beside an
+  accessory). These also carry Job B (#166, #168's approval), which part A
+  doesn't wire: its counting stays the placeholder below until part B.
 - **Storage.** `register_sessions` (`registerSessionCollection()`, which
   also carries the till's `register` local document), `cash_movements` and
   `closures` are added to the existing per-backend order store
@@ -79,16 +81,13 @@ movements and closures are local-only collections, never replicated.
     until they are open Cash and Card refuse with "Getting ready to save
     sales…" (the tender pane's own wait), since there would be no session to
     check or to stamp.
-  - **The tender pins its session.** `useSale` gets
-    `session: register.saleSession ?? tenderSession`, where `tenderSession`
-    is the `{ id, sessions }` that `requireOpen()` confirmed at tender
-    start, kept until the stage leaves the tender (the receipt, back to the
-    cart, a new sale). `register.saleSession` goes undefined once the
-    session closes, so without the pin a close under a tender would leave
-    `complete()` with nothing to stamp, and the sale with neither
-    `sessionId` nor `lateSessionId`. With it, `stampSession` refuses the
-    closed session and TallyUI makes the sale late (`lateSessionId` and a
-    `late-sale` fact).
+  - **The tender's session is pinned by TallyUI, not the app.** `useSale`
+    gets `session: register.saleSession`, and its `startTender` pins the
+    session in force for that tender (TallyUI #170; `cancelTender` and
+    `newSale` drop the pin). `register.saleSession` goes undefined once the
+    session closes, but `complete()` still stamps the pinned session:
+    `stampSession` refuses the closed one and TallyUI makes the sale late
+    (`lateSessionId` and a `late-sale` fact), never unstamped.
   - There is no second `requireOpen()` before the card terminal: the app
     doesn't drive a terminal. "Payment approved on terminal" is pressed
     after the terminal has taken the money, so refusing there would lose a

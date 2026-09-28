@@ -33,6 +33,15 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       if (phone) {
         await expect(page.getByTestId('catalogue-status-row').getByTestId('register-bar-pill')).toBeVisible();
         await shot(page, 'products');
+        // A long status stays on one line beside the pill, cut with an ellipsis (TallyUI #169).
+        const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
+        await search.fill('E2E product');
+        const status = page.getByTestId('catalogue-status-row').getByText(/^Up to date · 5 products · \d+ matching$/);
+        await expect(status).toBeVisible();
+        const [height, clipped] = await status.evaluate((el) => [el.getBoundingClientRect().height, el.scrollWidth > el.clientWidth]);
+        expect([height < 24, clipped]).toEqual([true, true]);
+        await shot(page, 'products-long');
+        await search.fill('');
       }
       await addE2E1(page);
       await openCart(page);
