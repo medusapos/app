@@ -12,7 +12,7 @@ import {
 
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import {
-  GETTING_READY, IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
+  GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
@@ -252,6 +252,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     : <Tender sale={sale} />;
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
+  // The receipt's and the last closure's store (ADR 0018).
+  const receiptStore = { name: settings.storeName, address: settings.location.addressLine };
+  // On a phone the count (and a close to finish) is in the cart view, so it opens there even with an empty cart.
+  const registerStatus = register.session?.status;
+  useEffect(() => { if (phone && (registerStatus === 'counting' || registerStatus === 'closed')) setCartOpen(true); }, [phone, registerStatus]);
   const [gateFocus, setGateFocus] = useState(0);
   const gateFocusHandled = useRef(0);
   const registerBar = (className?: string) => <TillRegisterBar online={state !== 'offline'} onOpenPanel={() => setPanelOpen(true)}
@@ -265,7 +270,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <SyncStatus state={outboxState} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
-  const cart = <RegisterGate currency={pricing.currency} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
+  const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
   </RegisterGate>;
 
@@ -292,10 +297,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
       {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
-      <RegisterPanelSheet currency={pricing.currency} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
+      <RegisterPanelSheet currency={pricing.currency} store={receiptStore} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
+      <RegisterClosedSheet currency={pricing.currency} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
-        store={{ name: settings.storeName, address: settings.location.addressLine }}
+        store={receiptStore}
         topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}
         cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">

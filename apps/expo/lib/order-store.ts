@@ -26,6 +26,8 @@ const addOrders = (db: OrdersDatabase) => addPosOrderCollection(db as unknown as
 const E2E_FAIL_NEXT_OPEN_KEY = 'medusapos-e2e-fail-next-order-store-open';
 // E2E debug only: the hold HoldOrderInserts sets and ReleaseOrderInserts resolves (hooks below).
 let e2eInsertHold: { promise: Promise<void>; release(): void; waiting: number } | undefined;
+// E2E debug only: set by FailNextClosureInsert (hook below), cleared by the one closure insert it fails.
+let e2eFailClosureInsert = false;
 
 // Local document id recording that `carryOverOrders` copied a legacy database (count and time).
 // A record only: it never causes a delete, nor skips reading a legacy database that exists.
@@ -183,9 +185,18 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
           });
         }
         // New at TallyUI 451a0ca, so nothing to migrate or carry over; they share this store's close and watchdog.
-        const { register_sessions } = await db.addCollections({
+        const { register_sessions, closures } = await db.addCollections({
           register_sessions: registerSessionCollection(), cash_movements: { schema: cashMovementSchema }, closures: { schema: closureSchema },
         });
+        // E2E debug only (folded away in production): FailNextClosureInsert fails one closure write, leaving a
+        // session closed with its closure unwritten, as a restart mid-close does (ADR 0018).
+        if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') {
+          closures.preInsert(() => {
+            if (!e2eFailClosureInsert) return;
+            e2eFailClosureInsert = false;
+            throw new Error('E2E: the closure write failed');
+          }, false);
+        }
         await ensureRegister(register_sessions, 'web');
         return { orders, close: async () => { unwatch?.(); await db.close(); } };
       } catch (error) { unwatch?.(); await db.close(); throw error; }
@@ -280,4 +291,5 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
   // How many inserts the hold has stopped, so a test knows the save got past its reads (the session stamp).
   exposeE2eHook('HeldOrderInserts', () => e2eInsertHold?.waiting ?? 0);
   exposeE2eHook('ReleaseOrderInserts', () => { e2eInsertHold?.release(); e2eInsertHold = undefined; });
+  exposeE2eHook('FailNextClosureInsert', () => { e2eFailClosureInsert = true; });
 }

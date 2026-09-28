@@ -160,8 +160,19 @@ phone its register pill opens the cart view, where the picker shows).
 `register.spec.ts`, at 1280 × 800 and at 360 × 780, signs in without that,
 sees the picker and then the open card above a cart whose Cash refuses,
 opens with 100.00, sells `E2E-1` for exact cash, checks the panel's "1 sale
-this session" and expected cash, records a €5.00 paid in and undoes it, and
-takes Close register to the counting placeholder and back. Each state is
+this session" and expected cash, and records a €5.00 paid in and undoes it.
+It then counts the drawer (ADR 0018) with the denomination tiles, exactly
+the expected cash, closes under the €5.00 threshold, checks the closure
+sheet, sees the open card prefilled with that count, and reads the last
+closure's figures behind "Register ›". A second test counts €90.00
+against €100.00 expected, gets "Manager approval", aborts the sign-in
+request to see "Connect to approve, or count again." with only Cancel, then
+approves with the e2e admin's own login. The closure shows "Approved by …",
+and the password is in neither the URL nor web storage. A third test fails
+the closure's write once (`window.__medusaposFailNextClosureInsert()`, an
+`EXPO_PUBLIC_E2E_DEBUG` hook), which leaves the session closed with no
+closure, as a restart mid-close does. It then checks that TallyUI's "Finish
+closing" card completes the close with the stored count. Each state is
 attached as a screenshot (also saved to `REGISTER_SHOTS_DIR` when set).
 
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and

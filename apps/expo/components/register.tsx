@@ -1,8 +1,16 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { OpenRegisterCard, RegisterBar, RegisterColumn, RegisterPanel, RegisterPicker } from '@tallyui/components';
+import { Text, View } from 'react-native';
+import {
+  ClosureSheet, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
+} from '@tallyui/components';
 import { RegisterSessionRequiredError, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
+import { useSession } from '../lib/session-context';
+import { LastClosureSheet, useApprove } from './register-close';
+
+// RegisterColumn's Finish closing button's nativeID (TallyUI #175).
+const FINISH_CLOSE_BUTTON = 'register-column-finish-close-button';
+type CloseInput = Parameters<ReturnType<typeof useRegisterSession>['actions']['closeSession']>[0];
 
 // The refusals at tender start (ADR 0017): paying needs an open register; browsing and the cart don't.
 export const OPEN_TO_PAY = 'Open the register to take payment.';
@@ -11,13 +19,11 @@ export const GETTING_READY = 'Getting ready to save sales…';
 export const CHECK_FAILED = "Couldn't check the register. Try again.";
 
 type Sale = ReturnType<typeof useSale>;
-// How long a confirmed session may take to reach the render before the tender start gives up (a second tap retries).
-const PENDING_SESSION_MS = 3000;
 
 /**
- * The sale the Cart gets: its Cash and Card start the tender only once `requireOpen()` confirms an open session
- * (TallyUI c1's gate at tender start; `complete()` stamps the session useSale pinned then, TallyUI #170). Also
- * reports the tender to the register.
+ * The sale the Cart gets: its Cash and Card start the tender only once `requireSaleSession()` confirms an open
+ * session (TallyUI c1's gate at tender start), and pin that session for the tender (`complete()` stamps it, TallyUI
+ * #170, #172). Also reports the tender to the register.
  */
 export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null } {
   const { register, setTenderInProgress } = useRegister();
@@ -31,37 +37,19 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
   const tender = sale.stage.kind === 'tender';
   useEffect(() => setTenderInProgress(tender), [tender, setTenderInProgress]);
   useEffect(() => () => setTenderInProgress(false), [setTenderInProgress]);
-  // useSale pins the RENDERED session at startTender (TallyUI #170), and requireOpen() reads storage, which can be
-  // ahead of the render (a session just opened). So the tender starts only once the rendered session is the one
-  // requireOpen() confirmed; until then it waits as `pending`, and taps stay ignored.
-  const saleSessionId = register.saleSession?.id;
-  const saleSessionRef = useRef(saleSessionId);
-  saleSessionRef.current = saleSessionId;
-  const [pending, setPending] = useState<{ method: 'cash' | 'external'; id: string } | null>(null);
-  useEffect(() => {
-    if (!pending) return;
-    const settle = () => { setPending(null); checking.current = false; };
-    if (saleSessionId === pending.id) {
-      settle();
-      if (latest.current.stage.kind === 'cart') latest.current.startTender(pending.method);
-      return;
-    }
-    if (saleSessionId) return settle(); // Another session: drop it.
-    const timer = setTimeout(() => { settle(); setRefused(CHECK_FAILED); }, PENDING_SESSION_MS);
-    return () => clearTimeout(timer);
-  }, [pending, saleSessionId]);
   const startTender = (method: 'cash' | 'external') => {
     if (checking.current) return;
     // Before the order store opens there is no session to check, nor one to stamp the sale with.
     if (!register.enabled) return setRefused(GETTING_READY);
     checking.current = true;
-    // Resolves null only while sessions are off; then the tender starts as it did before registers.
-    register.requireOpen().then((id) => {
-      if (latest.current.stage.kind !== 'cart') { checking.current = false; return; }
-      setRefused(null);
-      if (id && saleSessionRef.current !== id) return setPending({ method, id });
+    // requireSaleSession() reads storage, which can be ahead of the render (a session opened just before the tap), so
+    // the confirmed session is passed to startTender explicitly, and useSale pins it for this tender (TallyUI #172).
+    // It resolves null only while sessions are off; the tender then starts as it did before registers.
+    register.requireSaleSession().then((session) => {
       checking.current = false;
-      latest.current.startTender(method);
+      if (latest.current.stage.kind !== 'cart') return;
+      setRefused(null);
+      latest.current.startTender(method, { session: session ?? undefined });
     }, (error: unknown) => {
       checking.current = false;
       if (error instanceof RegisterSessionRequiredError) return setRefused(OPEN_TO_PAY);
@@ -77,7 +65,8 @@ export const IN_ROW = 'h-auto border-b-0 bg-transparent px-0';
 
 /**
  * TallyUI's RegisterBar for this till: the strip under the header when wide, or `IN_ROW` on a phone. Its pill is
- * never a dead label: without a session it brings up the gate (`onGate`), with one it opens the panel.
+ * never a dead label: with an open session it opens the panel; otherwise it brings up the gate (`onGate`), which
+ * also holds the count and, for "Close not finished" (TallyUI #175), focuses the Finish closing button.
  */
 export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
   online: boolean; onOpenPanel: () => void; onGate: () => void; className?: string;
@@ -86,13 +75,18 @@ export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
   if (boundRegisterId === undefined) return null;
   return <View dataSet={{ print: 'hide' }}>
     <RegisterBar register={register} registerId={boundRegisterId} online={online} registerName={registerName ?? undefined}
-      multiRegister={false} onOpenPanel={onOpenPanel} onPressPill={register.session ? onOpenPanel : onGate} className={className} />
+      multiRegister={false} onOpenPanel={onOpenPanel} onPressPill={register.session?.status === 'open' ? onOpenPanel : onGate} className={className} />
   </View>;
 }
 
-/** The register panel (movements with Undo, Close register), opened from the control. */
-export function RegisterPanelSheet({ currency, open, onOpenChange }: { currency: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+/** The register panel (movements with Undo, Close register), opened from the control; between sessions, the last closure's figures. */
+export function RegisterPanelSheet({ currency, store, open, onOpenChange }: {
+  currency: string; store: { name: string; address?: string }; open: boolean; onOpenChange: (open: boolean) => void;
+}) {
   const { register, registerName } = useRegister();
+  if (!register.session && register.lastClosure) {
+    return <LastClosureSheet register={register} currency={currency} store={store} open={open} onOpenChange={onOpenChange} />;
+  }
   return <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
     onOpenChange={onOpenChange} />;
 }
@@ -100,45 +94,58 @@ export function RegisterPanelSheet({ currency, open, onOpenChange }: { currency:
 /**
  * Above the cart until a session is open: the picker while unbound, then the open card, with the cart still
  * usable below. RegisterColumn swaps the cart out wholesale, so it is used only once a session exists, for
- * the count slot while counting.
+ * the count (RegisterCount, ADR 0018) while counting, and for its Finish closing card when a session closed but its
+ * closure didn't finish. A close here shows the closure sheet.
  */
-export function RegisterGate({ currency, refused, cartEmpty, focus, children }: {
-  currency: string; refused: string | null; cartEmpty: boolean; children: ReactNode;
+export function RegisterGate({ currency, online, refused, cartEmpty, focus, children }: {
+  currency: string; online: boolean; refused: string | null; cartEmpty: boolean; children: ReactNode;
   /** A pill tap's request (`key`) and the last one handled, kept by the screen so a gate that mounts for it (a
    *  phone's cart view) still honours it. */
   focus: { key: number; handled: { current: number } };
 }) {
-  const { register, boundRegisterId, registers, bind } = useRegister();
+  const { register, boundRegisterId, registers, bind, close } = useRegister();
+  const { session: signedIn } = useSession();
   const pick = (id: string) => { bind(id).catch((error: unknown) => console.warn('Could not bind the register:', error)); };
-  // A pill tap scrolls the gate into view and focuses its first control (web).
+  // A pill tap scrolls the gate into view and focuses its first control (web): for "Close not finished" (TallyUI
+  // #175), the Finish closing button, even with the app's error line above it.
   const gate = useRef<View>(null);
   useEffect(() => {
     if (focus.handled.current === focus.key) return;
     focus.handled.current = focus.key;
     const node = gate.current as unknown as HTMLElement | null;
     node?.scrollIntoView?.({ block: 'nearest' });
-    node?.querySelector?.<HTMLElement>('input, [role="button"]')?.focus();
+    (node?.querySelector?.<HTMLElement>(`#${FINISH_CLOSE_BUTTON}`) ?? node?.querySelector?.<HTMLElement>('input, [role="button"]'))?.focus();
   }, [focus.key, focus.handled]);
+  const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online);
+  const session = register.session;
+  // Both closes go through the provider's close flow, so its sheet and masking outlive this gate (a phone's cart view).
+  const counting = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, true) } };
+  // A session closed but whose closure didn't finish (a restart mid-close, #88 review) gets RegisterColumn's own
+  // Finish closing card (TallyUI #174), which resumes with the count and approver stored on the session. During a
+  // close (`register.closing`, TallyUI #175) the column keeps the count instead, so the card never flashes.
+  const column = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, false) } };
   return <View ref={gate} className="flex-1">
     {boundRegisterId === null ? <RegisterPicker registers={registers} onPick={pick} /> : null}
-    {boundRegisterId && !register.session ? <OpenRegisterCard register={register} currency={currency} /> : null}
+    {boundRegisterId && !session ? <OpenRegisterCard register={register} currency={currency} /> : null}
     {refused ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{refused}</Text> : null}
-    {boundRegisterId && register.session ? <RegisterColumn register={register} registerId={boundRegisterId} registers={registers}
-      onPick={pick} currency={currency} cartEmpty={cartEmpty} countSlot={<RegisterCountSlot register={register} />}>
+    {/* Why the count's own close failed, above the Finish closing card (which shows only its own run's error). */}
+    {session?.status === 'closed' && !register.closing && close.error
+      ? <Text testID="close-error" accessibilityRole="alert" className="px-4 pt-3 text-destructive">{close.error}</Text> : null}
+    {boundRegisterId && session ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
+      onPick={pick} currency={currency} cartEmpty={cartEmpty}
+      countSlot={<RegisterCount register={counting} currency={currency} approve={approve} />}>
       {children}
     </RegisterColumn> : children}
+    {dialog}
   </View>;
 }
 
-/** Job B's count UI goes here (RegisterColumn's `countSlot`); until it lands, counting can only go back to selling. */
-export function RegisterCountSlot({ register }: { register: ReturnType<typeof useRegisterSession> }) {
-  const [error, setError] = useState('');
-  return <View className="flex-1 items-center justify-center gap-4 p-4">
-    <Text className="text-foreground">Counting arrives in the next update.</Text>
-    <Pressable accessibilityRole="button" onPress={() => { register.actions.backToSelling().catch((e: unknown) => setError(String(e))); }}
-      className="min-h-11 justify-center rounded-md border border-border bg-card px-4 py-3">
-      <Text className="text-center text-foreground">Back to selling</Text>
-    </Pressable>
-    {error ? <Text accessibilityRole="alert" className="text-destructive">{error}</Text> : null}
-  </View>;
+/**
+ * TallyUI's ClosureSheet for the closure a close through the app resolved with (it shows "Approved by …" itself,
+ * #174), until Done. Mounted by the sale screen, not the gate, so a phone's cart view closing doesn't lose it.
+ */
+export function RegisterClosedSheet({ currency }: { currency: string }) {
+  const { register, close } = useRegister();
+  if (!close.shown || register.lastClosure?.id !== close.shown) return null;
+  return <ClosureSheet register={register} currency={currency} onDone={close.dismiss} />;
 }

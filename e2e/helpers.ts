@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
-const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
+export const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 
 // The e2e store has two regions and no default one, so a fresh till shows "Set up this till";
 // the existing specs keep Europe (dk, 25% exclusive). Returns whether the choice screen showed;

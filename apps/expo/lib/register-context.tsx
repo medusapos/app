@@ -4,7 +4,9 @@ import {
   bindRegister, getBoundRegisterId, observeRegister$, useRegisterSession, type PosOrder,
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
+import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { registerCollections, type RegisterCollections } from './order-store';
+import { defaultStorage } from './session';
 import { useSession } from './session-context';
 
 /**
@@ -24,7 +26,21 @@ export type RegisterContextValue = {
   bind(id: string): Promise<void>;
   /** The sale screen reports its tender here: counting and closing refuse while a sale is at tender. */
   setTenderInProgress(inProgress: boolean): void;
+  /** The app's closes (ADR 0018), kept here so they outlive the cart view that started them (a phone's, #89 review). */
+  close: CloseFlow;
 };
+
+export type CloseFlow = {
+  /** `closeSession` through the app: its closure's sheet then shows. `fromCount`: the count's own close, whose failure
+   *  is kept in `error` (the Finish closing card shows only its own run's error). */
+  run(input: Parameters<CloseSession>[0], fromCount: boolean): ReturnType<CloseSession>;
+  /** The closure whose ClosureSheet shows, until `dismiss`. */
+  shown: string | null;
+  dismiss(): void;
+  /** Why the count's own close last failed, shown above the Finish closing card; cleared by the next close. */
+  error: string;
+};
+type CloseSession = ReturnType<typeof useRegisterSession>['actions']['closeSession'];
 
 type Bound = { collections: RegisterCollections; storeKey: string; id: string | null; name: string | null };
 
@@ -52,7 +68,32 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
     actor: { id: session?.email ?? '', name: session?.email ?? '' },
     timezone: 'device', softwareVersion: appVersion, tenderInProgress,
+    // Part B (ADR 0018): a close over the threshold needs an approver; blind counting stays off.
+    varianceThreshold: VARIANCE_THRESHOLD_MINOR,
+    // Cashier ids are their emails; an approver's id (a Medusa user id) resolves through the names kept at approval,
+    // which a close resumed after a restart needs. Read at call time, so an approval just made is found.
+    labels: { registerName: current?.name ?? undefined, resolveCashierName: (id) => loadApprovers(defaultStorage(), storeKey)[id] ?? id },
   });
+  const [shown, setShown] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState('');
+  // TallyUI #175 runs one close per register (a second closeSession joins it) and exposes `register.closing`, with
+  // which RegisterColumn keeps the count up during a close and shows its Finish closing card only for a closed
+  // session that isn't closing: the app no longer masks anything.
+  const close: CloseFlow = {
+    async run(input, fromCount) {
+      setCloseError('');
+      try {
+        const closure = await register.actions.closeSession(input);
+        setShown(closure.id);
+        return closure;
+      } catch (error) {
+        // The card shows its own run's error itself; only the count's would otherwise go unseen.
+        if (fromCount) setCloseError(error instanceof Error ? error.message : String(error));
+        throw error;
+      }
+    },
+    shown, dismiss: () => setShown(null), error: closeError,
+  };
   const value: RegisterContextValue = {
     register, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,
     async bind(id) {
@@ -60,6 +101,7 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
       if (collections && choice) await bindRegister(collections.sessions, storeKey, choice);
     },
     setTenderInProgress,
+    close,
   };
   return <RegisterContext.Provider value={value}>{children}</RegisterContext.Provider>;
 }
