@@ -1,5 +1,7 @@
 import type { CommandResult } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { MedusaError } from '@medusajs/framework/utils'
+import type { RegisterCommandResult } from '../tally-register/types'
+import type { CommandErrorWithData } from '../../workflows/tally-order-create/fiscal-figures'
 
 /** Validates a CommandResult (e.g. one read back from the ledger). Throws
  *  MedusaError INVALID_DATA naming the first bad field. */
@@ -14,7 +16,10 @@ export function parseCommandResult(value: unknown): CommandResult {
   if (input.status !== 'applied' && input.status !== 'duplicate' && input.status !== 'rejected') {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid status')
   }
-  const result: CommandResult = { id: input.id, status: input.status }
+  // BRIDGE (TallyUI c2a-1)
+  const result: CommandResult & { register?: RegisterCommandResult; error?: CommandErrorWithData } = { id: input.id, status: input.status }
+  const object = (value: unknown): boolean => typeof value === 'object' && value !== null
+    && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
   if (input.serverRefs !== undefined) {
     if (typeof input.serverRefs !== 'object' || input.serverRefs === null || Array.isArray(input.serverRefs)) {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid serverRefs')
@@ -32,7 +37,11 @@ export function parseCommandResult(value: unknown): CommandResult {
     result.serverRefs = { orderId: refs.orderId, totalMinor: refs.totalMinor as number }
     if (refs.displayId !== undefined) result.serverRefs.displayId = refs.displayId as string
   }
-  if (result.status === 'applied' && result.serverRefs === undefined) {
+  if (input.register !== undefined) {
+    if (!object(input.register)) throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid register')
+    result.register = input.register as RegisterCommandResult
+  }
+  if (result.status === 'applied' && result.serverRefs === undefined && result.register === undefined) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid serverRefs: required for applied')
   }
   if (input.warnings !== undefined) {
@@ -77,6 +86,10 @@ export function parseCommandResult(value: unknown): CommandResult {
       throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid error.message')
     }
     result.error = { code: error.code, message: error.message }
+    if (error.data !== undefined) {
+      if (!object(error.data)) throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid error.data')
+      result.error.data = error.data as Record<string, unknown>
+    }
   }
   if (result.status === 'rejected' && result.error === undefined) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid error: required for rejected')

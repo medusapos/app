@@ -157,14 +157,13 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
       }
     })
 
-    it('an older transition snapshot does not overwrite a newer one', async () => {
+    it('transitions apply in received order whatever their at: a later-received transition with an earlier at still applies', async () => {
       await service.openSession(first)
       await service.transition({ sessionId: first.sessionId, status: 'counting', at })
-      const before = await snapshot()
       expect(await service.transition({ sessionId: first.sessionId, status: 'open', at: '2026-09-28T10:00:00Z' })).toEqual({
-        kind: 'ok', register: { session: { id: first.sessionId, status: 'counting' }, counters: zero },
+        kind: 'ok', register: { session: { id: first.sessionId, status: 'open' }, counters: zero },
       })
-      expect(await snapshot()).toEqual(before)
+      expect(await sql('select status, status_at from tally_register_session')).toEqual([{ status: 'open', status_at: '2026-09-28T10:00:00Z' }])
     })
 
     it.each([[at, 'not-a-date'], ['not-a-date', at]])('applies a snapshot when a timestamp cannot parse (%s, %s)', async (storedAt, incomingAt) => {
