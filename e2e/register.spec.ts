@@ -146,6 +146,29 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(figures).toHaveCount(0);
     });
 
+    test('a close whose closure write failed shows TallyUI\'s Finish closing card, which completes it with the stored count', async ({ page }) => {
+      await signIn(page);
+      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+      const count = page.getByTestId('register-count');
+      await count.getByTestId('count-amount').fill('100.00');
+      // The session closes, then its closure write fails: as a restart mid-close leaves it (an e2e debug hook).
+      await page.evaluate(() => (window as Window & { __medusaposFailNextClosureInsert?: () => void }).__medusaposFailNextClosureInsert!());
+      await count.getByTestId('count-close').click();
+      const finish = page.getByTestId('register-column-finish-close');
+      await expect(finish).toBeVisible();
+      await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+      await expect(page.getByTestId('closure-sheet')).toHaveCount(0);
+      await shot(page, 'finish-close');
+      await finish.getByTestId('register-column-finish-close-button').click();
+      const sheet = page.getByTestId('closure-sheet');
+      await expect(sheet.getByTestId('closure-number')).toHaveText('Closure #1');
+      await expect(sheet.getByTestId('closure-counted-cash')).toHaveText(/^Counted €?\s?100[.,]00\s?€?$/);
+      await sheet.getByTestId('closure-done').click();
+      await expect(page.getByTestId('open-register-amount')).toHaveValue('100.00');
+      await expect(finish).toHaveCount(0);
+    });
+
     test('over the threshold: the approval dialog, its offline refusal, then a manager login approves the close', async ({ page }) => {
       await signIn(page);
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
@@ -179,8 +202,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await dialog.getByTestId('approval-approve').click();
       const sheet = page.getByTestId('closure-sheet');
       await expect(sheet.getByTestId('closure-number')).toHaveText('Closure #1');
-      await expect(page.getByTestId('closure-approved-by')).toHaveText(/^Approved by \S/);
-      const approvedBy = await page.getByTestId('closure-approved-by').textContent();
+      // TallyUI's ClosureSheet shows the approver itself (#174).
+      await expect(sheet.getByTestId('closure-approved-by')).toHaveText(/^Approved by \S/);
+      const approvedBy = await sheet.getByTestId('closure-approved-by').textContent();
       await expect(sheet.getByTestId('closure-check')).toHaveCSS('opacity', '1');
       await shot(page, 'closure');
       await sheet.getByTestId('closure-done').click();

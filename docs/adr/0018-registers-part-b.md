@@ -11,8 +11,10 @@ recorded cash movements; its Close register reached a placeholder. TallyUI
 `ClosureSheet`, `buildClosureDocument`) and #168 (`approvedBy` and
 `approvedByName` threaded to `closeSession`, the closure's
 `breakdowns.approved_by` / `approved_by_name` and the session's
-`approved_by`; `RegisterApprovalRequiredError`, the hook's own gate). No pin
-change.
+`approved_by`; `RegisterApprovalRequiredError`, the hook's own gate). Part B
+is finished on `25665e1` (#172: `requireSaleSession()` and
+`startTender(method, { session })`; #174: `ClosureSheet` shows the approver,
+`RegisterColumn`'s Finish closing card, and complete closure-document types).
 
 A close whose cash count is off by more than a threshold needs someone to
 approve it. The Front desk (2026-09-28) chose how: option (b), a second
@@ -76,20 +78,26 @@ close can't complete over the threshold without an approver.
   keeps returning a session that is `closed` but whose closure row was never
   written, and `openSession` refuses with `RegisterCloseIncompleteError`
   until its close finishes. Showing the open card would therefore be a dead
-  end. Above the cart, the gate shows "The last close didn't finish. Finish
-  it to open the register again." with **Finish closing**, which calls
-  `closeSession({ counted: session.counted })`. TallyUI resumes it with the
-  count and approver already stored on the session (a resumed close isn't
-  gated again), then the closure sheet shows. The cart stays usable, and
-  paying refuses as for a closed register.
+  end. The gate renders `RegisterColumn` for that session, and the column
+  shows TallyUI's "Finish closing" card (#174) in place of the cart. The card
+  resumes the close through `closeSession` with the count and approver
+  already stored on the session (a resumed close isn't gated again), and
+  shows any error. The app wraps that `closeSession` like the count's, so
+  the closure sheet follows, then the open card. On a phone the cart view
+  opens for it.
+  - While the count's own close is writing its closure, the session is
+    already `closed` for a moment. For that moment the gate gives
+    `RegisterColumn` the session as `counting`, so the busy count stays on
+    screen instead of flashing the card, whose button would start a second
+    close. Only the count's own in-flight close does this; a close found
+    unfinished at start-up always gets the card.
 - **After the close.** When `closeSession` resolves, the gate shows TallyUI's
   `ClosureSheet` for that closure (no `onPrint` yet). Its Done goes back to
   selling, where `OpenRegisterCard` is prefilled with the last counted cash.
-  `ClosureSheet` shows no approver, so the app adds a line, "Approved by
-  {name}", under it in the root portal, pinned to the bottom of the
-  viewport above the overlay. The line shows only when the closure has
-  `approved_by`. "Approval pending" never appears, because a close can't
-  complete without approval.
+  Since #174 `ClosureSheet` itself shows "Approved by {approved_by_name, or
+  else approved_by}" under the figures, blind or not, only when the closure
+  has an approver. The app's own floating line is gone. "Approval pending"
+  never appears, because a close can't complete without approval.
 - **The last closure's figures (the Z).** Between sessions, when the
   register is closed, "Register ›" opens `LastClosureSheet` in place of the
   panel, which would otherwise show only disabled controls. This is the
@@ -145,8 +153,5 @@ close can't complete over the threshold without an approver.
   opens, "Register ›" is the panel again, and the last closure can't be
   viewed until that session closes. Follow-up: a Register menu entry once
   registers c2 lands.
-
-- The app's "Approved by" line sits at the bottom of the viewport, not
-  directly under the sheet: `ClosureSheet` has no slot for it.
 - The approver-name map is per device. A close resumed on another till, which
   can't happen while sessions are local-only, would name the approver by id.

@@ -168,7 +168,11 @@ closure's figures behind "Register ›". A second test counts €90.00
 against €100.00 expected, gets "Manager approval", aborts the sign-in
 request to see "Connect to approve, or count again." with only Cancel, then
 approves with the e2e admin's own login. The closure shows "Approved by …",
-and the password is in neither the URL nor web storage. Each state is
+and the password is in neither the URL nor web storage. A third test fails
+the closure's write once (`window.__medusaposFailNextClosureInsert()`, an
+`EXPO_PUBLIC_E2E_DEBUG` hook), which leaves the session closed with no
+closure, as a restart mid-close does. It then checks that TallyUI's "Finish
+closing" card completes the close with the stored count. Each state is
 attached as a screenshot (also saved to `REGISTER_SHOTS_DIR` when set).
 
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and

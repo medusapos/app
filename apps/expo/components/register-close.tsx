@@ -1,10 +1,9 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { ScrollView, View, useWindowDimensions } from 'react-native';
 import { getLocales } from 'expo-localization';
-import { Button, ClosureSheet, Dialog, DialogContent, DialogTitle, Input, Label, Text } from '@tallyui/components';
+import { Button, Dialog, DialogContent, DialogTitle, Input, Label, Text } from '@tallyui/components';
 import { formatMoney, minorUnitDigits, moneyFromDecimalString } from '@tallyui/core';
-import { buildClosureDocument, type Closure, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
-import { Portal } from '@tallyui/primitives';
+import { buildClosureDocument, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
 import { ApprovalError, rememberApprover, requestApproval, type Approval } from '../lib/approval';
 import { defaultStorage } from '../lib/session';
 
@@ -79,35 +78,6 @@ function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string; online
   </Dialog>;
 }
 
-/** The approver the closure froze (`breakdowns.approved_by`, named by `approved_by_name`), or null without one. */
-export function closureApprover(closure: Closure): string | null {
-  const { approved_by: id, approved_by_name: name } = closure.breakdowns;
-  if (typeof id !== 'string' || !id) return null;
-  return typeof name === 'string' && name ? name : id;
-}
-
-/** TallyUI's ClosureSheet, with the app's "Approved by" line under it (in the portal, above the sheet's overlay). */
-export function RegisterClosedSheet({ register, currency, onDone }: { register: Register; currency: string; onDone: () => void }) {
-  const approver = register.lastClosure ? closureApprover(register.lastClosure) : null;
-  return <>
-    <ClosureSheet register={register} currency={currency} onDone={onDone} />
-    {approver ? <Portal name="closure-approved-by">
-      <View className="pointer-events-none fixed inset-x-0 bottom-0 z-50 items-center p-4">
-        <Text testID="closure-approved-by" className="rounded-md bg-background px-4 py-2">{`Approved by ${approver}`}</Text>
-      </View>
-    </Portal> : null}
-  </>;
-}
-
-/** A session closed but whose closure didn't finish (a restart mid-close, #88 review): Finish closing resumes it. */
-export function FinishClose({ closing, error, onFinish }: { closing: boolean; error: string; onFinish: () => void }) {
-  return <View testID="finish-close" className="gap-3 p-4">
-    <Text>{closing ? 'Finishing the close…' : "The last close didn't finish. Finish it to open the register again."}</Text>
-    {error ? <Text accessibilityRole="alert" className="text-destructive">{error}</Text> : null}
-    <Button testID="finish-close-button" className="min-h-11" disabled={closing} onPress={onFinish}><Text>Finish closing</Text></Button>
-  </View>;
-}
-
 const I18N = { over: 'Over', short: 'Short', exact: 'Exact', paid_in: 'Paid in', paid_out: 'Paid out', no_sale: 'No sale', void: 'Void' };
 
 export function closureContext(currency: string, store: { name: string; address?: string }): ClosureContext {
@@ -141,9 +111,8 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
   if (!open || !closure) return null;
   const { closure: z, fiscal } = buildClosureDocument(closure, closureContext(currency, store));
   const approver = z.approved_by ? String(z.breakdowns.labels.approved_by_name || z.approved_by) : null;
-  // The envelope carries every closure field; its type names only the ones it adds.
-  const unsynced = Number((z as { unsynced_count?: unknown }).unsynced_count ?? 0);
-  const movements = z.breakdowns.movements as (typeof z.breakdowns.movements[number] & { id?: unknown; reason?: unknown })[];
+  const unsynced = z.unsynced_count;
+  const movements = z.breakdowns.movements;
   return <Dialog open onOpenChange={onOpenChange}>
     <DialogContent testID="last-closure" className="flex-col overflow-hidden" style={{ maxHeight: Math.max(280, height - 64) }}>
       <DialogTitle>{`Last closure · Closure #${fiscal.receipt_number}`}</DialogTitle>
@@ -161,8 +130,8 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
         </View>)}
         {movements.length ? <View testID="last-closure-movements" className="border-t border-border pt-2">
           <Text className="font-semibold">Paid in / out</Text>
-          {movements.map((movement) => <Row key={String(movement.id)} label={String(movement.type_label)}
-            value={`${movement.amount_display}${movement.reason ? ` · ${String(movement.reason)}` : ''}${movement.voided ? ' · undone' : ''}`} />)}
+          {movements.map((movement) => <Row key={movement.id} label={movement.type_label}
+            value={`${movement.amount_display}${movement.reason ? ` · ${movement.reason}` : ''}${movement.voided ? ' · undone' : ''}`} />)}
         </View> : null}
         {unsynced > 0 ? <Text testID="last-closure-unsynced" accessibilityRole="alert" className="text-warning">
           {`${unsynced} ${unsynced === 1 ? 'sale' : 'sales'} not sent yet · ${z.unsynced_total_display}`}</Text> : null}

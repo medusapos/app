@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Text, View } from 'react-native';
-import { OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker } from '@tallyui/components';
+import {
+  ClosureSheet, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
+} from '@tallyui/components';
 import { RegisterSessionRequiredError, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
-import { FinishClose, LastClosureSheet, RegisterClosedSheet, useApprove } from './register-close';
+import { LastClosureSheet, useApprove } from './register-close';
 
 type Register = ReturnType<typeof useRegisterSession>;
 
@@ -90,8 +92,8 @@ export function RegisterPanelSheet({ currency, store, open, onOpenChange }: {
 /**
  * Above the cart until a session is open: the picker while unbound, then the open card, with the cart still
  * usable below. RegisterColumn swaps the cart out wholesale, so it is used only once a session exists, for
- * the count (RegisterCount, ADR 0018) while counting. A close here shows the closure sheet; a session closed but
- * whose closure didn't finish offers Finish closing above the cart.
+ * the count (RegisterCount, ADR 0018) while counting, and for its Finish closing card when a session closed but its
+ * closure didn't finish. A close here shows the closure sheet.
  */
 export function RegisterGate({ currency, online, refused, cartEmpty, focus, children }: {
   currency: string; online: boolean; refused: string | null; cartEmpty: boolean; children: ReactNode;
@@ -112,40 +114,41 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
     node?.querySelector?.<HTMLElement>('input, [role="button"]')?.focus();
   }, [focus.key, focus.handled]);
   const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online);
-  const [closing, setClosing] = useState(false);
-  const [closeError, setCloseError] = useState('');
-  // The closure a close here resolved with: its sheet shows until Done.
+  // The closure a close here resolved with (the count's, or RegisterColumn's Finish closing card): its sheet shows
+  // until Done.
   const [closed, setClosed] = useState<string | null>(null);
-  const closeSession: Register['actions']['closeSession'] = async (input) => {
-    setClosing(true);
-    setCloseError('');
+  // The count's own close is in flight.
+  const [closingCount, setClosingCount] = useState(false);
+  const closeThen = (fromCount: boolean): Register['actions']['closeSession'] => async (input) => {
+    if (fromCount) setClosingCount(true);
     try {
       const closure = await register.actions.closeSession(input);
       setClosed(closure.id);
       return closure;
-    } catch (error) {
-      setCloseError(error instanceof Error ? error.message : String(error));
-      throw error;
     } finally {
-      setClosing(false);
+      if (fromCount) setClosingCount(false);
     }
   };
-  const counting = { ...register, actions: { ...register.actions, closeSession } };
   const session = register.session;
+  const counting = { ...register, actions: { ...register.actions, closeSession: closeThen(true) } };
+  // A session closed but whose closure didn't finish (a restart mid-close, #88 review) gets RegisterColumn's own
+  // Finish closing card (TallyUI #174), which resumes with the count and approver stored on the session. While the
+  // count's own close is writing its closure, the session is already `closed`: the column keeps showing the (busy)
+  // count instead of flashing that card, whose button would start a second close.
+  const column = { ...register, actions: { ...register.actions, closeSession: closeThen(false) },
+    session: closingCount && session?.status === 'closed' ? { ...session, status: 'counting' as const } : session };
   return <View ref={gate} className="flex-1">
     {boundRegisterId === null ? <RegisterPicker registers={registers} onPick={pick} /> : null}
     {boundRegisterId && !session ? <OpenRegisterCard register={register} currency={currency} /> : null}
-    {/* A resumed close keeps the count and approver already stored on the session (TallyUI's closeSession). */}
-    {session?.status === 'closed' ? <FinishClose closing={closing} error={closeError}
-      onFinish={() => { closeSession({ counted: session.counted ?? {} }).catch(() => {}); }} /> : null}
     {refused ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{refused}</Text> : null}
-    {boundRegisterId && session ? <RegisterColumn register={register} registerId={boundRegisterId} registers={registers}
+    {boundRegisterId && session ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
       onPick={pick} currency={currency} cartEmpty={cartEmpty}
       countSlot={<RegisterCount register={counting} currency={currency} approve={approve} />}>
       {children}
     </RegisterColumn> : children}
     {dialog}
+    {/* TallyUI's sheet shows "Approved by …" itself (#174). */}
     {closed && register.lastClosure?.id === closed
-      ? <RegisterClosedSheet register={register} currency={currency} onDone={() => setClosed(null)} /> : null}
+      ? <ClosureSheet register={register} currency={currency} onDone={() => setClosed(null)} /> : null}
   </View>;
 }
