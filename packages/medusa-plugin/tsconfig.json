@@ -1,7 +1,6 @@
 {
   "compilerOptions": {
     "baseUrl": ".",
-    "paths": { "@tallyui/core": ["./.tallyui-types/commands.d.ts"] },
     "target": "ES2021",
     "esModuleInterop": true,
     "module": "Node16",
