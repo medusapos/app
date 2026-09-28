@@ -1,8 +1,27 @@
 import type { SearchTypes } from "@medusajs/framework/types";
 import "@medusajs/framework/modules-sdk";
 import productIndex from "../search/product";
+import { resolveProductIds } from "../search/helpers/resolve-product-ids"
 
 describe("product search ingestion", () => {
+  it.each([
+    { name: "product-option.created", ids: ["opt_1", "opt_2"] },
+    { name: "product-variant.created", ids: ["variant_1", "variant_2"] },
+  ])("resolveProductIds skips rows query.graph does not return ($name)", async ({ name, ids }) => {
+    const graph = jest.fn(async () => ({
+      data: [undefined, { product_id: "prod_2" }],
+    }))
+    const context = {
+      container: { query: { graph } },
+      index: { entity: "product", primary_key: "id" },
+    } as unknown as SearchTypes.SearchIngestionContext
+
+    await expect(resolveProductIds(
+      { name, data: ids.map((id) => ({ id })) },
+      context,
+    )).resolves.toEqual(["prod_2"])
+  })
+
   it("consumes product deletion without loading prices", async () => {
     const ids = ["prod_1", "prod_2"]
     const graph = jest.fn()
