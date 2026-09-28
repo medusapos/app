@@ -30,14 +30,18 @@ jobs:
         with:
           package_json_file: app/package.json
       - uses: actions/setup-node@v5
+        id: setup-node
         with:
           node-version-file: app/apps/expo/package.json
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: app
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - run: python3 scripts/assert-no-premium-side-effects.py
+        working-directory: app
+        env:
+          SETUP_NODE_CACHE_HIT: ${{ steps.setup-node.outputs.cache-hit }}
       - run: pnpm typecheck
         working-directory: app
       - run: pnpm test
@@ -68,14 +72,18 @@ jobs:
         with:
           package_json_file: app/package.json
       - uses: actions/setup-node@v5
+        id: setup-node
         with:
           node-version-file: app/apps/expo/package.json
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: app
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - run: python3 scripts/assert-no-premium-side-effects.py
+        working-directory: app
+        env:
+          SETUP_NODE_CACHE_HIT: ${{ steps.setup-node.outputs.cache-hit }}
       - run: npm ci
         working-directory: app/packages/medusa-plugin
       - run: npm ci
@@ -109,14 +117,18 @@ jobs:
         with:
           package_json_file: app/package.json
       - uses: actions/setup-node@v5
+        id: setup-node
         with:
           node-version-file: app/apps/expo/package.json
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
+          package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: app
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - run: python3 scripts/assert-no-premium-side-effects.py
+        working-directory: app
+        env:
+          SETUP_NODE_CACHE_HIT: ${{ steps.setup-node.outputs.cache-hit }}
       - run: pnpm --filter @medusapos/expo build:web
         env:
           CI: '1'
