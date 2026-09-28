@@ -1,11 +1,20 @@
+import { logger } from "@medusajs/framework/logger"
 import type { SearchTypes } from "@medusajs/framework/types";
 import "@medusajs/framework/modules-sdk";
 import productIndex from "../search/product";
 import { resolveProductIds } from "../search/helpers/resolve-product-ids"
 
 describe("product search ingestion", () => {
+  beforeEach(() => {
+    jest.spyOn(logger, "warn").mockImplementation(() => {})
+    jest.spyOn(logger, "debug").mockImplementation(() => {})
+  })
+
+  afterEach(() => {
+    jest.restoreAllMocks()
+  })
+
   it.each([
-    { name: "product-option.created", ids: ["opt_1", "opt_2"] },
     { name: "product-variant.created", ids: ["variant_1", "variant_2"] },
   ])("resolveProductIds skips rows query.graph does not return ($name)", async ({ name, ids }) => {
     const graph = jest.fn(async () => ({
@@ -19,6 +28,71 @@ describe("product search ingestion", () => {
     await expect(resolveProductIds(
       { name, data: ids.map((id) => ({ id })) },
       context,
+    )).resolves.toEqual(["prod_2"])
+  })
+
+  it.each([
+    {
+      title: "product-option events select products.id and resolve every linked product",
+      name: "product-option.updated", field: "products.id",
+      row: { id: "opt_1", products: [{ id: "prod_1" }, { id: "prod_2" }] },
+    },
+    {
+      title: "product-option-value events select option.products.id",
+      name: "product-option-value.updated", field: "option.products.id",
+      row: { id: "optval_1", option: { products: [{ id: "prod_1" }, { id: "prod_2" }] } },
+    },
+  ])("$title", async ({ name, field, row }) => {
+    const graph = jest.fn(async () => ({ data: [row] }))
+    const context = {
+      container: { query: { graph } },
+    } as unknown as SearchTypes.SearchIngestionContext
+
+    await expect(resolveProductIds({ name, data: { id: row.id } }, context))
+      .resolves.toEqual(["prod_1", "prod_2"])
+    expect(graph).toHaveBeenCalledWith(expect.objectContaining({
+      fields: expect.arrayContaining(["id", field]),
+      filters: { id: [row.id] },
+    }))
+    expect(logger.warn).not.toHaveBeenCalled()
+    expect(logger.debug).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    {
+      title: "an event whose rows resolve to no products logs a warning with the event name and ids",
+      name: "product-option.updated", level: "warn" as const, other: "debug" as const,
+    },
+    {
+      title: "a new standalone option logs at debug, not warn",
+      name: "product-option.created", level: "debug" as const, other: "warn" as const,
+    },
+  ])("$title", async ({ name, level, other }) => {
+    const ids = ["opt_1", "opt_2"]
+    const graph = jest.fn(async () => ({ data: ids.map((id) => ({ id, products: [] })) }))
+    const context = {
+      container: { query: { graph } },
+    } as unknown as SearchTypes.SearchIngestionContext
+
+    await expect(resolveProductIds({ name, data: ids.map((id) => ({ id })) }, context))
+      .resolves.toEqual([])
+    expect(logger[level]).toHaveBeenCalledTimes(1)
+    expect(logger[level]).toHaveBeenCalledWith(
+      `[search] product index: ${name} product-option opt_1, opt_2 resolved to no products; nothing re-indexed`,
+    )
+    expect(logger[other]).not.toHaveBeenCalled()
+  })
+
+  it("an undefined row never throws", async () => {
+    const graph = jest.fn(async () => ({
+      data: [undefined, { id: "opt_2", products: [{ id: "prod_2" }] }],
+    }))
+    const context = {
+      container: { query: { graph } },
+    } as unknown as SearchTypes.SearchIngestionContext
+
+    await expect(resolveProductIds(
+      { name: "product-option.updated", data: [{ id: "opt_1" }, { id: "opt_2" }] }, context,
     )).resolves.toEqual(["prod_2"])
   })
 
