@@ -8,6 +8,7 @@ import { commandFingerprint } from './fingerprint'
 import type { StockTopUp } from './stock'
 import { payloadShapeErrors } from './payload-shape'
 import { runOrderCreate, type TallyPluginOptions } from './run'
+import { isStoreConfigurationError } from './store-configuration-error'
 
 export type ExecuteOutcome =
   | { kind: 'result'; result: CommandResult }
@@ -65,9 +66,17 @@ export async function executeOrderCreate(
           }
           throw error
         }
-        const result = await runOrderCreate(container, command, options, {
-          claimToken: claim.claimToken, carriedTopUps: (claim.command.stock_topups_applied ?? []) as unknown as StockTopUp[],
-        })
+        let result: CommandResult
+        try {
+          result = await runOrderCreate(container, command, options, {
+            claimToken: claim.claimToken, carriedTopUps: (claim.command.stock_topups_applied ?? []) as unknown as StockTopUp[],
+          })
+        } catch (error) {
+          if (!isStoreConfigurationError(error)) throw error
+          return { kind: 'result', result: { id, status: 'rejected', error: {
+            code: 'store_configuration', message: error.message,
+          } } }
+        }
         await ledger.complete(id, claim.claimToken, result)
         completed = true
         return { kind: 'result', result }
