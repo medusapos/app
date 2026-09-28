@@ -34,6 +34,15 @@ it('the golden v3 envelope passes validation unchanged', () => {
   expect(fiscalFiguresErrors(payload)).toStrictEqual([])
 })
 
+it('a 1-unit change to a taxByRate figure fails validation', () => {
+  const input = structuredClone(payload)
+  input.taxByRate![0].taxMinor += 1
+  expect(fiscalFiguresErrors(input)).toEqual([
+    'taxByRate: expected the sum of taxMinor to equal payload.taxMinor',
+    'taxByRate[0].grossMinor: expected netMinor + taxMinor',
+  ])
+})
+
 it('the golden v3 envelope is stored as sent', () => {
   const result = planOrderCreate(payload, {
     commandId: fixture.id,
@@ -48,8 +57,8 @@ it('the golden v3 envelope is stored as sent', () => {
   const { metadata, customer_id } = result.plan.draftOrder
   const totals = metadata.tally_pos_totals as { v: number } & Pick<OrderCreatePayloadV3, 'display' | 'taxByRate'>
   expect(totals.v).toBe(2)
-  expect(totals.display).toStrictEqual(fixture.payload.display)
-  expect(totals.taxByRate).toStrictEqual(fixture.payload.taxByRate)
+  expect(JSON.stringify(totals.display)).toBe(JSON.stringify(fixture.payload.display))
+  expect(JSON.stringify(totals.taxByRate)).toBe(JSON.stringify(fixture.payload.taxByRate))
   expect(metadata.tally_session_id).toBe(fixture.payload.sessionId)
   expect(metadata.tally_customer_id).toBe(fixture.payload.customer.customerId)
   expect(customer_id).toBe(fixture.payload.customer.customerId)
