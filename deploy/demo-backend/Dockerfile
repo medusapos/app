@@ -20,7 +20,7 @@ COPY . /src/app
 WORKDIR /src/app/packages/medusa-plugin
 RUN npm run build && npm pack
 WORKDIR /src/app/dev/medusa-store
-RUN npm install --no-save --no-audit --no-fund /src/app/packages/medusa-plugin/medusapos-medusa-plugin-0.0.1.tgz
+RUN npm install --no-save --no-audit --no-fund /src/app/packages/medusa-plugin/medusapos-medusa-plugin-*.tgz
 WORKDIR /src/app/dev/medusa-store/apps/backend
 RUN npx medusa build
 

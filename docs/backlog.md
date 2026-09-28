@@ -53,11 +53,28 @@ A Playwright trace of the hosted smoke (app.medusapos.com against the demo backe
 - the first catalogue sync takes **47 s** to reach "Up to date · 1,956 products";
 - each product search or add-to-cart step afterwards takes **3–6 s**.
 
-The sale then finished at 88 s, and the 90 s test timeout cancelled its sync POST, so the smoke failed. The trace is kept at `~/agent/handoff/smoke-hosted-trace-2026-09-28.zip` (open with `npx playwright show-trace`). Next is a read-only profiling spike on the hosted web build that ends in a spec. It should find where the time goes: the RxDB query, a missing index, SQLite-wasm/OPFS, or rendering.
+(That run's smoke failure was not the slowness: its sale never synced because the demo's seed put the E2E products on a different shipping profile from the shipping option the plugin picked, and the plugin retried the refusal forever; fixed in #93, #94 and the profile-aware pick.) The trace is kept at `~/agent/handoff/smoke-hosted-trace-2026-09-28.zip` (open with `npx playwright show-trace`). Next is a read-only profiling spike on the hosted web build that ends in a spec. It should find where the time goes: the RxDB query, a missing index, SQLite-wasm/OPFS, or rendering.
 
 ## Keep the till's email when a found customer is attached
 
 When `order.create` v3 names a customer the plugin finds, the till's email is deliberately not passed, because Medusa's `findOrCreateCustomerStep` would swap in a guest customer. So the order takes the customer's stored email. If that customer has none, the order email is null and the email the cashier typed is kept nowhere (`packages/medusa-plugin/src/workflows/tally-order-create/plan.ts`). Record it as `tally_customer_email` metadata, and add a test for a found customer without an email (from the #90 delta review).
+
+## Publish the plugin to npm with trusted publishing
+
+v0.1.0 ships `@medusapos/medusa-plugin` as a tarball attached to the GitHub release. That's an MVP-week stopgap. From the next release, publish it to npm the way TallyUI does: a release workflow using npm trusted publishing (OIDC from GitHub Actions, with no long-lived token) and provenance. Testers then run `npm install @medusapos/medusa-plugin`.
+
+It needs:
+- an npm organisation or scope for `@medusapos`, which Paul creates;
+- the package linked to this repository's workflow as a trusted publisher;
+- QUICKSTART and the release note switched to install by name.
+
+## The demo image's smoke should seed and sell
+
+`deploy/demo-backend/smoke.sh` proves health, the in-memory Redis fallback, search seeding and the golden-copy reset. It never seeds the demo data or records a sale, so the shipping-profile mismatch that stopped every hosted sale (2026-09-28) passed CI. Extend it:
+- run `seed.sh`;
+- create an admin user;
+- post one `order.create` for an E2E product to `/tally/v1/commands`;
+- assert `applied`.
 
 ## Two shipping failures still retry forever
 
