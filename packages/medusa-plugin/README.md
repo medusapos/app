@@ -40,7 +40,8 @@ Sign in as a Medusa admin user through `/auth/user/emailpass` and send its JWT a
 `Authorization: Bearer <jwt>` (an authenticated admin session is also accepted).
 
 Send `POST /tally/v1/commands` with `X-Tally-Protocol: 1` and JSON
-`{ commands: CommandEnvelope[] }` containing 1–50 `order.create` commands, version 1 or 2.
+`{ commands: CommandEnvelope[] }` containing 1–50 commands: `order.create` (version 1, 2 or 3)
+or the five register commands (version 1; see [Registers](#registers)).
 Every envelope includes `id` (1–64 characters), object `payload`, string `createdAt`
 and `deviceId`, and a safe integer `attempt` of at least 1.
 A `200 { results: CommandResult[] }` returns one result per command in the same order:
@@ -48,6 +49,8 @@ A `200 { results: CommandResult[] }` returns one result per command in the same 
 Reusing an id with a different payload rejects it with
 `idempotency_mismatch`; a stored rejection replays as rejected.
 `invalid_payload` rejects malformed payload shapes before claiming, with validation errors in the message; it is not stored in the ledger.
+`store_configuration` rejects a sale the store can't take yet, before any write. Examples: no sales channel, no stock location or address, no shipping option at the location for the products' shipping profile, or a sale that mixes shipping profiles. The message names what to fix, it isn't stored, and the same command applies once the store is fixed (ADR 0004).
+An unsupported version is a per-command `unsupported_version` with `error.data` naming the highest supported version (`orderCreate` or `register`).
 
 - `400`: unsupported protocol (`{ code: 'unsupported_protocol' }`) or invalid envelope.
 - `401`: no valid admin authentication.
@@ -65,7 +68,12 @@ own tax mode) and `discountMinor`, their sum; both positive when present. Versio
 `discountMinor` is `invalid_payload`. Each discounted line gets one code-less Medusa line-item
 adjustment, "POS discount", in the line's tax mode, so tax is charged on the discounted amount.
 
-`GET /tally/v1/info` returns `{ "contracts": { "order.create": [1, 2] } }`, with the same
+Version 3 (TallyUI ADR-065) adds optional fields:
+- `display` and `taxByRate`, both or neither: the receipt's own figures, stored as sent in `tally_pos_totals` v2 as the fiscal record (ADR 0012);
+- `sessionId`, the register session, stored as `tally_session_id`;
+- `customer.customerId`, the Medusa customer. When that customer exists, the order uses it without the till's email.
+
+`GET /tally/v1/info` returns `{ "contracts": { "order.create": [1, 2, 3], "register": [1] } }`, with the same
 authentication and CORS as the command endpoint.
 
 ## Order creation workflow
@@ -82,7 +90,10 @@ tax total differs; the result reports the rounded server total and any `total_mi
 Payments use the system provider, which moves no money. Later failures compensate
 the order and inventory; capture itself has no refund compensation.
 Options `salesChannelId`, `locationId`, and `shippingOptionId` override the store/channel
-defaults and the location's earliest shipping option; payload `locationId` takes precedence.
+defaults and the automatic shipping option; payload `locationId` takes precedence.
+The automatic shipping option is the location's earliest one on the sale's products' shipping profile.
+A sale needs one profile; otherwise it's a `store_configuration` rejection. An explicit
+`shippingOptionId` must use the products' profile.
 Stock never rejects an offline sale: availability is checked at the sale location, shortfalls
 are temporarily added before the draft and taken back after fulfillment, with compensation.
 Stock ends at original minus sold and may go negative. Each short variant gets an
@@ -123,3 +134,19 @@ Stored results are parsed with the same validator when returned by claim or comp
 `release(id, claimToken, context?)` hard-deletes only an `in_progress` command
 with the current token. Stale tokens, finished commands and unknown ids are left alone.
 See [the lease ADR](../../docs/adr/0001-command-ledger-lease.md).
+
+## Registers
+
+TallyUI registers c2 syncs a till's drawer to the store: sessions, cash movements and closures (the Z). The contract is TallyUI ADR-068, and the plugin's design is [ADR 0019](../../docs/adr/0019-registers-on-the-server.md).
+- **Five commands** go through the command endpoint and its ledger, at version 1: `register.session.open`, `register.session.transition`, `register.movement.record`, `register.movement.void` and `register.closure.submit`.
+- **The `tally_register` module** stores them in `tally_register`, `tally_register_session`, `tally_register_movement` and `tally_register_closure`. Postgres enforces:
+  - one non-closed session per register;
+  - one closure per session;
+  - gap-free closure numbers;
+  - one void per movement;
+  - no movement after its session's closure.
+- **Business refusals** are per-command rejections with `error.data`: `register_session_already_open`, `register_session_closed`, `register_closure_exists` and `register_closure_number_invalid`.
+- **Commands apply in the order received,** and `at` is never compared. Every operation is replay-safe by its till-minted id.
+- **Server figures:** results and `GET /tally/v1/registers/{id}` carry the server's `expected` per tender and `salesCount`, derived from the orders' `tally_payments` and the movements. The till's own `tillExpected` and `counted` are stored unchanged as the fiscal record.
+
+**The naming trap:** `order.create`'s `registerId`, stored as order metadata `tally_register_id`, is the **till's device id** (ADR 0017). The register commands, the `tally_register` tables and `/tally/v1/registers/{id}` mean the **drawer**. Never join the two.
