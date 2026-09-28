@@ -53,7 +53,13 @@ A Playwright trace of the hosted smoke (app.medusapos.com against the demo backe
 - the first catalogue sync takes **47 s** to reach "Up to date · 1,956 products";
 - each product search or add-to-cart step afterwards takes **3–6 s**.
 
-(That run's smoke failure was not the slowness: its sale never synced because the demo's seed put the E2E products on a different shipping profile from the shipping option the plugin picked, and the plugin retried the refusal forever; fixed in #93, #94 and the profile-aware pick.) The trace is kept at `~/agent/handoff/smoke-hosted-trace-2026-09-28.zip` (open with `npx playwright show-trace`). Next is a read-only profiling spike on the hosted web build that ends in a spec. It should find where the time goes: the RxDB query, a missing index, SQLite-wasm/OPFS, or rendering.
+(That run's smoke failure was not the slowness: its sale never synced because the demo's seed put the E2E products on a different shipping profile from the shipping option the plugin picked, and the plugin retried the refusal forever; fixed in #93, #94 and the profile-aware pick.) The trace is kept at `~/agent/handoff/smoke-hosted-trace-2026-09-28.zip` (open with `npx playwright show-trace`). The profiling spike (2026-09-28) put the causes in TallyUI:
+- an unvirtualized product grid: 8.7 s of the sync, and all of the 1.4–7.6 s search and add delay. TallyUI #191 virtualizes it, and it arrives with the next TallyUI minor. Re-measure then with the harness in `~/agent/handoff/perf-spike-harness`, including the tile count;
+- sequential page fetches: about 15 s;
+- SQLite/OPFS write amplification: 5.4 s after the grid fix;
+- the background checks.
+
+The findings are in `~/agent/handoff/perf-spike-findings-2026-09-28.md`. The app's own share is under 1 s: every sync page maps every product to a new object (`use-replicated-products.ts:113-116`) and rebuilds the sorted list (`index.tsx:221-226`). Throttle both during the first sync.
 
 ## Keep the till's email when a found customer is attached
 
@@ -81,3 +87,7 @@ It needs:
 Both come from the #96 review. They're raised before any write, so they can become `store_configuration` rejections (ADR 0004):
 - **A shipped product without a shipping profile.** Medusa 2.21 sets a line's `requires_shipping` when its product has a profile *or* any of its inventory items requires shipping (`core-flows` `cart/utils/prepare-line-item-data.js:23-29`). So a profile-less product with shipping inventory fails every shipping option in fulfilment, and is retried as transient. Reject it before the workflow, naming the product: "put it on a shipping profile".
 - **An explicit `shippingOptionId` that doesn't exist.** It fails inside the workflow with a `TypeError`. Reject it before the workflow. The test "releases a failed run after real payment" uses `so_missing` to force a workflow failure, so give that test another way to fail. When the id is explicit, also filter the `shipping_option` query by it.
+
+## The plugin tarball ships compiled tests
+
+`npm pack` for `@medusapos/medusa-plugin` 0.1.0 includes `.medusa/server/src/**/__tests__/*.js` and the `__fixtures__` JSON. Exclude them through the package's `files` field, or in the build.
