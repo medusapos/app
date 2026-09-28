@@ -1,4 +1,4 @@
-import type { CommandResult } from '@tallyui/core'
+import type { CommandResult } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { MedusaError } from '@medusajs/framework/utils'
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils'
 import { TALLY_LEDGER_MODULE } from '..'

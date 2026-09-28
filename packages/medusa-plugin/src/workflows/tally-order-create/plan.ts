@@ -1,4 +1,4 @@
-import type { OrderCreatePayload, CommandWarning } from '@tallyui/core'
+import type { OrderCreatePayload, CommandWarning } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, minorToMajor } from './money'
 

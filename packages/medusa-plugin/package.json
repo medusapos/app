@@ -24,12 +24,7 @@
     "./*": "./.medusa/server/src/*.js"
   },
   "scripts": {
-    "tallyui-types": "tsc -p tsconfig.tallyui-types.json",
-    "pretypecheck": "npm run tallyui-types",
-    "prebuild": "npm run tallyui-types",
-    "pretest:integration:modules": "npm run tallyui-types",
-    "pretest:integration:http": "npm run tallyui-types && npm run build",
-    "pretest:unit": "npm run tallyui-types",
+    "pretest:integration:http": "npm run build",
     "build": "medusa plugin:build",
     "dev": "medusa plugin:develop",
     "prepublishOnly": "medusa plugin:build",
@@ -46,6 +41,7 @@
     "@medusajs/test-utils": "2.21.0",
     "@swc/core": "^1.7.28",
     "@swc/jest": "^0.2.36",
+    "@tallyui/core": "2.0.0",
     "@types/jest": "^29.5.13",
     "@types/node": "^20.12.11",
     "jest": "^29.7.0",

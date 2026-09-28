@@ -1,4 +1,4 @@
-import type { CommandResult } from '@tallyui/core'
+import type { CommandResult } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { MedusaError } from '@medusajs/framework/utils'
 
 /** Validates a CommandResult (e.g. one read back from the ledger). Throws

@@ -20,20 +20,17 @@ Open source, modular point of sale for [MedusaJS](https://medusajs.com). Built o
 ## TallyUI
 
 TallyUI stays platform-agnostic, and this repo holds the Medusa POS built on
-it. The `@tallyui/*` packages come from a TallyUI checkout **next to this
-repo** (`../tallyui`), through `pnpm.overrides` in the root `package.json`.
-The published npm versions predate the APIs the app needs, and
-`@tallyui/primitives` is not published. The app compiles TallyUI from source
-(`src/index.ts`, via tsconfig `paths` and a Metro resolver), so the checkout
-does not need a build. When TallyUI publishes, delete the `overrides` block
-and those two resolver hooks.
+it. All eight `@tallyui/*` packages come from npm, pinned at exactly `2.0.0`
+in the root `package.json`'s `pnpm.overrides` and `apps/expo/package.json`.
+The app compiles TallyUI from each npm package's shipped `src/`, using the
+`source` export condition, tsconfig `paths` and the Metro resolver.
+To bump TallyUI, change all eight versions in both files and run `pnpm install`.
 
 ## Getting Started
 
 Testing the hosted app? Follow the [tester quick-start](docs/QUICKSTART.md).
 
 ```bash
-git clone https://github.com/TallyUI/tallyui.git ../tallyui   # once
 pnpm install
 ```
 

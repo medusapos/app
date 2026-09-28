@@ -1,6 +1,6 @@
 import type { EntityManager } from '@medusajs/framework/mikro-orm/postgresql'
 import type { Context, InferTypeOf } from '@medusajs/framework/types'
-import type { CommandResult } from '@tallyui/core'
+import type { CommandResult } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { randomUUID } from 'node:crypto'
 import {
   InjectManager,

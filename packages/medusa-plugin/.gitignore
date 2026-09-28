@@ -1,6 +1,5 @@
 node_modules/
 .medusa/
-.tallyui-types/
 .yalc/
 yalc.lock
 .env*

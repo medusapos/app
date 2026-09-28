@@ -1,4 +1,4 @@
-import type { CommandError, OrderCreatePayload } from '@tallyui/core'
+import type { CommandError, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { currencyDecimals } from './money'
 
 // BRIDGE (TallyUI order.create): replace when @tallyui/core adds CommandError.data.
