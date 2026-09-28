@@ -73,3 +73,18 @@ the product. On Medusa 2.21.0 (2026-09-24) both routes moved the variant's
 `updated_at` and the price's `updated_at`; the product's `updated_at` did not
 move. So a feed filtered on the variant's `updated_at` sees price edits, and
 one filtered on the product's `updated_at` does not.
+
+## `g4-events`
+
+The G4 event probe measures events and arrival times for five sequential
+product updates on the local or Redis event bus. It drops and recreates only
+its own `medusapos_g4` database and serves it on port 9200. Run from the repo root:
+
+```sh
+bash dev/medusa-store/scripts/probes/g4-events/run.sh local "$PWD/.g4-out/local"
+bash dev/medusa-store/scripts/probes/g4-events/run.sh redis "$PWD/.g4-out/redis"
+```
+
+Redis mode uses `redis://127.0.0.1:6379/5`. Each output directory contains
+`events.jsonl`, `results.json`, and `server.log`. The server stops on exit.
+The probe and Redis module override are disabled when their G4 env vars are unset.
