@@ -25,7 +25,8 @@ test('a discounted sale is applied as order.create v2, with a "POS discount" adj
   const token = await adminToken();
   const commands = captureCommands(page);
   await signIn(page);
-  expect(await capabilities(page)).toEqual({ orderCreate: 2 });
+  // The plugin advertises order.create [1, 2, 3] (ADR 0012 amendment); a discounted sale is still sent as version 2 by the pinned TallyUI.
+  expect(await capabilities(page)).toEqual({ orderCreate: 3 });
   await addE2E1(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '10');
