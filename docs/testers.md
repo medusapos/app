@@ -7,8 +7,9 @@ setup detail rather than repeating it.
 
 - The till now has a register. Choose **Register 1** and open it with the
   cash in the drawer (the float) before taking payment; you can browse and
-  fill the cart before that. A bar under the header shows the register's
-  state, and **Register ›** opens its panel: the sales this session, the
+  fill the cart before that. The register's state shows under the header
+  (on a phone, at the right end of a row); tap it to choose or open the
+  register. **Register ›** opens its panel: the sales this session, the
   cash expected in the drawer, and **Paid in**, **Paid out** and **No sale**,
   each with **Undo**. Closing the register arrives in the next update.
 - If saving a sale fails but the order did reach the till's storage, the

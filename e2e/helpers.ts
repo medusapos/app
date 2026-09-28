@@ -39,23 +39,17 @@ export async function signIn(page: Page, region: string | null = 'Europe', regis
 }
 
 // ADR 0017: paying needs an open register session. Binds this fresh till to Register 1 through the picker and
-// opens it with `float` through the open card, both above the cart. On a phone the cart view (where they show)
-// opens only with a line in the cart, so it adds one E2E-1 first, then removes it and returns to Products.
+// opens it with `float` through the open card, both above the cart. On a phone they show in the cart view, which
+// the register pill opens even with an empty cart; it then returns to Products.
 export async function openRegister(page: Page, float = '100.00') {
   const phone = (page.viewportSize()?.width ?? 1280) < 600;
-  if (phone) {
-    await addE2E1(page);
-    await page.getByRole('button', { name: /^Open cart, / }).click();
-  }
+  if (phone) await page.getByTestId('register-bar-pill').click();
   await page.getByTestId('register-picker-row-register-1').click();
   await page.getByTestId('open-register-amount').fill(float);
   await page.getByTestId('open-register-button').click();
   await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
-  if (phone) {
-    await page.getByRole('button', { name: 'Remove E2E product 1', exact: true }).click();
-    await page.getByRole('button', { name: 'Products', exact: true }).click();
-  }
+  if (phone) await page.getByRole('button', { name: 'Products', exact: true }).click();
 }
 
 // On "Set up this till": pick a region and continue.

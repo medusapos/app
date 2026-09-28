@@ -215,7 +215,7 @@ describe('ProductsScreen catalogue', () => {
     }));
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out', 'Register ›', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
     expect(screen.getByLabelText('Sync status').textContent).toBe('All sales synced');
     fireEvent.click(screen.getByRole('button', { name: 'Apple' }));
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();

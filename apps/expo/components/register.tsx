@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { OpenRegisterCard, RegisterBar, RegisterColumn, RegisterPanel, RegisterPicker } from '@tallyui/components';
+import { describeRegisterBarPill, OpenRegisterCard, RegisterColumn, RegisterPanel, RegisterPicker } from '@tallyui/components';
 import { RegisterSessionRequiredError, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
 
@@ -33,17 +33,41 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
   return { sale: { ...sale, startTender }, refused };
 }
 
-/** The register bar under the header, and the panel it opens (movements with Undo, Close register). */
-export function RegisterStrip({ online, currency }: { online: boolean; currency: string }) {
-  const { register, boundRegisterId, registerName } = useRegister();
-  const [panelOpen, setPanelOpen] = useState(false);
+/**
+ * The register's state as one control (RegisterBar's pill, from `describeRegisterBarPill`, and "Register ›"), placed
+ * by the screen: the strip when wide, existing rows on a phone. The pill is never a dead label: without a session it
+ * brings up the gate (`onGate`), with one it opens the panel, like "Register ›".
+ */
+export function RegisterControl({ online, onOpenPanel, onGate }: { online: boolean; onOpenPanel: () => void; onGate: () => void }) {
+  const { register: { session, overdue, enabled, lastClosure }, boundRegisterId } = useRegister();
   if (boundRegisterId === undefined) return null;
-  return <View dataSet={{ print: 'hide' }}>
-    <RegisterBar register={register} registerId={boundRegisterId} online={online} registerName={registerName ?? undefined}
-      multiRegister={false} onOpenPanel={() => setPanelOpen(true)} />
-    <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={panelOpen}
-      onOpenChange={setPanelOpen} />
+  const pill = describeRegisterBarPill({ registerId: boundRegisterId, online, sessionStatus: session?.status ?? null, overdue,
+    approvalRequired: session?.approval_required, sessionsOn: enabled });
+  return <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-2">
+    {pill ? <Pressable accessibilityRole="button" accessibilityLabel={pill} onPress={session ? onOpenPanel : onGate}
+      className="min-h-11 justify-center">
+      <View testID="register-bar-pill" className="rounded-full bg-warning px-2.5 py-0.5">
+        <Text className="text-xs font-semibold text-warning-foreground">{pill}</Text>
+      </View>
+    </Pressable> : null}
+    {session || lastClosure ? <Pressable accessibilityRole="button" accessibilityLabel="Open register panel" onPress={onOpenPanel}
+      className="min-h-11 justify-center px-2">
+      <Text className={overdue ? 'text-warning' : 'text-foreground'}>Register ›</Text>
+    </Pressable> : null}
   </View>;
+}
+
+/** The strip under the header at wide widths, laid out as RegisterBar's (whose pill can't be tapped). */
+export function RegisterStrip({ children }: { children: ReactNode }) {
+  return <View testID="register-bar" dataSet={{ print: 'hide' }}
+    className="h-12 flex-row items-center justify-end border-b border-border bg-card px-3">{children}</View>;
+}
+
+/** The register panel (movements with Undo, Close register), opened from the control. */
+export function RegisterPanelSheet({ currency, open, onOpenChange }: { currency: string; open: boolean; onOpenChange: (open: boolean) => void }) {
+  const { register, registerName } = useRegister();
+  return <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
+    onOpenChange={onOpenChange} />;
 }
 
 /**
@@ -51,12 +75,22 @@ export function RegisterStrip({ online, currency }: { online: boolean; currency:
  * usable below. RegisterColumn swaps the cart out wholesale, so it is used only once a session exists, for
  * the count slot while counting.
  */
-export function RegisterGate({ currency, refused, cartEmpty, children }: {
-  currency: string; refused: string | null; cartEmpty: boolean; children: ReactNode;
+export function RegisterGate({ currency, refused, cartEmpty, focusKey, children }: {
+  currency: string; refused: string | null; cartEmpty: boolean; focusKey: number; children: ReactNode;
 }) {
   const { register, boundRegisterId, registers, bind } = useRegister();
   const pick = (id: string) => { bind(id).catch((error: unknown) => console.warn('Could not bind the register:', error)); };
-  return <View className="flex-1">
+  // A pill tap (a new focusKey) scrolls the gate into view and focuses its first control (web).
+  const gate = useRef<View>(null);
+  const focused = useRef(focusKey);
+  useEffect(() => {
+    if (focused.current === focusKey) return;
+    focused.current = focusKey;
+    const node = gate.current as unknown as HTMLElement | null;
+    node?.scrollIntoView?.({ block: 'nearest' });
+    node?.querySelector?.<HTMLElement>('input, [role="button"]')?.focus();
+  }, [focusKey]);
+  return <View ref={gate} className="flex-1">
     {boundRegisterId === null ? <RegisterPicker className="flex-none" registers={registers} onPick={pick} /> : null}
     {boundRegisterId && !register.session ? <OpenRegisterCard className="flex-none" register={register} currency={currency} /> : null}
     {refused ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{refused}</Text> : null}

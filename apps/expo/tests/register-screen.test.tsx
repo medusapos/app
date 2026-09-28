@@ -212,3 +212,43 @@ describe('the register on the sale screen', () => {
     expect((await sessions().find().exec())[0].status).toBe('open');
   });
 });
+
+// The Front desk's review (2026-09-28): the pill is never a dead label, and on a phone the control ends existing rows.
+describe('the register control', () => {
+  it('at 1280, tapping "Choose a register" brings up the gate: the picker, focused', async () => {
+    await mount();
+    const picker = await screen.findByTestId('register-picker');
+    await waitFor(() => expect(pill()).toBe('Choose a register'));
+    expect(screen.getByTestId('register-bar').contains(screen.getByTestId('register-bar-pill'))).toBe(true);
+    fireEvent.click(button('Choose a register'));
+    expect(picker.contains(document.activeElement)).toBe(true);
+  });
+
+  it('at 360, with no strip and an empty cart, tapping "Register closed" opens the cart view with the open card above the empty cart', async () => {
+    setWindowWidth(360);
+    await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
+    await mount();
+    await waitFor(() => expect(pill()).toBe('Register closed'));
+    expect(screen.queryByTestId('register-bar')).toBeNull();
+    expect(screen.queryByTestId('open-register-card')).toBeNull();
+    // The cart bar stays disabled; only the pill opens the cart view.
+    expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');
+    fireEvent.click(button('Register closed'));
+    const card = await screen.findByTestId('open-register-card');
+    const empty = screen.getByText('Scan or tap a product to start a sale.');
+    expect(card.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The control now ends the "‹ Products" row.
+    expect(button('Products').parentElement!.contains(screen.getByTestId('register-bar-pill'))).toBe(true);
+  });
+
+  it.each([1280, 360])('at %i, with a session open, tapping the pill ("Offline") opens the panel', async (width) => {
+    setWindowWidth(width);
+    vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'offline', error: null, lastSyncedAt: null,
+      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await waitFor(() => expect(pill()).toBe('Offline'));
+    fireEvent.click(button('Offline'));
+    expect(await screen.findByTestId('register-panel')).toBeTruthy();
+  });
+});

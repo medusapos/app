@@ -154,7 +154,7 @@ form without triggering a scan, then pays exact cash for `E2E-1` and `E2E-2`.
 
 Paying needs an open register (ADR 0017), so `signIn` also binds the fresh
 till to Register 1 and opens it with a €100.00 float (`openRegister`; on a
-phone it adds and removes one `E2E-1` to reach the cart view).
+phone its register pill opens the cart view, where the picker shows).
 `register.spec.ts`, at 1280 × 800 and at 360 × 780, signs in without that,
 sees the picker and then the open card above a cart whose Cash refuses,
 opens with 100.00, sells `E2E-1` for exact cash, checks the panel's "1 sales
