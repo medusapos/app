@@ -5,9 +5,7 @@ import { executeOrderCreate } from '../../../../workflows/tally-order-create/exe
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 import { payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
-
-// Shared by command processing and /info so advertised and accepted versions stay aligned.
-export const SUPPORTED_ORDER_CREATE_VERSIONS = [1, 2, 3]
+import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../versions'
 
 export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }

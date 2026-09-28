@@ -18,15 +18,16 @@ const payload: OrderCreatePayloadV3 = {
 }
 
 // All amounts are integer EUR cents; exponent = 2.
-// Inclusive line: 2 * 1200 = 2400 gross; 120 line + 120 order discount = 240.
-// The order discount is allocated entirely to this line, included in discountMinor.
-// After discounts: 2400 - 240 = 2160 gross; 2160 / 1.20 = 1800 net; tax = 360.
-// Exclusive line: 1 * 1000 = 1000 net; 1000 * 10% = 100 tax; gross = 1100.
-// Settlement: subtotal = 1800 + 1000 = 2800; tax = 360 + 100 = 460;
-// total = 2800 + 460 = 3260; payload discount = sum of line discounts = 240.
-// Display: subtotal = 2400 + 1100 = 3500; discounts = 120 + 120 = 240;
-// total = 3500 - 240 = 3260 = 2160 + 1100; orderDiscountMinor = 120.
-// Cash: amount = total = 3260; tendered 4000 - amount 3260 = change 740.
+// The 120 order discount is allocated across both lines in each line's own mode (ADR-062).
+// Inclusive line: 2 * 1200 = 2400 gross; discountMinor = 203 (120 line + 83 order).
+// After discounts: 2400 - 203 = 2197 gross = 1831 net + 366 tax (200000 ppm).
+// Exclusive line (taxInclusive: false): 1 * 1000 - 37 discount = 963 net;
+// 1059 gross = 963 net + 96 tax (100000 ppm).
+// Settlement: subtotal = 1831 + 963 = 2794; tax = 366 + 96 = 462;
+// total = 2794 + 462 = 3256 = 2197 + 1059; payload discount = 203 + 37 = 240.
+// Display lines are before discounts (ADR-063): subtotal = 2400 + 1100 = 3500;
+// display discount = 244 = 120 line + 124 order; total = 3500 - 244 = 3256.
+// Cash: amount = total = 3256; change = 744 = 4000 tendered - 3256 amount.
 
 it('the golden v3 envelope passes validation unchanged', () => {
   // processBatch's version rules are not exposed as a pure function; use the

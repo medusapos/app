@@ -8,7 +8,7 @@ import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
-import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../../src/api/tally/v1/commands/process'
+import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../../src/api/tally/v1/versions'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
