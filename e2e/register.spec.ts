@@ -29,6 +29,11 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     test('bind, open with a float, a cash sale, a paid in and its Undo, and Close register', async ({ page }) => {
       await signIn(page, 'Europe', false);
       await expect(page.getByTestId('register-bar-pill')).toHaveText('Choose a register');
+      // On a phone the bar ends Catalogue's status line.
+      if (phone) {
+        await expect(page.getByTestId('catalogue-status-row').getByTestId('register-bar-pill')).toBeVisible();
+        await shot(page, 'products');
+      }
       await addE2E1(page);
       await openCart(page);
       await expect(page.getByTestId('register-picker')).toBeVisible();
@@ -57,7 +62,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       expect(total).toBeGreaterThan(0);
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
       const panel = page.getByTestId('register-panel');
-      await expect(panel.getByTestId('register-panel-sales-count')).toHaveText('1 sales this session');
+      await expect(panel.getByTestId('register-panel-sales-count')).toHaveText('1 sale this session');
       const expectedCash = panel.getByTestId('register-panel-expected').getByText(/\d/);
       await expect(expectedCash).toHaveText(money(100 + total));
 

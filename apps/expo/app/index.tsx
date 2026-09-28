@@ -11,7 +11,7 @@ import {
 } from '@tallyui/pos';
 
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
-import { RegisterControl, RegisterGate, RegisterPanelSheet, RegisterStrip, useGatedSale } from '../components/register';
+import { IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
@@ -246,16 +246,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
   const [gateFocus, setGateFocus] = useState(0);
-  const registerControl = <RegisterControl online={state !== 'offline'} onOpenPanel={() => setPanelOpen(true)}
-    onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} />;
+  const registerBar = (className?: string) => <TillRegisterBar online={state !== 'offline'} onOpenPanel={() => setPanelOpen(true)}
+    onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
   const catalogue = <View className="flex-1">
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
+    {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
-    {/* On a phone the register control ends this row: Catalogue's status line takes only text (ADR 0017). */}
-    <View className="flex-row items-center"><View className="flex-1"><SyncStatus state={outboxState} /></View>
-      {phone ? <View className="pr-4">{registerControl}</View> : null}</View>
+      onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
+    <SyncStatus state={outboxState} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} refused={refused} cartEmpty={!sale.order.lineItems.length} focusKey={gateFocus}>
@@ -284,7 +283,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
-      {sale.stage.kind !== 'receipt' && !phone ? <RegisterStrip>{registerControl}</RegisterStrip> : null}
+      {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
       <RegisterPanelSheet currency={pricing.currency} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
@@ -305,7 +304,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
               <View className="flex-row items-center justify-between border-b border-border pr-3">
                 <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}
                   className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
-                {registerControl}
+                {registerBar(IN_ROW)}
               </View>
               {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
               {cart}

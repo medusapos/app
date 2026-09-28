@@ -173,7 +173,7 @@ describe('the register on the sale screen', () => {
     expect(record.mock.calls[0][0]).not.toHaveProperty('lateSessionId');
     await act(async () => { fireEvent.click(button('New sale')); });
     const panel = await openPanel();
-    await waitFor(() => expect(panel.getByTestId('register-panel-sales-count').textContent).toBe('1 sales this session'));
+    await waitFor(() => expect(panel.getByTestId('register-panel-sales-count').textContent).toBe('1 sale this session'));
   });
 
   it('records a paid in of 5.00 from the panel, and Undo voids it', async () => {
@@ -224,12 +224,13 @@ describe('the register control', () => {
     expect(picker.contains(document.activeElement)).toBe(true);
   });
 
-  it('at 360, with no strip and an empty cart, tapping "Register closed" opens the cart view with the open card above the empty cart', async () => {
+  it('at 360, with the bar on the status line and an empty cart, tapping "Register closed" opens the cart view with the open card above the empty cart', async () => {
     setWindowWidth(360);
     await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
     await mount();
     await waitFor(() => expect(pill()).toBe('Register closed'));
-    expect(screen.queryByTestId('register-bar')).toBeNull();
+    // No strip: the bar ends Catalogue's status line.
+    expect(screen.getByTestId('catalogue-status-row').contains(screen.getByTestId('register-bar'))).toBe(true);
     expect(screen.queryByTestId('open-register-card')).toBeNull();
     // The cart bar stays disabled; only the pill opens the cart view.
     expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');

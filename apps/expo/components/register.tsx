@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Pressable, Text, View } from 'react-native';
-import { describeRegisterBarPill, OpenRegisterCard, RegisterColumn, RegisterPanel, RegisterPicker } from '@tallyui/components';
+import { OpenRegisterCard, RegisterBar, RegisterColumn, RegisterPanel, RegisterPicker } from '@tallyui/components';
 import { RegisterSessionRequiredError, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
 
@@ -33,34 +33,22 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
   return { sale: { ...sale, startTender }, refused };
 }
 
-/**
- * The register's state as one control (RegisterBar's pill, from `describeRegisterBarPill`, and "Register ›"), placed
- * by the screen: the strip when wide, existing rows on a phone. The pill is never a dead label: without a session it
- * brings up the gate (`onGate`), with one it opens the panel, like "Register ›".
- */
-export function RegisterControl({ online, onOpenPanel, onGate }: { online: boolean; onOpenPanel: () => void; onGate: () => void }) {
-  const { register: { session, overdue, enabled, lastClosure }, boundRegisterId } = useRegister();
-  if (boundRegisterId === undefined) return null;
-  const pill = describeRegisterBarPill({ registerId: boundRegisterId, online, sessionStatus: session?.status ?? null, overdue,
-    approvalRequired: session?.approval_required, sessionsOn: enabled });
-  return <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-2">
-    {pill ? <Pressable accessibilityRole="button" accessibilityLabel={pill} onPress={session ? onOpenPanel : onGate}
-      className="min-h-11 justify-center">
-      <View testID="register-bar-pill" className="rounded-full bg-warning px-2.5 py-0.5">
-        <Text className="text-xs font-semibold text-warning-foreground">{pill}</Text>
-      </View>
-    </Pressable> : null}
-    {session || lastClosure ? <Pressable accessibilityRole="button" accessibilityLabel="Open register panel" onPress={onOpenPanel}
-      className="min-h-11 justify-center px-2">
-      <Text className={overdue ? 'text-warning' : 'text-foreground'}>Register ›</Text>
-    </Pressable> : null}
-  </View>;
-}
+// RegisterBar inside an existing row (a phone's "‹ Products" row, Catalogue's status line): no strip of its own.
+export const IN_ROW = 'h-auto border-b-0 bg-transparent px-0';
 
-/** The strip under the header at wide widths, laid out as RegisterBar's (whose pill can't be tapped). */
-export function RegisterStrip({ children }: { children: ReactNode }) {
-  return <View testID="register-bar" dataSet={{ print: 'hide' }}
-    className="h-12 flex-row items-center justify-end border-b border-border bg-card px-3">{children}</View>;
+/**
+ * TallyUI's RegisterBar for this till: the strip under the header when wide, or `IN_ROW` on a phone. Its pill is
+ * never a dead label: without a session it brings up the gate (`onGate`), with one it opens the panel.
+ */
+export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
+  online: boolean; onOpenPanel: () => void; onGate: () => void; className?: string;
+}) {
+  const { register, boundRegisterId, registerName } = useRegister();
+  if (boundRegisterId === undefined) return null;
+  return <View dataSet={{ print: 'hide' }}>
+    <RegisterBar register={register} registerId={boundRegisterId} online={online} registerName={registerName ?? undefined}
+      multiRegister={false} onOpenPanel={onOpenPanel} onPressPill={register.session ? onOpenPanel : onGate} className={className} />
+  </View>;
 }
 
 /** The register panel (movements with Undo, Close register), opened from the control. */
@@ -91,8 +79,8 @@ export function RegisterGate({ currency, refused, cartEmpty, focusKey, children 
     node?.querySelector?.<HTMLElement>('input, [role="button"]')?.focus();
   }, [focusKey]);
   return <View ref={gate} className="flex-1">
-    {boundRegisterId === null ? <RegisterPicker className="flex-none" registers={registers} onPick={pick} /> : null}
-    {boundRegisterId && !register.session ? <OpenRegisterCard className="flex-none" register={register} currency={currency} /> : null}
+    {boundRegisterId === null ? <RegisterPicker registers={registers} onPick={pick} /> : null}
+    {boundRegisterId && !register.session ? <OpenRegisterCard register={register} currency={currency} /> : null}
     {refused ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{refused}</Text> : null}
     {boundRegisterId && register.session ? <RegisterColumn register={register} registerId={boundRegisterId} registers={registers}
       onPick={pick} currency={currency} cartEmpty={cartEmpty} countSlot={<RegisterCountSlot register={register} />}>

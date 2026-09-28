@@ -12,15 +12,19 @@ screens on top of `useRegisterSession` (TallyUI ADR-032): `RegisterPicker`,
 `useRegisterSession` unused and passed no `session` to `useSale`. This ADR
 adopts the register for part A: bind the till to a register, open it with a
 float, show its status and panel, and record paid in, paid out and no sale.
-Counting, the closure and approval (Job B) come in a later pin.
+Counting, the closure and approval (Job B, TallyUI #166) are wired in part B.
 
 TallyUI has no server side for registers yet (registers c2): sessions,
 movements and closures are local-only collections, never replicated.
 
 ## Decision
 
-- **Pin.** `TALLYUI_REF` is `451a0ca67b7974f8c719be0a3fadab7b9604e886`.
-  Nothing outside the register code changes for this app at that pin.
+- **Pin.** Part A was built on `TALLYUI_REF` `451a0ca` (TallyUI #164) and
+  finished on `562e62e` (TallyUI #167: `RegisterBar`'s `onPressPill`,
+  Catalogue's `statusAccessory`, the open card's float label with its
+  currency, picker and open card that size to their content). `562e62e`
+  also carries Job B (#166), which part A doesn't wire: its counting stays
+  the placeholder below until part B.
 - **Storage.** `register_sessions` (`registerSessionCollection()`, which
   also carries the till's `register` local document), `cash_movements` and
   `closures` are added to the existing per-backend order store
@@ -85,24 +89,22 @@ movements and closures are local-only collections, never replicated.
     cart column when wide, in the cart view on a phone (ADR 0009). Once a
     session exists, the cart sits inside `RegisterColumn`, used only for its
     `'counting'` swap to `countSlot`.
-- **The register control** is RegisterBar's content, composed in the app
-  (`RegisterControl`): the pill from TallyUI's `describeRegisterBarPill`
-  and "Register ›", `print: 'hide'`, not on the receipt. `online` is false
-  while the catalogue's sync state is `'offline'`. RegisterBar's own pill is
-  a plain badge, and the Front desk's review (2026-09-28) wants the pill
-  never to be a dead label, so the app draws it as a button:
+- **The register bar** is TallyUI's `RegisterBar` (`TillRegisterBar`),
+  `print: 'hide'`, not on the receipt. `online` is false while the
+  catalogue's sync state is `'offline'`. The Front desk's review
+  (2026-09-28) wants the pill never to be a dead label, so the app passes
+  `onPressPill` (TallyUI #167), which makes it a button:
   - without a session ("Choose a register", "Register closed") it brings up
     the gate: wide, it scrolls the cart column's gate into view and focuses
     its first control; on a phone, it opens the cart view, even with an
     empty cart (the cart bar itself stays disabled then);
   - with a session, it opens the panel, as "Register ›" does.
-- **Where it sits.** Wide (≥ 600 px): a strip under the navigation header,
-  above the earlier-sale and saving notes, laid out as RegisterBar's. On a
-  phone (ADR 0009) there is no strip: the control ends rows that already
-  exist, the cart view's "‹ Products" row, and on Products the sync-status
-  row above the cart bar. Catalogue's status line under the search box takes
-  only a string (`statusText`, drawn inside Catalogue's own header), so
-  nothing can sit on it or directly under it without a TallyUI slot.
+- **Where it sits.** Wide (≥ 600 px): its own strip under the navigation
+  header, above the earlier-sale and saving notes. On a phone (ADR 0009)
+  there is no strip: the same bar, without its strip height, padding,
+  border and background (`IN_ROW`), ends rows that already exist: the cart
+  view's "‹ Products" row, and on Products Catalogue's status line under the
+  search box (its `statusAccessory`, TallyUI #167).
 - **The panel.** "Register ›" opens `RegisterPanel` (currency from
   pricing), whose Paid in, Paid out and No sale open TallyUI's
   `MovementSheet`, and whose Undo calls `voidMovement`. No `onOpenDrawer`:
@@ -140,10 +142,6 @@ movements and closures are local-only collections, never replicated.
   close waits for every write, until the #85 backstop fails the next open.
 - No `requireOpen()` before a card terminal's capture (see above); the
   completion's stamp is the only check after tender start.
-- On a phone, the Products view's register control sits on the sync-status
-  row, not on Catalogue's status line, until Catalogue offers a slot there.
-- The open card's float field doesn't name its currency yet (a TallyUI
-  change to `OpenRegisterCard`).
 - The gate and the stamp read storage. With a dead storage worker, pressing
   Cash or Card, or completing a sale, now reaches the read watchdog's
   "Storage stopped" prompt; before, a completing sale showed "Saving is
