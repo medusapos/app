@@ -3,6 +3,7 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core'
 import { executeOrderCreate } from '../../../../workflows/tally-order-create/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
+import { fiscalFiguresErrors, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 
 export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }
@@ -27,7 +28,7 @@ export function validateBatch(body: unknown):
     let field: string | undefined
     if (typeof command.id !== 'string' || command.id.length === 0 || command.id.length > 64) field = 'id'
     else if (command.type !== 'order.create') field = 'type'
-    else if (command.version !== 1 && command.version !== 2) field = 'version'
+    else if (command.version !== 1 && command.version !== 2 && command.version !== 3) field = 'version'
     else if (typeof command.payload !== 'object' || command.payload === null || Array.isArray(command.payload)) field = 'payload'
     else if (typeof command.createdAt !== 'string') field = 'createdAt'
     else if (typeof command.deviceId !== 'string') field = 'deviceId'
@@ -48,10 +49,23 @@ export async function processBatch(
     const { lines, discountMinor } = command.payload as { lines?: unknown; discountMinor?: unknown }
     const discounted = discountMinor !== undefined
       || (Array.isArray(lines) && lines.some(line => (line as { discountMinor?: unknown } | null)?.discountMinor !== undefined))
+    const payload = command.payload as OrderCreatePayloadV3
+    const { display, taxByRate, sessionId } = payload
+    const v3 = (command.version as number) === 3
     const versionError = command.version === 2 && discountMinor === undefined ? 'version 2 requires discountMinor'
-      : command.version === 1 && discounted ? 'discountMinor requires version 2' : undefined
+      : command.version === 1 && discounted ? 'discountMinor requires version 2'
+      : !v3 && (display !== undefined || taxByRate !== undefined) ? 'display and taxByRate require version 3'
+      : !v3 && sessionId !== undefined ? 'sessionId requires version 3'
+      : !v3 && payload.customer?.customerId !== undefined ? 'customerId requires version 3'
+      : v3 && (display !== undefined) !== (taxByRate !== undefined) ? 'display and taxByRate must both be present or both absent'
+      : undefined
     if (versionError) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: versionError } })
+      continue
+    }
+    const errors = v3 && display !== undefined && taxByRate !== undefined ? fiscalFiguresErrors(payload) : []
+    if (errors.length) {
+      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
       continue
     }
     const outcome = await executeOrderCreate(container, command, options)

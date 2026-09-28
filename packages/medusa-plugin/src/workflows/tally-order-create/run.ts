@@ -67,7 +67,12 @@ export async function runOrderCreate(
         filters: { id: payload.lines.map(line => line.variantId) },
       })
       const { address_1, address_2, city, country_code, province, postal_code, phone } = location.address
+      const customerId = (payload as import('./fiscal-figures').OrderCreatePayloadV3).customer?.customerId
+      const customer = customerId === undefined ? null : (await query.graph({
+        entity: 'customer', fields: ['id'], filters: { id: customerId },
+      })).data[0] ?? null
       const planned = planOrderCreate(payload, {
+        customer,
         commandId: command.id, salesChannelId: channels[0].id,
         location: { id: location.id, address: { address_1, address_2, city, country_code, province, postal_code, phone } },
         region: region ? {

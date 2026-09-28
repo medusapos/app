@@ -8,6 +8,7 @@ import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { executeOrderCreate, type ExecuteOutcome } from '../../src/workflows/tally-order-create'
 import { seed } from './seed'
+import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
 
 jest.setTimeout(180000)
 
@@ -204,6 +205,30 @@ medusaIntegrationTestRunner({
       }
       expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
       expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(1)
+    })
+
+    it('fingerprints every v3 field and replays identical bytes without rewriting metadata', async () => {
+      const base = command()
+      const payload: OrderCreatePayloadV3 = { ...base.payload, sessionId: randomUUID(), customer: { customerId: 'unknown' },
+        display: { currency: 'EUR', exponent: 2, taxInclusive: true, subtotalMinor: 1000, discountMinor: 0,
+          taxMinor: 160, totalMinor: 1000, orderDiscountMinor: 0,
+          lines: [{ clientLineId: base.payload.lines[0].clientLineId, amountMinor: 1000, discounts: [] }] },
+        taxByRate: [{ ratePpm: 190000, netMinor: 840, taxMinor: 160, grossMinor: 1000 }],
+      }
+      const sale = { ...base, version: 3, payload } as unknown as CommandEnvelope<OrderCreatePayloadV3>
+      const first = result(await executeOrderCreate(container, sale))
+      expect(first.status).toBe('applied')
+      expect(result(await executeOrderCreate(container, sale))).toEqual({ ...first, status: 'duplicate' })
+      const [order] = await liveOrders(payload.clientOrderId)
+      for (const changed of [
+        { ...payload, display: { ...payload.display!, orderDiscountMinor: 1 } },
+        { ...payload, taxByRate: [{ ...payload.taxByRate![0], code: 'changed' }] },
+        { ...payload, sessionId: 'changed' }, { ...payload, customer: { customerId: 'changed' } },
+      ]) {
+        expect(result(await executeOrderCreate(container, { ...sale, payload: changed })))
+          .toMatchObject({ status: 'rejected', error: { code: 'idempotency_mismatch' } })
+      }
+      expect((await liveOrders(payload.clientOrderId))[0].metadata).toEqual(order.metadata)
     })
   },
 })

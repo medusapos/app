@@ -7,6 +7,7 @@ import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core'
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
+import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
@@ -100,7 +101,7 @@ medusaIntegrationTestRunner({
       const cookie = session.headers['set-cookie']![0].split(';')[0]
       for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
         const response = await info(requestHeaders)
-        expect([response.status, response.data]).toEqual([200, { contracts: { 'order.create': [1, 2] } }])
+        expect([response.status, response.data]).toEqual([200, { contracts: { 'order.create': [1, 2, 3] } }])
       }
       expect((await info({})).status).toBe(401)
       for (const origin of ['http://localhost', 'https://untrusted.example']) {
@@ -452,6 +453,74 @@ medusaIntegrationTestRunner({
       const sales = Array.from({ length: 51 }, () => command())
       expect((await post(sales)).status).toBe(413)
       expect(await ledger.listTallyCommands({ id: sales.map(sale => sale.id) })).toHaveLength(0)
+    })
+
+    it.each([false, true])('creates and replays a v3 sale with receipt figures, discounted=%s', async discounted => {
+      const base = command()
+      const taxMinor = discounted ? 144 : 160
+      const totalMinor = discounted ? 900 : 1000
+      const payload: OrderCreatePayloadV3 = { ...base.payload, subtotalMinor: totalMinor - taxMinor, taxMinor, totalMinor,
+        ...(discounted ? { discountMinor: 100 } : {}),
+        lines: [{ ...base.payload.lines[0], variantId: data.variantB, ...(discounted ? { discountMinor: 100 } : {}) }],
+        payments: [{ ...base.payload.payments[0], amountMinor: totalMinor }],
+        display: { currency: 'EUR', exponent: 2, taxInclusive: true, subtotalMinor: 1000,
+          discountMinor: discounted ? 100 : 0, taxMinor, totalMinor, orderDiscountMinor: 0,
+          lines: [{ clientLineId: base.payload.lines[0].clientLineId, amountMinor: totalMinor,
+            discounts: discounted ? [{ discountId: 'd', label: 'Sale', amountMinor: 100 }] : [] }] },
+        taxByRate: [{ ratePpm: 190000, code: 'VAT', netMinor: totalMinor - taxMinor, taxMinor, grossMinor: totalMinor }],
+        ...(discounted ? { sessionId: randomUUID() } : {}),
+      }
+      const sale = { ...base, version: 3, payload }
+      const first = await post([sale])
+      expect(first.status).toBe(200)
+      expect(first.data.results[0]).toMatchObject({ status: 'applied', serverRefs: { totalMinor } })
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.metadata.tally_pos_totals).toEqual({ v: 2, currency: 'EUR', exponent: 2,
+        settlement: { subtotalMinor: totalMinor - taxMinor, discountMinor: discounted ? 100 : 0, taxMinor, totalMinor },
+        display: payload.display, taxByRate: payload.taxByRate,
+      })
+      if (discounted) expect(order.metadata.tally_session_id).toBe(payload.sessionId)
+      else expect(order.metadata).not.toHaveProperty('tally_session_id')
+      expect((await post([sale])).data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
+      const changed = { ...sale, payload: { ...payload, display: { ...payload.display!, subtotalMinor: 1001 } } }
+      expect((await post([changed])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'idempotency_mismatch' } })
+      expect((await liveOrders(payload.clientOrderId))[0].metadata).toEqual(order.metadata)
+      const invalid = { ...sale, id: randomUUID(), payload: { ...payload, display: { ...payload.display!, totalMinor: totalMinor + 1 } } }
+      expect((await post([invalid])).data.results[0]).toMatchObject({ status: 'rejected', error: {
+        code: 'invalid_payload', message: 'display.totalMinor: expected payload.totalMinor',
+      } })
+    })
+
+    it.each(['email', 'id-only', 'unknown'])('creates v3 customerId orders: %s', async mode => {
+      const email = `v3-${randomUUID()}@example.com`
+      const customerId = mode === 'unknown' ? 'cus_unknown' : (await container.resolve(Modules.CUSTOMER).createCustomers({ email })).id
+      const payload: OrderCreatePayloadV3 = { ...command().payload,
+        customer: { customerId, ...(mode === 'email' ? { email } : {}) }, sessionId: 'unknown-session',
+      }
+      const sale = { ...command(), version: 3, payload }
+      const response = await post([sale])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0].status).toBe('applied')
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBe(mode === 'unknown' ? null : customerId)
+      expect(order.metadata.tally_customer_id).toBe(customerId)
+      expect(order.metadata.tally_session_id).toBe('unknown-session')
+      expect(order.metadata.tally_pos_totals.v).toBe(1)
+      if (mode === 'email') expect(order.email).toBe(email)
+    })
+
+    it.each([
+      [3, { sessionId: 'x'.repeat(37) }, 'sessionId: expected a string of at most 36 characters'],
+      [3, { sessionId: '' }, 'sessionId: expected a string of at most 36 characters'],
+      [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId requires version 3'],
+      [3, { customer: { customerId: 'x'.repeat(65) } }, 'customer.customerId: expected a string of at most 64 characters'],
+      [2, { customer: { customerId: 'customer' }, discountMinor: 1 }, 'customerId requires version 3'],
+    ])('rejects invalid v%s bookkeeping fields %j', async (version, fields, message) => {
+      const sale = command()
+      const response = await post([{ ...sale, version, payload: { ...sale.payload, ...fields } }])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0]).toEqual({ id: sale.id, status: 'rejected', error: { code: 'invalid_payload', message } })
+      expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
     })
   },
 })

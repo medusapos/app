@@ -18,6 +18,7 @@ export type PlanContext = {
   salesChannelId: string
   location: { id: string; address: LocationAddress }
   variants: Record<string, { id: string }>
+  customer: { id: string } | null
 }
 
 export type DraftOrderItemInput = {
@@ -38,6 +39,7 @@ export type OrderCreatePlan = {
     status: 'draft'; is_draft_order: true
     region_id: string; sales_channel_id: string; currency_code: string
     email?: string
+    customer_id?: string
     shipping_address: LocationAddress; billing_address: LocationAddress
     no_notification: true
     metadata: Record<string, unknown>
@@ -112,6 +114,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
         currency_code: currencyCode,
         ...(typeof payload.customer?.email === 'string' && payload.customer.email.length > 0
           ? { email: payload.customer.email } : {}),
+        ...(ctx.customer ? { customer_id: ctx.customer.id } : {}),
         shipping_address: { ...address },
         billing_address: { ...address },
         no_notification: true,
@@ -122,19 +125,28 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
           tally_payments: payload.payments,
           ...(payload.registerId !== undefined ? { tally_register_id: payload.registerId } : {}),
           ...(payload.cashierRef !== undefined ? { tally_cashier_ref: payload.cashierRef } : {}),
+          ...((payload as import('./fiscal-figures').OrderCreatePayloadV3).sessionId !== undefined
+            ? { tally_session_id: (payload as import('./fiscal-figures').OrderCreatePayloadV3).sessionId } : {}),
+          ...((payload as import('./fiscal-figures').OrderCreatePayloadV3).customer?.customerId !== undefined
+            ? { tally_customer_id: (payload as import('./fiscal-figures').OrderCreatePayloadV3).customer!.customerId } : {}),
           // The till's own settlement figures, as the fiscal record (ADR 0012). Written at create only;
-          // resume.ts never rewrites this key. display and taxByRate join this key with order.create v3 (TallyUI ADR-065).
-          tally_pos_totals: {
-            v: 1,
-            currency: payload.currency,
-            exponent: decimals,
-            settlement: {
-              subtotalMinor: payload.subtotalMinor,
-              discountMinor: payload.discountMinor ?? 0,
-              taxMinor: payload.taxMinor,
-              totalMinor: payload.totalMinor,
-            },
-          },
+          // resume.ts never rewrites this key. Version 3 adds the receipt's figures as sent (TallyUI ADR-065).
+          tally_pos_totals: (() => {
+            const { display, taxByRate } = payload as import('./fiscal-figures').OrderCreatePayloadV3
+            return {
+              v: display !== undefined && taxByRate !== undefined ? 2 : 1,
+              currency: payload.currency,
+              exponent: decimals,
+              settlement: {
+                subtotalMinor: payload.subtotalMinor,
+                discountMinor: payload.discountMinor ?? 0,
+                taxMinor: payload.taxMinor,
+                totalMinor: payload.totalMinor,
+              },
+              ...(display !== undefined && taxByRate !== undefined
+                ? { display: structuredClone(display), taxByRate: structuredClone(taxByRate) } : {}),
+            }
+          })(),
         },
         items: payload.lines.map(line => ({
           variant_id: line.variantId,

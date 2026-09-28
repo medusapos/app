@@ -1,6 +1,7 @@
 import type { OrderCreatePayload } from '@tallyui/core'
 import { fulfillmentGroups, planOrderCreate, totalWarnings } from '../plan'
 import type { PlanContext } from '../plan'
+import type { OrderCreatePayloadV3 } from '../fiscal-figures'
 
 const payload: OrderCreatePayload = {
   clientOrderId: 'client_order', createdAt: '2026-09-23T10:00:00Z', currency: 'EUR',
@@ -15,6 +16,7 @@ const payload: OrderCreatePayload = {
   locationId: 'client_location',
 }
 const ctx: PlanContext = {
+  customer: null,
   commandId: 'command_1', region: { id: 'region_1', currency_code: 'eUr', country_codes: ['ES', 'fr'] },
   salesChannelId: 'channel_1',
   location: {
@@ -303,4 +305,84 @@ describe('tally_pos_totals metadata (ADR 0012)', () => {
     if (!result.ok) throw new Error('Expected a plan')
     expect(result.plan.draftOrder.metadata.tally_pos_totals).toMatchObject({ settlement: { discountMinor: 155 } })
   })
+})
+
+it('writes tally_pos_totals v2 with display and taxByRate as sent for version 3', () => {
+  const input: OrderCreatePayloadV3 = { ...payload,
+    display: { currency: 'EUR', exponent: 2, taxInclusive: true, subtotalMinor: 1705, discountMinor: 0,
+      taxMinor: 296, totalMinor: 1705, orderDiscountMinor: 0, lines: [
+        { clientLineId: 'line_2', amountMinor: 5, discounts: [] },
+        { clientLineId: 'line_1', amountMinor: 1700, discounts: [{ discountId: 'd', label: 'Zero', amountMinor: 0 }] },
+      ] },
+    taxByRate: [{ ratePpm: 210000, code: 'VAT', netMinor: 1409, taxMinor: 296, grossMinor: 1705 }],
+  }
+  const before = JSON.stringify(input)
+  const result = planOrderCreate(input, ctx)
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(JSON.stringify(result.plan.draftOrder.metadata.tally_pos_totals)).toBe(JSON.stringify({
+    v: 2, currency: 'EUR', exponent: 2,
+    settlement: { subtotalMinor: 1409, discountMinor: 0, taxMinor: 296, totalMinor: 1705 },
+    display: input.display, taxByRate: input.taxByRate,
+  }))
+  const totals = result.plan.draftOrder.metadata.tally_pos_totals as OrderCreatePayloadV3
+  expect(totals.display).not.toBe(input.display)
+  expect(totals.display!.lines[1].discounts[0]).not.toBe(input.display!.lines[1].discounts[0])
+  expect(totals.taxByRate![0]).not.toBe(input.taxByRate![0])
+  expect(JSON.stringify(input)).toBe(before)
+})
+
+it('writes tally_pos_totals v1 byte-identical for v1, v2 and v3 without the fields', () => {
+  for (const version of [1, 2, 3]) {
+    const input = version === 2 ? { ...payload, discountMinor: 100, lines: [{ ...payload.lines[0], discountMinor: 100 }, payload.lines[1]] } : payload
+    const result = planOrderCreate(input, ctx)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(JSON.stringify(result.plan.draftOrder.metadata.tally_pos_totals)).toBe(JSON.stringify({
+      v: 1, currency: 'EUR', exponent: 2,
+      settlement: { subtotalMinor: 1409, discountMinor: version === 2 ? 100 : 0, taxMinor: 296, totalMinor: 1705 },
+    }))
+    expect(result.plan.draftOrder.metadata).not.toHaveProperty('tally_session_id')
+    expect(result.plan.draftOrder.metadata).not.toHaveProperty('tally_customer_id')
+    expect(result.plan.draftOrder).not.toHaveProperty('customer_id')
+  }
+})
+
+it.each([undefined, '12345678-1234-1234-1234-123456789012', 'unknown-session'])('stores sessionId only when present: %s', sessionId => {
+  const input: OrderCreatePayloadV3 = { ...payload, ...(sessionId === undefined ? {} : { sessionId }) }
+  const result = planOrderCreate(input, ctx)
+  if (!result.ok) throw new Error('Expected a plan')
+  if (sessionId === undefined) expect(result.plan.draftOrder.metadata).not.toHaveProperty('tally_session_id')
+  else expect(result.plan.draftOrder.metadata.tally_session_id).toBe(sessionId)
+})
+
+it.each(['buyer@example.com', undefined])('links a found customerId and preserves email %s', email => {
+  const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'customer_1', ...(email ? { email } : {}) } }
+  const result = planOrderCreate(input, { ...ctx, customer: { id: 'customer_1' } })
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(result.plan.draftOrder.customer_id).toBe('customer_1')
+  expect(result.plan.draftOrder.metadata.tally_customer_id).toBe('customer_1')
+  expect(result.plan.draftOrder.email).toBe(email)
+})
+
+it('accepts an unknown customerId without linking it', () => {
+  const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'unknown' } }
+  const result = planOrderCreate(input, ctx)
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(result.plan.draftOrder).not.toHaveProperty('customer_id')
+  expect(result.plan.draftOrder.metadata.tally_customer_id).toBe('unknown')
+})
+
+it('keeps the v3 plan without customerId byte-identical', () => {
+  const input: OrderCreatePayloadV3 = { ...payload }
+  const address = { ...ctx.location.address, country_code: 'es' }
+  expect(JSON.stringify(planOrderCreate(input, ctx))).toBe(JSON.stringify({ ok: true, plan: {
+    currencyCode: 'eur', decimals: 2, locationId: 'location_1', paymentAmount: '17.05', draftOrder: {
+      status: 'draft', is_draft_order: true, region_id: 'region_1', sales_channel_id: 'channel_1', currency_code: 'eur',
+      email: 'buyer@example.com', shipping_address: address, billing_address: address, no_notification: true,
+      metadata: { tally_client_id: 'client_order', tally_created_at: '2026-09-23T10:00:00Z', tally_command_id: 'command_1',
+        tally_payments: payload.payments, tally_register_id: 'register_1', tally_cashier_ref: 'cashier_1',
+        tally_pos_totals: { v: 1, currency: 'EUR', exponent: 2,
+          settlement: { subtotalMinor: 1409, discountMinor: 0, taxMinor: 296, totalMinor: 1705 } },
+      }, items: itemsIn(true),
+    },
+  } }))
 })
