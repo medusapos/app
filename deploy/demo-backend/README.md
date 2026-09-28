@@ -23,8 +23,8 @@ container of those images the production network aliases.
 
 ## Files
 
-- `Dockerfile` builds from the repo root: TallyUI types at the pinned
-  `TALLYUI_REF`, the plugin tarball, the dev store, then `medusa build`.
+- `Dockerfile` builds from the repo root: the plugin tarball (its
+  `@tallyui/core` types come from npm), the dev store, then `medusa build`.
   It includes `psql` for `reset.sh`.
 - `start.sh` is the container command: migrations, then `medusa start` on
   port 9000. On an empty database the migrations also run the starter's

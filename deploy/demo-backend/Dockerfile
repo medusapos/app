@@ -6,10 +6,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src/app
-COPY .github/workflows/ci.yml .github/workflows/ci.yml
-RUN ref=$(sed -n 's/^  TALLYUI_REF: *//p' .github/workflows/ci.yml) \
-    && mkdir -p /src/tallyui \
-    && curl -fsSL "https://codeload.github.com/TallyUI/tallyui/tar.gz/$ref" | tar -xz --strip-components=1 -C /src/tallyui
 
 WORKDIR /src/app/packages/medusa-plugin
 COPY packages/medusa-plugin/package.json packages/medusa-plugin/package-lock.json ./
