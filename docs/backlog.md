@@ -46,3 +46,11 @@ Tap race: a line added at the instant new store settings land is dropped from th
 - import the types from `@tallyui/core`;
 - delete the local copies;
 - check that `__fixtures__/order-create-v3.json` (the golden envelope TallyUI also pins) still passes unchanged.
+
+## Hosted catalogue sync and search are too slow at 1,956 products
+
+A Playwright trace of the hosted smoke (app.medusapos.com against the demo backend, both at 4a60da6, 2026-09-28) shows:
+- the first catalogue sync takes **47 s** to reach "Up to date · 1,956 products";
+- each product search or add-to-cart step afterwards takes **3–6 s**.
+
+The sale then finished at 88 s, and the 90 s test timeout cancelled its sync POST, so the smoke failed. The trace is kept at `~/agent/handoff/smoke-hosted-trace-2026-09-28.zip` (open with `npx playwright show-trace`). Next is a read-only profiling spike on the hosted web build that ends in a spec. It should find where the time goes: the RxDB query, a missing index, SQLite-wasm/OPFS, or rendering.
