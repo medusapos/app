@@ -6,8 +6,8 @@ const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password
 
 // The e2e store has two regions and no default one, so a fresh till shows "Set up this till";
 // the existing specs keep Europe (dk, 25% exclusive). Returns whether the choice screen showed;
-// with `region` null it returns there, without choosing.
-export async function signIn(page: Page, region: string | null = 'Europe'): Promise<boolean> {
+// with `region` null it returns there, without choosing. Then opens the register, unless `register` is false.
+export async function signIn(page: Page, region: string | null = 'Europe', register = true): Promise<boolean> {
   await page.goto('/login');
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
@@ -34,7 +34,28 @@ export async function signIn(page: Page, region: string | null = 'Europe'): Prom
   } else {
     await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
   }
+  if (register) await openRegister(page);
   return chose;
+}
+
+// ADR 0017: paying needs an open register session. Binds this fresh till to Register 1 through the picker and
+// opens it with `float` through the open card, both above the cart. On a phone the cart view (where they show)
+// opens only with a line in the cart, so it adds one E2E-1 first, then removes it and returns to Products.
+export async function openRegister(page: Page, float = '100.00') {
+  const phone = (page.viewportSize()?.width ?? 1280) < 600;
+  if (phone) {
+    await addE2E1(page);
+    await page.getByRole('button', { name: /^Open cart, / }).click();
+  }
+  await page.getByTestId('register-picker-row-register-1').click();
+  await page.getByTestId('open-register-amount').fill(float);
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+  if (phone) {
+    await page.getByRole('button', { name: 'Remove E2E product 1', exact: true }).click();
+    await page.getByRole('button', { name: 'Products', exact: true }).click();
+  }
 }
 
 // On "Set up this till": pick a region and continue.

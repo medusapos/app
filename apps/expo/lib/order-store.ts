@@ -3,7 +3,10 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
-import { addPosOrderCollection, posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
+import {
+  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, posOrderCollection, posOrderSchema, registerSessionCollection,
+  type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterSessionCollection,
+} from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { terminateWebStorage, webStorageAvailable } from './web-storage';
 import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
@@ -30,6 +33,18 @@ const LEGACY_ORDERS_MARKER = 'legacy-orders-migrated';
 // time limit, for every write in flight, and a hung save's insert may never finish. Past this, the open fails with an
 // ordinary Error, so the outbox's onOpenError shows #80's blocking prompt before the next sale takes any money.
 export const ORDER_STORE_CLOSE_WAIT_MS = 10_000;
+
+/** TallyUI's register collections (ADR 0017), local only, in the same per-backend database as `pos_orders`. */
+export type RegisterCollections = {
+  sessions: RegisterSessionCollection; movements: CashMovementCollection; closures: ClosureCollection;
+};
+
+/** The register collections of the database `orders` belongs to, as `openOrderStore` adds them. */
+export function registerCollections(orders: RxCollection<PosOrder>): RegisterCollections {
+  const { register_sessions, cash_movements, closures } = orders.database.collections as unknown as Record<string, RxCollection>;
+  return { sessions: register_sessions as RegisterSessionCollection, movements: cash_movements as CashMovementCollection,
+    closures: closures as ClosureCollection };
+}
 
 export function orderDatabaseName(baseUrl: string): string {
   return productCacheName('orders', baseUrl);
@@ -161,6 +176,11 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
             legacyExists: () => legacyOrdersDatabaseExists(legacyDexieName('orders', baseUrl)),
           });
         }
+        // New at TallyUI 451a0ca, so nothing to migrate or carry over; they share this store's close and watchdog.
+        const { register_sessions } = await db.addCollections({
+          register_sessions: registerSessionCollection(), cash_movements: { schema: cashMovementSchema }, closures: { schema: closureSchema },
+        });
+        await ensureRegister(register_sessions, 'web');
         return { orders, close: async () => { unwatch?.(); await db.close(); } };
       } catch (error) { unwatch?.(); await db.close(); throw error; }
     })();

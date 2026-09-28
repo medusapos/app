@@ -59,12 +59,13 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
 // ADR 0015 (#82 review): an automatic sign-out during a save that can't finish waits, with a note that fits at 360 px.
 test('a sign-out requested during a stuck save waits, and its note fits beside Sign out at 360 px', async ({ page }) => {
   await signIn(page);
-  await page.evaluate(() => (window as unknown as { __medusaposKillStorageWorker: () => void }).__medusaposKillStorageWorker());
   await addE2E1(page);
   await page.getByRole('button', { name: /^Open cart, / }).click();
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
   const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
   await tender.locator('[tabindex="0"]').first().click();
+  // After the tender starts: its register check (ADR 0017) reads storage, so a worker killed before it stops there.
+  await page.evaluate(() => (window as unknown as { __medusaposKillStorageWorker: () => void }).__medusaposKillStorageWorker());
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   await expect(page.getByRole('alert')).toHaveText('Saving is slow…');
 

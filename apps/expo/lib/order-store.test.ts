@@ -7,9 +7,18 @@ import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import {
-  addPosOrderCollection, createOrderBuilder, finalizeOrder, PosOrderOpenClosedError, posOrderCollection, posOrderSchema, type PosOrder,
+  addPosOrderCollection, bindRegister, createOrderBuilder, ensureRegister, finalizeOrder, getBoundRegisterId, openSession, PosOrderOpenClosedError,
+  posOrderCollection, posOrderSchema, readRegister, recordMovement, type PosOrder,
 } from '@tallyui/pos';
-import { carryOverOrders, closeOrderStores, openOrderStore, ORDER_STORE_CLOSE_WAIT_MS, orderDatabaseName } from './order-store';
+import {
+  carryOverOrders, closeOrderStores, openOrderStore, ORDER_STORE_CLOSE_WAIT_MS, orderDatabaseName, registerCollections,
+} from './order-store';
+
+// ensureRegister, observed: the real one runs.
+vi.mock('@tallyui/pos', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tallyui/pos')>();
+  return { ...actual, ensureRegister: vi.fn(actual.ensureRegister) };
+});
 
 addRxPlugin(RxDBDevModePlugin);
 addRxPlugin(RxDBLocalDocumentsPlugin);
@@ -479,5 +488,50 @@ describe('carryOverOrders', () => {
       warn.mockRestore();
       await to.remove();
     }
+  });
+});
+
+// The register collections (ADR 0017) live in the order store's database, next to pos_orders.
+describe('register collections in the order store', () => {
+  const opened = { registerId: 'register-1', expectedFloatMinor: null, countedFloatMinor: 10000, openedBy: 'cashier@store.test',
+    businessDay: { year: 2026, month: 9, day: 28 } };
+
+  it('open with the order store, and keep their sessions, movements and binding over a close and reopen', async () => {
+    const url = 'https://registers.test';
+    const first = await openOrderStore(url);
+    const { sessions, movements, closures } = registerCollections(first.orders);
+    for (const collection of [sessions, movements, closures]) expect(collection.database).toBe(first.orders.database);
+    expect(sessions.schema.version).toBe(0);
+    await bindRegister(sessions, url, { id: 'register-1', name: 'Register 1' });
+    const session = await openSession(sessions, { ...opened, storeKey: url });
+    await recordMovement(sessions, movements, closures, { sessionId: session.id, type: 'paid_in', amountMinor: 500, reason: 'Change', actor: 'cashier@store.test' });
+    const register = await readRegister(sessions);
+    await first.close();
+    expect(first.orders.database.closed).toBe(true);
+    const reopened = await openOrderStore(url);
+    try {
+      const again = registerCollections(reopened.orders);
+      expect(await readRegister(again.sessions)).toEqual(register);
+      expect(getBoundRegisterId(await readRegister(again.sessions), url)).toBe('register-1');
+      expect((await again.sessions.findOne(session.id).exec())?.status).toBe('open');
+      expect((await again.movements.find().exec()).map((row) => [row.type, row.amountMinor])).toEqual([['paid_in', 500]]);
+    } finally { await reopened.close(); }
+  });
+
+  it('runs ensureRegister once per database open, and mints the register document only once', async () => {
+    const url = 'https://register-once.test';
+    vi.mocked(ensureRegister).mockClear();
+    const [a, b] = await Promise.all([openOrderStore(url), openOrderStore(url)]);
+    expect(ensureRegister).toHaveBeenCalledTimes(1);
+    expect(ensureRegister).toHaveBeenCalledWith(registerCollections(a.orders).sessions, 'web');
+    const minted = await readRegister(registerCollections(a.orders).sessions);
+    expect(minted?.platform).toBe('web');
+    await a.close();
+    await b.close();
+    const reopened = await openOrderStore(url);
+    try {
+      expect(ensureRegister).toHaveBeenCalledTimes(2);
+      expect(await readRegister(registerCollections(reopened.orders).sessions)).toEqual(minted);
+    } finally { await reopened.close(); }
   });
 });

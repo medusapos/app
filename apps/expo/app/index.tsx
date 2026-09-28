@@ -11,11 +11,13 @@ import {
 } from '@tallyui/pos';
 
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
+import { RegisterGate, RegisterStrip, useGatedSale } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, posConnector } from '../lib/pos-connector';
+import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -182,8 +184,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
   // the outbox confirms the order is stored.
+  // `session`: complete() stamps the sale with the open register session (ADR 0017); the Cart's tender start
+  // (useGatedSale) refuses until one is open.
+  const { register } = useRegister();
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
-    isStored });
+    isStored, session: register.saleSession });
+  const { sale: cartSale, refused } = useGatedSale(sale);
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
@@ -244,6 +250,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
     <SyncStatus state={outboxState} />
   </View>;
+  // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
+  const cart = <RegisterGate currency={pricing.currency} refused={refused} cartEmpty={!sale.order.lineItems.length}>
+    <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
+  </RegisterGate>;
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
@@ -267,6 +277,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
+      {sale.stage.kind !== 'receipt' ? <RegisterStrip online={state !== 'offline'} currency={pricing.currency} /> : null}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
         store={{ name: settings.storeName, address: settings.location.addressLine }}
@@ -279,7 +290,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {!phone ? <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
             {catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : tenderPane}
+              {sale.stage.kind === 'cart' ? cart : tenderPane}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : cartOpen ? <View className="flex-1 bg-card">
@@ -288,7 +299,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
                   className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
               </View>
               {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
-              <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
+              {cart}
             </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
         </View>}
     </ConnectorProvider>

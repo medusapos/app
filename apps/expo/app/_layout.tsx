@@ -1,6 +1,7 @@
 import '../global.css';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
+import { PortalHost } from '@tallyui/primitives';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { LiveTabGate } from '../components/live-tab-gate';
@@ -44,6 +45,9 @@ export default function RootLayout() {
     <SessionProvider>
       <StatusBar style="dark" />
       <GatedApp />
+      {/* One root host, after navigation and outside every gate (TallyUI's integration doc at 451a0ca): the
+          register panel and movement sheet (Dialog) render here, above the screen's header. */}
+      <PortalHost />
     </SessionProvider>
   );
 }
