@@ -60,6 +60,12 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
 
       const total = await sellBySku(page, [], 'exact');
       expect(total).toBeGreaterThan(0);
+      if (phone) {
+        // Products with the register open: the short status line and "Register ›" share one row.
+        await expect(page.getByTestId('catalogue-status-row').getByText(/^Up to date · 5 products$/)).toBeVisible();
+        await expect(page.getByTestId('catalogue-status-row').getByRole('button', { name: 'Open register panel' })).toBeVisible();
+        await shot(page, 'products-open');
+      }
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
       const panel = page.getByTestId('register-panel');
       await expect(panel.getByTestId('register-panel-sales-count')).toHaveText('1 sale this session');

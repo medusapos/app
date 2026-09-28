@@ -253,3 +253,18 @@ describe('the register control', () => {
     expect(await screen.findByTestId('register-panel')).toBeTruthy();
   });
 });
+
+// The Front desk (2026-09-28): on a phone the status line shares its row with the register pill, so it is short.
+describe('the catalogue status line', () => {
+  it.each([
+    [1280, 'MedusaJS · Up to date · 1 products · 2 not sold in this channel · Failed to fetch'],
+    [360, 'Up to date · 1 products · Failed to fetch'],
+  ])('at %i reads %j', async (width, text) => {
+    setWindowWidth(width);
+    vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: 'Failed to fetch', lastSyncedAt: null,
+      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: { count: 2, stale: false } });
+    await mount();
+    await waitFor(() => expect(pill()).toBe('Choose a register'));
+    expect(within(screen.getByTestId('catalogue-status-row')).getByText(text)).toBeTruthy();
+  });
+});

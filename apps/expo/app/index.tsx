@@ -231,8 +231,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     if (entry) { sale.add(entry, traits); setScanMiss(null); } else setScanMiss(code);
   });
   const sellableCount = sorted.length;
-  const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
-    + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
+  // On a phone the status line shares its row with the register pill (ADR 0017), so it drops the connector name and
+  // the unlisted count; an error always stays.
+  const statusText = (phone ? '' : `${connector.name} · `) + `${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
+    + (!phone && unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
     + (error ? ` · ${error}` : '');
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.
   const clock = getCalendars()[0]?.uses24hourClock;

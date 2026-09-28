@@ -104,7 +104,9 @@ movements and closures are local-only collections, never replicated.
   there is no strip: the same bar, without its strip height, padding,
   border and background (`IN_ROW`), ends rows that already exist: the cart
   view's "‹ Products" row, and on Products Catalogue's status line under the
-  search box (its `statusAccessory`, TallyUI #167).
+  search box (its `statusAccessory`, TallyUI #167). There the status text
+  is short, to fit one line beside the pill: the sync state and the product
+  count, plus any error, without the connector name or the unlisted count.
 - **The panel.** "Register ›" opens `RegisterPanel` (currency from
   pricing), whose Paid in, Paid out and No sale open TallyUI's
   `MovementSheet`, and whose Undo calls `voidMovement`. No `onOpenDrawer`:
