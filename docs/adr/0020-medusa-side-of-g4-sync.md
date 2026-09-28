@@ -127,7 +127,7 @@ Auth is unchanged for every route: `authenticate('user', ['bearer', 'session'])`
 
 | Route | Request | Response | Fed by |
 |---|---|---|---|
-| `GET /tally/v1/changes` | `since=<seq>&limit=<n≤1000>`, plus optional `collections=products` (`customers` and `orders` from P3) | `{ epoch, head, horizon, changes: [{ seq, collection, id, op: 'upsert'\|'delete', revision }], more }`. A `since` below `horizon`, or a different `epoch`, answers `410 { code: 'cursor_expired', epoch, head }`, and the engine then takes its backlog-guard path. | The `tally_change` table (below) |
+| `GET /tally/v1/changes` | `since=<seq>&limit=<n≤1000>`, plus optional `collections=products` (`customers` and `orders` from P3) | `{ epoch, head, horizon, changes: [{ seq, collection, id, op: 'upsert'\|'delete', revision }], more }`, with each change gaining `content_hash` at P3 (Ruling 8). A `since` below `horizon`, or a different `epoch`, answers `410 { code: 'cursor_expired', epoch, head }`, and the engine then takes its backlog-guard path. | The `tally_change` table (below) |
 | `GET /tally/v1/changes/tick` | `since=<seq>&epoch=<e>` | `304` when `since == head`, otherwise `{ epoch, head, horizon }` | Same table |
 
 **The journal table** (`tally_change`, in a new `tally_sync` module): `seq bigserial primary key`, `collection`, `object_id`, `op`, `created_at`, and an index on `(collection, object_id)`. The revision is the `seq` of the object's latest row. Retention purges superseded rows and advances `horizon`.
@@ -164,7 +164,7 @@ G4 counts these events against writes before anything depends on them (Ruling Q3
 - Each digest entry is `hash(id ‖ content_hash)`.
 - `content_hash` is computed in SQL from the source tables. It covers the promoted columns and the fields that define the document's content, including the price and stock inputs.
 - A missed update therefore changes the bucket's digest.
-- The driver hashes the same driver-declared field list from its stored document.
+- `/changes` rows carry the server's `content_hash` (from P3), and the till stores it beside the row. The audit compares the stored server hashes with the current server hashes. The driver never recomputes the hash, so there's no byte-for-byte serialization contract between SQL and TypeScript that could break silently (Ruling 8).
 - A supplement, not a replacement: the product workflow hooks run inside the workflow (E2.3), so they could journal product and variant writes. The inventory workflows have no hooks, and price module events reach no hook (E2.3), so the content hash stays the catch.
 
 G4 only designs this; P3 builds it.
@@ -374,10 +374,8 @@ Cited at `origin/main` `e151099`:
 5. **Order history.** Keep TallyUI ADR-024's outbox view through G4. Decide at P3, against the P1 acceptance scenarios.
 6. **Customers.** The journal `seq` is their revision. A metadata revision would emit `customer.updated` and loop. This is moot until a `customer.update` command exists.
 7. **Index module.** Stay on `query.graph` and the list routes. The Index module is feature-flagged, returns estimated counts and can't be a change feed (E2.5).
+8. **Content-hash agreement** (raised in review). `/changes` rows carry the server's content hash, and the till stores it beside the row. The digest compares stored server hashes with current server hashes. There's no canonical serialization shared by SQL and TypeScript: that would be a byte-for-byte contract that breaks silently.
 
 ## Open questions
 
 1. **For G2:** the name and exact shape of the engine state for `unsupported_version` (§2 proposes `retry-downgraded`).
-2. **For P3:** how the server's and the driver's content hashes agree byte for byte. The server hashes in SQL and the driver hashes its stored document, and the two differ in numeric formatting, timestamp formatting and array order. `calculated_price` also isn't in the source tables. There are two options:
-   - a canonical serialization of the driver-declared field list, with a shared test vector;
-   - `/changes` rows carry the server's `content_hash`, and the driver stores it rather than recomputing it.
