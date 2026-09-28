@@ -27,31 +27,37 @@ export default class TallyRegisterModuleService extends MedusaService({
       let [session] = await em.execute('select id, register_id from tally_register_session where id = ?', [p.sessionId])
       if (!session) {
         await em.execute('insert into tally_register (id) values (?) on conflict do nothing', [p.registerId])
-        const inserted = await em.execute(`insert into tally_register_session
-          (id, register_id, store_key, status, business_day, opened_at, opened_by, expected_float_minor, counted_float_minor, opening_variance_minor)
-          values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?) on conflict do nothing returning id`,
-        [p.sessionId, p.registerId, p.storeKey ?? null, p.businessDay ?? null, p.openedAt, p.openedBy ?? null,
-          p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null])
-        if (inserted.length) return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
-        ;[session] = await em.execute('select id, register_id from tally_register_session where id = ?', [p.sessionId])
+        for (let attempt = 0; attempt < 3; attempt++) {
+          const inserted = await em.execute(`insert into tally_register_session
+            (id, register_id, store_key, status, business_day, opened_at, opened_by, expected_float_minor, counted_float_minor, opening_variance_minor)
+            values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?) on conflict do nothing returning id`,
+          [p.sessionId, p.registerId, p.storeKey ?? null, p.businessDay ?? null, p.openedAt, p.openedBy ?? null,
+            p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null])
+          if (inserted.length) return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
+          ;[session] = await em.execute('select id, register_id from tally_register_session where id = ?', [p.sessionId])
+          if (session) break
+          const [active] = await em.execute(`select id from tally_register_session
+            where register_id = ? and status <> 'closed' and deleted_at is null`, [p.registerId])
+          if (active) return { kind: 'conflict', code: 'register_session_already_open', data: { sessionId: active.id } }
+        }
       }
       if (session) {
         if (session.register_id !== p.registerId) return { kind: 'invalid', message: 'session id belongs to another register' }
         return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
       }
-      const [active] = await em.execute(`select id from tally_register_session
-        where register_id = ? and status <> 'closed' and deleted_at is null`, [p.registerId])
-      if (!active) return { kind: 'invalid', message: 'conflicting session is no longer active' }
-      return { kind: 'conflict', code: 'register_session_already_open', data: { sessionId: active.id } }
+      return { kind: 'invalid', message: 'conflicting session is no longer active' }
     })
   }
 
   @InjectManager()
   async transition(p: RegisterSessionTransitionPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      const [session] = await em.execute('select id, status from tally_register_session where id = ? for update', [p.sessionId])
+      const [session] = await em.execute('select id, status, status_at from tally_register_session where id = ? for update', [p.sessionId])
       if (!session) return { kind: 'invalid', message: 'unknown session' }
       if (session.status === p.status) return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
+      if (session.status_at && Date.parse(p.at) < Date.parse(session.status_at)) {
+        return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
+      }
       if (session.status === 'closed') return { kind: 'conflict', code: 'register_session_closed' }
       if (p.status === 'closed') {
         await em.execute(`update tally_register_session set status = ?, status_at = ?, closed_at = ?, counted = ?::jsonb,
@@ -107,7 +113,10 @@ export default class TallyRegisterModuleService extends MedusaService({
         (id, session_id, type, amount_minor, reason, created_at_client, created_by, voids)
         values (?, ?, 'void', 0, null, ?, ?, ?) on conflict do nothing returning id`,
       [p.movementId, p.sessionId, p.createdAt, p.createdBy ?? null, p.voids])
-      if (!inserted.length) return { kind: 'invalid', message: 'movement id does not match this void' }
+      if (!inserted.length) {
+        const [voided] = await em.execute('select id from tally_register_movement where voids = ? and deleted_at is null', [p.voids])
+        return { kind: 'invalid', message: voided ? 'void target is already voided' : 'movement id does not match this void' }
+      }
       await em.execute('update tally_register_movement set voided_by = ?, updated_at = now() where id = ?', [p.movementId, p.voids])
       return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
     })
@@ -116,7 +125,7 @@ export default class TallyRegisterModuleService extends MedusaService({
   @InjectManager()
   async submitClosure(p: RegisterClosureSubmitPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      const [session] = await em.execute('select register_id from tally_register_session where id = ?', [p.sessionId])
+      const [session] = await em.execute('select register_id from tally_register_session where id = ? for update', [p.sessionId])
       if (!session) return { kind: 'invalid', message: 'unknown session' }
       let [closure] = await em.execute(`select id, register_id, number from tally_register_closure
         where id = ? or session_id = ? order by (id = ?) desc`, [p.closureId, p.sessionId, p.closureId])

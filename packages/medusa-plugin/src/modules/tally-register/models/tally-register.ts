@@ -7,4 +7,6 @@ export const TallyRegister = model.define('tally_register', {
   perpetual_sales_total_minor: model.number().default(0),
   // The migration uses bigint for this integer; results use JSON numeric values.
   perpetual_refunds_total_minor: model.number().default(0),
-})
+}).indexes([
+  { name: 'IDX_tally_register_deleted_at', on: ['deleted_at'], where: 'deleted_at is null' },
+])

@@ -29,6 +29,7 @@ export const TallyRegisterClosure = model.define('tally_register_closure', {
   order_ids: model.json(),
   movement_ids: model.json(),
 }).indexes([
-  { name: 'IDX_tally_register_closure_session', on: ['session_id'], unique: true },
-  { name: 'IDX_tally_register_closure_number', on: ['register_id', 'number'], unique: true },
+  { name: 'IDX_tally_register_closure_deleted_at', on: ['deleted_at'], where: 'deleted_at is null' },
+  { name: 'IDX_tally_register_closure_session', on: ['session_id'], unique: true, where: null },
+  { name: 'IDX_tally_register_closure_number', on: ['register_id', 'number'], unique: true, where: null },
 ])
