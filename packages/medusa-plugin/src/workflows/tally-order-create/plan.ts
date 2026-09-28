@@ -1,4 +1,5 @@
 import type { OrderCreatePayload, CommandWarning } from '@tallyui/core'
+import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, minorToMajor } from './money'
 
 export type OrderRejectionCode =
@@ -49,6 +50,7 @@ export type OrderCreatePlan = {
 
 export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
   { ok: true; plan: OrderCreatePlan } | { ok: false; rejection: Rejection } {
+  const v3 = payload as OrderCreatePayloadV3
   if (payload.lines.length === 0) {
     return { ok: false, rejection: { code: 'invalid_quantity', message: 'Invalid lines: must not be empty' } }
   }
@@ -125,14 +127,14 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
           tally_payments: payload.payments,
           ...(payload.registerId !== undefined ? { tally_register_id: payload.registerId } : {}),
           ...(payload.cashierRef !== undefined ? { tally_cashier_ref: payload.cashierRef } : {}),
-          ...((payload as import('./fiscal-figures').OrderCreatePayloadV3).sessionId !== undefined
-            ? { tally_session_id: (payload as import('./fiscal-figures').OrderCreatePayloadV3).sessionId } : {}),
-          ...((payload as import('./fiscal-figures').OrderCreatePayloadV3).customer?.customerId !== undefined
-            ? { tally_customer_id: (payload as import('./fiscal-figures').OrderCreatePayloadV3).customer!.customerId } : {}),
+          ...(v3.sessionId !== undefined
+            ? { tally_session_id: v3.sessionId } : {}),
+          ...(v3.customer?.customerId !== undefined
+            ? { tally_customer_id: v3.customer!.customerId } : {}),
           // The till's own settlement figures, as the fiscal record (ADR 0012). Written at create only;
           // resume.ts never rewrites this key. Version 3 adds the receipt's figures as sent (TallyUI ADR-065).
           tally_pos_totals: (() => {
-            const { display, taxByRate } = payload as import('./fiscal-figures').OrderCreatePayloadV3
+            const { display, taxByRate } = v3
             return {
               v: display !== undefined && taxByRate !== undefined ? 2 : 1,
               currency: payload.currency,

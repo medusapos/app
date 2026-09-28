@@ -1,6 +1,9 @@
 import type { OrderCreatePayload } from '@tallyui/core'
 import { currencyDecimals } from './money'
 
+// BRIDGE (TallyUI ADR-065 order.create v3; spec-order-create-v3, PR to follow): a local copy until
+// @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden
+// fixture __fixtures__/order-create-v3.json must still pass unchanged.
 export interface OrderCreateDisplay {
   currency: string;
   exponent: number;
@@ -17,6 +20,9 @@ export interface OrderCreateDisplay {
   }>;
 }
 
+// BRIDGE (TallyUI ADR-065 order.create v3; spec-order-create-v3, PR to follow): a local copy until
+// @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden
+// fixture __fixtures__/order-create-v3.json must still pass unchanged.
 export interface OrderCreateTaxRate {
   ratePpm: number;
   code?: string;
@@ -25,6 +31,9 @@ export interface OrderCreateTaxRate {
   grossMinor: number;
 }
 
+// BRIDGE (TallyUI ADR-065 order.create v3; spec-order-create-v3, PR to follow): a local copy until
+// @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden
+// fixture __fixtures__/order-create-v3.json must still pass unchanged.
 export type OrderCreatePayloadV3 = OrderCreatePayload & {
   display?: OrderCreateDisplay; taxByRate?: OrderCreateTaxRate[]; sessionId?: string
   customer?: { email?: string; customerId?: string } | null

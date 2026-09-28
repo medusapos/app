@@ -225,7 +225,7 @@ medusaIntegrationTestRunner({
         { ...payload, taxByRate: [{ ...payload.taxByRate![0], code: 'changed' }] },
         { ...payload, sessionId: 'changed' }, { ...payload, customer: { customerId: 'changed' } },
       ]) {
-        expect(result(await executeOrderCreate(container, { ...sale, payload: changed })))
+        expect(result(await executeOrderCreate(container, { ...sale, payload: changed } as unknown as CommandEnvelope<OrderCreatePayload>)))
           .toMatchObject({ status: 'rejected', error: { code: 'idempotency_mismatch' } })
       }
       expect((await liveOrders(payload.clientOrderId))[0].metadata).toEqual(order.metadata)
