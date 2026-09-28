@@ -8,7 +8,6 @@ import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
-import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../../src/api/tally/v1/versions'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
@@ -115,10 +114,10 @@ medusaIntegrationTestRunner({
       }
     })
 
-    it('/info lists the supported versions from the shared constant', async () => {
+    it('/info lists order.create versions 1, 2 and 3', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
-      expect(response.data).toEqual({ contracts: { 'order.create': SUPPORTED_ORDER_CREATE_VERSIONS } })
+      expect(response.data).toEqual({ contracts: { 'order.create': [1, 2, 3] } })
     })
 
     it('a batch with a version-4 command and a version-1 command rejects only the first, as unsupported_version, and applies the second', async () => {
