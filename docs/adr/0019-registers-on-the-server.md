@@ -59,10 +59,17 @@ Rows are never deleted or rewritten. The exceptions are a session's status field
 
 **The naming trap.** In medusapos, `order.create`'s `registerId` (order metadata `tally_register_id`) is the **till's device id** (ADR 0017). The register commands, the `tally_register` tables and `GET /tally/v1/registers/{id}` mean the **drawer**. They are never joined.
 
-**Expected cash and the sales count** are derived on the server (P2):
-- the sales count and sales come from orders whose `tally_session_id` is the session (order.create v3), using the till's own figures in `tally_pos_totals` (ADR 0012), never Medusa's recomputed totals;
-- expected cash is those sales plus the counted float, plus paid-in, minus paid-out, with voids reversing their target. Per ADR-068 6a, `amountMinor` is always positive and `type` gives the direction; `no_sale` is 0;
-- at `closure.submit`, the figures cover exactly the submitted `orderIds` and `movementIds`.
+**Expected per tender and the sales count** are derived on the server (P2, TallyUI ADR-068 decision 13), equal to the till's `deriveExpected`:
+- **`expected` is keyed by payment `method`.** `cash` is always present and starts at the session's `countedFloatMinor`. Each sale adds its payments' `amountMinor` (net of change), read from the order's `tally_payments` metadata as the till sent it, never from Medusa's totals or payment collections.
+- **Movements change `cash` only.** paid-in adds and paid-out subtracts; per ADR-068 6a, `amountMinor` is always positive and `type` gives the direction. `no_sale` and void rows add nothing, and a voided movement is excluded.
+- **`salesCount`** is the number of orders.
+- **Which orders count:**
+  - **live:** orders whose `tally_session_id` is the session;
+  - **at and after the closure:** the orders in the closure's `orderIds`, whatever their `tally_session_id`, so v1/v2 orders enter only this way. The movements are those in its `movementIds`, plus the session's void rows, so a movement stranded by a racing close is left out.
+  - An order counts when it isn't deleted, carries `tally_payments`, and has status `completed`, `archived` or `canceled`. Pending and draft orders were never received. **The reconciliation view answers what the till took during the session.** A later admin action (archive, cancel, refund) is a correction recorded elsewhere, and never rewrites a session's figure.
+- **The closure's `variance`** is counted − expected, over `counted`'s keys only.
+- **The till's `tillExpected` and `counted` are the fiscal record,** stored unchanged. The server's figures are a reconciliation view, computed on read, so an order that arrives late is included. The closure row's `expected` and `variance` columns stay null. Orders the server never received, and rejected orders, show up as the difference from `tillExpected`. No field is added for them.
+- **Open question (post-c2):** when refunds arrive, a refund against a session's order goes into the refund figure, not out of `expected`.
 
 ## Consequences
 
