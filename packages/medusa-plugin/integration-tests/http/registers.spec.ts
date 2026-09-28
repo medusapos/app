@@ -1,13 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, MedusaError, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
 import type TallyRegisterModuleService from '../../src/modules/tally-register/service'
-import type { RegisterSessionOpenPayload } from '../../src/modules/tally-register/types'
+import type { RegisterClosureSubmitPayload, RegisterSessionOpenPayload } from '../../src/modules/tally-register/types'
+import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
@@ -49,7 +50,7 @@ medusaIntegrationTestRunner({
       return command('register.session.transition', { sessionId, status: 'closed', at: closedAt, counted: { cash: 100 } })
     }
     function closure(session: RegisterSessionOpenPayload, number = 1) {
-      return command('register.closure.submit', {
+      return command<RegisterClosureSubmitPayload>('register.closure.submit', {
         closureId: randomUUID(), sessionId: session.sessionId, registerId: session.registerId, number, openedAt, closedAt,
         tillExpected: { cash: 1100 }, counted: { cash: 1100 }, periodSalesTotalMinor: 1000, periodRefundsTotalMinor: 0,
         perpetualSalesTotalMinor: 1000, perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0,
@@ -59,13 +60,31 @@ medusaIntegrationTestRunner({
     function post(commands: unknown[]) {
       return api.post('/tally/v1/commands', { commands }, { headers, validateStatus: () => true })
     }
+    function sale(variantId: string, sessionId?: string, method = 'cash') {
+      const clientLineId = randomUUID()
+      return { ...command('order.create', {
+        clientOrderId: randomUUID(), createdAt: openedAt, currency: 'EUR', pricesIncludeTax: true,
+        ...(sessionId ? { sessionId } : {}),
+        lines: [{ clientLineId, variantId, quantity: 1, unitPriceMinor: 1000 }],
+        subtotalMinor: 840, taxMinor: 160, totalMinor: 1000,
+        payments: [{ clientPaymentId: randomUUID(), method, amountMinor: 1000, tenderedMinor: 1200, changeMinor: 200 }],
+        display: { currency: 'EUR', exponent: 2, taxInclusive: true, subtotalMinor: 1000,
+          discountMinor: 0, taxMinor: 160, totalMinor: 1000, orderDiscountMinor: 0,
+          lines: [{ clientLineId, amountMinor: 1000, discounts: [] }] },
+        taxByRate: [{ ratePpm: 190000, code: 'VAT', netMinor: 840, taxMinor: 160, grossMinor: 1000 }],
+      }), version: 3 }
+    }
+    function movement(sessionId: string, type: 'paid_in' | 'paid_out' | 'no_sale', amountMinor: number) {
+      return command('register.movement.record', { movementId: randomUUID(), sessionId, type, amountMinor,
+        reason: 'test movement', createdAt: openedAt })
+    }
 
     it('opens a session: applied with register.session and counters, and a replay is a duplicate with the same register', async () => {
       const batch = [open()]
       const first = await post(batch)
       expect(first.status).toBe(200)
       expect(first.data.results).toEqual([{ id: batch[0].id, status: 'applied', register: {
-        session: { id: batch[0].payload.sessionId, status: 'open' }, counters,
+        session: { id: batch[0].payload.sessionId, status: 'open', expected: { cash: 100 }, salesCount: 0 }, counters,
       } }])
       const replay = await post(batch)
       expect(replay.status).toBe(200)
@@ -115,7 +134,7 @@ medusaIntegrationTestRunner({
       expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'applied'])
       const expectedCounters = { ...counters, lastClosureNumber: 1, perpetualSalesTotalMinor: 1000 }
       expect(response.data.results[2]).toEqual({ id: first.id, status: 'applied', register: {
-        closure: { serverClosureId: first.payload.closureId, number: 1 }, counters: expectedCounters,
+        closure: { serverClosureId: first.payload.closureId, number: 1, expected: { cash: 100 }, variance: { cash: 1000 } }, counters: expectedCounters,
       } })
       const replay = await post([first])
       expect(replay.data.results).toEqual([{ ...response.data.results[2], status: 'duplicate' }])
@@ -192,7 +211,9 @@ medusaIntegrationTestRunner({
       expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
       const retry = await post([opening])
       expect(retry.status).toBe(200)
-      expect(retry.data.results).toEqual([{ id: opening.id, status: 'applied', register: stored }])
+      expect(retry.data.results).toEqual([{ id: opening.id, status: 'applied', register: {
+        ...stored, session: { ...stored!.session, expected: { cash: 100 }, salesCount: 0 },
+      } }])
       expect((await post([opening])).data.results).toEqual([{ ...retry.data.results[0], status: 'duplicate' }])
     })
 
@@ -215,13 +236,225 @@ medusaIntegrationTestRunner({
       expect((await post(batch)).data.results).toEqual(response.data.results.map(result => ({ ...result, status: 'duplicate' })))
     })
 
-    it('stores service invalid_payload outcomes so a replay keeps the original rejection', async () => {
-      const transition = close(randomUUID())
-      const response = await post([transition])
+    it('live expected counts every completed order carrying the sessionId, plus float and movements', async () => {
+      const data = await seed(container)
+      const opening = open()
+      const sessionId = opening.payload.sessionId
+      const cash = sale(data.variantB, sessionId)
+      const external = sale(data.variantB, sessionId, 'external')
+      const unrelated = sale(data.variantB, randomUUID())
+      const paidIn = movement(sessionId, 'paid_in', 200)
+      const paidOut = movement(sessionId, 'paid_out', 50)
+      const voided = movement(sessionId, 'paid_out', 70)
+      const voiding = command('register.movement.void', { movementId: randomUUID(), sessionId,
+        voids: voided.payload.movementId, createdAt: openedAt })
+      const counting = command('register.session.transition', { sessionId, status: 'counting', at: closedAt })
+      const batch = [opening, cash, external, unrelated, paidIn, paidOut, voided, voiding,
+        movement(sessionId, 'no_sale', 0), counting]
+      const response = await post(batch)
       expect(response.status).toBe(200)
-      expect(response.data.results).toEqual([{ id: transition.id, status: 'rejected', error: { code: 'invalid_payload', message: 'unknown session' } }])
-      expect(await ledger.listTallyCommands({ id: transition.id })).toHaveLength(1)
-      expect((await post([transition])).data.results).toEqual(response.data.results)
+      expect(response.data.results.map(result => result.status)).toEqual(batch.map(() => 'applied'))
+      expect(response.data.results.filter(result => result.register).map(result => result.register.session)).toEqual([
+        { id: sessionId, status: 'open', expected: { cash: 100 }, salesCount: 0 },
+        ...[1300, 1250, 1180, 1250, 1250].map(cash => ({
+          id: sessionId, status: 'open', expected: { cash, external: 1000 }, salesCount: 2,
+        })),
+        { id: sessionId, status: 'counting', expected: { cash: 1250, external: 1000 }, salesCount: 2 },
+      ])
+      expect((await post([opening, paidIn])).data.results).toEqual([
+        { ...response.data.results[0], status: 'duplicate' }, { ...response.data.results[4], status: 'duplicate' },
+      ])
+    })
+
+    it("closure expected counts the closure's orderIds, including an order sent without sessionId, and excludes a session order not in orderIds", async () => {
+      const data = await seed(container)
+      const opening = open()
+      const sessionId = opening.payload.sessionId
+      const included = sale(data.variantB, sessionId)
+      const withoutSession = sale(data.variantB)
+      const otherSession = sale(data.variantB, randomUUID(), 'external')
+      const excluded = sale(data.variantB, sessionId)
+      const submission = closure(opening.payload)
+      submission.payload.orderIds = [included, withoutSession, otherSession].map(order => order.payload.clientOrderId)
+      const batch = [opening, included, withoutSession, otherSession, excluded, close(sessionId), submission]
+      const response = await post(batch)
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(batch.map(() => 'applied'))
+      expect(response.data.results[6].register.closure).toEqual({ serverClosureId: submission.payload.closureId,
+        number: 1, expected: { cash: 2100, external: 1000 }, variance: { cash: -1000 } })
+      const after = await post([close(sessionId)])
+      expect(after.data.results[0].register.session).toEqual({ id: sessionId, status: 'closed',
+        expected: { cash: 2100, external: 1000 }, salesCount: 3 })
+      const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+      expect(read.data.session).toEqual(after.data.results[0].register.session)
+    })
+
+    it.each([
+      { action: 'archiving', status: 'archived' },
+      { action: 'cancelling', status: 'canceled' },
+    ])('$action an order after the closure changes neither the live nor the closed figure', async ({ status }) => {
+      const data = await seed(container)
+      const opening = open()
+      const liveOpening = open()
+      const sessionId = opening.payload.sessionId
+      const liveSessionId = liveOpening.payload.sessionId
+      const order = sale(data.variantB, sessionId)
+      const liveOrder = sale(data.variantB, liveSessionId)
+      const batch = [opening, liveOpening, order, liveOrder]
+      const response = await post(batch)
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(batch.map(() => 'applied'))
+      const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+      expect(read.data.session).toEqual({ id: sessionId, status: 'open', expected: { cash: 1100 }, salesCount: 1 })
+      const liveBefore = await loadSessionFigures(container, liveSessionId)
+      expect(liveBefore).toEqual({ expected: read.data.session.expected, salesCount: 1 })
+      const submission = closure(opening.payload)
+      submission.payload.orderIds = [order.payload.clientOrderId]
+      const closed = await post([close(sessionId), submission])
+      expect(closed.status).toBe(200)
+      expect(closed.data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+      const closedBefore = await loadSessionFigures(container, sessionId)
+      expect(closedBefore).toEqual({ ...liveBefore, variance: { cash: 0 } })
+      expect(closed.data.results[1].register.closure.expected).toEqual(closedBefore!.expected)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      await knex('order').whereIn('id', response.data.results.slice(2).map(result => result.serverRefs.orderId))
+        .update({ status })
+      expect(await loadSessionFigures(container, sessionId)).toEqual(closedBefore)
+      expect(await loadSessionFigures(container, liveSessionId)).toEqual(liveBefore)
+    })
+
+    it("closure variance is counted minus server expected over counted's keys, and the till's tillExpected and counted are stored unchanged", async () => {
+      const data = await seed(container)
+      const opening = open()
+      const sessionId = opening.payload.sessionId
+      const cash = sale(data.variantB, sessionId)
+      const external = sale(data.variantB, sessionId, 'external')
+      const submission = closure(opening.payload)
+      submission.payload.orderIds = [cash, external].map(order => order.payload.clientOrderId)
+      submission.payload.tillExpected = { cash: 9000, external: 8000 }
+      submission.payload.counted = { cash: 1050 }
+      const batch = [opening, cash, external, close(sessionId), submission]
+      const response = await post(batch)
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(batch.map(() => 'applied'))
+      const expectedClosure = { serverClosureId: submission.payload.closureId, number: 1,
+        expected: { cash: 1100, external: 1000 }, variance: { cash: -50 } }
+      expect(response.data.results[4].register.closure).toEqual(expectedClosure)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const stored = await knex('tally_register_closure').where('id', submission.payload.closureId).first()
+      expect(stored.till_expected).toEqual(submission.payload.tillExpected)
+      expect(stored.counted).toEqual(submission.payload.counted)
+      expect(stored.expected).toBeNull()
+      expect(stored.variance).toBeNull()
+      const retry = await post([{ ...submission, id: randomUUID(), payload: {
+        ...submission.payload, counted: { cash: 9999 }, tillExpected: { cash: 9999 },
+      } }])
+      expect(retry.data.results[0].register.closure).toEqual(expectedClosure)
+      expect(await knex('tally_register_closure').where('id', submission.payload.closureId).first()).toEqual(stored)
+    })
+
+    it('an orderId the server has not received is missing from the closure figure, and no extra field appears', async () => {
+      const data = await seed(container)
+      const opening = open()
+      const sessionId = opening.payload.sessionId
+      const received = sale(data.variantB, sessionId)
+      const late = sale(data.variantB)
+      const submission = closure(opening.payload)
+      submission.payload.orderIds = [received, late].map(order => order.payload.clientOrderId)
+      submission.payload.tillExpected = { cash: 2100 }
+      submission.payload.unsyncedCount = 1
+      submission.payload.unsyncedTotalMinor = 1000
+      const response = await post([opening, received, close(sessionId), submission])
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'applied', 'applied'])
+      expect(response.data.results[3].register).toEqual({
+        closure: { serverClosureId: submission.payload.closureId, number: 1, expected: { cash: 1100 }, variance: { cash: 0 } },
+        counters: { ...counters, lastClosureNumber: 1, perpetualSalesTotalMinor: 1000 },
+      })
+      const url = `/tally/v1/registers/${opening.payload.registerId}`
+      expect((await api.get(url, { headers })).data.session).toEqual({ id: sessionId, status: 'closed',
+        expected: { cash: 1100 }, salesCount: 1 })
+      expect((await post([late])).data.results[0].status).toBe('applied')
+      expect((await api.get(url, { headers })).data.session).toEqual({ id: sessionId, status: 'closed',
+        expected: { cash: 2100 }, salesCount: 2 })
+      expect((await post([submission])).data.results).toEqual([{ ...response.data.results[3], status: 'duplicate' }])
+      const refreshed = await post([{ ...submission, id: randomUUID() }])
+      expect(refreshed.data.results[0].register.closure).toEqual({ serverClosureId: submission.payload.closureId,
+        number: 1, expected: { cash: 2100 }, variance: { cash: -1000 } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const stored = await knex('tally_register_closure').where('id', submission.payload.closureId).first()
+      expect(stored.unsynced_count).toBe(1)
+      expect(Number(stored.unsynced_total_minor)).toBe(1000)
+      expect(stored.till_expected).toEqual({ cash: 2100 })
+      expect(stored.counted).toEqual({ cash: 1100 })
+      expect(stored.expected).toBeNull()
+      expect(stored.variance).toBeNull()
+    })
+
+    it('a movement recorded before the closure but absent from movementIds is excluded from the closure figure', async () => {
+      const data = await seed(container)
+      const opening = open()
+      const sessionId = opening.payload.sessionId
+      const included = movement(sessionId, 'paid_in', 200)
+      const stranded = movement(sessionId, 'paid_in', 300)
+      const voided = movement(sessionId, 'paid_out', 70)
+      const voiding = command('register.movement.void', { movementId: randomUUID(), sessionId,
+        voids: voided.payload.movementId, createdAt: openedAt })
+      const submission = closure(opening.payload)
+      submission.payload.movementIds = [included.payload.movementId, voided.payload.movementId]
+      expect((await post([sale(data.variantB, sessionId)])).data.results[0].status).toBe('applied')
+      const batch = [opening, included, stranded, voided, voiding, close(sessionId), submission]
+      const response = await post(batch)
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(batch.map(() => 'applied'))
+      expect(response.data.results[5].register.session).toEqual({ id: sessionId, status: 'closed',
+        expected: { cash: 1600 }, salesCount: 1 })
+      expect(response.data.results[6].register.closure).toEqual({ serverClosureId: submission.payload.closureId,
+        number: 1, expected: { cash: 300 }, variance: { cash: 800 } })
+      const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+      expect(read.data.session).toEqual({ id: sessionId, status: 'closed', expected: { cash: 300 }, salesCount: 0 })
+    })
+
+    it('GET /tally/v1/registers/{id} returns the open session with expected and salesCount and the counters; 404 for an unknown register; 401 without auth', async () => {
+      const data = await seed(container)
+      const opening = open()
+      const response = await post([opening, sale(data.variantB, opening.payload.sessionId)])
+      expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+      const url = `/tally/v1/registers/${opening.payload.registerId}`
+      const read = await api.get(url, { headers: { ...headers, Origin: 'http://localhost' } })
+      expect(read.status).toBe(200)
+      expect(read.headers['access-control-allow-origin']).toBe('http://localhost')
+      expect(read.headers['access-control-allow-credentials']).toBe('true')
+      expect(read.data).toEqual({ session: { id: opening.payload.sessionId, status: 'open',
+        expected: { cash: 1100 }, salesCount: 1 }, counters })
+      const unknown = await api.get(`/tally/v1/registers/${randomUUID()}`, { headers, validateStatus: () => true })
+      expect(unknown.status).toBe(404)
+      expect(unknown.data).toEqual({ message: 'Unknown register' })
+      expect((await api.get(url, { validateStatus: () => true })).status).toBe(401)
+    })
+
+    it('a state-dependent refusal is invalid_payload and is not stored, so a resend after the fix applies', async () => {
+      const opening = open()
+      const recording = movement(opening.payload.sessionId, 'paid_in', 50)
+      const response = await post([recording])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([{ id: recording.id, status: 'rejected', error: { code: 'invalid_payload', message: 'unknown session' } }])
+      expect(await ledger.listTallyCommands({ id: recording.id })).toHaveLength(0)
+      expect((await post([opening])).data.results[0].status).toBe('applied')
+      const resend = await post([recording])
+      expect(resend.status).toBe(200)
+      expect(resend.data.results[0]).toMatchObject({ id: recording.id, status: 'applied' })
+    })
+
+    it('a register command whose claim was lost before the write is in_progress and writes nothing', async () => {
+      const opening = open()
+      jest.spyOn(ledger, 'assertClaim').mockRejectedValueOnce(new MedusaError(MedusaError.Types.CONFLICT, 'claim lost'))
+      const response = await post([opening])
+      expect(response.status).toBe(409)
+      expect(response.data).toEqual({ code: 'in_progress', id: opening.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_session').where('id', opening.payload.sessionId)).toHaveLength(0)
+      expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
     })
   },
 })

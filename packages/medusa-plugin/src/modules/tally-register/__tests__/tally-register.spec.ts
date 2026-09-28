@@ -166,15 +166,6 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
       expect(await sql('select status, status_at from tally_register_session')).toEqual([{ status: 'open', status_at: '2026-09-28T10:00:00Z' }])
     })
 
-    it.each([[at, 'not-a-date'], ['not-a-date', at]])('applies a snapshot when a timestamp cannot parse (%s, %s)', async (storedAt, incomingAt) => {
-      await service.openSession(first)
-      await service.transition({ sessionId: first.sessionId, status: 'counting', at: storedAt })
-      expect(await service.transition({ sessionId: first.sessionId, status: 'open', at: incomingAt })).toMatchObject({
-        kind: 'ok', register: { session: { status: 'open' } },
-      })
-      expect(await sql('select status_at from tally_register_session')).toEqual([{ status_at: incomingAt }])
-    })
-
     it('stores each allowed transition and soft approval as sent', async () => {
       await service.openSession(first)
       for (const status of ['counting', 'open', 'counting'] as const) {

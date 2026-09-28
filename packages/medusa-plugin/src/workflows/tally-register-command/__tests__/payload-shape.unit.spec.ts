@@ -47,6 +47,8 @@ it.each<[string, Record<string, unknown>, string]>([
   ['register.closure.submit', { ...closure, counted: { '': 1 } }, 'counted'],
   ['register.closure.submit', { ...closure, counted: new Date(at) }, 'counted'],
   ['register.closure.submit', { ...closure, number: 0 }, 'number'],
+  ['register.closure.submit', { ...closure, number: 2147483648 }, 'number'],
+  ['register.closure.submit', { ...closure, unsyncedCount: 2147483648 }, 'unsyncedCount'],
   ['register.closure.submit', { ...closure, closedAt: 'invalid' }, 'closedAt'],
   ['register.closure.submit', { ...closure, unsyncedTotalMinor: -1 }, 'unsyncedTotalMinor'],
   ['register.closure.submit', { ...closure, orderIds: [''] }, 'orderIds'],
@@ -60,6 +62,18 @@ it('accepts positive paid_out amounts, zero no_sale amounts and signed safe inte
   expect(registerPayloadErrors('register.movement.record', { ...movement, type: 'no_sale', amountMinor: 0 })).toEqual([])
   expect(registerPayloadErrors('register.session.open', { ...open, expectedFloatMinor: -1, openingVarianceMinor: -1 })).toEqual([])
   expect(registerPayloadErrors('register.closure.submit', { ...closure, tillExpected: { cash: -1 }, counted: {} })).toEqual([])
+})
+
+it.each(['paid_in', 'paid_out', 'no_sale'])('rejects blank and 501-character reasons but accepts 500 characters for %s', type => {
+  const payload = { ...movement, type, amountMinor: type === 'no_sale' ? 0 : 50 }
+  for (const reason of ['   ', 'r'.repeat(501)]) {
+    expect(registerPayloadErrors('register.movement.record', { ...payload, reason })).toEqual([expect.stringContaining('reason')])
+  }
+  expect(registerPayloadErrors('register.movement.record', { ...payload, reason: 'r'.repeat(500) })).toEqual([])
+})
+
+it('accepts the maximum Postgres integer for closure number and unsyncedCount', () => {
+  expect(registerPayloadErrors('register.closure.submit', { ...closure, number: 2147483647, unsyncedCount: 2147483647 })).toEqual([])
 })
 
 it('limits errors to ten and rejects non-object payloads', () => {
