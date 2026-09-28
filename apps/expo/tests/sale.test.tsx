@@ -15,6 +15,8 @@ import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettin
 import { useSession } from '../lib/session-context';
 import { posConnector } from '../lib/pos-connector';
 import ProductsScreen from '../app/index';
+import { useRegister } from '../lib/register-context';
+import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
 // Cart, Tender, Receipt etc. live in @tallyui/components (TallyUI TV6a/TV6b) and are imported above,
@@ -62,6 +64,10 @@ vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: nu
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({
   useOutboxContext: vi.fn(),
+}));
+// The register (ADR 0017): bound and open (register-fixture.ts); register-screen.test.tsx covers the gate itself.
+vi.mock('../lib/register-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
 vi.mock('../lib/use-replicated-products', () => ({
   useReplicatedProducts: () => ({ products: [], state: 'synced', error: null }),
@@ -122,6 +128,7 @@ beforeEach(() => {
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
     setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
   vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+  vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });
 

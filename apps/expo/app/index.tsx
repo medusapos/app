@@ -11,11 +11,15 @@ import {
 } from '@tallyui/pos';
 
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
+import {
+  GETTING_READY, IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
+} from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, posConnector } from '../lib/pos-connector';
+import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -182,8 +186,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
   // the outbox confirms the order is stored.
+  // `session`: complete() stamps the sale with the register session (ADR 0017). The Cart's tender start
+  // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
+  // close during the tender still reaches the stamp, which then makes the sale late.
+  const { register } = useRegister();
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
-    isStored });
+    isStored, session: register.saleSession });
+  const { sale: cartSale, refused } = useGatedSale(sale);
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
@@ -225,9 +234,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     if (entry) { sale.add(entry, traits); setScanMiss(null); } else setScanMiss(code);
   });
   const sellableCount = sorted.length;
-  const statusText = `${connector.name} · ${STATE_LABEL[state]} · ${sellableCount.toLocaleString()} products`
-    + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
-    + (error ? ` · ${error}` : '');
+  // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the connector name and
+  // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
+  const productCount = `${sellableCount.toLocaleString()} products`;
+  const statusText = phone ? `${STATE_LABEL[state]}${error ? ` · ${error}` : ''} · ${productCount}`
+    : `${connector.name} · ${STATE_LABEL[state]} · ${productCount}`
+      + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
+      + (error ? ` · ${error}` : '');
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.
   const clock = getCalendars()[0]?.uses24hourClock;
   const hour12 = clock == null ? undefined : !clock;
@@ -235,15 +248,26 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Complete would have nothing to save to, so the tender pane waits for it, live, instead. Cart and the
   // catalogue don't need a store to add lines, so only this pane is gated.
   const tenderPane = orders === null
-    ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">Getting ready to save sales…</Text>
+    ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
     : <Tender sale={sale} />;
+  // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [gateFocus, setGateFocus] = useState(0);
+  const gateFocusHandled = useRef(0);
+  const registerBar = (className?: string) => <TillRegisterBar online={state !== 'offline'} onOpenPanel={() => setPanelOpen(true)}
+    onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
   const catalogue = <View className="flex-1">
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
+    {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} />
+      onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
     <SyncStatus state={outboxState} />
   </View>;
+  // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
+  const cart = <RegisterGate currency={pricing.currency} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
+    <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
+  </RegisterGate>;
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
@@ -267,6 +291,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
+      {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
+      <RegisterPanelSheet currency={pricing.currency} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
         store={{ name: settings.storeName, address: settings.location.addressLine }}
@@ -279,16 +305,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {!phone ? <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
             {catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : tenderPane}
+              {sale.stage.kind === 'cart' ? cart : tenderPane}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : cartOpen ? <View className="flex-1 bg-card">
-              <View className="border-b border-border">
+              <View className="flex-row items-center justify-between border-b border-border pr-3">
                 <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}
                   className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
+                {registerBar(IN_ROW)}
               </View>
               {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
-              <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
+              {cart}
             </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
         </View>}
     </ConnectorProvider>

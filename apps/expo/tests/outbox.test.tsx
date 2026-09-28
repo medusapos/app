@@ -21,6 +21,7 @@ import { saveSession, type Session } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../lib/store-settings';
 import { terminateWebStorage } from '../lib/web-storage';
+import { openTestRegister } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
 // The outbox's two live-tab hooks, observed where they live (TV7 review): markBusy still runs for real;
@@ -626,8 +627,12 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
   async function tenderShirtByCard(withOrders = false) {
     const view = render(<App orders={withOrders} />);
     await waitFor(() => expect(outbox.orders).not.toBeNull());
+    // The cashier binds Register 1 and opens it (ADR 0017): paying needs an open session.
+    await act(async () => { await openTestRegister(outbox.orders!, session.baseUrl); });
+    await waitFor(() => expect(screen.queryByTestId('open-register-card')).toBeNull());
     fireEvent.click(await screen.findByRole('button', { name: 'Shirt' }));
     fireEvent.click(button('Card terminal'));
+    await screen.findByRole('button', { name: 'Payment approved on terminal' });
     return view;
   }
   /** Makes the next store insert write `stored(doc)` and then reject; resolves to the order the sale handed over. */

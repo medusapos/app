@@ -13,6 +13,8 @@ import {
   fetchStoreSettings, loadCachedPricing, loadSettingsChoice, saveCachedPricing, saveCachedSettings, saveSettingsChoice, type StoreSettings,
 } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
+import { useRegister } from '../lib/register-context';
+import { openRegisterFixture } from './register-fixture';
 
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: () => null } }));
 // expo-localization's native module isn't available under vitest.
@@ -20,6 +22,10 @@ vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: nu
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
+// The register (ADR 0017): bound and open (register-fixture.ts); register-screen.test.tsx covers the gate itself.
+vi.mock('../lib/register-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
+}));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
@@ -91,6 +97,7 @@ beforeEach(() => {
   capabilities.mockReset().mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useSession).mockReturnValue(signedIn());
+  vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null: this file's tender tests aren't about the order store opening (#86 review, item 5; see products-screen.test.tsx).
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0,
     record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
@@ -211,7 +218,7 @@ describe('store settings flow', () => {
     await requested(1);
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
-    const startSale = () => { fireEvent.click(button('Shirt')); fireEvent.click(button('Card terminal')); };
+    const startSale = async () => { fireEvent.click(button('Shirt')); await act(async () => { fireEvent.click(button('Card terminal')); }); };
     const inTender = () => {
       expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
       expect(button('Payment approved on terminal')).toBeTruthy();
@@ -222,7 +229,7 @@ describe('store settings flow', () => {
     // Retry is offered only while the sale is idle, so a sale is started while the retry loads.
     await act(async () => { fireEvent.click(button('Retry')); });
     await requested(2);
-    startSale();
+    await startSale();
     inTender(); // still mounted while the retry loads
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     inTender();
@@ -231,7 +238,7 @@ describe('store settings flow', () => {
     toIdle();
     await act(async () => { fireEvent.click(button('Retry')); });
     await requested(3);
-    startSale();
+    await startSale();
     await act(async () => { settle.resolve({ ...pricing, taxRatesPpm: { ...pricing.taxRatesPpm } }); });
     inTender();
     expect(screen.queryByText('Offline')).toBeNull();
@@ -252,7 +259,7 @@ describe('store settings flow', () => {
     expect(button('Retry')).toBeTruthy();
     fireEvent.click(button('Shirt'));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     fireEvent.click(button('Back'));
     fireEvent.click(button('Remove Shirt'));
@@ -270,7 +277,7 @@ describe('store settings flow', () => {
     expect(region()).toBe('reg_eu');
     fireEvent.click(button('Shirt'));
     expect(screen.getByText('Total: €30.00')).toBeTruthy();
-    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
     expect(screen.getByText('Card terminal: €30.00')).toBeTruthy();
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     const record = vi.mocked(useOutboxContext().record);
@@ -296,7 +303,7 @@ describe('store settings flow', () => {
     await act(async () => { fireEvent.click(button('Retry')); });
     await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
     fireEvent.click(button('Shirt'));
-    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { settle.reject(choiceRequired({ regions })); });
     expect(screen.queryByText('Set up this till')).toBeNull();
     expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();

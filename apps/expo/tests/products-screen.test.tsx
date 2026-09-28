@@ -22,6 +22,8 @@ import ProductsScreen from '../app/index';
 import OrdersScreen from '../app/orders';
 import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 import { OutboxStrip, StoreRefused } from '../components/store-refused';
+import { useRegister } from '../lib/register-context';
+import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
 vi.mock('expo-router', () => ({
@@ -40,6 +42,12 @@ vi.mock('../lib/outbox-context', async (importOriginal) => {
   realOutbox.useOutboxContext = actual.useOutboxContext;
   return { ...actual, useOutboxContext: vi.fn() };
 });
+// The register (ADR 0017): bound and open (register-fixture.ts), so sales can be paid; register-screen.test.tsx
+// covers the gate itself. OutboxProvider's own RegisterProvider passes through: the hung-save tests' orders are a stand-in.
+vi.mock('../lib/register-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/register-context')>(),
+  RegisterProvider: ({ children }: { children: ReactNode }) => children, useRegister: vi.fn(),
+}));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
 // The session's network calls, driven per test (the sign-out paths below); everything else in it is real.
@@ -127,6 +135,7 @@ beforeEach(() => {
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
+  vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null by default: the order store is open unless a test says otherwise (#86 review, item 5).
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
@@ -206,7 +215,7 @@ describe('ProductsScreen catalogue', () => {
     }));
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
     expect(screen.getByLabelText('Sync status').textContent).toBe('All sales synced');
     fireEvent.click(screen.getByRole('button', { name: 'Apple' }));
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
@@ -259,7 +268,7 @@ describe('ProductsScreen catalogue', () => {
     }] }));
     await mount(true, false, name);
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     expect(useOutboxContext().record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       syncStatus: 'pending', totalMinor: 1500, cashierRef: 'admin@store.test',
@@ -446,17 +455,17 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(search()).toBeTruthy();
     fireEvent.click(button('Open cart, 2 items, €30.00'));
     expect(screen.getByText('Shirt: €12.00 × 2 = €24.00')).toBeTruthy();
-    fireEvent.click(button('Cash'));
+    await act(async () => { fireEvent.click(button('Cash')); });
     expect(button('Complete sale')).toBeTruthy();
     for (const name of ['Products', /^Open cart/, 'Cash']) expect(screen.queryByRole('button', { name })).toBeNull();
     expect(search()).toBeNull();
     fireEvent.click(button('Back'));
-    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     fireEvent.click(button('New sale'));
     expect(button('Cart is empty')).toBeTruthy();
     expect(search()).toBeTruthy();
-  });
+  }, 15000);
 
   it('at 1280 wide shows the catalogue and cart with no bar; the order discount scrolls and pay is pinned', async () => {
     await mount();
@@ -515,7 +524,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored });
     await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBeNull();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     expect(record).toHaveBeenCalledTimes(1);
@@ -562,7 +571,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
     await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     // Replication reports 401 twice while the save is held: nothing signs out or navigates.
     const onUnauthorized = vi.mocked(useReplicatedProducts).mock.lastCall![2];
@@ -592,7 +601,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
     await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
@@ -635,7 +644,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     await act(async () => { hungView = render(hungTree()); });
     vi.useFakeTimers();
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     expect(record).toHaveBeenCalledTimes(1);
     return record.mock.calls[0][0];
@@ -859,7 +868,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
     await mountTill(token);
     fireEvent.click(button('Shirt'));
-    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
   }
@@ -915,7 +924,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(<Root sale />); });
     fireEvent.click(button('Shirt'));
-    fireEvent.click(button('Card terminal'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     act(() => { vi.mocked(useReplicatedProducts).mock.lastCall![2](); });
     expect(screen.getByText(NOTE)).toBeTruthy();
@@ -971,7 +980,7 @@ describe('ProductsScreen earlier-sale note wording', () => {
     const record = vi.fn<(order: PosOrder) => Promise<void>>();
     await arrange(savesInFlight, resolves ? record.mockResolvedValue(undefined) : record.mockImplementation(() => new Promise(() => {})));
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
   }
 
@@ -1037,15 +1046,34 @@ describe('ProductsScreen earlier-sale reload hint', () => {
 describe('ProductsScreen tender gated on the order store opening', () => {
   beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
-  it('shows a notice instead of Tender while orders is null, then Tender once it opens', async () => {
+  it('says it couldn\'t check the register, and logs why, when the check fails for another reason', async () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(fixture.register.requireOpen).mockRejectedValue(new Error('storage went away'));
+    vi.mocked(useRegister).mockReturnValue(fixture);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await mount();
+      fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cash' })); });
+      expect(screen.getByRole('alert').textContent).toBe("Couldn't check the register. Try again.");
+      expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+      expect(warn).toHaveBeenCalledWith('Could not check the register at tender start:', expect.objectContaining({ message: 'storage went away' }));
+    } finally { warn.mockRestore(); }
+  });
+
+  // While orders is null the register isn't enabled either (its collections are in the same store, ADR 0017).
+  it('refuses to start a tender while orders is null, saying so, then tenders once it opens', async () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: null });
+    vi.mocked(useRegister).mockReturnValue(openRegisterFixture({ enabled: false }));
     const view = await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     expect(screen.getByRole('alert').textContent).toBe('Getting ready to save sales…');
     expect(screen.queryByRole('button', { name: 'Payment approved on terminal' })).toBeNull();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: {} as never });
+    vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
     await act(async () => { view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
   });
 });

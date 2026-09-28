@@ -109,10 +109,13 @@ on any file it cannot read, and on app source outside that module and tests
 that contains `__medusapos` or writes a `window` property.
 
 The same file proves the storage-health prompts (ADR-061 part B): one test
-kills the storage worker via `window.__medusaposKillStorageWorker()` (another
-`EXPO_PUBLIC_E2E_DEBUG` hook, terminating the worker without forgetting the
-storage), then searches and completes a cash sale for `E2E-1` — expecting
-"Saving is slow…", then "Storage stopped", then a Reload that brings the app
+completes a cash sale for `E2E-1` with its insert held
+(`__medusaposHoldOrderInserts`, past the register check and session stamp
+that read storage first, ADR 0017), kills the storage worker via
+`window.__medusaposKillStorageWorker()` (another `EXPO_PUBLIC_E2E_DEBUG`
+hook, terminating the worker without forgetting the storage), and releases
+the insert into it — expecting "Saving is slow…", then "Storage stopped"
+once Orders' Retry reads the dead storage, then a Reload that brings the app
 back live (the killed sale itself is never checked). The other opens a second
 page at the static worker URL and starts a bare `Worker` there to hold the
 opfs-sahpool pool outside the coordinator, then signs in and expects the
@@ -150,6 +153,16 @@ empty". A second test opens the cart, keyboard-wedge scans `E2E-2` in (typed
 with `delay: 10`, staying on Cart), scans an unknown code to see the "No
 product matches" alert with nothing added, types into the line's discount
 form without triggering a scan, then pays exact cash for `E2E-1` and `E2E-2`.
+
+Paying needs an open register (ADR 0017), so `signIn` also binds the fresh
+till to Register 1 and opens it with a €100.00 float (`openRegister`; on a
+phone its register pill opens the cart view, where the picker shows).
+`register.spec.ts`, at 1280 × 800 and at 360 × 780, signs in without that,
+sees the picker and then the open card above a cart whose Cash refuses,
+opens with 100.00, sells `E2E-1` for exact cash, checks the panel's "1 sale
+this session" and expected cash, records a €5.00 paid in and undoes it, and
+takes Close register to the counting placeholder and back. Each state is
+attached as a screenshot (also saved to `REGISTER_SHOTS_DIR` when set).
 
 CI runs all tests on every PR in **End-to-end (web)** with Postgres 17 and
 Chromium. Failures upload `test-results` and the HTML `playwright-report`.

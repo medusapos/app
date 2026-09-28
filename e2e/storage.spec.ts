@@ -221,19 +221,23 @@ test('a dead storage worker shows the reload prompt, and Reload recovers the app
   await sellBySku(page, ['E2E-1'], 'exact');
   await page.unroute('**/tally/v1/commands');
 
-  await page.evaluate(() => (window as unknown as {
-    __medusaposKillStorageWorker: () => void;
-  }).__medusaposKillStorageWorker());
-
   // The write: a second, different sale saves to the same dead order store. It never completes;
-  // only recovery is checked below.
+  // only recovery is checked below. The tender's register check and complete()'s session stamp
+  // (ADR 0017) read storage before the save, so the worker dies only once the sale's insert is
+  // held (an E2E debug hook) past both; released, the insert reaches the dead worker and stalls.
   const search = page.getByPlaceholder(SEARCH_PLACEHOLDER, { exact: true });
   await search.fill('E2E-1');
   await search.press('Enter');
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
   const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
   await tender.locator('[tabindex="0"]').first().click();
+  const debug = (name: 'HoldOrderInserts' | 'HeldOrderInserts' | 'ReleaseOrderInserts' | 'KillStorageWorker') =>
+    page.evaluate((hook) => (window as unknown as Record<string, () => number | void>)[`__medusapos${hook}`](), name);
+  await debug('HoldOrderInserts');
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
+  await expect.poll(() => debug('HeldOrderInserts')).toBe(1);
+  await debug('KillStorageWorker');
+  await debug('ReleaseOrderInserts');
   await expect(page.getByRole('alert')).toHaveText('Saving is slow…');
 
   // The read: Retry's requeue() query has never run before, so it must reach the (now dead)

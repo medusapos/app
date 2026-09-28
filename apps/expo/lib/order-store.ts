@@ -3,7 +3,10 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
-import { addPosOrderCollection, posOrderCollection, posOrderSchema, type PosOrder } from '@tallyui/pos';
+import {
+  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, posOrderCollection, posOrderSchema, registerSessionCollection,
+  type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterSessionCollection,
+} from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { terminateWebStorage, webStorageAvailable } from './web-storage';
 import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
@@ -21,6 +24,8 @@ const addOrders = (db: OrdersDatabase) => addPosOrderCollection(db as unknown as
 // E2E debug only (guarded below, folded away in production): sessionStorage, so it survives the
 // reload `e2e/storage.spec.ts` uses to reach a fresh openOrderStore, unlike an in-memory flag.
 const E2E_FAIL_NEXT_OPEN_KEY = 'medusapos-e2e-fail-next-order-store-open';
+// E2E debug only: the hold HoldOrderInserts sets and ReleaseOrderInserts resolves (hooks below).
+let e2eInsertHold: { promise: Promise<void>; release(): void; waiting: number } | undefined;
 
 // Local document id recording that `carryOverOrders` copied a legacy database (count and time).
 // A record only: it never causes a delete, nor skips reading a legacy database that exists.
@@ -30,6 +35,18 @@ const LEGACY_ORDERS_MARKER = 'legacy-orders-migrated';
 // time limit, for every write in flight, and a hung save's insert may never finish. Past this, the open fails with an
 // ordinary Error, so the outbox's onOpenError shows #80's blocking prompt before the next sale takes any money.
 export const ORDER_STORE_CLOSE_WAIT_MS = 10_000;
+
+/** TallyUI's register collections (ADR 0017), local only, in the same per-backend database as `pos_orders`. */
+export type RegisterCollections = {
+  sessions: RegisterSessionCollection; movements: CashMovementCollection; closures: ClosureCollection;
+};
+
+/** The register collections of the database `orders` belongs to, as `openOrderStore` adds them. */
+export function registerCollections(orders: RxCollection<PosOrder>): RegisterCollections {
+  const { register_sessions, cash_movements, closures } = orders.database.collections as unknown as Record<string, RxCollection>;
+  return { sessions: register_sessions as RegisterSessionCollection, movements: cash_movements as CashMovementCollection,
+    closures: closures as ClosureCollection };
+}
 
 export function orderDatabaseName(baseUrl: string): string {
   return productCacheName('orders', baseUrl);
@@ -155,12 +172,21 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
       try {
         // Migrates v0 or v1 to v2, all of it. A DM4 fails this open, never deletes: the older orders stay; the next open retries.
         const orders = await addOrders(db);
+        // E2E debug only (folded away in production): while HoldOrderInserts holds, an insert waits before its write.
+        if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') {
+          orders.preInsert(() => { if (!e2eInsertHold) return; e2eInsertHold.waiting++; return e2eInsertHold.promise; }, false);
+        }
         if (onWebStorage) {
           await carryOverOrders({
             fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
             legacyExists: () => legacyOrdersDatabaseExists(legacyDexieName('orders', baseUrl)),
           });
         }
+        // New at TallyUI 451a0ca, so nothing to migrate or carry over; they share this store's close and watchdog.
+        const { register_sessions } = await db.addCollections({
+          register_sessions: registerSessionCollection(), cash_movements: { schema: cashMovementSchema }, closures: { schema: closureSchema },
+        });
+        await ensureRegister(register_sessions, 'web');
         return { orders, close: async () => { unwatch?.(); await db.close(); } };
       } catch (error) { unwatch?.(); await db.close(); throw error; }
     })();
@@ -245,4 +271,13 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
   exposeE2eHook('SeedV1Order', (baseUrl: string, order: PosOrder) =>
     seed(1, orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
   exposeE2eHook('FailNextOrderStoreOpen', (code: string) => window.sessionStorage.setItem(E2E_FAIL_NEXT_OPEN_KEY, code));
+  // A stuck insert without a dead storage worker: `record()` hangs before its write until released.
+  exposeE2eHook('HoldOrderInserts', () => {
+    if (e2eInsertHold) return;
+    let release!: () => void;
+    e2eInsertHold = { promise: new Promise<void>((resolve) => { release = resolve; }), release: () => release(), waiting: 0 };
+  });
+  // How many inserts the hold has stopped, so a test knows the save got past its reads (the session stamp).
+  exposeE2eHook('HeldOrderInserts', () => e2eInsertHold?.waiting ?? 0);
+  exposeE2eHook('ReleaseOrderInserts', () => { e2eInsertHold?.release(); e2eInsertHold = undefined; });
 }

@@ -6,6 +6,7 @@ import {
 import { markBusy, reportStorageStartFailure } from './live-tab';
 import { openOrderStore } from './order-store';
 import { authHeaders } from './pos-connector';
+import { RegisterProvider } from './register-context';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from './session';
 import { useSession } from './session-context';
 import { clearOrderStoreOpenFailure, reportOrderStoreOpenFailure } from './storage-health';
@@ -48,8 +49,9 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   const saving = outbox.savesInFlight > 0;
   useEffect(() => setSavesHold(saving), [saving, setSavesHold]);
   useEffect(() => () => setSavesHold(false, false), [setSavesHold]);
+  // The register (ADR 0017) lives in this outbox's order store, so its one useRegisterSession sits here too.
   return <OutboxContext.Provider value={outbox}>
-    {children}
+    <RegisterProvider orders={outbox.orders}>{children}</RegisterProvider>
   </OutboxContext.Provider>;
 }
 
