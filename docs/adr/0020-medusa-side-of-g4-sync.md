@@ -36,12 +36,16 @@ This ADR is the **Medusa half** of G4:
 
 The engine half (running `require()`, the recovery and the offline replay through the engine) is the monorepo's. It is not done here. Every claim about the engine cites the wiki; every claim about Medusa cites source or a measurement.
 
-**How Medusa is reached today (the baseline G4 replaces).** medusapos has no pull surface of its own. TallyUI's `connector-medusa` pulls straight from Medusa's admin and store APIs: a product feed, plus five more runners that patch what the product's `updated_at` misses (six in all; cited at TallyUI `origin/main` `e151099`, `connectors/medusa/src/`):
-- a product feed: id-ordered offset pages inside a fixed `updated_at[$gte]` window, 500 per page (`replication/products.ts:52,82-95`);
-- a variant feed, because "a price-only edit bumps the variant's `updated_at` but not the product's" (`replication/variant-feed.ts:29-37`);
-- a stock reconcile, because "inventory changes never touch the product" (`reconcile/stock.ts:17-21`);
-- an id reconcile for deletions (`reconcile/ids.ts:29-38`);
-- two price fingerprint passes: every 30 minutes, because "price-list edits and sale start/end bump no timestamp" (`reconcile/calculated-prices.ts:5-6`), and a nightly base-price backstop (`reconcile/prices.ts:7-8`).
+**How Medusa is reached today (the baseline G4 replaces).** medusapos has no pull surface of its own. TallyUI's `connector-medusa` pulls straight from Medusa's admin and store APIs. It runs **one combined pull replication plus four reconcile runners**, which patch what the product's `updated_at` misses (cited at TallyUI `origin/main` `e151099`, `connectors/medusa/src/`, and confirmed by the TallyUI track):
+- **The combined pull** (`index.ts:125-132`, `combinePullAdapters`) has three sub-feeds:
+  - products: id-ordered offset pages inside a fixed `updated_at[$gte]` window, 500 per page (`replication/products.ts:52,82-95`);
+  - variants, because "a price-only edit bumps the variant's `updated_at` but not the product's" (`replication/variant-feed.ts:26-47`);
+  - the id reconcile's re-delivery feed.
+- **The four reconcile runners** (`index.ts:136-141`):
+  - stock, because "inventory changes never touch the product" (`reconcile/stock.ts:17-21`);
+  - ids, for deletions (`reconcile/ids.ts:29-38`);
+  - calculated prices, every 30 minutes, because "price-list edits and sale start/end bump no timestamp" (`reconcile/calculated-prices.ts:5-6`);
+  - base prices, a nightly backstop (`reconcile/prices.ts:7-8`).
 
 The app wires all of them (`apps/expo/lib/use-replicated-products.ts:131-193`). The push side is the command outbox on `POST /tally/v1/commands`, with the plugin's own idempotency ledger (ADR 0001, ADR 0019).
 
@@ -66,7 +70,7 @@ From the Medusa side the answer is **driver-typed `payload`**. The engine keeps 
    - a context-dependent `calculated_price` per region and sales channel (`pricing/calculated.ts:32-42`).
 
    Woo's `price`/`regular_price`/`sale_price` and one `stock_quantity` would drop every one of these. A materialised Woo payload would need a second, Medusa-typed side channel for them, which is a driver-typed payload under another name.
-2. **The existing Medusa traits already read Medusa shapes.** TallyUI's pos layer reads the catalogue only through traits (ADR-002; `connectors/medusa/src/traits/product.ts`). Materialising Woo shapes would mean rewriting those traits to read wc/v3 fields and then mapping them back into Medusa ids and prices for `order.create`.
+2. **The existing Medusa traits already read Medusa shapes.** TallyUI's pos layer reads the catalogue only through traits (TallyUI ADR-002's rule; the Medusa traits are in `connectors/medusa/src/traits/`). Materialising Woo shapes would mean rewriting those traits to read wc/v3 fields and then mapping them back into Medusa ids and prices for `order.create`.
 3. **The order write path isn't Woo's.** The engine's Woo write path adopts server money and grafts line ids (wiki `architecture/client/write-path.md`, `architecture/client/ack-identity-and-adoption.md`). WCPOS's money authority is "WooCommerce owns money" (wiki `architecture/decisions/2026-08-23-money-authority.md`). medusapos is the other way round: the till's figures are the fiscal record, and Medusa recomputes totals on read and settles within one minor unit (ADR 0012; `order/dist/utils/transform-order.js:79`). A Woo-shaped order payload would carry Woo's money rules into a backend where they're false.
 4. **Revisions are typed in Medusa.** Orders carry an integer `version` (measured: `"version":1` on every seeded order; §Evidence E4). Woo's revision is opaque, and empty on an acked Woo order (wiki `architecture/client/write-path.md`).
 
@@ -137,7 +141,7 @@ Auth is unchanged for every route: `authenticate('user', ['bearer', 'session'])`
 - `/store/products?id[]=…&region_id=…` for calculated prices: 100 products in 197 ms (E5).
 - A plugin `GET /tally/v1/products?ids=` that does both in one `query.graph` call is an optimisation for after G4, and only if the two-request fetch shows up in the numbers.
 
-**What the driver stops doing.** The six runners (product feed, variant feed, stock, ids, calculated prices, base prices) collapse into one journal cursor and one digest audit. On the demo, one full pass of the current reconcile runners (not counting the product and variant feeds) costs about 35 requests, from the counts in E1:
+**What the driver stops doing.** The combined pull (products, variants, the id re-delivery feed) and the four reconcile runners (stock, ids, calculated prices, base prices) collapse into one journal cursor and one digest audit. On the demo, one full pass of the current reconcile runners (not counting the product and variant feeds) costs about 35 requests, from the counts in E1:
 - ids: 3;
 - stock: 6;
 - calculated prices: 20;
@@ -294,7 +298,7 @@ There is no websocket, `socket.io` or data-change stream in `medusa/dist`, `fram
 
 ### Baseline cited from TallyUI
 
-**Provisional:** these connector citations, and those in the Context section, were read from TallyUI's repository at `origin/main` `e151099` during this research. They describe TallyUI's code, so the TallyUI track confirms them before this ADR is accepted. The handoff copies of ADR-067, ADR-068 and the adoption plan (`~/agent/handoff/tallyui-*.md`) are the authoritative TallyUI inputs.
+These connector citations, and those in the Context section, describe TallyUI's code at `origin/main` `e151099`. The TallyUI track confirmed them on 2026-09-29, correcting the runner count to one combined pull (three sub-feeds) plus four reconcilers. The handoff copies of ADR-067, ADR-068 and the adoption plan (`~/agent/handoff/tallyui-*.md`) are the TallyUI inputs.
 
 Cited at `origin/main` `e151099`:
 - `connectors/medusa/src/replication/products.ts:22-137`: the offset-in-window pull, and "Medusa 2.21 honours only the operator form; `updated_at[gte]` is silently dropped" (line 93), confirmed by E3;
@@ -306,7 +310,7 @@ Cited at `origin/main` `e151099`:
 
 - **G4's answer from Medusa is "driver-typed `payload`",** backed by the data a Woo shape would lose (Decision 1). The monorepo half of G4 still has to run the three experiments through the engine. This ADR gives it the server surface and the numbers to beat.
 - **The plugin grows a `tally_sync` module:** the journal table, subscribers, one scheduled job, and four read routes plus SSE. All are additive and gated by `contracts.sync` in `/tally/v1/info`. The command endpoint is unchanged, and `order.create` and `register.*` keep their ledger.
-- **The connector's six runners retire when the driver lands (P3).** They stay in service for testers until then (ADR-067 decision 7).
+- **The connector's combined pull and four reconcile runners retire when the driver lands (P3).** They stay in service for testers until then (ADR-067 decision 7).
 - **A lost event is caught by the digest audit, not by the journal.** Medusa's event bus releases events after the workflow finishes (E2.1), so a crash between commit and subscriber loses the pointer. The audit's cadence bounds how long that lasts. G4 measures it.
 - **Politeness budgets become per driver.** Woo's PHP-sized ceilings don't bind Medusa. The pressure ladder stays for the shared VPS.
 - **Candidates for WCPOS v2** (ADR-067: "an improvement proven on Medusa … is a candidate for WCPOS v2"):
