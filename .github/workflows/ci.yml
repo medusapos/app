@@ -32,12 +32,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: app/apps/expo/package.json
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: app
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - run: python3 scripts/assert-no-premium-side-effects.py
+        working-directory: app
       - run: pnpm typecheck
         working-directory: app
       - run: pnpm test
@@ -70,12 +70,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: app/apps/expo/package.json
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: app
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - run: python3 scripts/assert-no-premium-side-effects.py
+        working-directory: app
       - run: npm ci
         working-directory: app/packages/medusa-plugin
       - run: npm ci
@@ -111,12 +111,12 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version-file: app/apps/expo/package.json
-          cache: pnpm
-          cache-dependency-path: app/pnpm-lock.yaml
       - run: pnpm install --frozen-lockfile
         working-directory: app
         env:
           RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+      - run: python3 scripts/assert-no-premium-side-effects.py
+        working-directory: app
       - run: pnpm --filter @medusapos/expo build:web
         env:
           CI: '1'

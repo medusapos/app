@@ -1,2 +1,4 @@
 packages:
   - "apps/*"
+# Prevent caching the decrypted rxdb-premium build in the pnpm store.
+sideEffectsCache: false
