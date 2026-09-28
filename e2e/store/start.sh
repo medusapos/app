@@ -14,11 +14,12 @@ root="$PWD"
 (
   cd packages/medusa-plugin
   npm run build
+  rm -f "$root/e2e/.tmp"/medusapos-medusa-plugin-*.tgz
   npm pack --pack-destination "$root/e2e/.tmp"
 )
 (
   cd dev/medusa-store
-  npm install --no-save --offline --no-audit --no-fund "$root/e2e/.tmp/medusapos-medusa-plugin-0.0.1.tgz"
+  npm install --no-save --offline --no-audit --no-fund "$root/e2e/.tmp"/medusapos-medusa-plugin-*.tgz
 )
 
 export PGUSER="${DB_USERNAME:-claude}"
