@@ -6,7 +6,8 @@ import type { ComponentProps, ReactNode } from 'react';
 import type { CartLineProps, CartTotalProps, SearchInput, ProductGrid } from '@tallyui/components';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import {
-  bindRegister, closeSession, openSession, readRegister, saleLogger, startCounting, useStoreSettings, type LogEntry, type PosOrder,
+  bindRegister, closeSession, formatClosureDate, openSession, readRegister, recordMovement, saleLogger, startCounting, useStoreSettings,
+  voidMovement, type LogEntry, type PosOrder,
 } from '@tallyui/pos';
 import { APPROVAL_REQUIRED_TEXT } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
@@ -237,7 +238,7 @@ describe('closing the register', () => {
   const TOKEN = 'approver-token-xyz';
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
   /** A stand-in Medusa for the approver's sign-in (emailpass, then the plugin's info: 404) and /admin/users/me. */
-  function stubMedusa(signIn: () => Response = () => json({ token: TOKEN })) {
+  function stubMedusa(signIn: () => Response | Promise<Response> = () => json({ token: TOKEN })) {
     const fetch = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
       const path = new URL(String(url)).pathname;
       if (path === '/auth/user/emailpass') return signIn();
@@ -411,25 +412,41 @@ describe('closing the register', () => {
   });
 
   it('the last closure\'s figures come from the frozen closure, unchanged by a sale stamped to its session afterwards', async () => {
-    await openTestRegister(store.orders, baseUrl);
+    const session = await openTestRegister(store.orders, baseUrl);
+    // A paid in that stands, and a paid out undone (its void row), both on the Z.
+    const { movements, closures: closureRows } = registerCollections(store.orders);
+    await recordMovement(sessions(), movements, closureRows, { sessionId: session.id, type: 'paid_in', amountMinor: 500, reason: 'Float top-up', actor: 'admin@store.test' });
+    const paidOut = await recordMovement(sessions(), movements, closureRows, { sessionId: session.id, type: 'paid_out', amountMinor: 200, reason: 'Stamps', actor: 'admin@store.test' });
+    await voidMovement(sessions(), movements, paidOut.id, 'admin@store.test', closureRows);
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(button('Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
     await act(async () => { fireEvent.click(button('New sale')); });
-    await closeWith(await startCount(), '100.00');
+    await closeWith(await startCount(), '105.00');
     await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
     // A sale stamped to the closed session after its close (a raced stamp): a live recompute would count it.
     await act(async () => { await store.orders.insert({ ...record.mock.calls[0][0], id: 'raced-sale' }); });
     fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
     const figures = within(await screen.findByTestId('last-closure'));
+    const [closure] = await closures();
+    const when = (value: string) => formatClosureDate(value, { timezone: 'device', locale: 'en-GB' }).datetime;
     expect(figures.getByRole('heading').textContent).toBe('Last closure · Closure #1');
+    expect(figures.getByTestId('last-closure-opened').textContent).toBe(when(closure.opened_at));
+    expect(figures.getByTestId('last-closure-closed').textContent).toBe(when(closure.closed_at));
+    expect(when(closure.closed_at)).not.toBe('');
     expect(figures.getByTestId('last-closure-sales').textContent).toBe('€15.00');
     expect(figures.getByTestId('last-closure-float').textContent).toBe('€100.00');
-    expect(figures.getByTestId('last-closure-expected-cash').textContent).toBe('€100.00');
-    expect(figures.getByTestId('last-closure-counted-cash').textContent).toBe('€100.00');
+    expect(figures.getByTestId('last-closure-expected-cash').textContent).toBe('€105.00');
+    expect(figures.getByTestId('last-closure-counted-cash').textContent).toBe('€105.00');
     expect(figures.getByTestId('last-closure-variance-cash').textContent).toBe('Exact');
+    // Each movement is a row (label, then amount and reason); the order is the closure's row order.
+    const movementRows = within(figures.getByTestId('last-closure-movements'));
+    for (const [label, value] of [['Paid in', '€5.00 · Float top-up'], ['Paid out', '€2.00 · Stamps · undone'], ['Void', '€2.00 · Stamps']]) {
+      expect(movementRows.getByText(value).parentElement!.firstChild!.textContent).toBe(label);
+    }
+    expect(movementRows.getAllByText(/^€/)).toHaveLength(3);
     expect(figures.getByTestId('last-closure-unsynced').textContent).toBe('1 sale not sent yet · €15.00');
     expect(figures.queryByTestId('last-closure-approved-by')).toBeNull();
     fireEvent.click(figures.getByTestId('last-closure-done'));
@@ -443,6 +460,106 @@ describe('closing the register', () => {
     await startCount();
     expect(button('Products')).toBeTruthy();
     await waitFor(() => expect(pill()).toBe('Counting'));
+  });
+
+  // #89 review, MAJOR 1.
+  it('a hung approval never locks the count: Cancel refuses at once, and a success that arrives later closes nothing', async () => {
+    let answer!: (response: Response) => void;
+    stubMedusa(() => new Promise<Response>((resolve) => { answer = resolve; }));
+    const session = await openTestRegister(store.orders, baseUrl);
+    await mount();
+    const count = await startCount();
+    await closeWith(count, '90.00');
+    const dialog = await approveAs('mia@store.test', PASSWORD);
+    expect(dialog.getByTestId('approval-approve').textContent).toBe('Checking…');
+    await act(async () => { fireEvent.click(dialog.getByTestId('approval-cancel')); });
+    expect(screen.queryByTestId('approval-dialog')).toBeNull();
+    expect(count.getByTestId('count-manager-line').textContent).toBe('Approval was not granted. The count is unchanged.');
+    expect((count.getByTestId('count-amount') as HTMLInputElement).value).toBe('90.00');
+    await act(async () => { answer(json({ token: TOKEN })); await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(await closures()).toEqual([]);
+    expect(await stored(session.id)).toMatchObject({ status: 'counting' });
+    expect(localStorage.getItem(`medusapos.approvers.${baseUrl}`)).toBeNull();
+  });
+
+  /** Holds every closure insert until `release()`: the session is closed in storage, its closure not yet written. */
+  function holdClosureWrites() {
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    let waiting = 0;
+    registerCollections(store.orders).closures.preInsert(async () => { waiting++; await held; }, false);
+    return { release, waiting: () => waiting };
+  }
+  /** Records whether RegisterColumn's Finish closing card ever renders, however briefly. */
+  function watchForFinishCard() {
+    let seen = false;
+    const check = () => { if (document.querySelector('[data-testid="register-column-finish-close"]')) seen = true; };
+    const observer = new MutationObserver(check);
+    observer.observe(document.body, { childList: true, subtree: true });
+    return { seen: () => { check(); return seen; }, stop: () => observer.disconnect() };
+  }
+
+  // #89 review, MINORS 3 and 4: the count's own close masks the card while its closure writes and just after.
+  it('while the count\'s own closure is written, the Finish closing card never shows, and exactly one closure is written', async () => {
+    const session = await openTestRegister(store.orders, baseUrl);
+    await mount();
+    const count = await startCount();
+    const hold = holdClosureWrites();
+    const card = watchForFinishCard();
+    try {
+      await closeWith(count, '100.00');
+      await waitFor(() => expect(hold.waiting()).toBe(1));
+      await waitFor(async () => expect(await stored(session.id)).toMatchObject({ status: 'closed' }));
+      // Long enough for the closed session to reach the render.
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+      expect(screen.getByTestId('register-count')).toBeTruthy();
+      await act(async () => { hold.release(); });
+      await screen.findByTestId('closure-sheet');
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+      expect(card.seen()).toBe(false);
+    } finally { card.stop(); }
+    expect(await closures()).toHaveLength(1);
+  });
+
+  // #89 review, MINOR 5: the close's state lives in RegisterProvider, not in the cart view.
+  it('at 360, leaving the cart view mid-close keeps the close: its sheet still shows, and one closure is written', async () => {
+    setWindowWidth(360);
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    const count = await startCount();
+    const hold = holdClosureWrites();
+    await closeWith(count, '100.00');
+    await waitFor(() => expect(hold.waiting()).toBe(1));
+    // "‹ Products" unmounts the cart view, and the gate with it.
+    await act(async () => { fireEvent.click(button('Products')); });
+    expect(screen.queryByTestId('register-count')).toBeNull();
+    await act(async () => { hold.release(); });
+    const sheet = within(await screen.findByTestId('closure-sheet'));
+    expect(sheet.getByTestId('closure-number').textContent).toBe('Closure #1');
+    expect(await closures()).toHaveLength(1);
+    fireEvent.click(sheet.getByTestId('closure-done'));
+    await waitFor(() => expect(screen.queryByTestId('closure-sheet')).toBeNull());
+  });
+
+  // #89 review, MINOR 6.
+  it('a count close whose closure write fails shows why above TallyUI\'s Finish closing card, which then completes it', async () => {
+    let fail = true;
+    registerCollections(store.orders).closures.preInsert(() => {
+      if (!fail) return;
+      fail = false;
+      throw new Error('Storage is full');
+    }, false);
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await closeWith(await startCount(), '100.00');
+    const card = await screen.findByTestId('register-column-finish-close');
+    const error = screen.getByTestId('close-error');
+    expect(error.textContent).toContain('Storage is full');
+    expect(error.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await act(async () => { fireEvent.click(within(card).getByTestId('register-column-finish-close-button')); });
+    expect(within(await screen.findByTestId('closure-sheet')).getByTestId('closure-number').textContent).toBe('Closure #1');
+    expect(screen.queryByTestId('close-error')).toBeNull();
+    expect(await closures()).toHaveLength(1);
   });
 });
 
@@ -509,7 +626,7 @@ describe('the tender gate', () => {
   const SALE_WARNINGS = 'register-test-sale-warnings';
   afterEach(() => { saleLogger.removeSink(SALE_WARNINGS); });
   // The #88 delta re-review: requireOpen() reads storage ahead of the render, and useSale pins the rendered session.
-  it('a tap straight after the session opens in storage waits for it to render, and the sale is stamped with it', async () => {
+  it('a tap straight after the session opens in storage pins the session requireSaleSession() confirmed, and the sale is stamped with it', async () => {
     // The stamp must come from the pin, not TallyUI's backstop, which would warn (#174 review): so no sale warnings.
     const logged: LogEntry[] = [];
     saleLogger.addSink({ id: SALE_WARNINGS, levels: ['warn', 'error'], write: (entry) => { logged.push(entry); } });

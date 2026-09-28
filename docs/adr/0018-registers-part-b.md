@@ -46,15 +46,28 @@ close can't complete over the threshold without an approver.
     dialog's state when Approve is pressed: the field is cleared whatever the
     answer, and the dialog unmounts on success. The token is a local variable
     dropped once `/me` returns. Neither is logged, stored or put in a URL.
-    The fields set `autoComplete="off"`, so the till's browser neither fills
-    in nor offers to save a manager's password. Tests spy on the console, on
-    storage and on every request URL to prove this.
+    Tests spy on the console, on storage and on every request URL to prove
+    this. The token is dropped on this device only: on the server it stays
+    valid until it expires, because Medusa tokens can't be revoked.
+  - **Autofill.** The app avoids it: the password field is
+    `autoComplete="new-password"` (browsers ignore `"off"` on a password
+    field) and the email field `"off"`, so the browser doesn't fill in the
+    cashier's saved login. A browser may still offer to save the manager's
+    password after Approve. The app can't prevent that, so testers.md tells
+    cashiers never to save it on the till.
   - A wrong password shows "That email and password didn't work." and the
     dialog stays open. Cancel resolves `null`, which `RegisterCount` shows as
     "Approval was not granted. The count is unchanged."
-  - **Offline** (the catalogue's sync state is `'offline'`, or the sign-in or
-    `/me` fails with a network error), the dialog shows "Connect to approve,
-    or count again." with only Cancel.
+  - **A hung request never locks the till** (#89 review). `requestApproval`
+    takes an `AbortSignal` for both requests, and gives up after
+    `APPROVAL_TIMEOUT_MS` (15 s) as offline. Cancel, Escape and closing the
+    dialog work while a request is in flight: they abort it and resolve
+    `null` at once. The dialog answers exactly once, so an answer that
+    arrives after Cancel or the timeout is ignored. It never approves, never
+    closes the register, and never records the approver.
+  - **Offline** (the catalogue's sync state is `'offline'`, the sign-in or
+    `/me` fails with a network error, or the approval times out), the dialog
+    shows "Connect to approve, or count again." with only Cancel.
   - **Self-approval is allowed.** A solo owner approves with their own login.
     Medusa 2.21 has no admin roles, so any admin can approve. This records
     who approved; it does not stop a cashier who knows an admin's password.
@@ -82,16 +95,24 @@ close can't complete over the threshold without an approver.
   shows TallyUI's "Finish closing" card (#174) in place of the cart. The card
   resumes the close through `closeSession` with the count and approver
   already stored on the session (a resumed close isn't gated again), and
-  shows any error. The app wraps that `closeSession` like the count's, so
-  the closure sheet follows, then the open card. On a phone the cart view
-  opens for it.
-  - While the count's own close is writing its closure, the session is
-    already `closed` for a moment. For that moment the gate gives
-    `RegisterColumn` the session as `counting`, so the busy count stays on
-    screen instead of flashing the card, whose button would start a second
-    close. Only the count's own in-flight close does this; a close found
-    unfinished at start-up always gets the card.
-- **After the close.** When `closeSession` resolves, the gate shows TallyUI's
+  shows any error. When the count's own close failed, the gate shows that
+  error above the card, so the cashier sees why. Both closes go through the
+  app's close flow, so the closure sheet follows, then the open card. On a
+  phone the cart view opens for it.
+  - While the count's own closure is written, the session is already
+    `closed`, and it stays `closed` in the render just after the close
+    resolves. For that session (`close.maskedSession`, set when the count
+    closes and cleared if it fails) the gate gives `RegisterColumn` the
+    session as `counting`. The count stays on screen instead of flashing the
+    card, whose button would start a second close. A close found unfinished
+    at start-up always gets the card. TallyUI's coming `closing` flag on
+    `useRegisterSession` will replace this masking.
+- **The close flow lives in `RegisterProvider`** (`close`, #89 review): the
+  close itself, the closure whose sheet shows, the masked session and the
+  last error. `RegisterClosedSheet` is mounted by the sale screen, not the
+  gate. So on a phone, leaving the cart view mid-close (which unmounts the
+  gate) loses neither the sheet nor the masking.
+- **After the close.** When `closeSession` resolves, the sale screen shows TallyUI's
   `ClosureSheet` for that closure (no `onPrint` yet). Its Done goes back to
   selling, where `OpenRegisterCard` is prefilled with the last counted cash.
   Since #174 `ClosureSheet` itself shows "Approved by {approved_by_name, or

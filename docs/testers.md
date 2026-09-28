@@ -23,8 +23,11 @@ setup detail rather than repeating it.
   approval: an admin of your Medusa store signs in with their email and
   password in the **Manager approval** box. This doesn't sign you out. On
   your own, you can approve with your own login. The closure then shows
-  "Approved by" and their name. Approval needs a connection. Offline, it
-  says "Connect to approve, or count again."; **Cancel** and count again.
+  "Approved by" and their name. Approval needs a connection. Offline, or
+  after 15 seconds with no answer, it says "Connect to approve, or count
+  again."; **Cancel** (always available) and count again.
+  Never save a manager's password in the till's browser. If the browser
+  offers to save it after **Approve**, choose "Never" or "Not now".
 - If the till stopped in the middle of a close, it shows "The last close
   didn't finish" with **Finish closing**, which completes it with the count
   you already entered.

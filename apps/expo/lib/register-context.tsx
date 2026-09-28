@@ -26,7 +26,23 @@ export type RegisterContextValue = {
   bind(id: string): Promise<void>;
   /** The sale screen reports its tender here: counting and closing refuse while a sale is at tender. */
   setTenderInProgress(inProgress: boolean): void;
+  /** The app's closes (ADR 0018), kept here so they outlive the cart view that started them (a phone's, #89 review). */
+  close: CloseFlow;
 };
+
+export type CloseFlow = {
+  /** `closeSession` through the app: its closure's sheet then shows. `fromCount`: the count's own close, which masks
+   *  RegisterColumn's Finish closing card for its session while the closure writes and after it resolves. */
+  run(input: Parameters<CloseSession>[0], fromCount: boolean): ReturnType<CloseSession>;
+  /** The closure whose ClosureSheet shows, until `dismiss`. */
+  shown: string | null;
+  dismiss(): void;
+  /** The session whose own close (from the count) is in flight or has just finished. */
+  maskedSession: string | null;
+  /** The last failed close's message, shown above the Finish closing card; cleared by the next close. */
+  error: string;
+};
+type CloseSession = ReturnType<typeof useRegisterSession>['actions']['closeSession'];
 
 type Bound = { collections: RegisterCollections; storeKey: string; id: string | null; name: string | null };
 
@@ -60,6 +76,25 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
     // which a close resumed after a restart needs. Read at call time, so an approval just made is found.
     labels: { registerName: current?.name ?? undefined, resolveCashierName: (id) => loadApprovers(defaultStorage(), storeKey)[id] ?? id },
   });
+  const [shown, setShown] = useState<string | null>(null);
+  const [maskedSession, setMaskedSession] = useState<string | null>(null);
+  const [closeError, setCloseError] = useState('');
+  const close: CloseFlow = {
+    async run(input, fromCount) {
+      if (fromCount) setMaskedSession(register.session?.id ?? null);
+      setCloseError('');
+      try {
+        const closure = await register.actions.closeSession(input);
+        setShown(closure.id);
+        return closure;
+      } catch (error) {
+        if (fromCount) setMaskedSession(null);
+        setCloseError(error instanceof Error ? error.message : String(error));
+        throw error;
+      }
+    },
+    shown, dismiss: () => setShown(null), maskedSession, error: closeError,
+  };
   const value: RegisterContextValue = {
     register, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,
     async bind(id) {
@@ -67,6 +102,7 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
       if (collections && choice) await bindRegister(collections.sessions, storeKey, choice);
     },
     setTenderInProgress,
+    close,
   };
   return <RegisterContext.Provider value={value}>{children}</RegisterContext.Provider>;
 }

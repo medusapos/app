@@ -32,7 +32,8 @@ export function openRegisterFixture({ enabled = true }: { enabled?: boolean } = 
     },
   } as unknown as RegisterContextValue['register'];
   return { register, boundRegisterId: 'register-1', registerName: 'Register 1', registers: DEFAULT_REGISTERS,
-    bind: vi.fn(async () => {}), setTenderInProgress: vi.fn() };
+    bind: vi.fn(async () => {}), setTenderInProgress: vi.fn(),
+    close: { run: vi.fn(), shown: null, dismiss: vi.fn(), maskedSession: null, error: '' } };
 }
 
 /** Binds a real order store's till to Register 1 and opens its session (once), as the cashier would. */

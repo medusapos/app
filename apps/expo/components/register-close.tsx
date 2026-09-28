@@ -1,10 +1,10 @@
-import { useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ScrollView, View, useWindowDimensions } from 'react-native';
 import { getLocales } from 'expo-localization';
 import { Button, Dialog, DialogContent, DialogTitle, Input, Label, Text } from '@tallyui/components';
 import { formatMoney, minorUnitDigits, moneyFromDecimalString } from '@tallyui/core';
 import { buildClosureDocument, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
-import { ApprovalError, rememberApprover, requestApproval, type Approval } from '../lib/approval';
+import { APPROVAL_TIMEOUT_MS, ApprovalError, rememberApprover, requestApproval, type Approval } from '../lib/approval';
 import { defaultStorage } from '../lib/session';
 
 type Register = ReturnType<typeof useRegisterSession>;
@@ -26,35 +26,59 @@ export function useApprove(baseUrl: string, online: boolean) {
   return { approve, dialog };
 }
 
-function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string; online: boolean; onResult: (result: Approval | null) => void }) {
+/**
+ * The "Manager approval" dialog. `onResult` fires exactly once: with the approver, or `null` on Cancel, Escape or
+ * the dialog closing. Cancel works while a request is in flight: it aborts it, and a late answer is ignored.
+ */
+export function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string; online: boolean; onResult: (result: Approval | null) => void }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [unreachable, setUnreachable] = useState(false);
   const [busy, setBusy] = useState(false);
   const busyRef = useRef(false);
+  const request = useRef<AbortController | null>(null);
+  const settled = useRef(false);
+  const finish = (result: Approval | null) => {
+    if (settled.current) return;
+    settled.current = true;
+    request.current?.abort();
+    onResult(result);
+  };
+  const finishRef = useRef(finish);
+  finishRef.current = finish;
+  // Escape cancels (web), as Cancel does. Unmounting aborts whatever is still in flight.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => { if (event.key === 'Escape') finishRef.current(null); };
+    globalThis.document?.addEventListener('keydown', onKey);
+    return () => { globalThis.document?.removeEventListener('keydown', onKey); request.current?.abort(); };
+  }, []);
   const offline = !online || unreachable;
   const submit = async () => {
-    if (busyRef.current || !email.trim() || !password) return;
+    if (busyRef.current || settled.current || !email.trim() || !password) return;
     busyRef.current = true;
     setBusy(true);
     setError('');
     // The password leaves state with the request, whatever its answer; nothing else keeps it.
     const secret = password;
     setPassword('');
+    const controller = request.current = new AbortController();
     try {
-      const approval = await requestApproval(baseUrl, email.trim(), secret);
+      const approval = await requestApproval(baseUrl, email.trim(), secret, { signal: controller.signal, timeoutMs: APPROVAL_TIMEOUT_MS });
+      // A late answer after Cancel never approves (and is never kept).
+      if (settled.current || controller.signal.aborted) return;
       rememberApprover(defaultStorage(), baseUrl, approval.approvedBy, approval.approvedByName);
-      onResult(approval);
+      finish(approval);
     } catch (e) {
+      if (settled.current) return;
       if (e instanceof ApprovalError && e.code === 'offline') setUnreachable(true);
       else setError(e instanceof ApprovalError ? e.message : APPROVE_FAILED);
     } finally {
       busyRef.current = false;
-      setBusy(false);
+      if (!settled.current) setBusy(false);
     }
   };
-  return <Dialog open onOpenChange={(open) => { if (!open && !busyRef.current) onResult(null); }}>
+  return <Dialog open onOpenChange={(open) => { if (!open) finish(null); }}>
     <DialogContent testID="approval-dialog">
       <DialogTitle>Manager approval</DialogTitle>
       <Text testID="approval-context" className="text-muted-foreground">{APPROVE_CONTEXT}</Text>
@@ -63,15 +87,16 @@ function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string; online
         <Input><Input.Field testID="approval-email" value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="off"
           keyboardType="email-address" accessibilityLabel="Email" accessibilityLabelledBy="approval-email-label" /></Input>
         <Label nativeID="approval-password-label">Password</Label>
-        {/* autoComplete off: the till's browser must neither fill in nor offer to keep an approver's password. */}
-        <Input><Input.Field testID="approval-password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="off"
+        {/* new-password: browsers ignore "off" on a password field; this keeps them from filling in the cashier's
+            saved password. A browser may still offer to save the approver's (ADR 0018; testers.md says never to). */}
+        <Input><Input.Field testID="approval-password" value={password} onChangeText={setPassword} secureTextEntry autoComplete="new-password"
           onSubmitEditing={() => { void submit(); }} accessibilityLabel="Password" accessibilityLabelledBy="approval-password-label" /></Input>
         {error ? <Text testID="approval-error" accessibilityRole="alert" className="text-destructive">{error}</Text> : null}
         <Button testID="approval-approve" className="min-h-11" disabled={busy || !email.trim() || !password} onPress={() => { void submit(); }}>
           <Text>{busy ? 'Checking…' : 'Approve'}</Text>
         </Button>
       </>}
-      <Button testID="approval-cancel" variant="outline" className="min-h-11" disabled={busy} onPress={() => onResult(null)}>
+      <Button testID="approval-cancel" variant="outline" className="min-h-11" onPress={() => finish(null)}>
         <Text>Cancel</Text>
       </Button>
     </DialogContent>
@@ -81,14 +106,16 @@ function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string; online
 const I18N = { over: 'Over', short: 'Short', exact: 'Exact', paid_in: 'Paid in', paid_out: 'Paid out', no_sale: 'No sale', void: 'Void' };
 
 export function closureContext(currency: string, store: { name: string; address?: string }): ClosureContext {
+  const locale = getLocales()[0]?.languageTag ?? 'en';
   return {
-    currency, exponent: minorUnitDigits(currency), timezone: 'device', locale: getLocales()[0]?.languageTag ?? 'en',
+    currency, exponent: minorUnitDigits(currency), timezone: 'device', locale,
     store, printedAt: new Date().toISOString(), i18n: I18N,
     // The envelope's money is decimal text ('-5.00'); shown as the till shows every amount.
     formatMoney: (value) => {
       const negative = value.startsWith('-');
       const money = moneyFromDecimalString(negative ? value.slice(1) : value, currency);
-      return money ? formatMoney({ ...money, amount: negative ? -money.amount : money.amount }) ?? value : value;
+      // `|| 0`: '-0.00' shows as €0.00, never −€0.00.
+      return money ? formatMoney({ ...money, amount: (negative ? -money.amount : money.amount) || 0 }, locale) ?? value : value;
     },
   };
 }
@@ -117,8 +144,8 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
     <DialogContent testID="last-closure" className="flex-col overflow-hidden" style={{ maxHeight: Math.max(280, height - 64) }}>
       <DialogTitle>{`Last closure · Closure #${fiscal.receipt_number}`}</DialogTitle>
       <ScrollView className="flex-1" contentContainerClassName="gap-1">
-        <Row label="Opened" value={z.opened_at.datetime} />
-        <Row label="Closed" value={z.closed_at.datetime} />
+        <Row label="Opened" value={z.opened_at.datetime} testID="last-closure-opened" />
+        <Row label="Closed" value={z.closed_at.datetime} testID="last-closure-closed" />
         <Row label="Sales" value={z.period_sales_total_display} testID="last-closure-sales" />
         <Row label="Opening float" value={z.breakdowns.opening_float.counted_display} testID="last-closure-float" />
         {z.tenders.map((tender) => <View key={tender.name} testID={`last-closure-tender-${tender.name}`} className="border-t border-border pt-2">

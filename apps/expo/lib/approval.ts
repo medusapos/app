@@ -7,9 +7,15 @@ import { login, LoginError, type SessionStorage } from './session';
  */
 export const VARIANCE_THRESHOLD_MINOR = 500;
 
+/**
+ * How long an approval (the sign-in and `/admin/users/me`) may take before it gives up as offline (#89 review): a
+ * network that never answers must not hold the count's dialog on "Checking…".
+ */
+export const APPROVAL_TIMEOUT_MS = 15000;
+
 export type Approval = { approvedBy: string; approvedByName: string };
 export class ApprovalError extends Error {
-  constructor(readonly code: 'invalid' | 'offline' | 'failed', message: string) { super(message); }
+  constructor(readonly code: 'invalid' | 'offline' | 'failed' | 'cancelled', message: string) { super(message); }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -20,8 +26,37 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * A second Medusa admin login for a close over the threshold (ADR 0018, option b): signs in with the approver's
  * email and password without saving or replacing the cashier's session, reads `/admin/users/me` with that token,
  * then drops the token. Nothing here stores, logs or returns the password or the token.
+ *
+ * `signal` (the dialog's Cancel) aborts both requests and rejects with `cancelled`; after `timeoutMs` they are
+ * aborted and it rejects as `offline`. Either way it settles then, even if a request ignores its signal.
  */
-export async function requestApproval(baseUrl: string, email: string, password: string, fetchImpl = globalThis.fetch): Promise<Approval> {
+export async function requestApproval(baseUrl: string, email: string, password: string, { signal, fetchImpl = globalThis.fetch,
+  timeoutMs = APPROVAL_TIMEOUT_MS }: { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number } = {}): Promise<Approval> {
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
+  const cancel = () => controller.abort();
+  signal?.addEventListener('abort', cancel, { once: true });
+  if (signal?.aborted) controller.abort();
+  const aborted = new Promise<never>((_, reject) => {
+    const stop = () => reject(timedOut ? new ApprovalError('offline', 'Could not reach the backend.')
+      : new ApprovalError('cancelled', 'The approval was cancelled.'));
+    if (controller.signal.aborted) stop(); else controller.signal.addEventListener('abort', stop, { once: true });
+  });
+  aborted.catch(() => {}); // Settled by the race below, or not at all once the request has won it.
+  const fetchWith = ((input, init) => fetchImpl(input, { ...init, signal: controller.signal })) as typeof fetch;
+  try {
+    return await Promise.race([approve(baseUrl, email, password, fetchWith), aborted]);
+  } catch (error) {
+    if (controller.signal.aborted) throw await aborted.catch((reason: unknown) => reason);
+    throw error;
+  } finally {
+    clearTimeout(timer);
+    signal?.removeEventListener('abort', cancel);
+  }
+}
+
+async function approve(baseUrl: string, email: string, password: string, fetchImpl: typeof fetch): Promise<Approval> {
   let token: string;
   try {
     ({ token } = await login(baseUrl, email, password, fetchImpl));

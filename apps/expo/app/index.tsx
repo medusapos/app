@@ -12,7 +12,7 @@ import {
 
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import {
-  GETTING_READY, IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
+  GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
@@ -298,6 +298,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
       {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
       <RegisterPanelSheet currency={pricing.currency} store={receiptStore} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
+      <RegisterClosedSheet currency={pricing.currency} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
         store={receiptStore}

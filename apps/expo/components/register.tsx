@@ -8,7 +8,7 @@ import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
 import { LastClosureSheet, useApprove } from './register-close';
 
-type Register = ReturnType<typeof useRegisterSession>;
+type CloseInput = Parameters<ReturnType<typeof useRegisterSession>['actions']['closeSession']>[0];
 
 // The refusals at tender start (ADR 0017): paying needs an open register; browsing and the cart don't.
 export const OPEN_TO_PAY = 'Open the register to take payment.';
@@ -101,7 +101,7 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
    *  phone's cart view) still honours it. */
   focus: { key: number; handled: { current: number } };
 }) {
-  const { register, boundRegisterId, registers, bind } = useRegister();
+  const { register, boundRegisterId, registers, bind, close } = useRegister();
   const { session: signedIn } = useSession();
   const pick = (id: string) => { bind(id).catch((error: unknown) => console.warn('Could not bind the register:', error)); };
   // A pill tap scrolls the gate into view and focuses its first control (web).
@@ -114,41 +114,39 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
     node?.querySelector?.<HTMLElement>('input, [role="button"]')?.focus();
   }, [focus.key, focus.handled]);
   const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online);
-  // The closure a close here resolved with (the count's, or RegisterColumn's Finish closing card): its sheet shows
-  // until Done.
-  const [closed, setClosed] = useState<string | null>(null);
-  // The count's own close is in flight.
-  const [closingCount, setClosingCount] = useState(false);
-  const closeThen = (fromCount: boolean): Register['actions']['closeSession'] => async (input) => {
-    if (fromCount) setClosingCount(true);
-    try {
-      const closure = await register.actions.closeSession(input);
-      setClosed(closure.id);
-      return closure;
-    } finally {
-      if (fromCount) setClosingCount(false);
-    }
-  };
   const session = register.session;
-  const counting = { ...register, actions: { ...register.actions, closeSession: closeThen(true) } };
+  // Both closes go through the provider's close flow, so its sheet and masking outlive this gate (a phone's cart view).
+  const counting = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, true) } };
   // A session closed but whose closure didn't finish (a restart mid-close, #88 review) gets RegisterColumn's own
-  // Finish closing card (TallyUI #174), which resumes with the count and approver stored on the session. While the
-  // count's own close is writing its closure, the session is already `closed`: the column keeps showing the (busy)
-  // count instead of flashing that card, whose button would start a second close.
-  const column = { ...register, actions: { ...register.actions, closeSession: closeThen(false) },
-    session: closingCount && session?.status === 'closed' ? { ...session, status: 'counting' as const } : session };
+  // Finish closing card (TallyUI #174), which resumes with the count and approver stored on the session. The count's
+  // own close is masked: while its closure writes, and after it resolves until the session leaves the render, that
+  // session is already `closed`, and the column keeps the count instead of flashing the card (whose button would
+  // start a second close).
+  const masked = session?.status === 'closed' && session.id === close.maskedSession;
+  const column = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, false) },
+    session: masked ? { ...session, status: 'counting' as const } : session };
   return <View ref={gate} className="flex-1">
     {boundRegisterId === null ? <RegisterPicker registers={registers} onPick={pick} /> : null}
     {boundRegisterId && !session ? <OpenRegisterCard register={register} currency={currency} /> : null}
     {refused ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{refused}</Text> : null}
+    {/* Why the last close failed, above the Finish closing card. */}
+    {session?.status === 'closed' && !masked && close.error
+      ? <Text testID="close-error" accessibilityRole="alert" className="px-4 pt-3 text-destructive">{close.error}</Text> : null}
     {boundRegisterId && session ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
       onPick={pick} currency={currency} cartEmpty={cartEmpty}
       countSlot={<RegisterCount register={counting} currency={currency} approve={approve} />}>
       {children}
     </RegisterColumn> : children}
     {dialog}
-    {/* TallyUI's sheet shows "Approved by …" itself (#174). */}
-    {closed && register.lastClosure?.id === closed
-      ? <ClosureSheet register={register} currency={currency} onDone={() => setClosed(null)} /> : null}
   </View>;
+}
+
+/**
+ * TallyUI's ClosureSheet for the closure a close through the app resolved with (it shows "Approved by …" itself,
+ * #174), until Done. Mounted by the sale screen, not the gate, so a phone's cart view closing doesn't lose it.
+ */
+export function RegisterClosedSheet({ currency }: { currency: string }) {
+  const { register, close } = useRegister();
+  if (!close.shown || register.lastClosure?.id !== close.shown) return null;
+  return <ClosureSheet register={register} currency={currency} onDone={close.dismiss} />;
 }
