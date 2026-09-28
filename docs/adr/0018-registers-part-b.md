@@ -137,10 +137,14 @@ close can't complete over the threshold without an approver.
   stronger: every admin is equal.
 - The Z figures are shown, not printed. Printing and a Z template are
   registers c2.
-- The last closure is reachable only while no session is open; during a
-  session, "Register ›" opens the panel as before.
 
 ## Known limitations
+
+- **Accepted: the Last closure view is reachable only between sessions.**
+  "Register ›" opens it only while no session is open; once the next session
+  opens, "Register ›" is the panel again, and the last closure can't be
+  viewed until that session closes. Follow-up: a Register menu entry once
+  registers c2 lands.
 
 - The app's "Approved by" line sits at the bottom of the viewport, not
   directly under the sheet: `ClosureSheet` has no slot for it.

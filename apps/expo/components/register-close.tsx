@@ -12,6 +12,7 @@ type Register = ReturnType<typeof useRegisterSession>;
 
 // ADR 0018's copy.
 export const APPROVE_OFFLINE = 'Connect to approve, or count again.';
+export const APPROVE_CONTEXT = "This count is over the threshold. A manager's admin login approves it.";
 const APPROVE_FAILED = "Couldn't check the approval. Try again.";
 
 /**
@@ -57,6 +58,7 @@ function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string; online
   return <Dialog open onOpenChange={(open) => { if (!open && !busyRef.current) onResult(null); }}>
     <DialogContent testID="approval-dialog">
       <DialogTitle>Manager approval</DialogTitle>
+      <Text testID="approval-context" className="text-muted-foreground">{APPROVE_CONTEXT}</Text>
       {offline ? <Text testID="approval-offline" accessibilityRole="alert">{APPROVE_OFFLINE}</Text> : <>
         <Label nativeID="approval-email-label">Email</Label>
         <Input><Input.Field testID="approval-email" value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="off"

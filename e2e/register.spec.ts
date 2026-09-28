@@ -156,6 +156,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await count.getByTestId('count-close').click();
       const dialog = page.getByTestId('approval-dialog');
       await expect(dialog.getByRole('heading')).toHaveText('Manager approval');
+      await expect(dialog.getByTestId('approval-context')).toHaveText("This count is over the threshold. A manager's admin login approves it.");
       await shot(page, 'count-over');
 
       // The sign-in can't reach the backend: connect or count again, with only Cancel.

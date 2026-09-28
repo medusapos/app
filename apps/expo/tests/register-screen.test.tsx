@@ -305,6 +305,10 @@ describe('closing the register', () => {
     await closeWith(await startCount(), '90.00');
     const dialog = within(await screen.findByTestId('approval-dialog'));
     expect(dialog.getByRole('heading').textContent).toBe('Manager approval');
+    // The line of context directly under the title (the reviewer, 2026-09-28).
+    const context = dialog.getByTestId('approval-context');
+    expect(context.textContent).toBe("This count is over the threshold. A manager's admin login approves it.");
+    expect(dialog.getByRole('heading').nextElementSibling).toBe(context);
     await approveAs('mia@store.test', PASSWORD);
     expect((await screen.findByTestId('closure-approved-by')).textContent).toBe('Approved by Mia Manager');
     expect(screen.queryByTestId('approval-dialog')).toBeNull();
