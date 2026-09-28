@@ -8,6 +8,8 @@ import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
 import { LastClosureSheet, useApprove } from './register-close';
 
+// RegisterColumn's Finish closing button's nativeID (TallyUI #175).
+const FINISH_CLOSE_BUTTON = 'register-column-finish-close-button';
 type CloseInput = Parameters<ReturnType<typeof useRegisterSession>['actions']['closeSession']>[0];
 
 // The refusals at tender start (ADR 0017): paying needs an open register; browsing and the cart don't.
@@ -64,7 +66,7 @@ export const IN_ROW = 'h-auto border-b-0 bg-transparent px-0';
 /**
  * TallyUI's RegisterBar for this till: the strip under the header when wide, or `IN_ROW` on a phone. Its pill is
  * never a dead label: with an open session it opens the panel; otherwise it brings up the gate (`onGate`), which
- * also holds the count and Finish closing.
+ * also holds the count and, for "Close not finished" (TallyUI #175), focuses the Finish closing button.
  */
 export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
   online: boolean; onOpenPanel: () => void; onGate: () => void; className?: string;
@@ -104,33 +106,30 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
   const { register, boundRegisterId, registers, bind, close } = useRegister();
   const { session: signedIn } = useSession();
   const pick = (id: string) => { bind(id).catch((error: unknown) => console.warn('Could not bind the register:', error)); };
-  // A pill tap scrolls the gate into view and focuses its first control (web).
+  // A pill tap scrolls the gate into view and focuses its first control (web): for "Close not finished" (TallyUI
+  // #175), the Finish closing button, even with the app's error line above it.
   const gate = useRef<View>(null);
   useEffect(() => {
     if (focus.handled.current === focus.key) return;
     focus.handled.current = focus.key;
     const node = gate.current as unknown as HTMLElement | null;
     node?.scrollIntoView?.({ block: 'nearest' });
-    node?.querySelector?.<HTMLElement>('input, [role="button"]')?.focus();
+    (node?.querySelector?.<HTMLElement>(`#${FINISH_CLOSE_BUTTON}`) ?? node?.querySelector?.<HTMLElement>('input, [role="button"]'))?.focus();
   }, [focus.key, focus.handled]);
   const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online);
   const session = register.session;
   // Both closes go through the provider's close flow, so its sheet and masking outlive this gate (a phone's cart view).
   const counting = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, true) } };
   // A session closed but whose closure didn't finish (a restart mid-close, #88 review) gets RegisterColumn's own
-  // Finish closing card (TallyUI #174), which resumes with the count and approver stored on the session. The count's
-  // own close is masked: while its closure writes, and after it resolves until the session leaves the render, that
-  // session is already `closed`, and the column keeps the count instead of flashing the card (whose button would
-  // start a second close).
-  const masked = session?.status === 'closed' && session.id === close.maskedSession;
-  const column = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, false) },
-    session: masked ? { ...session, status: 'counting' as const } : session };
+  // Finish closing card (TallyUI #174), which resumes with the count and approver stored on the session. During a
+  // close (`register.closing`, TallyUI #175) the column keeps the count instead, so the card never flashes.
+  const column = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, false) } };
   return <View ref={gate} className="flex-1">
     {boundRegisterId === null ? <RegisterPicker registers={registers} onPick={pick} /> : null}
     {boundRegisterId && !session ? <OpenRegisterCard register={register} currency={currency} /> : null}
     {refused ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{refused}</Text> : null}
-    {/* Why the last close failed, above the Finish closing card. */}
-    {session?.status === 'closed' && !masked && close.error
+    {/* Why the count's own close failed, above the Finish closing card (which shows only its own run's error). */}
+    {session?.status === 'closed' && !register.closing && close.error
       ? <Text testID="close-error" accessibilityRole="alert" className="px-4 pt-3 text-destructive">{close.error}</Text> : null}
     {boundRegisterId && session ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
       onPick={pick} currency={currency} cartEmpty={cartEmpty}

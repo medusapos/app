@@ -12,9 +12,12 @@ recorded cash movements; its Close register reached a placeholder. TallyUI
 `approvedByName` threaded to `closeSession`, the closure's
 `breakdowns.approved_by` / `approved_by_name` and the session's
 `approved_by`; `RegisterApprovalRequiredError`, the hook's own gate). Part B
-is finished on `25665e1` (#172: `requireSaleSession()` and
-`startTender(method, { session })`; #174: `ClosureSheet` shows the approver,
-`RegisterColumn`'s Finish closing card, and complete closure-document types).
+is finished on `677ffa2`:
+- #172: `requireSaleSession()` and `startTender(method, { session })`;
+- #174: `ClosureSheet` shows the approver, `RegisterColumn`'s Finish closing
+  card, and complete closure-document types;
+- #175: one close per register at a time, `register.closing`, and the "Close
+  not finished" pill.
 
 A close whose cash count is off by more than a threshold needs someone to
 approve it. The Front desk (2026-09-28) chose how: option (b), a second
@@ -94,24 +97,28 @@ close can't complete over the threshold without an approver.
   end. The gate renders `RegisterColumn` for that session, and the column
   shows TallyUI's "Finish closing" card (#174) in place of the cart. The card
   resumes the close through `closeSession` with the count and approver
-  already stored on the session (a resumed close isn't gated again), and
-  shows any error. When the count's own close failed, the gate shows that
-  error above the card, so the cashier sees why. Both closes go through the
-  app's close flow, so the closure sheet follows, then the open card. On a
-  phone the cart view opens for it.
-  - While the count's own closure is written, the session is already
-    `closed`, and it stays `closed` in the render just after the close
-    resolves. For that session (`close.maskedSession`, set when the count
-    closes and cleared if it fails) the gate gives `RegisterColumn` the
-    session as `counting`. The count stays on screen instead of flashing the
-    card, whose button would start a second close. A close found unfinished
-    at start-up always gets the card. TallyUI's coming `closing` flag on
-    `useRegisterSession` will replace this masking.
+  already stored on the session (a resumed close isn't gated again). The
+  card stays up through its own run and shows that run's error. It doesn't
+  show why the count's own close failed, so the gate shows that error above
+  the card, and clears it when the next close starts. Each error therefore
+  shows once. Both closes go through the app's close flow, so the closure
+  sheet follows, then the open card. On a phone the cart view opens for it.
+  - **No flash during a close** (TallyUI #175). The session is stored
+    `closed` before its closure lands. `useRegisterSession` runs one close
+    per register at a time (a second `closeSession` joins the one in flight)
+    and exposes `register.closing`. `RegisterColumn` keeps the count up
+    during a close started elsewhere (the count's own), and shows the Finish
+    closing card only for a closed session that isn't closing. The app no
+    longer masks anything.
+  - **The "Close not finished" pill** (TallyUI #175) shows for a closed
+    session that isn't closing. Tapping it brings up the gate: on a phone it
+    opens the cart view, and the Finish closing button
+    (`register-column-finish-close-button`) gets the focus.
 - **The close flow lives in `RegisterProvider`** (`close`, #89 review): the
-  close itself, the closure whose sheet shows, the masked session and the
-  last error. `RegisterClosedSheet` is mounted by the sale screen, not the
-  gate. So on a phone, leaving the cart view mid-close (which unmounts the
-  gate) loses neither the sheet nor the masking.
+  close itself, the closure whose sheet shows, and the count's last error.
+  `RegisterClosedSheet` is mounted by the sale screen, not the gate. So on a
+  phone, leaving the cart view mid-close (which unmounts the gate) doesn't
+  lose the sheet.
 - **After the close.** When `closeSession` resolves, the sale screen shows TallyUI's
   `ClosureSheet` for that closure (no `onPrint` yet). Its Done goes back to
   selling, where `OpenRegisterCard` is prefilled with the last counted cash.

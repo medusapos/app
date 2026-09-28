@@ -28,9 +28,9 @@ setup detail rather than repeating it.
   again."; **Cancel** (always available) and count again.
   Never save a manager's password in the till's browser. If the browser
   offers to save it after **Approve**, choose "Never" or "Not now".
-- If the till stopped in the middle of a close, it shows "The last close
-  didn't finish" with **Finish closing**, which completes it with the count
-  you already entered.
+- If the till stopped in the middle of a close, the register shows "Close
+  not finished"; tap it for "The last close didn't finish" and **Finish
+  closing**, which completes it with the count you already entered.
 - If saving a sale fails but the order did reach the till's storage, the
   pay screen says "This sale is stored and will be sent" and offers
   **Continue** to start the next sale. Pressing the pay button again to

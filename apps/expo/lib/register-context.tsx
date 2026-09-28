@@ -31,15 +31,13 @@ export type RegisterContextValue = {
 };
 
 export type CloseFlow = {
-  /** `closeSession` through the app: its closure's sheet then shows. `fromCount`: the count's own close, which masks
-   *  RegisterColumn's Finish closing card for its session while the closure writes and after it resolves. */
+  /** `closeSession` through the app: its closure's sheet then shows. `fromCount`: the count's own close, whose failure
+   *  is kept in `error` (the Finish closing card shows only its own run's error). */
   run(input: Parameters<CloseSession>[0], fromCount: boolean): ReturnType<CloseSession>;
   /** The closure whose ClosureSheet shows, until `dismiss`. */
   shown: string | null;
   dismiss(): void;
-  /** The session whose own close (from the count) is in flight or has just finished. */
-  maskedSession: string | null;
-  /** The last failed close's message, shown above the Finish closing card; cleared by the next close. */
+  /** Why the count's own close last failed, shown above the Finish closing card; cleared by the next close. */
   error: string;
 };
 type CloseSession = ReturnType<typeof useRegisterSession>['actions']['closeSession'];
@@ -77,23 +75,24 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
     labels: { registerName: current?.name ?? undefined, resolveCashierName: (id) => loadApprovers(defaultStorage(), storeKey)[id] ?? id },
   });
   const [shown, setShown] = useState<string | null>(null);
-  const [maskedSession, setMaskedSession] = useState<string | null>(null);
   const [closeError, setCloseError] = useState('');
+  // TallyUI #175 runs one close per register (a second closeSession joins it) and exposes `register.closing`, with
+  // which RegisterColumn keeps the count up during a close and shows its Finish closing card only for a closed
+  // session that isn't closing: the app no longer masks anything.
   const close: CloseFlow = {
     async run(input, fromCount) {
-      if (fromCount) setMaskedSession(register.session?.id ?? null);
       setCloseError('');
       try {
         const closure = await register.actions.closeSession(input);
         setShown(closure.id);
         return closure;
       } catch (error) {
-        if (fromCount) setMaskedSession(null);
-        setCloseError(error instanceof Error ? error.message : String(error));
+        // The card shows its own run's error itself; only the count's would otherwise go unseen.
+        if (fromCount) setCloseError(error instanceof Error ? error.message : String(error));
         throw error;
       }
     },
-    shown, dismiss: () => setShown(null), maskedSession, error: closeError,
+    shown, dismiss: () => setShown(null), error: closeError,
   };
   const value: RegisterContextValue = {
     register, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,

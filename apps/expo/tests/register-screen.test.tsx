@@ -542,12 +542,11 @@ describe('closing the register', () => {
   });
 
   // #89 review, MINOR 6.
-  it('a count close whose closure write fails shows why above TallyUI\'s Finish closing card, which then completes it', async () => {
-    let fail = true;
+  it('a count close whose closure write fails shows why above TallyUI\'s Finish closing card, once; the card shows its own run\'s error, then completes it', async () => {
+    const failures = ['Storage is full', 'Storage is still full'];
     registerCollections(store.orders).closures.preInsert(() => {
-      if (!fail) return;
-      fail = false;
-      throw new Error('Storage is full');
+      const failure = failures.shift();
+      if (failure) throw new Error(failure);
     }, false);
     await openTestRegister(store.orders, baseUrl);
     await mount();
@@ -556,6 +555,13 @@ describe('closing the register', () => {
     const error = screen.getByTestId('close-error');
     expect(error.textContent).toContain('Storage is full');
     expect(error.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // TallyUI's card shows only its own run's error, so the count's is shown once, by the app.
+    expect(within(card).queryByTestId('register-column-finish-close-error')).toBeNull();
+    // The card's own failed run: its error in the card, and the app's line gone, so again only once.
+    await act(async () => { fireEvent.click(within(card).getByTestId('register-column-finish-close-button')); });
+    await waitFor(() => expect(within(card).getByTestId('register-column-finish-close-error').textContent).toContain('Storage is still full'));
+    expect(screen.queryByTestId('close-error')).toBeNull();
+    expect(screen.getAllByText(/Storage is/)).toHaveLength(1);
     await act(async () => { fireEvent.click(within(card).getByTestId('register-column-finish-close-button')); });
     expect(within(await screen.findByTestId('closure-sheet')).getByTestId('closure-number').textContent).toBe('Closure #1');
     expect(screen.queryByTestId('close-error')).toBeNull();
@@ -603,6 +609,26 @@ describe('the register control', () => {
     await waitFor(() => expect(pill()).toBe('Offline'));
     fireEvent.click(button('Offline'));
     expect(await screen.findByTestId('register-panel')).toBeTruthy();
+  });
+
+  // #89 final round: TallyUI #175's "Close not finished" pill.
+  it.each([1280, 360])('at %i, "Close not finished" brings up the Finish closing card with its button focused', async (width) => {
+    setWindowWidth(width);
+    const session = await openTestRegister(store.orders, baseUrl);
+    await startCounting(sessions(), session.id);
+    await closeSession(sessions(), session.id, { counted: { cash: 10000 }, closedBy: 'admin@store.test' });
+    await mount();
+    await waitFor(() => expect(pill()).toBe('Close not finished'));
+    if (width === 360) {
+      // The cart view opened for it by itself; leave it, so the pill has to bring it back.
+      await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Products' })); });
+      expect(screen.queryByTestId('register-column-finish-close')).toBeNull();
+    }
+    await act(async () => { fireEvent.click(button('Close not finished')); });
+    const finish = await screen.findByTestId('register-column-finish-close-button');
+    expect(finish.id).toBe('register-column-finish-close-button');
+    expect(document.activeElement).toBe(finish);
+    expect(screen.queryByTestId('register-panel')).toBeNull();
   });
 });
 

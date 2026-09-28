@@ -159,6 +159,10 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(finish).toBeVisible();
       await expect(page.getByTestId('open-register-card')).toHaveCount(0);
       await expect(page.getByTestId('closure-sheet')).toHaveCount(0);
+      // TallyUI #175's pill; tapping it focuses the card's button.
+      await expect(page.getByTestId('register-bar-pill')).toHaveText('Close not finished');
+      await page.getByTestId('register-bar-pill').click();
+      await expect(finish.getByTestId('register-column-finish-close-button')).toBeFocused();
       await shot(page, 'finish-close');
       await finish.getByTestId('register-column-finish-close-button').click();
       const sheet = page.getByTestId('closure-sheet');
