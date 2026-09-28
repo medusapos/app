@@ -4,7 +4,9 @@ import {
   bindRegister, getBoundRegisterId, observeRegister$, useRegisterSession, type PosOrder,
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
+import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { registerCollections, type RegisterCollections } from './order-store';
+import { defaultStorage } from './session';
 import { useSession } from './session-context';
 
 /**
@@ -52,6 +54,11 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
     actor: { id: session?.email ?? '', name: session?.email ?? '' },
     timezone: 'device', softwareVersion: appVersion, tenderInProgress,
+    // Part B (ADR 0018): a close over the threshold needs an approver; blind counting stays off.
+    varianceThreshold: VARIANCE_THRESHOLD_MINOR,
+    // Cashier ids are their emails; an approver's id (a Medusa user id) resolves through the names kept at approval,
+    // which a close resumed after a restart needs. Read at call time, so an approval just made is found.
+    labels: { registerName: current?.name ?? undefined, resolveCashierName: (id) => loadApprovers(defaultStorage(), storeKey)[id] ?? id },
   });
   const value: RegisterContextValue = {
     register, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,

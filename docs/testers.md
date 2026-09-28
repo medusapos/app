@@ -11,7 +11,23 @@ setup detail rather than repeating it.
   (on a phone, at the right end of a row); tap it to choose or open the
   register. **Register ›** opens its panel: the sales this session, the
   cash expected in the drawer, and **Paid in**, **Paid out** and **No sale**,
-  each with **Undo**. Closing the register arrives in the next update.
+  each with **Undo**.
+- You can now close the register. In its panel, **Close register** opens
+  the count (on a phone, in the cart view). Tap the note and coin tiles or
+  type the cash in the drawer; the line under the amount shows what's
+  expected and how far off you are. **Close register** then shows the
+  closure number and each tender's counted, expected and difference. After
+  **Done**, the open card is filled in with the cash you just counted.
+  Between sessions, **Register ›** shows the last closure's figures.
+- If the cash is more than €5.00 over or short, closing needs a manager's
+  approval: an admin of your Medusa store signs in with their email and
+  password in the **Manager approval** box. This doesn't sign you out. On
+  your own, you can approve with your own login. The closure then shows
+  "Approved by" and their name. Approval needs a connection. Offline, it
+  says "Connect to approve, or count again."; **Cancel** and count again.
+- If the till stopped in the middle of a close, it shows "The last close
+  didn't finish" with **Finish closing**, which completes it with the count
+  you already entered.
 - If saving a sale fails but the order did reach the till's storage, the
   pay screen says "This sale is stored and will be sent" and offers
   **Continue** to start the next sale. Pressing the pay button again to
