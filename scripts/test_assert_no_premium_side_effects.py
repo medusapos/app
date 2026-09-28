@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 
 SCRIPT = Path(__file__).with_name("assert-no-premium-side-effects.py")
@@ -44,6 +45,19 @@ class AssertNoPremiumSideEffectsTests(unittest.TestCase):
         result = self.run_assertion()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout, "Checked index.db: inspected 1 rxdb-premium rows\n")
+
+    def test_a_restored_setup_node_cache_fails(self):
+        self.sqlite_store(PREMIUM_KEY, b"\x00files\xff")
+        with patch.dict(os.environ, {"SETUP_NODE_CACHE_HIT": "true"}):
+            result = self.run_assertion()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("setup-node restored a package-manager store cache", result.stderr)
+
+    def test_an_empty_cache_hit_passes(self):
+        self.sqlite_store(PREMIUM_KEY, b"\x00files\xff")
+        with patch.dict(os.environ, {"SETUP_NODE_CACHE_HIT": ""}):
+            result = self.run_assertion()
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_sqlite_without_premium_fails(self):
         self.sqlite_store("sha512-fixture\tanother-package@1.0.0", b"files")

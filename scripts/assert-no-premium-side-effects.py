@@ -5,6 +5,10 @@ import sqlite3
 import subprocess
 import sys
 
+# A restored setup-node store cache could contain the decrypted rxdb-premium build.
+if os.environ.get("SETUP_NODE_CACHE_HIT") == "true":
+    sys.exit("setup-node restored a package-manager store cache; caching must be disabled")
+
 override = os.environ.get("PNPM_STORE_DIR_OVERRIDE")
 # Tests bypass pnpm config only with PNPM_STORE_DIR_OVERRIDE and ASSERT_SKIP_PNPM_CONFIG=1.
 if not (override is not None and os.environ.get("ASSERT_SKIP_PNPM_CONFIG") == "1"):
