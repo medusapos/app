@@ -18,7 +18,9 @@ export const OPEN_SESSION: RegisterSession = {
 export function openRegisterFixture({ enabled = true }: { enabled?: boolean } = {}): RegisterContextValue {
   const register = {
     session: OPEN_SESSION, movements: [], expected: { cash: 10000 }, salesCount: 0, overdue: false, lastClosure: null,
-    lastClosed: null, varianceThreshold: undefined, enabled, blind: false, saleSession: undefined,
+    lastClosed: null, varianceThreshold: undefined, enabled, blind: false,
+    // Rendered as open, so the gate's tender start matches requireOpen(); the stamp reads it by primary key.
+    saleSession: { id: OPEN_SESSION.id, sessions: { storageInstance: { findDocumentsById: async () => [OPEN_SESSION] } } },
     requireOpen: vi.fn(async () => OPEN_SESSION.id),
     actions: {
       openSession: vi.fn(), startCounting: vi.fn(), backToSelling: vi.fn(), closeSession: vi.fn(),

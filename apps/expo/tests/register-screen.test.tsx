@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import type { ComponentProps, ReactNode } from 'react';
 import type { CartLineProps, CartTotalProps, SearchInput, ProductGrid } from '@tallyui/components';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
-import { bindRegister, readRegister, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import { bindRegister, openSession, readRegister, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
@@ -260,7 +260,7 @@ describe('the register control', () => {
 describe('the catalogue status line', () => {
   it.each([
     [1280, 'MedusaJS · Up to date · 1 products · 2 not sold in this channel · Failed to fetch'],
-    [360, 'Up to date · 1 products · Failed to fetch'],
+    [360, 'Up to date · Failed to fetch · 1 products'],
   ])('at %i reads %j', async (width, text) => {
     setWindowWidth(width);
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: 'Failed to fetch', lastSyncedAt: null,
@@ -273,6 +273,24 @@ describe('the catalogue status line', () => {
 
 // The #88 review.
 describe('the tender gate', () => {
+  // The #88 delta re-review: requireOpen() reads storage ahead of the render, and useSale pins the rendered session.
+  it('a tap straight after the session opens in storage waits for it to render, and the sale is stamped with it', async () => {
+    await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
+    await mount();
+    await screen.findByTestId('open-register-card');
+    fireEvent.click(button('Shirt'));
+    // Opened straight in storage, then tapped before the register's watcher renders it (as the reviewer reproduced).
+    const opened = await openSession(sessions(), { registerId: 'register-1', expectedFloatMinor: null, countedFloatMinor: 10000,
+      openedBy: 'admin@store.test', businessDay: { year: 2026, month: 9, day: 28 }, storeKey: baseUrl });
+    fireEvent.click(button('Card terminal'));
+    await screen.findByRole('button', { name: 'Open register panel' });
+    const approve = await screen.findByRole('button', { name: 'Payment approved on terminal' });
+    await act(async () => { fireEvent.click(approve); });
+    await waitFor(() => expect(record).toHaveBeenCalledOnce());
+    expect(record.mock.calls[0][0].sessionId).toBe(opened.id);
+    expect(record.mock.calls[0][0]).not.toHaveProperty('lateSessionId');
+  });
+
   it('pins the session for the tender: closed during it, the completed sale is late, with no sessionId', async () => {
     const session = await openTestRegister(store.orders, baseUrl);
     await mount();

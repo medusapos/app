@@ -115,8 +115,16 @@ movements and closures are local-only collections, never replicated.
   border and background (`IN_ROW`), ends rows that already exist: the cart
   view's "‹ Products" row, and on Products Catalogue's status line under the
   search box (its `statusAccessory`, TallyUI #167). There the status text
-  is short, to fit one line beside the pill: the sync state and the product
-  count, plus any error, without the connector name or the unlisted count.
+  is short, to fit one line beside the pill (TallyUI #169 cuts the rest
+  with an ellipsis): the sync state, any error, then the product count,
+  without the connector name or the unlisted count.
+- **The tender waits for the rendered session.** TallyUI's `useSale` pins
+  the session it was rendered with at `startTender`, while `requireOpen()`
+  reads storage, which can be ahead (a session opened a moment before the
+  tap). `useGatedSale` starts the tender only once the rendered
+  `register.saleSession` is the session `requireOpen()` confirmed; it waits
+  up to 3 s (taps ignored), drops the wait if another session renders, and
+  on timeout says "Couldn't check the register. Try again.".
 - **The panel.** "Register ›" opens `RegisterPanel` (currency from
   pricing), whose Paid in, Paid out and No sale open TallyUI's
   `MovementSheet`, and whose Undo calls `voidMovement`. No `onOpenDrawer`:
