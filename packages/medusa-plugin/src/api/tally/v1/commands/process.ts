@@ -2,10 +2,11 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { executeOrderCreate } from '../../../../workflows/tally-order-create/execute'
+import { executeRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 import { payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
-import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../versions'
+import { SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }
@@ -14,7 +15,7 @@ export type BatchOutcome =
 
 /** Validates every envelope before any command is claimed. */
 export function validateBatch(body: unknown):
-  | { ok: true; commands: CommandEnvelope<OrderCreatePayload>[] }
+  | { ok: true; commands: CommandEnvelope<unknown>[] }
   | { ok: false; status: 400 | 413; message: string } {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return { ok: false, status: 400, message: 'Expected body object with commands array' }
@@ -29,7 +30,8 @@ export function validateBatch(body: unknown):
     }
     let field: string | undefined
     if (typeof command.id !== 'string' || command.id.length === 0 || command.id.length > 64) field = 'id'
-    else if (command.type !== 'order.create') field = 'type'
+    else if (!['order.create', 'register.session.open', 'register.session.transition', 'register.movement.record',
+      'register.movement.void', 'register.closure.submit'].includes(command.type)) field = 'type'
     else if (!Number.isSafeInteger(command.version) || command.version < 1) field = 'version'
     else if (typeof command.payload !== 'object' || command.payload === null || Array.isArray(command.payload)) field = 'payload'
     else if (typeof command.createdAt !== 'string') field = 'createdAt'
@@ -42,11 +44,31 @@ export function validateBatch(body: unknown):
 
 export async function processBatch(
   container: MedusaContainer,
-  commands: CommandEnvelope<OrderCreatePayload>[],
+  commands: CommandEnvelope<unknown>[],
   options: TallyPluginOptions
 ): Promise<BatchOutcome> {
   const results: CommandResult[] = []
-  for (const command of commands) {
+  for (const envelope of commands) {
+    if (envelope.type !== 'order.create') {
+      if (!SUPPORTED_REGISTER_VERSIONS.includes(envelope.version)) {
+        results.push({ id: envelope.id, status: 'rejected', error: { code: 'unsupported_version',
+          message: `register version ${envelope.version} is not supported; this server supports ${SUPPORTED_REGISTER_VERSIONS.join(', ')}`,
+          data: { register: Math.max(...SUPPORTED_REGISTER_VERSIONS) },
+        } as CommandErrorWithData })
+        continue
+      }
+      const outcome = await executeRegisterCommand(container, envelope)
+      if (outcome.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: outcome.id } }
+      if (outcome.kind === 'transient') {
+        const { id, message } = outcome
+        const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
+        logger.error(`Command ${id} failed transiently: ${message}`)
+        return { status: 503, body: { code: 'transient', id, message: 'Temporary failure, retry later.' } }
+      }
+      results.push(outcome.result)
+      continue
+    }
+    const command = envelope as CommandEnvelope<OrderCreatePayload>
     if (!SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'unsupported_version',
         message: `order.create version ${command.version} is not supported; this server supports ${SUPPORTED_ORDER_CREATE_VERSIONS.join(', ')}`,

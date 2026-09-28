@@ -61,6 +61,28 @@ it('names the first bad field', () => {
   expect(() => parseCommandResult({ id: '', status: 'unknown' })).toThrow('Invalid id')
 })
 
+it('parses a register applied result without serverRefs and keeps register', () => {
+  const register = { session: { id: 's', status: 'open' }, counters: { lastClosureNumber: 0 } }
+  const value = { id: 'c', status: 'applied', register }
+  expect(parseCommandResult(value)).toEqual(value)
+  expect(parseCommandResult(value)).toHaveProperty('register', register)
+})
+
+it('keeps error.data on a rejected result', () => {
+  const data = { sessionId: 's', counters: { lastClosureNumber: 1 } }
+  const value = { ...rejected, error: { ...rejected.error, data } }
+  expect(parseCommandResult(value)).toEqual(value)
+})
+
+it('refuses applied with neither serverRefs nor register', () => {
+  expect(() => parseCommandResult({ id: 'c', status: 'applied' })).toThrow('Invalid serverRefs: required for applied')
+})
+
+it.each([null, [], 'text', 1, new Date()])('refuses non-object error.data and register: %s', value => {
+  expect(() => parseCommandResult({ ...rejected, error: { ...rejected.error, data: value } })).toThrow('Invalid error.data')
+  expect(() => parseCommandResult({ ...applied, register: value })).toThrow('Invalid register')
+})
+
 it('drops unknown keys at every level without mutating the input', () => {
   const value = {
     ...applied, extra: true,
