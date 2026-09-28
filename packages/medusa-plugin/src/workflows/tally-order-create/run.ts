@@ -1,11 +1,12 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, MedusaError } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
 import { planOrderCreate, totalWarnings } from './plan'
 import { resumeOrderCreate } from './resume'
 import { mergeStockTopUps, planStockTopUp } from './stock'
+import { StoreConfigurationError } from './store-configuration-error'
 import { tallyOrderCreateWorkflow, type StockTopUp } from './workflow'
 
 export type TallyPluginOptions = { salesChannelId?: string; locationId?: string; shippingOptionId?: string }
@@ -33,7 +34,7 @@ export async function runOrderCreate(
       filters: { id: salesChannelId ?? [] },
     })
     if (!channels[0]) {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Missing sales channel; set plugin option salesChannelId')
+      throw new StoreConfigurationError('Missing sales channel; set plugin option salesChannelId')
     }
     const locationId = payload.locationId ?? options.locationId ?? channels[0].stock_locations?.[0]?.id
     const { data: locations } = await query.graph({
@@ -41,7 +42,7 @@ export async function runOrderCreate(
     })
     const location = locations[0]
     if (!location?.address) {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Missing stock location or address; set plugin option locationId')
+      throw new StoreConfigurationError('Missing stock location or address; set plugin option locationId')
     }
     let shippingOptionId = options.shippingOptionId
     if (!shippingOptionId) {
@@ -52,7 +53,7 @@ export async function runOrderCreate(
         .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]?.id
     }
     if (!shippingOptionId) {
-      throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Missing shipping option; set plugin option shippingOptionId')
+      throw new StoreConfigurationError('Missing shipping option; set plugin option shippingOptionId')
     }
     if (orderId) {
       await resumeOrderCreate(container, orderId, Number(minorToMajor(payload.totalMinor, currencyDecimals(payload.currency))),

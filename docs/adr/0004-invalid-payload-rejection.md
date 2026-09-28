@@ -23,3 +23,29 @@ replaying the same malformed payload returns the same rejection.
 The register shows the sale under needs attention instead of retrying forever.
 TallyUI's `CommandError.code` is a string, so no type change is required.
 The TallyUI contract docs should list `invalid_payload`.
+
+## Amendment: store-configuration rejections (2026-09-28)
+
+**Context.** The hosted demo's sales never synced. Every `order.create` failed inside Medusa's `createOrderFulfillmentWorkflow` with "Shipping profile … does not match the shipping profile of the order item …". `executeOrderCreate` classified every error as `transient`, so the till retried the sale forever and showed it as "sending".
+
+**Decision.** Add the rejection code `store_configuration`:
+- **When it applies:** the plugin's own checks that run before any write throw a dedicated `StoreConfigurationError`, and `executeOrderCreate` turns that class, and only that class, into a per-command rejection whose message is the reason.
+  - Today those checks are the missing sales channel, the missing stock location or address, and the missing shipping option.
+  - A later change adds the shipping-profile check before the workflow runs.
+- **It isn't stored in the ledger:** the claim is released, as for `invalid_payload`. So the same command applies once the store is fixed, and the till's Retry works without a new command id.
+- **Everything else stays `transient`,** including every error Medusa throws inside its workflows.
+
+**Why the class, and not Medusa's error type.** Rejecting on Medusa's `INVALID_DATA` was considered and turned down:
+- **Retryable races:** Medusa throws `INVALID_DATA` for races that a retry resolves:
+  - a concurrent capture (`@medusajs/payment` `payment-module.js:387-395`);
+  - fulfillment reservation mismatches after a resume (`core-flows` `create-fulfillment.js:160,170`);
+  - "not a draft" on a concurrent draft conversion (`validate-draft-order.js:26`).
+- **Stranded payment:** a rejection after the workflow has started can strand money. The workflow captures payment before it fulfils (`workflow.ts`), and Medusa's capture step has no refund compensation (`core-flows` `capture-payment.js:15-16`). A stored or final rejection at that point would leave a captured payment for a sale the till believes was refused.
+
+Only errors raised before any write are safe to reject. **Don't widen this rule to Medusa's error types or messages.** A new permanent case gets its own pre-workflow check that throws `StoreConfigurationError`.
+
+**Consequences.**
+- The register shows such a sale under "needs attention" with the reason, instead of "sending" forever. After an admin fixes the store, Retry applies it.
+- Stock top-ups carried from an earlier attempt stay applied when a later attempt is rejected, and stock stays too high by them. That's ADR 0003's accepted bias.
+- A permanent failure inside Medusa's workflows still retries forever. Surfacing the reason in the till after repeated retries is a TallyUI outbox item.
+- TallyUI's contract docs should list `store_configuration`.
