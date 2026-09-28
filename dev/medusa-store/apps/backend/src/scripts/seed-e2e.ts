@@ -85,7 +85,8 @@ export default async function seedE2e({ container }: ExecArgs) {
     [Modules.STOCK_LOCATION]: { stock_location_id: location.id },
     [Modules.FULFILLMENT]: { fulfillment_provider_id: "manual_manual" },
   })
-  let [profile] = await fulfillment.listShippingProfiles({ name: "E2E shipping profile" })
+  // E2E products must share the default profile with existing shipping options at their location so the plugin's chosen option can fulfil them.
+  let [profile] = await fulfillment.listShippingProfiles({ type: "default" }, { order: { created_at: "ASC" } })
   if (!profile) [profile] = (await createShippingProfilesWorkflow(container).run({
     input: { data: [{ name: "E2E shipping profile", type: "default" }] },
   })).result
