@@ -1,4 +1,4 @@
-import type { OrderCreatePayload } from '@tallyui/core'
+import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { payloadShapeErrors } from '../payload-shape'
 
 const payload: OrderCreatePayload = {

@@ -1,4 +1,4 @@
-import type { OrderCreatePayload } from '@tallyui/core'
+import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { fulfillmentGroups, planOrderCreate, totalWarnings } from '../plan'
 import type { PlanContext } from '../plan'
 import type { OrderCreatePayloadV3 } from '../fiscal-figures'

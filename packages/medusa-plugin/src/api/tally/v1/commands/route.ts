@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
-import type { CommandBatchRequest } from '@tallyui/core'
+import type { CommandBatchRequest } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../../../modules/tally-ledger/service'
 import { processBatch, validateBatch } from './process'

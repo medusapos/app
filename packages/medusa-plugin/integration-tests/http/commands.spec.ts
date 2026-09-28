@@ -3,7 +3,7 @@ import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
-import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core'
+import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'

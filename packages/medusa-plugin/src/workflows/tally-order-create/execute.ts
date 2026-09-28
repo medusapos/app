@@ -1,6 +1,6 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, MedusaError } from '@medusajs/framework/utils'
-import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core'
+import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'

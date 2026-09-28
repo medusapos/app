@@ -1,6 +1,6 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, MedusaError } from '@medusajs/framework/utils'
-import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core'
+import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
 import { planOrderCreate, totalWarnings } from './plan'

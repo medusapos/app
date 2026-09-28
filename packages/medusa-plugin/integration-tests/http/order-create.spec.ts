@@ -7,7 +7,7 @@ import {
   createOrderWorkflow, createPaymentSessionsWorkflow, getOrderDetailWorkflow, markPaymentCollectionAsPaid, type CreateOrderWorkflowInput,
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
-import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core'
+import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { runOrderCreate } from '../../src/workflows'
 import { majorToMinor } from '../../src/workflows/tally-order-create/money'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'

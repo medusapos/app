@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import type { CommandEnvelope } from '@tallyui/core'
+import type { CommandEnvelope } from '@tallyui/core' with { 'resolution-mode': 'import' }
 
 /** JSON with recursively sorted object keys; arrays keep their order. */
 export function canonicalJson(value: unknown): string {
