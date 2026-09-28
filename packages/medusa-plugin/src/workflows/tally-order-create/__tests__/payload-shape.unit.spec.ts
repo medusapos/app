@@ -107,3 +107,24 @@ it('reports at most ten errors', () => {
   expect(errors).toHaveLength(10)
   expect(errors.every(error => /^.+: expected /u.test(error))).toBe(true)
 })
+
+it.each(['session-unknown', '12345678-1234-1234-1234-123456789012'])('accepts sessionId %s without a lookup', sessionId => {
+  expect(payloadShapeErrors({ ...payload, sessionId })).toEqual([])
+})
+
+it.each(['x'.repeat(37), '', null, 1])('rejects invalid sessionId %p', sessionId => {
+  expect(payloadShapeErrors({ ...payload, sessionId })).toEqual(['sessionId: expected a string of at most 36 characters'])
+})
+
+it.each([{ customerId: 'customer' }, { customerId: 'x'.repeat(64), email: 'buyer@example.com' }])('accepts customerId with optional email %j', customer => {
+  expect(payloadShapeErrors({ ...payload, customer })).toEqual([])
+})
+
+it.each(['x'.repeat(65), '', null, 1])('rejects invalid customerId %p', customerId => {
+  expect(payloadShapeErrors({ ...payload, customer: { customerId } }))
+    .toEqual(['customer.customerId: expected a string of at most 64 characters'])
+})
+
+it('keeps unknown top-level and customer fields lenient', () => {
+  expect(payloadShapeErrors({ ...payload, extra: true, customer: { extra: true } })).toEqual([])
+})

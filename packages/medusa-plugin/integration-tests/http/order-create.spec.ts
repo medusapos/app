@@ -340,6 +340,7 @@ medusaIntegrationTestRunner({
 
     async function createDraft(sale: CommandEnvelope<OrderCreatePayload>, shortfall = 0) {
       const planned = planOrderCreate(sale.payload, {
+        customer: null,
         commandId: sale.id, salesChannelId: data.channelId,
         region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
         location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
@@ -546,6 +547,18 @@ medusaIntegrationTestRunner({
       }
       expect(await ordersFor(sale.payload.clientOrderId).whereNull('deleted_at').whereNot('status', 'canceled')).toHaveLength(0)
       await expectStock(data.inventoryC, 1)
+    })
+
+    it('creates a guest v3 without receipt or bookkeeping fields with unchanged settlement metadata', async () => {
+      const sale = { ...command({ customer: null }), version: 3 } as unknown as CommandEnvelope<OrderCreatePayload>
+      const order = await readOrder(await runOrderCreate(container, sale))
+      expect(order.metadata.tally_pos_totals).toEqual({ v: 1, currency: 'EUR', exponent: 2,
+        settlement: { subtotalMinor: 840, discountMinor: 0, taxMinor: 160, totalMinor: 1000 },
+      })
+      expect(order.metadata).not.toHaveProperty('tally_session_id')
+      expect(order.metadata).not.toHaveProperty('tally_customer_id')
+      const [row] = await ordersFor(sale.payload.clientOrderId)
+      expect(row.customer_id).toBeNull()
     })
   },
 })

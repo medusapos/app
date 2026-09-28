@@ -39,3 +39,22 @@ Tap race: a line added at the instant new store settings land is dropped from th
 - **A test hold leaks on failure:** the register-screen no-card test holds a closure write, and doesn't release it in `finally` when the test fails. TallyUI's module-level in-flight close then makes later tests in the file join the stuck close, which gives misleading failures.
 - **The "Finish closing" wording:** "Close not finished" is the "The last close didn't finish" state. Keep the tester guide's wording in step with TallyUI's pill and card copy.
 - **Also "1 products":** the catalogue status reads "1 products" for a single product (pre-existing).
+
+## Swap the plugin's local order.create v3 types for @tallyui/core
+
+`packages/medusa-plugin/src/workflows/tally-order-create/fiscal-figures.ts` holds local copies of TallyUI's v3 wire types (`OrderCreateDisplay`, `OrderCreateTaxRate`, `OrderCreatePayloadV3`), each marked `BRIDGE`, because `@tallyui/core` doesn't export them yet. TallyUI's order.create v3 ships in `@tallyui/*` 2.1.0. At that bump:
+- import the types from `@tallyui/core`;
+- delete the local copies;
+- check that `__fixtures__/order-create-v3.json` (the golden envelope TallyUI also pins) still passes unchanged.
+
+## Hosted catalogue sync and search are too slow at 1,956 products
+
+A Playwright trace of the hosted smoke (app.medusapos.com against the demo backend, both at 4a60da6, 2026-09-28) shows:
+- the first catalogue sync takes **47 s** to reach "Up to date · 1,956 products";
+- each product search or add-to-cart step afterwards takes **3–6 s**.
+
+The sale then finished at 88 s, and the 90 s test timeout cancelled its sync POST, so the smoke failed. The trace is kept at `~/agent/handoff/smoke-hosted-trace-2026-09-28.zip` (open with `npx playwright show-trace`). Next is a read-only profiling spike on the hosted web build that ends in a spec. It should find where the time goes: the RxDB query, a missing index, SQLite-wasm/OPFS, or rendering.
+
+## Keep the till's email when a found customer is attached
+
+When `order.create` v3 names a customer the plugin finds, the till's email is deliberately not passed, because Medusa's `findOrCreateCustomerStep` would swap in a guest customer. So the order takes the customer's stored email. If that customer has none, the order email is null and the email the cashier typed is kept nowhere (`packages/medusa-plugin/src/workflows/tally-order-create/plan.ts`). Record it as `tally_customer_email` metadata, and add a test for a found customer without an email (from the #90 delta review).

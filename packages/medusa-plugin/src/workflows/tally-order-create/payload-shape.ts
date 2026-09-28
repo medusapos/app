@@ -58,6 +58,14 @@ export function payloadShapeErrors(payload: unknown): string[] {
     if (object(payload.customer) && payload.customer.email !== undefined) {
       check(typeof payload.customer.email === 'string', 'customer.email', 'a string')
     }
+    if (object(payload.customer) && payload.customer.customerId !== undefined) {
+      const id = payload.customer.customerId
+      check(typeof id === 'string' && id.length > 0 && id.length <= 64, 'customer.customerId', 'a string of at most 64 characters')
+    }
+  }
+  if (payload.sessionId !== undefined) {
+    check(typeof payload.sessionId === 'string' && payload.sessionId.length > 0 && payload.sessionId.length <= 36,
+      'sessionId', 'a string of at most 36 characters')
   }
   for (const field of ['registerId', 'cashierRef', 'locationId']) {
     if (payload[field] !== undefined) check(typeof payload[field] === 'string', field, 'a string')

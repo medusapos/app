@@ -52,3 +52,69 @@ Reports read `tally_pos_totals`, not `raw_total`, for the fiscal figures.
 `display` and `taxByRate` arrive with `order.create` version 3 (TallyUI
 ADR-065), not in this job. `total_mismatch` still flags real gaps (half a
 minor unit or more).
+
+## Amendment: order.create version 3 (2026-09-28)
+
+TallyUI ADR-065 adds `order.create` version 3, and the plugin accepts it
+(`/tally/v1/info` lists `[1, 2, 3]`). Version 3 is version 2 plus up to four
+optional fields, each validated by the plugin:
+
+- **`display` and `taxByRate`** (both or neither): the receipt's own figures,
+  copied from the till's order snapshot and never recomputed.
+  - They're strict: an unknown key anywhere inside `display`, its lines, their
+    discounts, or a `taxByRate` entry is rejected as `invalid_payload`.
+  - They're consistent: integer minor units; `display.currency`, `totalMinor`
+    and `taxMinor` equal the payload's; Σ `taxByRate.taxMinor` equals
+    `taxMinor`; each `grossMinor` is `netMinor + taxMinor`; every
+    `display.lines[].clientLineId` names a payload line; and
+    `display.exponent` matches the plugin's decimals for the currency.
+  - **Stored:** `tally_pos_totals` becomes `{ v: 2, currency, exponent,
+    settlement, display, taxByRate }`, with both stored value-identical to
+    what was sent (never recomputed; Postgres `jsonb` may reorder keys). They
+    are the fiscal figures (this ADR's decision (e)).
+  - Orders without them (v1, v2, and v3 without the fields) keep the
+    byte-identical `v: 1` shape.
+- **`sessionId`:** the register session the sale was taken for. It's a soft
+  reference of 1 to 36 characters that's never looked up, and it's stored as
+  `tally_session_id`. There is deliberately no `lateSessionId` on the wire: a
+  second field would change a resent command's bytes after TallyUI's orphan
+  sweep and trip `idempotency_mismatch`.
+- **`customer.customerId`** (programme item 14): the Medusa customer picked
+  at the till. It's a soft reference of 1 to 64 characters. When the customer
+  exists, the draft order gets its `customer_id` and not the till's email:
+  Medusa replaces the customer when both an id and a different email are
+  given, so the found customer keeps its own email. When it doesn't exist,
+  the till's email is used as before. The id is always recorded as
+  `tally_customer_id`, and an unknown or deleted customer never fails the
+  sale.
+
+**Version rules** (all rejected as `invalid_payload`):
+- `display`, `taxByRate`, `sessionId` or `customerId` on version 1 or 2;
+- a v3 carrying only one of `display` and `taxByRate`;
+- version 2 without `discountMinor`, as before.
+
+A discount-free v3 carries no `discountMinor`, and that's valid at v3.
+
+**Unsupported versions** (any positive integer not in `/tally/v1/info`) are
+rejected per command as `unsupported_version`, with
+`error.data.orderCreate` set to the highest supported version (a number,
+the maximum of `/info`'s list), so the rest of the batch still applies.
+TallyUI resends at that version when it's a safe positive integer, and
+refreshes `/info` otherwise. The check runs before the ledger records the command,
+so a rejected id can be resent at a supported version without
+`idempotency_mismatch`. Plugins released before this amendment answer the
+whole batch with HTTP 400 instead; TallyUI must handle both.
+
+**Strictness scope:** only the new v3 objects reject unknown keys. The
+payload's top level stays as lenient as before, because tightening it could
+reject tills already in the field.
+
+**Consequences:**
+- The command fingerprint covers the whole payload, so idempotency is
+  unchanged. TallyUI fixes each order's version at finalize, so a retry's
+  bytes never change.
+- A plugin downgraded below version 3 after tills finalized v3 orders
+  rejects those orders. TallyUI accepts this, as it does for discounts.
+- The plugin can land before TallyUI's half: a till sends v3 only once it
+  carries the new fields, which needs capability 3 and TallyUI's v3 release
+  pinned by the app.

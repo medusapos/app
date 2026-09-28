@@ -1,6 +1,7 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, MedusaError } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core'
+import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
 import { planOrderCreate, totalWarnings } from './plan'
 import { resumeOrderCreate } from './resume'
@@ -16,6 +17,7 @@ export async function runOrderCreate(
   ledger?: { claimToken: string; carriedTopUps: StockTopUp[] }
 ): Promise<CommandResult> {
   const payload = command.payload
+  const v3 = payload as OrderCreatePayloadV3
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const existing = await knex('order').select('id', 'status')
@@ -67,7 +69,12 @@ export async function runOrderCreate(
         filters: { id: payload.lines.map(line => line.variantId) },
       })
       const { address_1, address_2, city, country_code, province, postal_code, phone } = location.address
+      const customerId = v3.customer?.customerId
+      const customer = customerId === undefined ? null : (await query.graph({
+        entity: 'customer', fields: ['id'], filters: { id: customerId },
+      })).data[0] ?? null
       const planned = planOrderCreate(payload, {
+        customer,
         commandId: command.id, salesChannelId: channels[0].id,
         location: { id: location.id, address: { address_1, address_2, city, country_code, province, postal_code, phone } },
         region: region ? {
