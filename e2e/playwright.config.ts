@@ -11,7 +11,8 @@ export default defineConfig({
   testDir: '.',
   globalTeardown: appUrl ? undefined : './global-teardown.ts',
   workers: 1,
-  timeout: 90_000,
+  // The hosted demo catalogue (~2,000 products) takes ~47 s to sync first and seconds per search, so 90 s can end a hosted test before its sale syncs.
+  timeout: appUrl ? 5 * 60_000 : 90_000,
   expect: { timeout: 30_000 },
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { baseURL: appUrl || appLocalUrl, trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry' },
