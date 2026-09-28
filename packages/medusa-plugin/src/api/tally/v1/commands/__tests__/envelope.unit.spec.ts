@@ -1,5 +1,5 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { processBatch, validateBatch } from '../process'
+import { processBatch, validateBatch, type BatchOutcome } from '../process'
 
 const command = {
   id: 'sale-1', type: 'order.create', version: 1, payload: {},
@@ -56,13 +56,14 @@ describe('validateBatch', () => {
     const outcome = await processBatch({} as MedusaContainer, [{ ...command, version: 4, payload: { display: {} } } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
       code: 'unsupported_version', message: 'order.create version 4 is not supported; this server supports 1, 2, 3',
+      data: { orderCreate: 3 },
     } }] } })
   })
 
   it('a malformed v3 is rejected with the v1/v2 shape message and never throws', async () => {
     const payload = { clientOrderId: 'order_1', createdAt: command.createdAt, currency: 'EUR', pricesIncludeTax: true,
       lines: 'abc', payments: [], subtotalMinor: 0, taxMinor: 0, totalMinor: 0 }
-    const outcomes = []
+    const outcomes: BatchOutcome[] = []
     for (const version of [1, 2, 3]) {
       const fields = version === 2 ? { discountMinor: 1 } : version === 3 ? { display: {}, taxByRate: [] } : {}
       outcomes.push(await processBatch({} as MedusaContainer, [{ ...command, version, payload: { ...payload, ...fields } } as never], {}))

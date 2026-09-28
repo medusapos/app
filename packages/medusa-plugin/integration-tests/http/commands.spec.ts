@@ -128,12 +128,28 @@ medusaIntegrationTestRunner({
       expect(response.status).toBe(200)
       expect(response.data.results).toEqual([
         { id: unsupported.id, status: 'rejected', error: { code: 'unsupported_version',
-          message: 'order.create version 4 is not supported; this server supports 1, 2, 3' } },
+          message: 'order.create version 4 is not supported; this server supports 1, 2, 3', data: { orderCreate: 3 } } },
         expect.objectContaining({ id: supported.id, status: 'applied' }),
       ])
       expect(await ledger.listTallyCommands({ id: unsupported.id })).toHaveLength(0)
       expect(await liveOrders(unsupported.payload.clientOrderId)).toHaveLength(0)
       expect(await liveOrders(supported.payload.clientOrderId)).toHaveLength(1)
+    })
+
+    it('a command rejected as unsupported_version was never recorded: resending its id at a supported version is applied, not a duplicate or mismatch', async () => {
+      const sale = command()
+      const unsupported = await post([{ ...sale, version: 4 }])
+      expect(unsupported.status).toBe(200)
+      expect(unsupported.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
+        code: 'unsupported_version', message: 'order.create version 4 is not supported; this server supports 1, 2, 3',
+        data: { orderCreate: 3 },
+      } }])
+      const supported = await post([sale])
+      expect(supported.status).toBe(200)
+      expect(supported.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'applied' })])
+      const replay = await post([sale])
+      expect(replay.status).toBe(200)
+      expect(replay.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'duplicate' })])
     })
 
     // 19% inclusive: 1000 − 100 = 900 gross (net 756, tax 144); and 1000 − 1000 = 0, which has no payment collection.

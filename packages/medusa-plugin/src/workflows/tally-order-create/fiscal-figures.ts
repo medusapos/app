@@ -1,5 +1,8 @@
-import type { OrderCreatePayload } from '@tallyui/core'
+import type { CommandError, OrderCreatePayload } from '@tallyui/core'
 import { currencyDecimals } from './money'
+
+// BRIDGE (TallyUI order.create): replace when @tallyui/core adds CommandError.data.
+export type CommandErrorWithData = CommandError & { data?: Record<string, unknown> }
 
 // BRIDGE (TallyUI ADR-065 order.create v3; spec-order-create-v3, PR to follow): a local copy until
 // @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden

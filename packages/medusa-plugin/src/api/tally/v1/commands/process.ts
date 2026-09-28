@@ -3,7 +3,7 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core'
 import { executeOrderCreate } from '../../../../workflows/tally-order-create/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
-import { fiscalFiguresErrors, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
+import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 import { payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
 
 // Shared by command processing and /info so advertised and accepted versions stay aligned.
@@ -52,7 +52,8 @@ export async function processBatch(
     if (!SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'unsupported_version',
         message: `order.create version ${command.version} is not supported; this server supports ${SUPPORTED_ORDER_CREATE_VERSIONS.join(', ')}`,
-      } })
+        data: { orderCreate: Math.max(...SUPPORTED_ORDER_CREATE_VERSIONS) },
+      } as CommandErrorWithData })
       continue
     }
     // ADR-062 sends version 2 exactly when there is a discount, so version 1 can never create adjustments.
