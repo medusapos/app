@@ -44,16 +44,37 @@ export async function runOrderCreate(
     if (!location?.address) {
       throw new StoreConfigurationError('Missing stock location or address; set plugin option locationId')
     }
-    let shippingOptionId = options.shippingOptionId
-    if (!shippingOptionId) {
-      const { data: shippingOptions } = await query.graph({
-        entity: 'shipping_option', fields: ['id', 'created_at', 'service_zone.fulfillment_set.location.id'],
-      })
-      shippingOptionId = shippingOptions.filter(option => option.service_zone?.fulfillment_set?.location?.id === location.id)
-        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]?.id
+    const { data: shippingVariants } = await query.graph({
+      entity: 'product_variant', fields: ['id', 'product.shipping_profile.id'],
+      filters: { id: payload.lines.map(line => line.variantId) },
+    })
+    const profileIds = [...new Set(shippingVariants.flatMap(variant =>
+      variant.product?.shipping_profile?.id ? [variant.product.shipping_profile.id] : []
+    ))]
+    if (profileIds.length > 1) {
+      throw new StoreConfigurationError(`This sale's products use several shipping profiles (${profileIds.join(', ')}); POS sales need one profile per sale, so put these products on one shipping profile`)
     }
-    if (!shippingOptionId) {
-      throw new StoreConfigurationError('Missing shipping option; set plugin option shippingOptionId')
+    const profileId = profileIds[0]
+    const { data: shippingOptions } = await query.graph({
+      entity: 'shipping_option', fields: ['id', 'created_at', 'shipping_profile_id', 'service_zone.fulfillment_set.location.id'],
+    })
+    let shippingOptionId = options.shippingOptionId
+    if (shippingOptionId) {
+      const option = shippingOptions.find(option => option.id === shippingOptionId)
+      if (option && profileId && option.shipping_profile_id !== profileId) {
+        throw new StoreConfigurationError(`Shipping option ${shippingOptionId} (plugin option shippingOptionId) uses shipping profile ${option.shipping_profile_id}, but the sale's products use ${profileId}`)
+      }
+    } else {
+      const locationOptions = shippingOptions.filter(option => option.service_zone?.fulfillment_set?.location?.id === location.id)
+      if (!locationOptions.length) {
+        throw new StoreConfigurationError('Missing shipping option; set plugin option shippingOptionId')
+      }
+      // Medusa createOrderFulfillmentWorkflow rejects shipped items whose product profile differs from the option's.
+      shippingOptionId = locationOptions.filter(option => !profileId || option.shipping_profile_id === profileId)
+        .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())[0]?.id
+      if (!shippingOptionId) {
+        throw new StoreConfigurationError(`No shipping option at stock location ${location.id} uses shipping profile ${profileId}; add one, or set plugin option shippingOptionId`)
+      }
     }
     if (orderId) {
       await resumeOrderCreate(container, orderId, Number(minorToMajor(payload.totalMinor, currencyDecimals(payload.currency))),
