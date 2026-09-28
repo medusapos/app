@@ -65,9 +65,12 @@ close can't complete over the threshold without an approver.
     takes an `AbortSignal` for both requests, and gives up after
     `APPROVAL_TIMEOUT_MS` (15 s) as offline. Cancel, Escape and closing the
     dialog work while a request is in flight: they abort it and resolve
-    `null` at once. The dialog answers exactly once, so an answer that
-    arrives after Cancel or the timeout is ignored. It never approves, never
-    closes the register, and never records the approver.
+    `null` at once. While it's mounted, the dialog answers exactly once, so
+    an answer that arrives after Cancel or the timeout is ignored. It never
+    approves, never closes the register, and never records the approver.
+    If the dialog unmounts mid-request (a sign-out, or a tab park), the
+    request is aborted and nothing is answered. The count unmounts with it,
+    so nothing waits on the answer.
   - **Offline** (the catalogue's sync state is `'offline'`, the sign-in or
     `/me` fails with a network error, or the approval times out), the dialog
     shows "Connect to approve, or count again." with only Cancel.

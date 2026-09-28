@@ -27,7 +27,9 @@ setup detail rather than repeating it.
   after 15 seconds with no answer, it says "Connect to approve, or count
   again."; **Cancel** (always available) and count again.
   Never save a manager's password in the till's browser. If the browser
-  offers to save it after **Approve**, choose "Never" or "Not now".
+  offers to save it after **Approve**, choose "Never" or "Not now". If it
+  suggests a generated "strong password" in that field, dismiss it and type
+  the manager's own.
 - If the till stopped in the middle of a close, the register shows "Close
   not finished"; tap it for "The last close didn't finish" and **Finish
   closing**, which completes it with the count you already entered.
