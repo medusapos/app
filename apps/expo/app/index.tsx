@@ -10,6 +10,7 @@ import {
   withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
+import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
@@ -37,8 +38,6 @@ const STATE_LABEL: Record<SyncState, string> = {
 };
 
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
-// Sign out's lock message when only an earlier sale's save, abandoned by Continue, is still in flight.
-const EARLIER_SALE_SAVING = 'An earlier sale is still being saved.';
 // Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
@@ -90,10 +89,13 @@ function SettingsScreen(props: SignedInProps) {
 
 function SettingsMessage({ text, actions }: { text: string; actions: Record<string, () => void> }) {
   const buttons = Object.entries(actions);
-  return <View dataSet={{ print: 'hide' }} className="flex-1 items-center justify-center gap-4">
-    <Text className={buttons.length ? 'text-destructive' : 'text-muted-foreground'}>{text}</Text>
-    {buttons.map(([label, onPress]) => <Pressable key={label} accessibilityRole="button" onPress={onPress} className="rounded-md border border-border bg-card px-4 py-3"><Text className="text-center text-foreground">{label}</Text></Pressable>)}
-  </View>;
+  return <>
+    <EarlierSaleNote />
+    <View dataSet={{ print: 'hide' }} className="flex-1 items-center justify-center gap-4">
+      <Text className={buttons.length ? 'text-destructive' : 'text-muted-foreground'}>{text}</Text>
+      {buttons.map(([label, onPress]) => <Pressable key={label} accessibilityRole="button" onPress={onPress} className="rounded-md border border-border bg-card px-4 py-3"><Text className="text-center text-foreground">{label}</Text></Pressable>)}
+    </View>
+  </>;
 }
 
 type PricingProps = SignedInProps & { settings: StoreSettings; settingsStatus: string | null };
@@ -145,8 +147,8 @@ function PricingScreen(props: PricingProps) {
       return <SettingsMessage text={`Stock location ${settings.location.name} is in ${country.toUpperCase()}, which ${region ? `region ${regionNames.current.get(region) ?? region}` : 'the store\'s default region'} does not cover.`}
         actions={region ? { Retry: again, 'Choose another region': () => { clearSettingsRegion(defaultStorage(), session.baseUrl); again(); } } : { Retry: again }} />;
     }
-    return <StoreSettingsChoiceScreen choices={choices} initial={store.initial} title="Set up this till"
-      onSubmit={(choice) => store.choose({ ...choice, country })} />;
+    return <><EarlierSaleNote /><StoreSettingsChoiceScreen choices={choices} initial={store.initial} title="Set up this till"
+      onSubmit={(choice) => store.choose({ ...choice, country })} /></>;
   }
   if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
   const pos = shown.current;
@@ -162,12 +164,12 @@ function PricingScreen(props: PricingProps) {
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
-  const { setSaleHold, signOutDeferred } = useSession();
+  const { setSaleHold } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
-  const { record, isStored, state: outboxState, recent, savesInFlight } = useOutboxContext();
+  const { record, isStored, state: outboxState, recent, savesInFlight, orders } = useOutboxContext();
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {
     const fresh = recent.filter((order) => order.syncStatus === 'applied' && !stockWarned.current.has(order.id)
@@ -187,13 +189,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
   const signOutLocked = sale.saving || savesInFlight > 0;
   const lockMessage = sale.saving ? SALE_SAVING : EARLIER_SALE_SAVING;
-  // Shown under the header: why Sign out is locked by an earlier sale, and a sign-out waiting on either save.
-  const earlierSaving = savesInFlight > 0 && !sale.saving;
-  const note = earlierSaving ? (signOutDeferred ? `${EARLIER_SALE_SAVING} You'll be signed out once it's saved.` : EARLIER_SALE_SAVING)
-    : signOutDeferred ? 'Signed out after this sale is saved' : null;
   // The session's sale hold (ADR 0015): every sign-out waits while saving; automatic ones (a 401, a failed refresh)
-  // also wait for the receipt to clear. Released on unmount without running a pending sign-out: the next sale screen's
-  // release runs it, if the token is unchanged. OutboxProvider holds for the saves in flight.
+  // also wait for the receipt to clear. Released on unmount without running a pending sign-out: whichever release
+  // next leaves both holds clear runs it, if the token is unchanged — the next sale screen's, or OutboxProvider's
+  // for the saves hold (see ADR 0015, "When the sale screen unmounts for another reason").
   const saleHold = sale.saving ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
   useEffect(() => setSaleHold(saleHold), [saleHold, setSaleHold]);
   useEffect(() => () => setSaleHold(null, false), [setSaleHold]);
@@ -232,6 +231,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.
   const clock = getCalendars()[0]?.uses24hourClock;
   const hour12 = clock == null ? undefined : !clock;
+  // The order store may still be opening when a sale reaches tender (ADR 0015's backstop can take up to 10 s):
+  // Complete would have nothing to save to, so the tender pane waits for it, live, instead. Cart and the
+  // catalogue don't need a store to add lines, so only this pane is gated.
+  const tenderPane = orders === null
+    ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">Getting ready to save sales…</Text>
+    : <Tender sale={sale} />;
   const catalogue = <View className="flex-1">
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
@@ -262,8 +267,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
-      {note ? <View dataSet={{ print: 'hide' }} className="px-4 py-1">
-        <Text className="text-sm text-muted-foreground">{note}</Text></View> : null}
+      <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
         store={{ name: settings.storeName, address: settings.location.addressLine }}
         topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}
@@ -275,9 +279,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {!phone ? <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
             {catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : <Tender sale={sale} />}
+              {sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : tenderPane}
             </View>
-          </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card"><Tender sale={sale} /></View>
+          </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : cartOpen ? <View className="flex-1 bg-card">
               <View className="border-b border-border">
                 <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}

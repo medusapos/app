@@ -1,17 +1,21 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState, type ComponentProps, type ReactNode } from 'react';
+import { BehaviorSubject } from 'rxjs';
 import type { ProductGrid, SearchInput, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { formatMoney, SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
+import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
 import { createOrderBuilder, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
+import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { clearProductCache } from '../lib/product-cache';
 import { saveScannerSettings } from '../lib/scanner-settings';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { posConnector } from '../lib/pos-connector';
 import { SessionProvider, useSession } from '../lib/session-context';
+import { watchStorageHealth } from '../lib/storage-health';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { fetchStoreSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import ProductsScreen from '../app/index';
@@ -123,7 +127,8 @@ beforeEach(() => {
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
+  // Not null by default: the order store is open unless a test says otherwise (#86 review, item 5).
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -570,13 +575,15 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     await act(async () => { save(); });
     expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
     expect(signedOut()).toBe(false);
-    expect(screen.getByText('Signed out after this sale is saved')).toBeTruthy();
+    // On the receipt, no earlier save: the wording says New sale, not "Signed out after this sale is saved" (#86 review, item 2).
+    expect(screen.queryByText('Signed out after this sale is saved')).toBeNull();
+    expect(screen.getByText('You\'ll be signed out when you start a new sale.')).toBeTruthy();
     expect(clearProductCache).not.toHaveBeenCalled();
 
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New sale' })); });
     expect(signedOut()).toBe(true);
     expect(screen.getByText('redirect:/login')).toBeTruthy();
-    expect(screen.queryByText('Signed out after this sale is saved')).toBeNull();
+    expect(screen.queryByText('You\'ll be signed out when you start a new sale.')).toBeNull();
     expect(clearProductCache).toHaveBeenCalledTimes(1);
   });
 
@@ -602,7 +609,6 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
   // through this app's own wiring (no hungSaveCheckMs). The outbox record doesn't settle until the test settles it: a
   // hung insert. The real SessionProvider and OutboxProvider hold sign-out on it, over a stand-in for TallyUI's
   // useOrderOutbox whose savesInFlight counts its record calls not yet settled, as TallyUI's does (#163).
-  const EARLIER_SALE_SAVING = 'An earlier sale is still being saved.';
   let settle: { resolve: () => void; reject: (error: Error) => void };
   let hungSession: ReturnType<typeof useSession>;
   let hungOutbox: ReturnType<typeof useOutboxContext>;
@@ -615,7 +621,8 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     const record = vi.fn((_order: PosOrder) => new Promise<void>((resolve, reject) => { settle = { resolve, reject }; }));
     vi.mocked(useOrderOutbox).mockImplementation(function useHungOutbox() {
       const [savesInFlight, setSavesInFlight] = useState(0);
-      return { orders: null, state: { pending: 0, sending: false }, recent: [], savesInFlight, isStored,
+      // Not null: these tests are about the hung-save mechanics, not the order-store-open gate (#86 review, item 5).
+      return { orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight, isStored,
         flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
         async record(order: PosOrder) {
           setSavesInFlight((count) => count + 1);
@@ -751,10 +758,13 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       await act(async () => { hungView.rerender(hungTree()); });
       expect(screen.getByText('This backend can\'t supply store settings')).toBeTruthy();
       expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+      // (g) #86 review, item 1: the earlier-sale note shows above the settings screen too, not only the sale screen.
+      expect(screen.getByText(EARLIER_SALE_SAVING)).toBeTruthy();
       act(() => { hungSession.reportUnauthorized(); });
       expect(hungOutbox.savesInFlight).toBe(1);
       expect(hungSession.signOutDeferred).toBe(true);
       expect(signedOut()).toBe(false);
+      expect(screen.getByText('An earlier sale is still being saved. You\'ll be signed out once it\'s saved.')).toBeTruthy();
       await advance(15000);
       expect(hungOutbox.savesInFlight).toBe(1);
       expect(signedOut()).toBe(false);
@@ -938,5 +948,104 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     expect(screen.queryByText('redirect:/login')).toBeNull();
     expect(clearProductCache).not.toHaveBeenCalled();
     expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+  });
+});
+
+// #86 review, item 2: the earlier-sale note's exact wording, by savesInFlight, sale.saving, signOutDeferred and the receipt stage.
+describe('ProductsScreen earlier-sale note wording', () => {
+  let context: ReturnType<typeof useSession>;
+  function SessionProbe() { context = useSession(); return null; }
+  // The hidden Sign out description shares EARLIER_SALE_SAVING's exact text while signOutLocked, so plain-text
+  // checks must ignore it (as the hung-save tests above do), or getByText matches both nodes.
+  const visible = (text: string) => screen.getByText(text, { ignore: '#sign-out-locked, script, style' });
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  async function arrange(savesInFlight: number, record: (order: PosOrder) => Promise<void>) {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), savesInFlight, record });
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
+      token: `header.${btoa(JSON.stringify({ exp: Math.floor(Date.now() / 1000) + 86400 }))}.signature` });
+    await act(async () => { render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
+  }
+  async function pay(savesInFlight: number, resolves: boolean) {
+    const record = vi.fn<(order: PosOrder) => Promise<void>>();
+    await arrange(savesInFlight, resolves ? record.mockResolvedValue(undefined) : record.mockImplementation(() => new Promise(() => {})));
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+  }
+
+  it('shows only the plain note for an earlier save in flight, not deferred', async () => {
+    await arrange(1, vi.fn<(order: PosOrder) => Promise<void>>());
+    expect(visible(EARLIER_SALE_SAVING)).toBeTruthy();
+  });
+  it('adds "once it\'s saved" for an earlier save in flight, deferred, off the receipt', async () => {
+    await arrange(1, vi.fn<(order: PosOrder) => Promise<void>>());
+    act(() => context.setSavesHold(true));
+    act(() => context.signOut());
+    expect(visible(`${EARLIER_SALE_SAVING} You'll be signed out once it's saved.`)).toBeTruthy();
+  });
+  it('adds "and you start a new sale" for an earlier save in flight, deferred, on the receipt', async () => {
+    await pay(1, true);
+    expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    act(() => context.reportUnauthorized());
+    expect(visible(`${EARLIER_SALE_SAVING} You'll be signed out once it's saved and you start a new sale.`)).toBeTruthy();
+  });
+  it('keeps "Signed out after this sale is saved" while this sale itself is saving, with no earlier save', async () => {
+    await pay(0, false);
+    act(() => context.reportUnauthorized());
+    expect(visible('Signed out after this sale is saved')).toBeTruthy();
+  });
+  it('says the sign-out waits for a new sale on the receipt, with no earlier save', async () => {
+    await pay(0, true);
+    expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    act(() => context.reportUnauthorized());
+    expect(visible('You\'ll be signed out when you start a new sale.')).toBeTruthy();
+  });
+  it('shows no note with nothing pending', async () => {
+    await arrange(0, vi.fn<(order: PosOrder) => Promise<void>>());
+    expect(screen.queryByText(/signed out|being saved/i, { ignore: '#sign-out-locked, script, style' })).toBeNull();
+  });
+});
+
+// #86 review, item 3: the Reload hint, appended to the earlier-sale note once storage reports a stall.
+describe('ProductsScreen earlier-sale reload hint', () => {
+  const visible = (text: string) => screen.getByText(text, { ignore: '#sign-out-locked, script, style' });
+  function drive(status: 'ok' | 'stalled') {
+    return watchStorageHealth(new BehaviorSubject<StorageHealthReading>({ status, stalledWrites: status === 'stalled' ? 1 : 0 }));
+  }
+  it('appends the reload hint once storage reports stalled', async () => {
+    const unregister = drive('stalled');
+    try {
+      vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), savesInFlight: 1 });
+      await mount();
+      expect(visible(`${EARLIER_SALE_SAVING} That sale is already stored; reload if this doesn't clear.`)).toBeTruthy();
+    } finally { unregister(); }
+  });
+  it('shows no hint while storage is ok', async () => {
+    const unregister = drive('ok');
+    try {
+      vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), savesInFlight: 1 });
+      await mount();
+      expect(visible(EARLIER_SALE_SAVING)).toBeTruthy();
+      expect(screen.queryByText(/That sale is already stored/)).toBeNull();
+    } finally { unregister(); }
+  });
+});
+
+// #86 review, item 5: paying waits for the order store to open.
+describe('ProductsScreen tender gated on the order store opening', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+  it('shows a notice instead of Tender while orders is null, then Tender once it opens', async () => {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: null });
+    const view = await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Card terminal' }));
+    expect(screen.getByRole('alert').textContent).toBe('Getting ready to save sales…');
+    expect(screen.queryByRole('button', { name: 'Payment approved on terminal' })).toBeNull();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: {} as never });
+    await act(async () => { view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>); });
+    expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
   });
 });

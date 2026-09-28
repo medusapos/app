@@ -155,6 +155,19 @@ describe('SessionProvider sale and saves holds', () => {
     expect(signedOut()).toBe(true);
     expect(clearProductCache).toHaveBeenCalledOnce();
   });
+  it('keeps a deferred automatic sign-out pending through the saves hold release while the sale hold is the receipt, then runs it once New sale releases that hold', async () => {
+    await mount();
+    act(() => context.setSavesHold(true));
+    act(() => context.reportUnauthorized());
+    expect(context.signOutDeferred).toBe(true);
+    act(() => context.setSaleHold('receipt'));
+    act(() => context.setSavesHold(false));
+    expect(signedOut()).toBe(false);
+    expect(context.signOutDeferred).toBe(true);
+    act(() => context.setSaleHold(null));
+    expect(signedOut()).toBe(true);
+    expect(clearProductCache).toHaveBeenCalledOnce();
+  });
   it('drops a request deferred on the saves hold once the session is renewed, and never signs out', async () => {
     fetchImpl.mockResolvedValue(new Response(JSON.stringify({ token: stored.token })));
     const expiring = { ...stored, token: token(now + REFRESH_WINDOW_MS + 60_000) };
