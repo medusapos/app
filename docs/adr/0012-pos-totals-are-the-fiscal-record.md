@@ -97,8 +97,10 @@ A discount-free v3 carries no `discountMinor`, and that's valid at v3.
 
 **Unsupported versions** (any positive integer not in `/tally/v1/info`) are
 rejected per command as `unsupported_version`, with
-`error.data.orderCreate` listing the supported versions, so the rest of the
-batch still applies. The check runs before the ledger records the command,
+`error.data.orderCreate` set to the highest supported version (a number,
+the maximum of `/info`'s list), so the rest of the batch still applies.
+TallyUI resends at that version when it's a safe positive integer, and
+refreshes `/info` otherwise. The check runs before the ledger records the command,
 so a rejected id can be resent at a supported version without
 `idempotency_mismatch`. Plugins released before this amendment answer the
 whole batch with HTTP 400 instead; TallyUI must handle both.

@@ -54,3 +54,7 @@ A Playwright trace of the hosted smoke (app.medusapos.com against the demo backe
 - each product search or add-to-cart step afterwards takes **3–6 s**.
 
 The sale then finished at 88 s, and the 90 s test timeout cancelled its sync POST, so the smoke failed. The trace is kept at `~/agent/handoff/smoke-hosted-trace-2026-09-28.zip` (open with `npx playwright show-trace`). Next is a read-only profiling spike on the hosted web build that ends in a spec. It should find where the time goes: the RxDB query, a missing index, SQLite-wasm/OPFS, or rendering.
+
+## Keep the till's email when a found customer is attached
+
+When `order.create` v3 names a customer the plugin finds, the till's email is deliberately not passed, because Medusa's `findOrCreateCustomerStep` would swap in a guest customer. So the order takes the customer's stored email. If that customer has none, the order email is null and the email the cashier typed is kept nowhere (`packages/medusa-plugin/src/workflows/tally-order-create/plan.ts`). Record it as `tally_customer_email` metadata, and add a test for a found customer without an email (from the #90 delta review).
