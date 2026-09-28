@@ -1,3 +1,4 @@
+import { logger } from "@medusajs/framework/logger"
 import type {
   RemoteQueryFunction,
   SearchTypes,
@@ -24,6 +25,7 @@ async function relatedProductIds(
   ids: string[],
   pick: (row: Record<string, any>) => (string | null | undefined)[],
   withDeleted: boolean,
+  event: { name: string },
 ): Promise<string[]> {
   const { data } = await query.graph({
     entity,
@@ -32,9 +34,21 @@ async function relatedProductIds(
     withDeleted,
   });
 
-  return (data as Record<string, any>[])
+  const rows = data.filter(Boolean) as Record<string, any>[]
+  const productIds = rows
     .flatMap(pick)
     .filter((id): id is string => Boolean(id));
+  if (rows.length < ids.length) {
+    const missingIds = ids.filter((id) => !rows.some((row) => row.id === id))
+    logger.warn(
+      `[search] product index: ${event.name} returned ${rows.length} of ${ids.length} rows (${missingIds.join(", ")} missing); those products weren't re-indexed`,
+    )
+  } else if (!productIds.length) {
+    logger.debug(
+      `[search] product index: ${event.name} ${ids.join(", ")} links to no products`,
+    )
+  }
+  return productIds
 }
 
 /**
@@ -74,8 +88,9 @@ async function productIdsInSalesChannels(
  */
 export async function resolveProductIds(
   event: { name: string; data: unknown },
-  { container: { query } }: SearchTypes.SearchIngestionContext,
+  { container }: SearchTypes.SearchIngestionContext,
 ): Promise<string[]> {
+  const { query } = container
   const ids = payloadIds(event.data);
 
   if (!ids.length) {
@@ -92,46 +107,51 @@ export async function resolveProductIds(
       return relatedProductIds(
         query,
         "product_variant",
-        ["product_id"],
+        ["id", "product_id"],
         ids,
         (row) => [row.product_id],
         deleted,
+        event,
       );
     case "product-option":
       return relatedProductIds(
         query,
         "product_option",
-        ["product_id"],
+        ["id", "products.id"],
         ids,
-        (row) => [row.product_id],
+        (row) => (row.products ?? []).map((product: any) => product?.id),
         deleted,
+        event,
       );
     case "product-option-value":
       return relatedProductIds(
         query,
         "product_option_value",
-        ["option.product_id"],
+        ["id", "option.products.id"],
         ids,
-        (row) => [row.option?.product_id],
+        (row) => (row.option?.products ?? []).map((product: any) => product?.id),
         deleted,
+        event,
       );
     case "product-tag":
       return relatedProductIds(
         query,
         "product_tag",
-        ["products.id"],
+        ["id", "products.id"],
         ids,
         (row) => (row.products ?? []).map((product: any) => product?.id),
         deleted,
+        event,
       );
     case "product-category":
       return relatedProductIds(
         query,
         "product_category",
-        ["products.id"],
+        ["id", "products.id"],
         ids,
         (row) => (row.products ?? []).map((product: any) => product?.id),
         deleted,
+        event,
       );
     case "sales-channel":
       return productIdsInSalesChannels(query, ids);
