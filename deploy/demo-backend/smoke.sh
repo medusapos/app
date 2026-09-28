@@ -38,6 +38,12 @@ wait_healthy() {
 }
 wait_healthy
 
+timeout 300 docker exec -e DEMO_ADMIN_EMAIL=smoke@medusapos.test \
+  -e DEMO_ADMIN_PASSWORD=smoke-test-password mpdemo-smoke-backend \
+  /src/app/deploy/demo-backend/seed.sh
+node deploy/demo-backend/smoke-sell.mjs http://127.0.0.1:9000 \
+  smoke@medusapos.test smoke-test-password
+
 backend_logs=$(docker logs mpdemo-smoke-backend 2>&1)
 if [[ "$backend_logs" != *'redisUrl not found'* ]]; then
   echo 'smoke: in-memory Redis fallback log not found' >&2
