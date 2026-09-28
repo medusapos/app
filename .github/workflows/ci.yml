@@ -34,6 +34,8 @@ jobs:
         with:
           node-version-file: app/apps/expo/package.json
           package-manager-cache: false
+      - run: python3 -m unittest scripts/test_assert_no_premium_side_effects.py -v
+        working-directory: app
       - run: pnpm install --frozen-lockfile
         working-directory: app
         env:
