@@ -52,12 +52,9 @@ export default class TallyRegisterModuleService extends MedusaService({
   @InjectManager()
   async transition(p: RegisterSessionTransitionPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      const [session] = await em.execute('select id, status, status_at from tally_register_session where id = ? for update', [p.sessionId])
+      const [session] = await em.execute('select id, status from tally_register_session where id = ? for update', [p.sessionId])
       if (!session) return { kind: 'invalid', message: 'unknown session' }
       if (session.status === p.status) return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
-      if (session.status_at && Date.parse(p.at) < Date.parse(session.status_at)) {
-        return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
-      }
       if (session.status === 'closed') return { kind: 'conflict', code: 'register_session_closed' }
       if (p.status === 'closed') {
         await em.execute(`update tally_register_session set status = ?, status_at = ?, closed_at = ?, counted = ?::jsonb,

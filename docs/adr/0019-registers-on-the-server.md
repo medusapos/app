@@ -48,11 +48,12 @@ Rows are never deleted or rewritten. The exceptions are a session's status field
 `register_approval_required` waits for c2c (P3).
 
 **Two cross-track rules** (TallyUI ADR-068 is the contract both sides follow):
+- **Order, not clocks.** The server applies a register's commands in the order it receives them: batches apply in array order, and the till sends one register's commands serially, in its ledger order, stopping at the first one not applied. `at` and `createdAt` are facts carried in the payload, never ordering keys. A till's clock can be corrected, and comparing timestamps would drop a legitimate later command.
 - **A transition is a state snapshot, not an edge.** A till can go counting → open → counting between reconciles, and only the latest state reaches the server.
-  - Any transition from a non-closed session is accepted, and only a transition out of `closed` is refused.
-  - A same-status transition is an applied no-op, and so is a snapshot older than the session's `status_at`: a stalled, re-executed command never overwrites a newer state.
+  - The last applied transition sets the status. Any transition from a non-closed session is accepted, and only a transition out of `closed` is refused.
+  - A same-status transition is an applied no-op.
   - The server never refuses a transition because it didn't see an intermediate state.
-- **Movements are accepted on any non-closed session,** `open` or `counting`. They're refused with `register_session_closed` only when the session is `closed` or its closure has been submitted (TallyUI ADR-032).
+- **Movements are accepted on any non-closed session,** `open` or `counting`, whatever their `createdAt`. They're refused with `register_session_closed` only once the session's closing transition or its closure has been applied (TallyUI ADR-032). The till always sequences the closing transition after every movement of its session.
 
 **Operations are replay-safe by their till-minted ids.** Under the ledger's lease, a command whose write committed but whose ledger entry never completed (a crash) is re-executed with the same bytes. An existing session, movement, void or closure with the command's own id returns `ok` with the current state and writes nothing, and a transition to the status the session already has is a no-op `ok`. So a retry never turns a committed fact into a refusal, and it never writes the fact twice.
 
