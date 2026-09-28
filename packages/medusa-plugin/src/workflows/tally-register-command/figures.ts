@@ -3,14 +3,20 @@ import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import { TALLY_REGISTER_MODULE } from '../../modules/tally-register'
 import type TallyRegisterModuleService from '../../modules/tally-register/service'
 
+// A POS sale stays a received fact after an admin archives or cancels it, so reconciliation never changes after the fact.
+const ORDER_STATUSES_COUNTED = ['completed', 'archived', 'canceled']
+
 export function deriveSessionFigures(input: {
   countedFloatMinor: number
   orders: { payments: { method: string; amountMinor: number }[] }[]
   movements: { id: string; type: 'paid_in' | 'paid_out' | 'no_sale' | 'void'; amountMinor: number; voids: string | null }[]
 }): { expected: Record<string, number>; salesCount: number } {
-  const expected: Record<string, number> = { cash: input.countedFloatMinor }
+  const expected: Record<string, number> = Object.assign(Object.create(null), { cash: input.countedFloatMinor })
+  // tally_payments is order metadata an admin could edit, and a malformed row must never make register commands transient.
   for (const order of input.orders) {
+    if (!Array.isArray(order.payments)) continue
     for (const payment of order.payments) {
+      if (typeof payment?.method !== 'string' || !payment.method.length || !Number.isSafeInteger(payment.amountMinor)) continue
       expected[payment.method] = (expected[payment.method] ?? 0) + payment.amountMinor
     }
   }
@@ -20,7 +26,7 @@ export function deriveSessionFigures(input: {
     if (row.type === 'paid_in') expected.cash += row.amountMinor
     if (row.type === 'paid_out') expected.cash -= row.amountMinor
   }
-  return { expected, salesCount: input.orders.length }
+  return { expected: { ...expected }, salesCount: input.orders.length }
 }
 
 export function deriveVariance(counted: Record<string, number>, expected: Record<string, number>): Record<string, number> {
@@ -33,7 +39,7 @@ export async function loadSessionFigures(container: MedusaContainer, sessionId: 
   if (!input) return null
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const query = knex('order').select(knex.raw("metadata->'tally_payments' as payments"))
-    .whereNull('deleted_at').where('status', 'completed').where('is_draft_order', false)
+    .whereNull('deleted_at').whereIn('status', ORDER_STATUSES_COUNTED).where('is_draft_order', false)
     .whereRaw("metadata->'tally_payments' is not null").orderBy('created_at', 'asc')
   if (input.closure) {
     query.whereRaw("metadata->>'tally_client_id' = any(?)", [input.closure.orderIds])

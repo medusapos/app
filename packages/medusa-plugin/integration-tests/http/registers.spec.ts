@@ -8,6 +8,7 @@ import type TallyLedgerModuleService from '../../src/modules/tally-ledger/servic
 import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
 import type TallyRegisterModuleService from '../../src/modules/tally-register/service'
 import type { RegisterClosureSubmitPayload, RegisterSessionOpenPayload } from '../../src/modules/tally-register/types'
+import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
@@ -286,6 +287,40 @@ medusaIntegrationTestRunner({
         expected: { cash: 2100, external: 1000 }, salesCount: 3 })
       const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
       expect(read.data.session).toEqual(after.data.results[0].register.session)
+    })
+
+    it.each([
+      { action: 'archiving', status: 'archived' },
+      { action: 'cancelling', status: 'canceled' },
+    ])('$action an order after the closure changes neither the live nor the closed figure', async ({ status }) => {
+      const data = await seed(container)
+      const opening = open()
+      const liveOpening = open()
+      const sessionId = opening.payload.sessionId
+      const liveSessionId = liveOpening.payload.sessionId
+      const order = sale(data.variantB, sessionId)
+      const liveOrder = sale(data.variantB, liveSessionId)
+      const batch = [opening, liveOpening, order, liveOrder]
+      const response = await post(batch)
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(batch.map(() => 'applied'))
+      const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+      expect(read.data.session).toEqual({ id: sessionId, status: 'open', expected: { cash: 1100 }, salesCount: 1 })
+      const liveBefore = await loadSessionFigures(container, liveSessionId)
+      expect(liveBefore).toEqual({ expected: read.data.session.expected, salesCount: 1 })
+      const submission = closure(opening.payload)
+      submission.payload.orderIds = [order.payload.clientOrderId]
+      const closed = await post([close(sessionId), submission])
+      expect(closed.status).toBe(200)
+      expect(closed.data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+      const closedBefore = await loadSessionFigures(container, sessionId)
+      expect(closedBefore).toEqual({ ...liveBefore, variance: { cash: 0 } })
+      expect(closed.data.results[1].register.closure.expected).toEqual(closedBefore!.expected)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      await knex('order').whereIn('id', response.data.results.slice(2).map(result => result.serverRefs.orderId))
+        .update({ status })
+      expect(await loadSessionFigures(container, sessionId)).toEqual(closedBefore)
+      expect(await loadSessionFigures(container, liveSessionId)).toEqual(liveBefore)
     })
 
     it("closure variance is counted minus server expected over counted's keys, and the till's tillExpected and counted are stored unchanged", async () => {
