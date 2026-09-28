@@ -1,4 +1,5 @@
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework"
+import { ContainerRegistrationKeys } from "@medusajs/framework/utils"
 import { appendFile } from "node:fs/promises"
 
 export default async function g4EventProbe({ event, container }: SubscriberArgs<unknown>) {
@@ -9,7 +10,7 @@ export default async function g4EventProbe({ event, container }: SubscriberArgs<
   try {
     await appendFile(file, JSON.stringify({ name, receivedAt: Date.now(), data, metadata }) + "\n")
   } catch (error) {
-    container.resolve("logger").error(`G4 event probe write failed: ${error}`)
+    container.resolve(ContainerRegistrationKeys.LOGGER).error(`G4 event probe write failed: ${error}`)
   }
 }
 
