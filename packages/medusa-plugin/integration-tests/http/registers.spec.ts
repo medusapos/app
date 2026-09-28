@@ -115,6 +115,34 @@ medusaIntegrationTestRunner({
       expect(replay.data.results).toEqual(response.data.results)
     })
 
+    it('a replay of a stored rejection returns the recorded rejection after the state changes, and writes nothing', async () => {
+      const opening = open()
+      expect((await post([opening])).data.results[0].status).toBe('applied')
+      const second = open(opening.payload.registerId)
+      const response = await post([second])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0]).toMatchObject({ id: second.id, status: 'rejected', error: {
+        code: 'register_session_already_open', data: { sessionId: opening.payload.sessionId },
+      } })
+      const [stored] = await ledger.listTallyCommands({ id: second.id })
+      expect(stored).toBeDefined()
+      expect(stored.status).toBe('rejected')
+      const updatedAt = stored.updated_at
+
+      expect((await post([close(opening.payload.sessionId)])).data.results[0].status).toBe('applied')
+      const replay = await post([second])
+      expect(replay.status).toBe(200)
+      expect(replay.data.results).toEqual(response.data.results)
+
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_session').where('id', second.payload.sessionId)).toHaveLength(0)
+      const [replayed] = await ledger.listTallyCommands({ id: second.id })
+      expect(replayed).toBeDefined()
+      expect(replayed.status).toBe(stored.status)
+      expect(replayed.result).toEqual(stored.result)
+      expect(replayed.updated_at).toEqual(updatedAt)
+    })
+
     it('a movement on a closed session is rejected register_session_closed', async () => {
       const opening = open()
       const setup = await post([opening, close(opening.payload.sessionId)])
