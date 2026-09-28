@@ -27,6 +27,16 @@ it('accepts a discount-free v3 and a discounted v3', () => {
   expect(fiscalFiguresErrors(discounted)).toEqual([])
 })
 
+it('an unsupported currency adds no exponent error, leaving it to the planner', () => {
+  expect(fiscalFiguresErrors({ ...payload, currency: 'INVALID', display: { ...payload.display!, currency: 'INVALID' } })).toEqual([])
+})
+
+it('caps its errors at 10', () => {
+  const taxByRate = Array.from({ length: 12 }, () => ({ ...payload.taxByRate![0], grossMinor: 999 }))
+  expect(fiscalFiguresErrors({ ...payload, taxMinor: 1920, display: { ...payload.display!, taxMinor: 1920 }, taxByRate }))
+    .toEqual(Array.from({ length: 10 }, (_, index) => `taxByRate[${index}].grossMinor: expected netMinor + taxMinor`))
+})
+
 it.each([
   ['currency', 'USD', 'payload.currency'], ['totalMinor', 999, 'payload.totalMinor'],
   ['taxMinor', 159, 'payload.taxMinor'], ['exponent', 3, 'the currency decimals'],

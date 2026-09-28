@@ -207,6 +207,22 @@ medusaIntegrationTestRunner({
       expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(1)
     })
 
+    it("a picked guest customer whose stored email has uppercase letters stays the order's customer, and no customer is created", async () => {
+      const customers = container.resolve(Modules.CUSTOMER)
+      const customer = await customers.createCustomers({ email: 'Mixed@Example.com', has_account: false })
+      expect(await customers.retrieveCustomer(customer.id)).toMatchObject({ email: 'Mixed@Example.com', has_account: false })
+      const [, beforeCount] = await customers.listAndCountCustomers()
+      const base = command()
+      const payload: OrderCreatePayloadV3 = { ...base.payload, customer: { customerId: customer.id, email: 'mixed@example.com' } }
+      const sale = { ...base, version: 3, payload } as unknown as CommandEnvelope<OrderCreatePayloadV3>
+      expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
+      const [order] = await liveOrders(payload.clientOrderId)
+      const [, afterCount] = await customers.listAndCountCustomers()
+      expect({ customer_id: order.customer_id, customerCount: afterCount })
+        .toEqual({ customer_id: customer.id, customerCount: beforeCount })
+      expect(order.email).toBe('Mixed@Example.com')
+    })
+
     it('fingerprints every v3 field and replays identical bytes without rewriting metadata', async () => {
       const base = command()
       const payload: OrderCreatePayloadV3 = { ...base.payload, sessionId: randomUUID(), customer: { customerId: 'unknown' },

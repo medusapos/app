@@ -354,13 +354,22 @@ it.each([undefined, '12345678-1234-1234-1234-123456789012', 'unknown-session'])(
   else expect(result.plan.draftOrder.metadata.tally_session_id).toBe(sessionId)
 })
 
-it.each(['buyer@example.com', undefined])('links a found customerId and preserves email %s', email => {
+it.each(['buyer@example.com', undefined])('a found customer sets customer_id and no email, so Medusa keeps the picked customer', email => {
   const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'customer_1', ...(email ? { email } : {}) } }
   const result = planOrderCreate(input, { ...ctx, customer: { id: 'customer_1' } })
   if (!result.ok) throw new Error('Expected a plan')
   expect(result.plan.draftOrder.customer_id).toBe('customer_1')
   expect(result.plan.draftOrder.metadata.tally_customer_id).toBe('customer_1')
-  expect(result.plan.draftOrder.email).toBe(email)
+  expect(result.plan.draftOrder).not.toHaveProperty('email')
+})
+
+it("an unknown customer keeps the till's email and sets no customer_id", () => {
+  const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'unknown', email: 'buyer@example.com' } }
+  const result = planOrderCreate(input, ctx)
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(result.plan.draftOrder.email).toBe('buyer@example.com')
+  expect(result.plan.draftOrder).not.toHaveProperty('customer_id')
+  expect(result.plan.draftOrder.metadata.tally_customer_id).toBe('unknown')
 })
 
 it('accepts an unknown customerId without linking it', () => {

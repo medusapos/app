@@ -114,7 +114,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext):
         region_id: ctx.region.id,
         sales_channel_id: ctx.salesChannelId,
         currency_code: currencyCode,
-        ...(typeof payload.customer?.email === 'string' && payload.customer.email.length > 0
+        ...(!ctx.customer && typeof payload.customer?.email === 'string' && payload.customer.email.length > 0
           ? { email: payload.customer.email } : {}),
         ...(ctx.customer ? { customer_id: ctx.customer.id } : {}),
         shipping_address: { ...address },

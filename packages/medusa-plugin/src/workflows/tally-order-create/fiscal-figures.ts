@@ -100,7 +100,7 @@ export function fiscalFiguresErrors(payload: OrderCreatePayloadV3): string[] {
   try {
     check(display.exponent === currencyDecimals(payload.currency), 'display.exponent', 'the currency decimals')
   } catch {
-    check(false, 'display.exponent', 'a supported payload.currency')
+    // Leave unsupported currencies to the planner's unsupported_currency rejection.
   }
   return errors
 }

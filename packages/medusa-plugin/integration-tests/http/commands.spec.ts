@@ -8,6 +8,7 @@ import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
+import { SUPPORTED_ORDER_CREATE_VERSIONS } from '../../src/api/tally/v1/commands/process'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
@@ -112,6 +113,27 @@ medusaIntegrationTestRunner({
         expect(response.headers['access-control-allow-origin']).toBe(origin === 'http://localhost' ? origin : undefined)
         if (origin === 'http://localhost') expect(response.headers['access-control-allow-methods']).toBe('GET,OPTIONS')
       }
+    })
+
+    it('/info lists the supported versions from the shared constant', async () => {
+      const response = await api.get('/tally/v1/info', { headers })
+      expect(response.status).toBe(200)
+      expect(response.data).toEqual({ contracts: { 'order.create': SUPPORTED_ORDER_CREATE_VERSIONS } })
+    })
+
+    it('a batch with a version-4 command and a version-1 command rejects only the first, as unsupported_version, and applies the second', async () => {
+      const unsupported = { ...command(), version: 4 }
+      const supported = command()
+      const response = await post([unsupported, supported])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([
+        { id: unsupported.id, status: 'rejected', error: { code: 'unsupported_version',
+          message: 'order.create version 4 is not supported; this server supports 1, 2, 3' } },
+        expect.objectContaining({ id: supported.id, status: 'applied' }),
+      ])
+      expect(await ledger.listTallyCommands({ id: unsupported.id })).toHaveLength(0)
+      expect(await liveOrders(unsupported.payload.clientOrderId)).toHaveLength(0)
+      expect(await liveOrders(supported.payload.clientOrderId)).toHaveLength(1)
     })
 
     // 19% inclusive: 1000 − 100 = 900 gross (net 756, tax 144); and 1000 − 1000 = 0, which has no payment collection.

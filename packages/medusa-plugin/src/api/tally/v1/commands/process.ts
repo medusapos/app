@@ -4,6 +4,10 @@ import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreateP
 import { executeOrderCreate } from '../../../../workflows/tally-order-create/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
+import { payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
+
+// Shared by command processing and /info so advertised and accepted versions stay aligned.
+export const SUPPORTED_ORDER_CREATE_VERSIONS = [1, 2, 3]
 
 export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }
@@ -28,7 +32,7 @@ export function validateBatch(body: unknown):
     let field: string | undefined
     if (typeof command.id !== 'string' || command.id.length === 0 || command.id.length > 64) field = 'id'
     else if (command.type !== 'order.create') field = 'type'
-    else if (command.version !== 1 && command.version !== 2 && command.version !== 3) field = 'version'
+    else if (!Number.isSafeInteger(command.version) || command.version < 1) field = 'version'
     else if (typeof command.payload !== 'object' || command.payload === null || Array.isArray(command.payload)) field = 'payload'
     else if (typeof command.createdAt !== 'string') field = 'createdAt'
     else if (typeof command.deviceId !== 'string') field = 'deviceId'
@@ -45,6 +49,12 @@ export async function processBatch(
 ): Promise<BatchOutcome> {
   const results: CommandResult[] = []
   for (const command of commands) {
+    if (!SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
+      results.push({ id: command.id, status: 'rejected', error: { code: 'unsupported_version',
+        message: `order.create version ${command.version} is not supported; this server supports ${SUPPORTED_ORDER_CREATE_VERSIONS.join(', ')}`,
+      } })
+      continue
+    }
     // ADR-062 sends version 2 exactly when there is a discount, so version 1 can never create adjustments.
     const { lines, discountMinor } = command.payload as { lines?: unknown; discountMinor?: unknown }
     const discounted = discountMinor !== undefined
@@ -63,7 +73,8 @@ export async function processBatch(
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: versionError } })
       continue
     }
-    const errors = v3 && display !== undefined && taxByRate !== undefined ? fiscalFiguresErrors(payload) : []
+    const errors = v3 && display !== undefined && taxByRate !== undefined && payloadShapeErrors(payload).length === 0
+      ? fiscalFiguresErrors(payload) : []
     if (errors.length) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
       continue

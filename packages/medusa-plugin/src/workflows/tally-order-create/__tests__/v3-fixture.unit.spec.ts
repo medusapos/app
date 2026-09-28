@@ -6,6 +6,9 @@ import { planOrderCreate } from '../plan'
 
 // JSON imports widen string literals. Narrow only the payment method, leaving the
 // entire payload shape checked by this assignment to the local bridge type.
+// This catches missing or mistyped fields at tsc, but not extra keys: excess-property
+// checks do not apply to JSON imports, and Jest (swc) does not type-check.
+// Extra nested keys are caught at runtime by fiscalFiguresErrors.
 const payload: OrderCreatePayloadV3 = {
   ...fixture.payload,
   payments: fixture.payload.payments.map(payment => {
