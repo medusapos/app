@@ -9,7 +9,7 @@ import { bindRegister, readRegister, useStoreSettings, type PosOrder } from '@ta
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
-import { OPEN_TO_PAY } from '../components/register';
+import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { openOrderStore, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { posConnector } from '../lib/pos-connector';
@@ -236,6 +236,8 @@ describe('the register control', () => {
     expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(button('Register closed'));
     const card = await screen.findByTestId('open-register-card');
+    // One tap also focuses the gate, which mounted for it (the float field).
+    expect(card.contains(document.activeElement)).toBe(true);
     const empty = screen.getByText('Scan or tap a product to start a sale.');
     expect(card.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The control now ends the "‹ Products" row.
@@ -266,5 +268,59 @@ describe('the catalogue status line', () => {
     await mount();
     await waitFor(() => expect(pill()).toBe('Choose a register'));
     expect(within(screen.getByTestId('catalogue-status-row')).getByText(text)).toBeTruthy();
+  });
+});
+
+// The #88 review.
+describe('the tender gate', () => {
+  it('pins the session for the tender: closed during it, the completed sale is late, with no sessionId', async () => {
+    const session = await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await screen.findByRole('button', { name: 'Open register panel' });
+    fireEvent.click(button('Shirt'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
+    const approve = await screen.findByRole('button', { name: 'Payment approved on terminal' });
+    // A close lands under the tender (as a server close or another path could): saleSession goes undefined.
+    await act(async () => { await (await sessions().findOne(session.id).exec())!.incrementalPatch({ status: 'closed' }); });
+    await waitFor(() => expect(screen.queryByRole('button', { name: 'Open register panel' })).toBeNull());
+    await act(async () => { fireEvent.click(approve); });
+    await waitFor(() => expect(record).toHaveBeenCalledOnce());
+    expect(record.mock.calls[0][0]).toMatchObject({ lateSessionId: session.id });
+    expect(record.mock.calls[0][0]).not.toHaveProperty('sessionId');
+  });
+
+  it('refuses while the order store is still opening, and records nothing once it opens', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: null });
+    const tree = (orders: typeof store.orders | null) =>
+      <SessionProvider><RegisterProvider orders={orders}><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>;
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(tree(null)); });
+    fireEvent.click(button('Shirt'));
+    await act(async () => { fireEvent.click(button('Cash')); });
+    expect(screen.getByRole('alert').textContent).toBe(GETTING_READY);
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: store.orders });
+    await act(async () => { view.rerender(tree(store.orders)); });
+    await screen.findByRole('button', { name: 'Open register panel' });
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    expect(button('Cash')).toBeTruthy();
+    expect(record).not.toHaveBeenCalled();
+  });
+
+  it('while a check is pending, ignores further Cash and Card taps: one tender, with the first tap\'s method', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await screen.findByRole('button', { name: 'Open register panel' });
+    fireEvent.click(button('Shirt'));
+    await act(async () => {
+      fireEvent.click(button('Card terminal'));
+      fireEvent.click(button('Card terminal'));
+      fireEvent.click(button('Cash'));
+    });
+    expect(await screen.findByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
   });
 });

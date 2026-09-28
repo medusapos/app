@@ -222,23 +222,35 @@ test('a dead storage worker shows the reload prompt, and Reload recovers the app
   await page.unroute('**/tally/v1/commands');
 
   // The write: a second, different sale saves to the same dead order store. It never completes;
-  // only recovery is checked below. The worker dies once the tender has started: the tender's
-  // register check (ADR 0017) reads storage, so a worker killed before it stops there instead.
+  // only recovery is checked below. The tender's register check and complete()'s session stamp
+  // (ADR 0017) read storage before the save, so the worker dies only once the sale's insert is
+  // held (an E2E debug hook) past both; released, the insert reaches the dead worker and stalls.
   const search = page.getByPlaceholder(SEARCH_PLACEHOLDER, { exact: true });
   await search.fill('E2E-1');
   await search.press('Enter');
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
   const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
   await tender.locator('[tabindex="0"]').first().click();
-  await page.evaluate(() => (window as unknown as {
-    __medusaposKillStorageWorker: () => void;
-  }).__medusaposKillStorageWorker());
+  const debug = (name: 'HoldOrderInserts' | 'HeldOrderInserts' | 'ReleaseOrderInserts' | 'KillStorageWorker') =>
+    page.evaluate((hook) => (window as unknown as Record<string, () => number | void>)[`__medusapos${hook}`](), name);
+  await debug('HoldOrderInserts');
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
+  await expect.poll(() => debug('HeldOrderInserts')).toBe(1);
+  await debug('KillStorageWorker');
+  await debug('ReleaseOrderInserts');
+  await expect(page.getByRole('alert')).toHaveText('Saving is slow…');
 
-  // The read: before the save, complete() stamps the sale with the register session (ADR 0017),
-  // reading that session by primary key from the (now dead) storage, which gives the read watchdog
-  // something pending to go quiet on before any write can stall. (Before registers, "Saving is
-  // slow…" showed first, and Orders' Retry supplied this read.)
+  // The read: Retry's requeue() query has never run before, so it must reach the (now dead)
+  // storage, giving the read watchdog something pending to go quiet on. This is the only visit
+  // to Orders after the kill: leaving Products unmounts its product cache, whose close() also
+  // hangs, so a later return to Products would reopen the same database name before that close
+  // ever finishes (RxDB DB8).
+  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await expect(page).toHaveURL(/\/orders/);
+  const retryButton = page.getByRole('button', { name: 'Retry' });
+  await expect(retryButton).toBeVisible();
+  await retryButton.click();
+
   await expect(page.getByText('Storage stopped')).toBeVisible();
   await page.getByRole('button', { name: 'Reload' }).click();
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();

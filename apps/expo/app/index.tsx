@@ -11,7 +11,9 @@ import {
 } from '@tallyui/pos';
 
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
-import { IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale } from '../components/register';
+import {
+  GETTING_READY, IN_ROW, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale, type TenderSession,
+} from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
@@ -185,11 +187,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
   // the outbox confirms the order is stored.
   // `session`: complete() stamps the sale with the open register session (ADR 0017); the Cart's tender start
-  // (useGatedSale) refuses until one is open.
+  // (useGatedSale) refuses until one is open, and pins it for that tender: once the session closes, saleSession is
+  // undefined, and the pin still hands complete() the session to stamp, which then makes the sale late.
   const { register } = useRegister();
+  const [tenderSession, pinTenderSession] = useState<TenderSession | undefined>();
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
-    isStored, session: register.saleSession });
-  const { sale: cartSale, refused } = useGatedSale(sale);
+    isStored, session: register.saleSession ?? tenderSession });
+  const { sale: cartSale, refused } = useGatedSale(sale, pinTenderSession);
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
@@ -243,11 +247,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Complete would have nothing to save to, so the tender pane waits for it, live, instead. Cart and the
   // catalogue don't need a store to add lines, so only this pane is gated.
   const tenderPane = orders === null
-    ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">Getting ready to save sales…</Text>
+    ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
     : <Tender sale={sale} />;
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
   const [gateFocus, setGateFocus] = useState(0);
+  const gateFocusHandled = useRef(0);
   const registerBar = (className?: string) => <TillRegisterBar online={state !== 'offline'} onOpenPanel={() => setPanelOpen(true)}
     onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
   const catalogue = <View className="flex-1">
@@ -259,7 +264,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <SyncStatus state={outboxState} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
-  const cart = <RegisterGate currency={pricing.currency} refused={refused} cartEmpty={!sale.order.lineItems.length} focusKey={gateFocus}>
+  const cart = <RegisterGate currency={pricing.currency} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
   </RegisterGate>;
 

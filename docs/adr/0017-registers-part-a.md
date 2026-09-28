@@ -69,15 +69,26 @@ movements and closures are local-only collections, never replicated.
   - The Cart gets a `sale` whose `startTender` first awaits
     `register.requireOpen()` (`useGatedSale`, `components/register.tsx`).
     On `RegisterSessionRequiredError` the tender doesn't start and an
-    `alert` above the cart says "Open the register to take payment.".
-    `requireOpen()` resolves null only while sessions are off; the tender
-    then starts as before. Sessions are never off in this app (`enabled` is
-    true once the collections are open), and until they are open the Cash
-    and Card buttons refuse the same way, since there would be no session
-    to check or to stamp.
-  - `useSale` gets `session: register.saleSession`, so `complete()` stamps
-    the order through `stampSession`, and a session closed under a tender
-    makes it a late sale (`lateSessionId`), as TallyUI decides.
+    `alert` above the cart says "Open the register to take payment.". Any
+    other failure says "Couldn't check the register. Try again." and is
+    logged. While a check is pending, further Cash and Card taps are
+    ignored, and the tender starts only if the sale is still at the cart
+    when the check resolves. `requireOpen()` resolves null only while
+    sessions are off; the tender then starts as before. Sessions are never
+    off in this app (`enabled` is true once the collections are open), and
+    until they are open Cash and Card refuse with "Getting ready to save
+    sales…" (the tender pane's own wait), since there would be no session to
+    check or to stamp.
+  - **The tender pins its session.** `useSale` gets
+    `session: register.saleSession ?? tenderSession`, where `tenderSession`
+    is the `{ id, sessions }` that `requireOpen()` confirmed at tender
+    start, kept until the stage leaves the tender (the receipt, back to the
+    cart, a new sale). `register.saleSession` goes undefined once the
+    session closes, so without the pin a close under a tender would leave
+    `complete()` with nothing to stamp, and the sale with neither
+    `sessionId` nor `lateSessionId`. With it, `stampSession` refuses the
+    closed session and TallyUI makes the sale late (`lateSessionId` and a
+    `late-sale` fact).
   - There is no second `requireOpen()` before the card terminal: the app
     doesn't drive a terminal. "Payment approved on terminal" is pressed
     after the terminal has taken the money, so refusing there would lose a
@@ -139,12 +150,15 @@ movements and closures are local-only collections, never replicated.
 - One default register per backend, and no server sync: sessions,
   movements and closures stay on the till (TallyUI registers c2).
 - Register writes aren't held on sign-out. Unlike a sale's save (ADR 0015's
-  holds), a movement write that hangs in storage can be under the order
-  store's close when the cashier signs out; that close then waits, as RxDB's
-  close waits for every write, until the #85 backstop fails the next open.
-- No `requireOpen()` before a card terminal's capture (see above); the
-  completion's stamp is the only check after tender start.
+  holds), `requireOpen()`'s session write at tender start, and a movement,
+  bind or open write, can hang in storage under the order store's close
+  when the cashier signs out; that close then waits, as RxDB's close waits
+  for every write, until the #85 backstop fails the next open.
+- No `requireOpen()` before a card terminal's capture (see above); after
+  tender start, the completion's stamp of the pinned session is the only
+  check, and a session closed in between makes the sale late.
 - The gate and the stamp read storage. With a dead storage worker, pressing
   Cash or Card, or completing a sale, now reaches the read watchdog's
   "Storage stopped" prompt; before, a completing sale showed "Saving is
-  slow…" first (e2e `storage.spec.ts` follows this).
+  slow…" first. E2e `storage.spec.ts` still proves that note: it holds the
+  sale's insert past both reads, then kills the worker and releases it.

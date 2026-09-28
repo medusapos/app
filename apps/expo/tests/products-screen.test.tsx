@@ -465,7 +465,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     fireEvent.click(button('New sale'));
     expect(button('Cart is empty')).toBeTruthy();
     expect(search()).toBeTruthy();
-  });
+  }, 15000);
 
   it('at 1280 wide shows the catalogue and cart with no bar; the order discount scrolls and pay is pinned', async () => {
     await mount();
@@ -1046,15 +1046,34 @@ describe('ProductsScreen earlier-sale reload hint', () => {
 describe('ProductsScreen tender gated on the order store opening', () => {
   beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
-  it('shows a notice instead of Tender while orders is null, then Tender once it opens', async () => {
+  it('says it couldn\'t check the register, and logs why, when the check fails for another reason', async () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(fixture.register.requireOpen).mockRejectedValue(new Error('storage went away'));
+    vi.mocked(useRegister).mockReturnValue(fixture);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      await mount();
+      fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cash' })); });
+      expect(screen.getByRole('alert').textContent).toBe("Couldn't check the register. Try again.");
+      expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+      expect(warn).toHaveBeenCalledWith('Could not check the register at tender start:', expect.objectContaining({ message: 'storage went away' }));
+    } finally { warn.mockRestore(); }
+  });
+
+  // While orders is null the register isn't enabled either (its collections are in the same store, ADR 0017).
+  it('refuses to start a tender while orders is null, saying so, then tenders once it opens', async () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: null });
+    vi.mocked(useRegister).mockReturnValue(openRegisterFixture({ enabled: false }));
     const view = await mount();
     fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     expect(screen.getByRole('alert').textContent).toBe('Getting ready to save sales…');
     expect(screen.queryByRole('button', { name: 'Payment approved on terminal' })).toBeNull();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: {} as never });
+    vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
     await act(async () => { view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
   });
 });

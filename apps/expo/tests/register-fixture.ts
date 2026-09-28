@@ -13,18 +13,19 @@ export const OPEN_SESSION: RegisterSession = {
 /**
  * `useRegister()`'s value with this till bound to Register 1 and its session open, for tests that mock
  * `../lib/register-context`: `requireOpen()` resolves the session id, as TallyUI's does for an open session.
+ * `enabled: false` is the state while the order store opens (the outbox's `orders` is null).
  */
-export function openRegisterFixture(): RegisterContextValue {
+export function openRegisterFixture({ enabled = true }: { enabled?: boolean } = {}): RegisterContextValue {
   const register = {
     session: OPEN_SESSION, movements: [], expected: { cash: 10000 }, salesCount: 0, overdue: false, lastClosure: null,
-    lastClosed: null, varianceThreshold: undefined, enabled: true, blind: false, saleSession: undefined,
+    lastClosed: null, varianceThreshold: undefined, enabled, blind: false, saleSession: undefined,
     requireOpen: vi.fn(async () => OPEN_SESSION.id),
     actions: {
       openSession: vi.fn(), startCounting: vi.fn(), backToSelling: vi.fn(), closeSession: vi.fn(),
       recordMovement: vi.fn(), voidMovement: vi.fn(),
     },
   } as unknown as RegisterContextValue['register'];
-  return { register, boundRegisterId: 'register-1', registerName: 'Register 1', registers: DEFAULT_REGISTERS,
+  return { register, boundRegisterId: 'register-1', registerName: 'Register 1', registers: DEFAULT_REGISTERS, sessions: null,
     bind: vi.fn(async () => {}), setTenderInProgress: vi.fn() };
 }
 

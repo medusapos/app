@@ -25,7 +25,7 @@ const addOrders = (db: OrdersDatabase) => addPosOrderCollection(db as unknown as
 // reload `e2e/storage.spec.ts` uses to reach a fresh openOrderStore, unlike an in-memory flag.
 const E2E_FAIL_NEXT_OPEN_KEY = 'medusapos-e2e-fail-next-order-store-open';
 // E2E debug only: the hold HoldOrderInserts sets and ReleaseOrderInserts resolves (hooks below).
-let e2eInsertHold: { promise: Promise<void>; release(): void } | undefined;
+let e2eInsertHold: { promise: Promise<void>; release(): void; waiting: number } | undefined;
 
 // Local document id recording that `carryOverOrders` copied a legacy database (count and time).
 // A record only: it never causes a delete, nor skips reading a legacy database that exists.
@@ -173,7 +173,9 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
         // Migrates v0 or v1 to v2, all of it. A DM4 fails this open, never deletes: the older orders stay; the next open retries.
         const orders = await addOrders(db);
         // E2E debug only (folded away in production): while HoldOrderInserts holds, an insert waits before its write.
-        if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') orders.preInsert(() => e2eInsertHold?.promise, false);
+        if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') {
+          orders.preInsert(() => { if (!e2eInsertHold) return; e2eInsertHold.waiting++; return e2eInsertHold.promise; }, false);
+        }
         if (onWebStorage) {
           await carryOverOrders({
             fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
@@ -273,7 +275,9 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
   exposeE2eHook('HoldOrderInserts', () => {
     if (e2eInsertHold) return;
     let release!: () => void;
-    e2eInsertHold = { promise: new Promise<void>((resolve) => { release = resolve; }), release: () => release() };
+    e2eInsertHold = { promise: new Promise<void>((resolve) => { release = resolve; }), release: () => release(), waiting: 0 };
   });
+  // How many inserts the hold has stopped, so a test knows the save got past its reads (the session stamp).
+  exposeE2eHook('HeldOrderInserts', () => e2eInsertHold?.waiting ?? 0);
   exposeE2eHook('ReleaseOrderInserts', () => { e2eInsertHold?.release(); e2eInsertHold = undefined; });
 }

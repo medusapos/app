@@ -109,11 +109,13 @@ on any file it cannot read, and on app source outside that module and tests
 that contains `__medusapos` or writes a `window` property.
 
 The same file proves the storage-health prompts (ADR-061 part B): one test
-starts a cash sale for `E2E-1`, kills the storage worker via
+completes a cash sale for `E2E-1` with its insert held
+(`__medusaposHoldOrderInserts`, past the register check and session stamp
+that read storage first, ADR 0017), kills the storage worker via
 `window.__medusaposKillStorageWorker()` (another `EXPO_PUBLIC_E2E_DEBUG`
-hook, terminating the worker without forgetting the storage) once the tender
-is up, then completes it — expecting "Storage stopped" (the sale's register
-stamp reads the dead storage, ADR 0017), then a Reload that brings the app
+hook, terminating the worker without forgetting the storage), and releases
+the insert into it — expecting "Saving is slow…", then "Storage stopped"
+once Orders' Retry reads the dead storage, then a Reload that brings the app
 back live (the killed sale itself is never checked). The other opens a second
 page at the static worker URL and starts a bare `Worker` there to hold the
 opfs-sahpool pool outside the coordinator, then signs in and expects the
