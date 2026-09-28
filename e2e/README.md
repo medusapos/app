@@ -157,7 +157,7 @@ till to Register 1 and opens it with a €100.00 float (`openRegister`; on a
 phone its register pill opens the cart view, where the picker shows).
 `register.spec.ts`, at 1280 × 800 and at 360 × 780, signs in without that,
 sees the picker and then the open card above a cart whose Cash refuses,
-opens with 100.00, sells `E2E-1` for exact cash, checks the panel's "1 sales
+opens with 100.00, sells `E2E-1` for exact cash, checks the panel's "1 sale
 this session" and expected cash, records a €5.00 paid in and undoes it, and
 takes Close register to the counting placeholder and back. Each state is
 attached as a screenshot (also saved to `REGISTER_SHOTS_DIR` when set).
