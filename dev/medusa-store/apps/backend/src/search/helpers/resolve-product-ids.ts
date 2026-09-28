@@ -34,13 +34,18 @@ async function relatedProductIds(
     withDeleted,
   });
 
-  const productIds = (data.filter(Boolean) as Record<string, any>[])
+  const rows = data.filter(Boolean) as Record<string, any>[]
+  const productIds = rows
     .flatMap(pick)
     .filter((id): id is string => Boolean(id));
-  if (!productIds.length) {
-    const level = event.name === "product-option.created" ? "debug" : "warn"
-    logger[level](
-      `[search] product index: ${event.name} ${event.name.split(".")[0]} ${ids.join(", ")} resolved to no products; nothing re-indexed`,
+  if (rows.length < ids.length) {
+    const missingIds = ids.filter((id) => !rows.some((row) => row.id === id))
+    logger.warn(
+      `[search] product index: ${event.name} returned ${rows.length} of ${ids.length} rows (${missingIds.join(", ")} missing); those products weren't re-indexed`,
+    )
+  } else if (!productIds.length) {
+    logger.debug(
+      `[search] product index: ${event.name} ${ids.join(", ")} links to no products`,
     )
   }
   return productIds

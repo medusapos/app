@@ -42,6 +42,11 @@ describe("product search ingestion", () => {
       name: "product-option-value.updated", field: "option.products.id",
       row: { id: "optval_1", option: { products: [{ id: "prod_1" }, { id: "prod_2" }] } },
     },
+    {
+      title: "a product-tag event selects products.id",
+      name: "product-tag.updated", field: "products.id",
+      row: { id: "tag_1", products: [{ id: "prod_1" }, { id: "prod_2" }] },
+    },
   ])("$title", async ({ name, field, row }) => {
     const graph = jest.fn(async () => ({ data: [row] }))
     const context = {
@@ -60,27 +65,44 @@ describe("product search ingestion", () => {
 
   it.each([
     {
-      title: "an event whose rows resolve to no products logs a warning with the event name and ids",
+      title: "a missing row warns with the missing ids",
       name: "product-option.updated", level: "warn" as const, other: "debug" as const,
+      ids: ["opt_1", "opt_2"],
+      row: { id: "opt_2", products: [{ id: "prod_2" }] },
+      products: ["prod_2"],
+      message: "[search] product index: product-option.updated returned 1 of 2 rows (opt_1 missing); those products weren't re-indexed",
     },
     {
-      title: "a new standalone option logs at debug, not warn",
-      name: "product-option.created", level: "debug" as const, other: "warn" as const,
+      title: "rows with no products log at debug, not warn",
+      name: "product-option.deleted", level: "debug" as const, other: "warn" as const,
+      ids: ["opt_1"],
+      row: { id: "opt_1", products: [] },
+      products: [],
+      message: "[search] product index: product-option.deleted opt_1 links to no products",
     },
-  ])("$title", async ({ name, level, other }) => {
-    const ids = ["opt_1", "opt_2"]
-    const graph = jest.fn(async () => ({ data: ids.map((id) => ({ id, products: [] })) }))
+  ])("$title", async ({ name, level, other, ids, row, products, message }) => {
+    const graph = jest.fn(async () => ({ data: [row] }))
     const context = {
       container: { query: { graph } },
     } as unknown as SearchTypes.SearchIngestionContext
 
     await expect(resolveProductIds({ name, data: ids.map((id) => ({ id })) }, context))
-      .resolves.toEqual([])
+      .resolves.toEqual(products)
     expect(logger[level]).toHaveBeenCalledTimes(1)
     expect(logger[level]).toHaveBeenCalledWith(
-      `[search] product index: ${name} product-option opt_1, opt_2 resolved to no products; nothing re-indexed`,
+      message,
     )
     expect(logger[other]).not.toHaveBeenCalled()
+  })
+
+  it("a .deleted event queries with withDeleted true", async () => {
+    const graph = jest.fn(async () => ({ data: [{ id: "opt_1", products: [] }] }))
+    const context = {
+      container: { query: { graph } },
+    } as unknown as SearchTypes.SearchIngestionContext
+
+    await resolveProductIds({ name: "product-option.deleted", data: { id: "opt_1" } }, context)
+    expect(graph).toHaveBeenCalledWith(expect.objectContaining({ withDeleted: true }))
   })
 
   it("an undefined row never throws", async () => {
