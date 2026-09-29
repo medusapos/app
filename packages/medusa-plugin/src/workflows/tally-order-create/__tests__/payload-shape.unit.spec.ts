@@ -1,5 +1,5 @@
 import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
-import { payloadShapeErrors } from '../payload-shape'
+import { payloadNulErrors, payloadShapeErrors } from '../payload-shape'
 
 const payload: OrderCreatePayload = {
   clientOrderId: 'order_1', createdAt: '2026-09-23T10:00:00Z', currency: 'EUR', pricesIncludeTax: true,
@@ -127,4 +127,47 @@ it.each(['x'.repeat(65), '', null, 1])('rejects invalid customerId %p', customer
 
 it('keeps unknown top-level and customer fields lenient', () => {
   expect(payloadShapeErrors({ ...payload, extra: true, customer: { extra: true } })).toEqual([])
+})
+
+it.each([
+  ['clientOrderId', 255], ['createdAt', 255], ['currency', 255],
+  ['lines.0.clientLineId', 255], ['lines.0.variantId', 255], ['lines.0.title', 255],
+  ['payments.0.clientPaymentId', 255], ['payments.0.method', 255], ['payments.0.reference', 255],
+  ['registerId', 255], ['cashierRef', 255], ['locationId', 255], ['customer.email', 254],
+  ['customer.customerId', 64], ['sessionId', 36],
+] as const)('checks the exact string bound for %s (%i)', (field, max) => {
+  const value = { ...structuredClone(payload), customer: {} }
+  const keys = field.split('.')
+  const key = keys.pop()!
+  const target = keys.reduce((object, part) => object[part], value as any)
+  target[key] = 'x'.repeat(max)
+  expect(payloadShapeErrors(value)).toEqual([])
+  target[key] += 'x'
+  const expected = max === 64 || max === 36 ? `a string of at most ${max} characters` : `at most ${max} characters`
+  expect(payloadShapeErrors(value)).toEqual([`${field.replace('.0.', '[0].')}: expected ${expected}`])
+})
+
+it.each([
+  ['clientOrderId', { clientOrderId: 'order\0id' }],
+  ['lines[0].title', { lines: [{ ...payload.lines[0], title: 'cof\0fee' }] }],
+  ['customer.email', { customer: { email: 'buyer\0@example.com' } }],
+  ['sessionId', { sessionId: 'session\0id' }],
+])('rejects NUL in %s', (field, fields) => {
+  const value = { ...payload, ...fields as object }
+  expect(payloadShapeErrors(value)).toEqual([`${field}: expected no NUL character`])
+  expect(payloadNulErrors(value)).toEqual([`${field}: expected no NUL character`])
+})
+
+it('reports only NUL errors independently of shape and bounds', () => {
+  expect(payloadNulErrors({ lines: [{ title: 'x'.repeat(256) }] })).toEqual([])
+  expect(payloadNulErrors({ lines: [{ title: 'x'.repeat(256) + '\0' }] }))
+    .toEqual(['lines[0].title: expected no NUL character'])
+  const value = { ...payload, lines: Array.from({ length: 12 }, () => ({ ...payload.lines[0], title: '\0' })) }
+  expect(payloadNulErrors(value)).toHaveLength(10)
+  expect(payloadShapeErrors(value)).toEqual(payloadNulErrors(value))
+})
+
+it.each([null, 'payload', { lines: 5 }])('NUL checking never throws on %j', value => {
+  expect(() => payloadNulErrors(value)).not.toThrow()
+  expect(payloadNulErrors(value)).toEqual([])
 })

@@ -94,6 +94,7 @@ export async function runOrderCreate(
       )) ?? matchingRegions[0]
       const { data: variants } = await query.graph({
         entity: 'product_variant', fields: ['id', 'manage_inventory', 'allow_backorder',
+          'product.status', 'product.deleted_at', 'product.sales_channels.id',
           'inventory_items.inventory_item_id', 'inventory_items.required_quantity'],
         filters: { id: payload.lines.map(line => line.variantId) },
       })
@@ -109,9 +110,17 @@ export async function runOrderCreate(
         region: region ? {
           id: region.id, currency_code: region.currency_code, country_codes: region.countries.map(country => country.iso_2),
         } : { id: '', currency_code: '', country_codes: [] },
-        variants: Object.fromEntries(variants.map(variant => [variant.id, { id: variant.id }])),
+        variants: Object.fromEntries(variants.filter(variant =>
+          variant.product && !variant.product.deleted_at && variant.product.status === 'published' &&
+          variant.product.sales_channels?.some(channel => channel.id === channels[0].id)
+        ).map(variant => [variant.id, { id: variant.id }])),
       })
-      if (planned.ok === false) return { id: command.id, status: 'rejected', error: planned.rejection }
+      if (planned.ok === false) {
+        if (planned.rejection.code === 'unsupported_currency') {
+          throw new StoreConfigurationError(planned.rejection.message, 'unsupported_currency')
+        }
+        return { id: command.id, status: 'rejected', error: planned.rejection }
+      }
       const { data: levels } = await query.graph({
         entity: 'inventory_level', fields: ['inventory_item_id', 'location_id', 'stocked_quantity', 'reserved_quantity'],
         filters: { inventory_item_id: variants.flatMap(variant => variant.inventory_items.map(item => item.inventory_item_id)), location_id: location.id },
