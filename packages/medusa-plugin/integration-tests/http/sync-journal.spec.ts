@@ -48,8 +48,19 @@ medusaIntegrationTestRunner({
       secondProductId = second.data.product.id
       const channel = await api.post('/admin/sales-channels', { name: 'Journal channel' }, { headers })
       channelId = channel.data.sales_channel.id
+      await settleHead()
     })
     afterEach(() => jest.restoreAllMocks())
+
+    // Waits until head has not changed for 1 s (at most 10 s), so earlier events cannot land in a later test's window.
+    async function settleHead() {
+      let head = await sync.head()
+      for (let stableSince = Date.now(), deadline = stableSince + 10000; Date.now() - stableSince < 1000 && Date.now() < deadline;) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        const next = await sync.head()
+        if (next !== head) [head, stableSince] = [next, Date.now()]
+      }
+    }
 
     async function expectChanges(since: number, productIds: string[], op: 'upsert' | 'delete' = 'upsert') {
       const expected = productIds.map(id => expect.objectContaining({ collection: 'products', id, op }))
@@ -134,23 +145,49 @@ medusaIntegrationTestRunner({
       await expectChanges(headBefore, [productId, secondProductId])
     })
 
-    it('8. flag off: a product update adds no journal row within two seconds', async () => {
+    it('8. flag off: a product update adds no journal row, and the next update with the flag on adds exactly one', async () => {
       const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
-      jest.spyOn(ledger, 'getPluginOptions').mockReturnValue({})
       const headBefore = await sync.head()
+      const flag = jest.spyOn(ledger, 'getPluginOptions').mockReturnValue({})
       await api.post(`/admin/products/${productId}`, { title: 'Flag off update' }, { headers })
-      const deadline = Date.now() + 2000
-      do {
-        const page = await sync.changesSince({ since: headBefore, limit: 100 })
-        expect(page.changes).toEqual([])
-        await new Promise(resolve => setTimeout(resolve, 100))
-      } while (Date.now() < deadline)
+      // Keep the flag off until the subscriber has checked it and no further checks arrive for 500 ms (at most 5 s).
+      for (let calls = 0, deadline = Date.now() + 5000; Date.now() < deadline && (!flag.mock.calls.length || flag.mock.calls.length !== calls);) {
+        calls = flag.mock.calls.length
+        await new Promise(resolve => setTimeout(resolve, 500))
+      }
+      expect(flag).toHaveBeenCalled()
+      flag.mockRestore()
+      await api.post(`/admin/products/${productId}`, { title: 'Flag on update' }, { headers })
+      await expectChanges(headBefore, [productId])
+      await settleHead()
+      const page = await sync.changesSince({ since: headBefore, limit: 100 })
+      expect(page.changes.filter(change => change.collection === 'products' && change.id === productId)).toHaveLength(1)
     })
 
     it('9. journals an upsert, not a delete, after deleting one variant of a multi-variant product', async () => {
       const headBefore = await sync.head()
       await api.delete(`/admin/products/${productId}/variants/${data.variantD}`, { headers })
       await expect(latestOpAfterSettling(headBefore, productId)).resolves.toBe('upsert')
+    })
+
+    it('10. journals an upsert after removing a variant price, which Medusa hard-deletes', async () => {
+      const price = { id: priceId, currency_code: 'eur', amount: 10 }
+      await api.post(`/admin/products/${productId}/variants/${data.variantA}`, {
+        prices: [price, { currency_code: 'usd', amount: 12 }],
+      }, { headers })
+      await settleHead()
+      const headBefore = await sync.head()
+      await api.post(`/admin/products/${productId}/variants/${data.variantA}`, { prices: [price] }, { headers })
+      await expectChanges(headBefore, [productId])
+    })
+
+    it('11. recordEvent writes nothing and returns 0 for a missing product, and 1 for an existing one', async () => {
+      const headBefore = await sync.head()
+      await expect(sync.recordEvent('product.product.deleted', 'prod_missing')).resolves.toBe(0)
+      expect(await sync.head()).toBe(headBefore)
+      await expect(sync.recordEvent('product.product.updated', productId)).resolves.toBe(1)
+      expect((await sync.changesSince({ since: headBefore, limit: 10 })).changes).toEqual([
+        expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
     })
   },
 })

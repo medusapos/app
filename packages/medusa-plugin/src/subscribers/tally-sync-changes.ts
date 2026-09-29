@@ -5,7 +5,6 @@ import { TALLY_LEDGER_MODULE } from '../modules/tally-ledger'
 import type TallyLedgerModuleService from '../modules/tally-ledger/service'
 import { TALLY_SYNC_MODULE } from '../modules/tally-sync'
 import type TallySyncModuleService from '../modules/tally-sync/service'
-import { resolveProductChanges } from '../modules/tally-sync/resolve-products'
 
 export default async function tallySyncChanges({ event: { name, data }, container }: SubscriberArgs<{ id: string }>) {
   let logger: Logger | undefined
@@ -13,14 +12,8 @@ export default async function tallySyncChanges({ event: { name, data }, containe
     logger = container.resolve(ContainerRegistrationKeys.LOGGER)
     const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
     if (!ledger.getPluginOptions().experimentalSync) return
-    const changes = await resolveProductChanges(container.resolve(ContainerRegistrationKeys.PG_CONNECTION), name, data.id)
-    if (!changes.length) {
-      logger.debug(`tally_sync: no products resolved for ${name} (${data.id})`)
-      return
-    }
-    await container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE).record(changes.map(({ productId, op }) => ({
-      collection: 'products', objectId: productId, op,
-    })))
+    const written = await container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE).recordEvent(name, data.id)
+    if (!written) logger.debug(`tally_sync: no products resolved for ${name} (${data.id})`)
   } catch (error) {
     logger?.error(`tally_sync: failed to record ${name}: ${error}`)
   }

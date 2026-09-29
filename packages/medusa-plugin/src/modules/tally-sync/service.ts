@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import type { EntityManager } from '@medusajs/framework/mikro-orm/postgresql'
 import type { Context } from '@medusajs/framework/types'
 import { InjectManager, MedusaContext, MedusaService } from '@medusajs/framework/utils'
 import { TallyChange } from './models/tally-change'
 import { TallySyncState } from './models/tally-sync-state'
+import { resolveProductChanges } from './resolve-products'
 
-// Fixed transaction advisory lock key reserved for tally_sync epoch creation and backfill.
-const INITIALIZE_LOCK = 2026093009
+// Transaction advisory lock key taken before every tally_change write (record, recordEvent, initialize).
+// Held until commit, it serialises journal writers so seq order is commit order and a cursor never skips a row.
+const JOURNAL_LOCK = 2026093009
 
 // Postgres caps a statement at 65,535 parameters; this many rows (3 params each) stays well under it.
 const RECORD_CHUNK_SIZE = 1000
@@ -15,16 +18,30 @@ const RECORD_CHUNK_SIZE = 1000
 export default class TallySyncModuleService extends MedusaService({ TallyChange, TallySyncState }) {
   @InjectManager()
   async record(changes: { collection: string; objectId: string; op: 'upsert' | 'delete' }[],
-    @MedusaContext() sharedContext: Context = {}): Promise<void> {
+    @MedusaContext() sharedContext: Context = {}): Promise<number> {
     const unique = [...new Map(changes.map(c => [JSON.stringify([c.collection, c.objectId, c.op]), c])).values()]
-    if (!unique.length) return
-    const manager = sharedContext.manager as EntityManager
-    for (let i = 0; i < unique.length; i += RECORD_CHUNK_SIZE) {
-      const chunk = unique.slice(i, i + RECORD_CHUNK_SIZE)
-      await manager.execute(
-        `insert into tally_change (collection, object_id, op) values ${chunk.map(() => '(?, ?, ?)').join(', ')}`,
-        chunk.flatMap(c => [c.collection, c.objectId, c.op]))
-    }
+    if (!unique.length) return 0
+    return (sharedContext.manager as EntityManager).transactional(async em => {
+      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      for (let i = 0; i < unique.length; i += RECORD_CHUNK_SIZE) {
+        const chunk = unique.slice(i, i + RECORD_CHUNK_SIZE)
+        await em.execute(
+          `insert into tally_change (collection, object_id, op) values ${chunk.map(() => '(?, ?, ?)').join(', ')}`,
+          chunk.flatMap(c => [c.collection, c.objectId, c.op]))
+      }
+      return unique.length
+    })
+  }
+
+  // Resolves an event to products and journals them under JOURNAL_LOCK, reading committed state on the
+  // transaction's own connection, so a product's latest row reflects every write committed before it.
+  @InjectManager()
+  async recordEvent(eventName: string, id: string, @MedusaContext() sharedContext: Context = {}): Promise<number> {
+    return (sharedContext.manager as EntityManager).transactional(async em => {
+      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      const changes = await resolveProductChanges(em.getTransactionContext<Knex.Transaction>()!, eventName, id)
+      return this.record(changes.map(({ productId, op }) => ({ collection: 'products', objectId: productId, op })), { manager: em })
+    })
   }
 
   @InjectManager()
@@ -40,7 +57,6 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     @MedusaContext() sharedContext: Context = {}): Promise<{
       head: number; changes: { seq: number; collection: string; id: string; op: 'upsert' | 'delete' }[]; more: boolean
     }> {
-    const head = await this.head(sharedContext)
     const pageSize = Math.min(limit, 1000)
     const filter = collections ? (collections.length ? `and collection in (${collections.map(() => '?').join(', ')})` : 'and false') : ''
     const rows = await (sharedContext.manager as EntityManager).execute(
@@ -51,6 +67,8 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
       assert(Number.isSafeInteger(seq), 'tally_change seq exceeds safe integer range')
       return { seq, collection: row.collection, id: row.id, op: row.op }
     })
+    // Read head after the rows so it is never behind the page.
+    const head = Math.max(await this.head(sharedContext), changes.at(-1)?.seq ?? 0)
     return { head, changes, more: rows.length > pageSize }
   }
 
@@ -70,7 +88,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   @InjectManager()
   async initialize(productIds: string[], @MedusaContext() sharedContext: Context = {}): Promise<{ epoch: string; created: boolean }> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute('select pg_advisory_xact_lock(?)', [INITIALIZE_LOCK])
+      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
       const [state] = await em.execute("select epoch from tally_sync_state where id = 'sync'")
       if (state) return { epoch: state.epoch, created: false }
       const epoch = randomUUID()

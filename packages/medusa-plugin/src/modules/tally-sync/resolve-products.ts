@@ -10,6 +10,9 @@ export async function resolveProductChanges(knex: Knex, eventName: string, id: s
   }
 
   // Keep soft-deleted rows visible: deletion and detach events arrive after the write.
+  // Medusa hard-deletes some rows (prices removed by a price-set update, option values, product-option links), so
+  // their .deleted events resolve to nothing. G4 relies on the sibling product.product-variant.updated and
+  // product.product-option.updated events every such workflow also emits; the gap is documented in ADR 0020.
   let query: Knex.QueryBuilder
   if (/^product\.product-variant\.(created|updated|deleted|restored)$/.test(eventName)) {
     query = knex('product_variant').select('product_id').where('id', id)

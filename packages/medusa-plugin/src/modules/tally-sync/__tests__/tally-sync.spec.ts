@@ -61,6 +61,64 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       expect(await service.changesSince({ since: 0, limit: 10, collections: [] })).toEqual({ head, changes: [], more: false })
     })
 
+    async function drain(cursor: { since: number; ids: string[] }) {
+      for (let more = true; more;) {
+        const page = await service.changesSince({ since: cursor.since, limit: 1000 })
+        cursor.ids.push(...page.changes.map(change => change.id))
+        cursor.since = page.changes.at(-1)?.seq ?? cursor.since
+        more = page.more
+      }
+    }
+
+    it('a cursor reader sees every row when a later writer starts while an earlier write is uncommitted', async () => {
+      let release!: () => void
+      const released = new Promise<void>(resolve => { release = resolve })
+      let recorded!: () => void
+      const aRecorded = new Promise<void>(resolve => { recorded = resolve })
+      const a = MikroOrmWrapper.forkManager().transactional(async em => {
+        await service.record([{ ...product, objectId: 'a' }], { manager: em })
+        recorded()
+        await released
+      })
+      await Promise.race([aRecorded, a])
+      let bDone = false
+      const b = service.record([{ ...product, objectId: 'b' }]).then(() => { bDone = true })
+      const lockWaits = `select 1 from pg_locks where locktype = 'advisory' and not granted
+        and database = (select oid from pg_database where datname = current_database())`
+      // Bounded wait until B has either committed or is blocked on the journal lock.
+      for (const deadline = Date.now() + 2000; !bDone && Date.now() < deadline && !(await sql(lockWaits)).length;) {
+        await new Promise(resolve => setTimeout(resolve, 20))
+      }
+      const cursor = { since: 0, ids: [] as string[] }
+      await drain(cursor)
+      release()
+      await Promise.all([a, b])
+      await drain(cursor)
+      expect(cursor.ids).toEqual(['a', 'b'])
+    })
+
+    it('changesSince reads head after the rows, so a row committed between the reads is not in the page', async () => {
+      await service.record([{ ...product, objectId: 'before' }])
+      const head = TallySyncModuleService.prototype.head
+      const spy = jest.spyOn(TallySyncModuleService.prototype, 'head').mockImplementationOnce(
+        async function (this: TallySyncModuleService, ...args: Parameters<typeof head>) {
+          const value = await head.apply(this, args)
+          await service.record([{ ...product, objectId: 'between' }])
+          return value
+        })
+      const page = await service.changesSince({ since: 0, limit: 10 })
+      expect(spy).toHaveBeenCalledTimes(1)
+      spy.mockRestore()
+      expect(page.head).toBeGreaterThanOrEqual(page.changes.at(-1)!.seq)
+      expect(page).toEqual({ head: page.changes[0].seq, changes: [expect.objectContaining({ id: 'before' })], more: false })
+      expect((await service.changesSince({ since: page.head, limit: 10 })).changes).toEqual([expect.objectContaining({ id: 'between' })])
+    })
+
+    it('recordEvent returns 0 and writes nothing for an event it does not resolve', async () => {
+      expect(await service.recordEvent('product.product-type.updated', 'ptyp_1')).toBe(0)
+      expect(await sql('select seq from tally_change')).toEqual([])
+    })
+
     it('initialize creates an epoch and backfill once, and a second call adds nothing', async () => {
       expect(await service.getState()).toBeNull()
       const first = await service.initialize(['p1', 'p2'])
