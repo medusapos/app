@@ -17,6 +17,7 @@ medusaIntegrationTestRunner({
     let sync: TallySyncModuleService
     let data: Awaited<ReturnType<typeof seed>>
     let productId: string
+    let untouchedId: string
 
     beforeEach(async () => {
       container = getContainer()
@@ -25,7 +26,7 @@ medusaIntegrationTestRunner({
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       productId = (await knex('product_variant').where('id', data.variantA).first()).product_id
       // A second live product the direct writes never touch, so an over-broad rescan would journal it too.
-      await container.resolve(Modules.PRODUCT).createProducts({ title: 'Untouched product' })
+      untouchedId = (await container.resolve(Modules.PRODUCT).createProducts({ title: 'Untouched product' })).id
     })
 
     // Subscribers journal asynchronously; wait until the head has not moved for a second.
@@ -39,13 +40,15 @@ medusaIntegrationTestRunner({
       return head
     }
 
-    // Initializes the journal, lets queued events land, then makes a write no subscriber sees; returns the head before it.
-    async function directWrite(table: string, id: string, values: Record<string, unknown>): Promise<number> {
+    // Initializes the journal, lets queued events land, then makes a write no subscriber sees; returns the head
+    // before it and the database's now() from just before it, for an explicit rescan since.
+    async function directWrite(table: string, id: string, values: Record<string, unknown>): Promise<{ head: number; since: string }> {
       await ensureInitialized(container)
       const head = await settle()
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const since = (await knex.raw('select now()::text as now')).rows[0].now as string
       await knex(table).where('id', id).update({ ...values, updated_at: knex.raw('now()') })
-      return head
+      return { head, since }
     }
 
     async function priceId(): Promise<string> {
@@ -55,36 +58,45 @@ medusaIntegrationTestRunner({
     }
 
     it('1. a direct variant write is journaled as an upsert for its product, and nothing else', async () => {
-      const head = await directWrite('product_variant', data.variantA, { title: 'Direct A' })
-      await expect(sync.rescan()).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      const { head, since } = await directWrite('product_variant', data.variantA, { title: 'Direct A' })
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
       expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
         expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
     })
 
     it('2. a direct soft delete of a product is journaled as a delete', async () => {
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
-      const head = await directWrite('product', productId, { deleted_at: knex.raw('now()') })
-      await expect(sync.rescan()).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      const { head, since } = await directWrite('product', productId, { deleted_at: knex.raw('now()') })
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
       expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
         expect.objectContaining({ collection: 'products', id: productId, op: 'delete' })])
     })
 
     it('3. rescan returns null before the journal is initialized', async () => {
-      await expect(sync.rescan()).resolves.toBeNull()
+      await expect(sync.rescan(new Date().toISOString())).resolves.toBeNull()
     })
 
     it('4. an explicit since in the future journals nothing', async () => {
-      const head = await directWrite('product_variant', data.variantA, { title: 'Direct A' })
+      const { head } = await directWrite('product_variant', data.variantA, { title: 'Direct A' })
       const result = await sync.rescan(new Date(Date.now() + 3600000).toISOString())
       expect(result).toEqual({ since: expect.any(String), rows: 0 })
       expect(await sync.head()).toBe(head)
     })
 
     it('5. a direct price-only write is journaled as an upsert for its product', async () => {
-      const head = await directWrite('price', await priceId(), { amount: 77 })
-      await expect(sync.rescan()).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      const { head, since } = await directWrite('price', await priceId(), { amount: 77 })
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
       expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
         expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
+    it('6. a later journal row for a different product does not stop the rescan from journaling an earlier direct write', async () => {
+      const { head, since } = await directWrite('product_variant', data.variantA, { title: 'Direct A' })
+      await container.resolve(Modules.PRODUCT).updateProducts(untouchedId, { title: 'Untouched updated' })
+      await settle()
+      expect((await sync.rescan(since))?.rows).toBeGreaterThanOrEqual(1)
+      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual(
+        expect.arrayContaining([expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })]))
     })
   },
 })

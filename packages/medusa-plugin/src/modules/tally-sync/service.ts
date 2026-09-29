@@ -170,14 +170,13 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   }
 
   // Journals every product whose row, variants, prices, inventory levels, option values or sales-channel links were
-  // updated or deleted after since (default: the latest journal row, else initialization), catching up writes made
+  // updated or deleted after the given since, catching up writes made
   // outside the server. Price lists are the watcher's job. Returns null before initialization.
   @InjectManager()
-  async rescan(since?: string, @MedusaContext() sharedContext: Context = {}): Promise<{ since: string; rows: number } | null> {
+  async rescan(since: string, @MedusaContext() sharedContext: Context = {}): Promise<{ since: string; rows: number } | null> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
       await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
-      const [state] = await em.execute(`select coalesce(?::timestamptz::text, (select max(created_at)::text from tally_change),
-        created_at::text) as since from tally_sync_state where id = 'sync'`, [since ?? null])
+      const [state] = await em.execute("select ?::timestamptz::text as since from tally_sync_state where id = 'sync'", [since])
       if (!state) return null
       const products: { id: string; deleted_at: Date | null }[] = await em.execute(`with changed as (
           select id as product_id, updated_at, deleted_at from product
