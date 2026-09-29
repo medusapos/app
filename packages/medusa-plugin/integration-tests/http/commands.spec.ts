@@ -330,6 +330,38 @@ medusaIntegrationTestRunner({
       })
     })
 
+    it('a short sale whose take-back unlock throws is applied and takes its top-up back exactly once', async () => {
+      const inventory = container.resolve(Modules.INVENTORY)
+      const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      const quantity = Math.max(Number(before.stocked_quantity) - Number(before.reserved_quantity), 0) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const locking = container.resolve(Modules.LOCKING)
+      const execute = locking.execute.bind(locking) as (...args: unknown[]) => Promise<unknown>
+      let probes = 0
+      // Only the take-back's execute runs after it marks the order started; that one throws after its job.
+      jest.spyOn(locking, 'execute').mockImplementation((async (...args: unknown[]) => {
+        const result = await execute(...args)
+        const [order] = await liveOrders(sale.payload.clientOrderId)
+        if (probes || order?.metadata?.tally_stock_take_back_started !== true) return result
+        probes++
+        throw new Error('unlock probe')
+      }) as never)
+      const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+      const response = await post([sale])
+      const [after] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      expect([Number(after.stocked_quantity), Number(after.reserved_quantity)])
+        .toEqual([Number(before.stocked_quantity) - quantity, Number(before.reserved_quantity)])
+      expect([response.status, response.data.results[0].status, probes]).toEqual([200, 'applied', 1])
+      const [order] = await liveOrders(sale.payload.clientOrderId)
+      expect(order.metadata).toMatchObject({ tally_stock_take_back_started: true, tally_stock_topups_reversed: true })
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(`order ${order.id} took its stock top-up back, but the lock release failed: unlock probe`))
+      await inventory.adjustInventory(data.inventoryC, data.berlinId, quantity)
+    })
+
     it('ignores a pending top-up whose outcome is unknown', async () => {
       const inventory = container.resolve(Modules.INVENTORY)
       const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
@@ -586,7 +618,7 @@ medusaIntegrationTestRunner({
         await expectRejectedAndReversed(sale, orderId)
       })
 
-      it('a take-back that throws after its adjustment committed is marked reversed, so the next reject never takes the stock back twice', async () => {
+      it('a take-back whose unlock throws after its adjustment committed still succeeds, so the reject completes and the stock is taken back once', async () => {
         const before = await levelC()
         const sale = saleOfC()
         const { orderId } = await parkLiveOrder(sale, 1)
@@ -596,12 +628,40 @@ medusaIntegrationTestRunner({
           await execute(...args)
           throw new Error('unlock probe')
         }) as never)
-        await expect(resolve(sale.id, 'reject')).rejects.toMatchObject({ message: 'unlock probe' })
-        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin', result: null })
-        expect(await levelC()).toEqual([before[0], before[1] + 2])
         await resolve(sale.id, 'reject')
         expect(await levelC()).toEqual(before)
         await expectRejectedAndReversed(sale, orderId)
+        await expect(resolve(sale.id, 'reject')).rejects.toThrow('not needs_admin')
+        expect(await levelC()).toEqual(before)
+      })
+
+      it('tally-ledger-resolve destroys a connection whose unlock failed before the pool gets it back, disposed', async () => {
+        const { sale } = await parkLiveOrder()
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        const acquire = knex.client.acquireConnection.bind(knex.client)
+        let locked: { __knex__disposed?: unknown } | undefined
+        let probed = 0
+        // Background work shares the pool, so the probe fails the first sale unlock on whichever connection runs it.
+        jest.spyOn(knex.client, 'acquireConnection').mockImplementation(async () => {
+          const connection = await acquire()
+          if (jest.isMockFunction(connection.query)) return connection
+          const query = connection.query.bind(connection)
+          jest.spyOn(connection, 'query').mockImplementation((...args: unknown[]) => {
+            if (locked || !String(args[0]).includes('pg_advisory_unlock')) return query(...args)
+            locked = connection
+            probed = connection.query.mock.invocationCallOrder.slice(-1)[0]
+            return Promise.reject(new Error('unlock probe'))
+          })
+          return connection
+        })
+        const destroy = jest.spyOn(knex.client, 'destroyRawConnection')
+        const release = jest.spyOn(knex.client, 'releaseConnection')
+        await resolve(sale.id, 'apply')
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', needs_admin_reason: null })
+        // Calls on that connection after the probe; the pool's validator may destroy it again once it is back.
+        const order = (spy: jest.SpyInstance) => spy.mock.invocationCallOrder.filter((at, index) => at > probed && spy.mock.calls[index][0] === locked)
+        expect([order(release).length, order(destroy)[0] < order(release)[0]]).toEqual([1, true])
+        expect(locked!.__knex__disposed).toBeTruthy()
       })
 
       it('tally-ledger-resolve re-reads the row under the sale lock and refuses, touching no order, when it changed', async () => {

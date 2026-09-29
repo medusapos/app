@@ -20,6 +20,7 @@ export default async function tallyLedgerResolve({ container, args }: ExecArgs) 
   const reason = row.needs_admin_reason as { orderId: string; clientOrderId: string }
   // The same per-sale lock execute.ts holds, so no order.create of this sale runs while it is resolved.
   const connection = await knex.client.acquireConnection()
+  let unlocked = true
   try {
     const { rows: [{ locked }] } = await connection.query(
       "select pg_try_advisory_lock(hashtext('tally_order'), hashtext($1)) as locked", [reason.clientOrderId])
@@ -33,10 +34,18 @@ export default async function tallyLedgerResolve({ container, args }: ExecArgs) 
       try {
         await connection.query("select pg_advisory_unlock(hashtext('tally_order'), hashtext($1))", [reason.clientOrderId])
       } catch (error) {
+        unlocked = false
         logger.error(`tally_ledger_resolve: could not unlock sale ${reason.clientOrderId}: ${error.message}`)
       }
     }
   } finally {
+    // A session whose unlock failed may still hold the sale lock, so it is closed and marked disposed: the pool
+    // only frees a borrowed connection on release (its destroy waits for it), and its validator drops a disposed one.
+    if (!unlocked) {
+      connection.__knex__disposed = 'sale unlock failed'
+      await knex.client.destroyRawConnection(connection).catch((error: Error) =>
+        logger.error(`tally_ledger_resolve: could not close the connection of sale ${reason.clientOrderId}: ${error.message}`))
+    }
     await knex.client.releaseConnection(connection)
   }
 }
