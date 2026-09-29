@@ -14,21 +14,25 @@ import type TallySyncModuleService from '../modules/tally-sync/service'
 let queue: Promise<unknown> = Promise.resolve()
 
 export default async function tallySyncChanges({ event: { name, data }, container }: SubscriberArgs<{ id: string }>) {
+  const isLockTimeout = (error: unknown) => (error as { code?: string } | undefined)?.code === '55P03'
+    || String(error).includes('canceling statement due to lock timeout')
   let logger: Logger | undefined
   try {
     logger = container.resolve(ContainerRegistrationKeys.LOGGER)
     const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
     if (!ledger.getPluginOptions().experimentalSync) return
     const sync = container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE)
-    const link = queue.then(() => sync.recordEvent(name, data.id))
-    queue = link.catch(() => undefined) // caught here so one failed event never breaks the chain
-    const written = await link
+    const record = () => {
+      const link = queue.then(() => sync.recordEvent(name, data.id))
+      queue = link.catch(() => undefined) // caught here so one failed event never breaks the chain
+      return link
+    }
+    // A lock timeout sends the event to the back of the same queue exactly once more; no other error is retried.
+    const written = await record().catch(error => isLockTimeout(error) ? record() : Promise.reject(error))
     if (!written) logger.debug(`tally_sync: no products resolved for ${name} (${data.id})`)
   } catch (error) {
-    const isLockTimeout = (error as { code?: string } | undefined)?.code === '55P03'
-      || String(error).includes('canceling statement due to lock timeout')
     const message = `tally_sync: failed to record ${name} (${data.id}): ${error}`
-    logger?.error(isLockTimeout ? `tally_sync: journal lock timeout: ${message}` : message)
+    logger?.error(isLockTimeout(error) ? `tally_sync: journal lock timeout: ${message} (dropped after one retry)` : message)
   }
 }
 

@@ -13,9 +13,12 @@ import { resolveProductChanges } from './resolve-products'
 const JOURNAL_LOCK = 2026093009
 
 // Bounds the wait for JOURNAL_LOCK so one stuck holder (a long backfill, an idle-in-transaction connection) cannot
-// stall every queued event indefinitely. A timeout is an error: the subscriber logs it and moves on, so a
-// timed-out event is logged but not journaled -- the digest audit (P3) is the backstop for that gap.
+// stall every queued event indefinitely. A timeout is an error: the subscriber retries the event once, then logs it as
+// dropped -- the digest audit (P3) is the backstop for that gap. It is set with the lock in one statement; when record
+// runs inside a caller's transaction, the timeout stays set for the rest of that transaction.
 const JOURNAL_LOCK_TIMEOUT = '10s'
+let journalLockTimeout = JOURNAL_LOCK_TIMEOUT // for tests only, the setter shortens it; no argument restores the default
+export const setJournalLockTimeoutForTests = (timeout = JOURNAL_LOCK_TIMEOUT) => { journalLockTimeout = timeout }
 
 // Transaction advisory lock key for the price-list watcher, so concurrent runs never scan the same window twice.
 // Lock order is always PRICE_LIST_WATCHER_LOCK, then JOURNAL_LOCK (inside record); nothing takes them the other way.
@@ -31,8 +34,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     const unique = [...new Map(changes.map(c => [JSON.stringify([c.collection, c.objectId, c.op]), c])).values()]
     if (!unique.length) return 0
     return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
-      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
       for (let i = 0; i < unique.length; i += RECORD_CHUNK_SIZE) {
         const chunk = unique.slice(i, i + RECORD_CHUNK_SIZE)
         await em.execute(
@@ -48,8 +50,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   @InjectManager()
   async recordEvent(eventName: string, id: string, @MedusaContext() sharedContext: Context = {}): Promise<number> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
-      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
       const changes = await resolveProductChanges(em.getTransactionContext<Knex.Transaction>()!, eventName, id)
       return this.record(changes.map(({ productId, op }) => ({ collection: 'products', objectId: productId, op })), { manager: em })
     })
@@ -100,8 +101,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   @InjectManager()
   async initialize(productIds: string[], @MedusaContext() sharedContext: Context = {}): Promise<{ epoch: string; created: boolean }> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
-      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
       const [state] = await em.execute("select epoch from tally_sync_state where id = 'sync'")
       if (state) return { epoch: state.epoch, created: false }
       const epoch = randomUUID()
@@ -124,8 +124,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   async watchPriceLists(@MedusaContext() sharedContext: Context = {}): Promise<number> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
       // A run that times out waiting is logged by the caller and retried on the next tick or minute.
-      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
-      await em.execute('select pg_advisory_xact_lock(?)', [PRICE_LIST_WATCHER_LOCK])
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, PRICE_LIST_WATCHER_LOCK])
       // Timestamps stay as text so the microsecond precision of Postgres survives the round trip.
       const [state] = await em.execute(`select now()::text as now, price_list_watermark::text as watermark,
         price_window_run_at::text as window_run_at from tally_sync_state where id = 'sync'`)

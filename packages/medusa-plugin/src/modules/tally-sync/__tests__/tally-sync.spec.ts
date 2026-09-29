@@ -1,6 +1,6 @@
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils'
 import { HORIZON, TALLY_SYNC_MODULE } from '..'
-import TallySyncModuleService from '../service'
+import TallySyncModuleService, { setJournalLockTimeoutForTests } from '../service'
 
 moduleIntegrationTestRunner<TallySyncModuleService>({
   moduleName: TALLY_SYNC_MODULE,
@@ -111,6 +111,39 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       expect(page.head).toBeGreaterThanOrEqual(page.changes.at(-1)!.seq)
       const next = await service.changesSince({ since: page.head, limit: 10 })
       expect([...page.changes, ...next.changes].map(change => change.id)).toEqual(expect.arrayContaining(['before', 'between']))
+    })
+
+    it('changesSince reports head as at least the last seq when its head read is older than a committed row', async () => {
+      const staleHead = await service.head()
+      await service.record([{ ...product, objectId: 'after-head' }])
+      const [last] = await sql('select seq from tally_change order by seq desc limit 1')
+      jest.spyOn(TallySyncModuleService.prototype, 'head').mockResolvedValueOnce(staleHead)
+      const page = await service.changesSince({ since: 0, limit: 10 })
+      jest.restoreAllMocks()
+      expect(page.head).toBeGreaterThanOrEqual(Number(last.seq))
+      expect(page.changes.map(change => change.id)).toContain('after-head')
+    })
+
+    it('record rejects with 55P03 when another connection holds the journal lock past the timeout', async () => {
+      let release!: () => void
+      const released = new Promise<void>(resolve => { release = resolve })
+      let locked!: () => void
+      const holding = new Promise<void>(resolve => { locked = resolve })
+      const holder = MikroOrmWrapper.forkManager().transactional(async em => {
+        await service.record([{ ...product, objectId: 'holder' }], { manager: em })
+        locked()
+        await released
+      })
+      await Promise.race([holding, holder])
+      setJournalLockTimeoutForTests('200ms')
+      try {
+        await expect(service.record([{ ...product, objectId: 'blocked' }])).rejects.toMatchObject({ code: '55P03' })
+      } finally {
+        setJournalLockTimeoutForTests()
+        release()
+        await holder
+      }
+      expect((await sql('select object_id from tally_change')).map(row => row.object_id)).toEqual(['holder'])
     })
 
     it('recordEvent returns 0 and writes nothing for an event it does not resolve', async () => {
