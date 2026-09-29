@@ -133,7 +133,9 @@ ones only when every session and payment uses `pp_system_default` (the provider
 canceled fulfilment means an admin acted on the order. Resume then throws before any write,
 and the ledger row becomes `needs_admin`, which the reclaim never matches; the till gets
 `409 in_progress`. The `tally-ledger-resolve` exec script either reopens the row for a resume
-(`apply`) or stores a `platform_error` rejection with `platformCode: 'needs_admin_rejected'` (`reject`).
+(`apply`) or cancels the sale's live order and then stores a `platform_error` rejection with
+`platformCode: 'TALLY_ADMIN_REJECTED'` (`reject`). A cancel Medusa refuses leaves the row `needs_admin`,
+so a rejected command never has a live order.
 
 ## Consequences
 

@@ -139,11 +139,14 @@ See [the lease ADR](../../docs/adr/0001-command-ledger-lease.md).
 
 `needs_admin`: a reclaimed `order.create` that finds its order in a state the recipe never creates (a refund, a partial
 capture, a non-system payment provider or a canceled fulfilment) stops before any write. The row is parked with
-`needs_admin_reason` (`{ orderId, detail }`) and one error log line, `claim` never reclaims it, and the till gets `409 in_progress`
+`needs_admin_reason` (`{ orderId, clientOrderId, detail }`) and one error log line, `claim` never reclaims it, and the till gets `409 in_progress`
 on every resend. The script builds to `.medusa/server/src/scripts/tally-ledger-resolve.js` (checked after `npm run build`);
 from the store's directory an admin runs `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-resolve.js <commandId> apply|reject [message]`:
-`apply` (order fixed) makes the row reclaimable at once, so the next resend resumes it; `reject` stores a `platform_error`
-rejection (`data.platformCode: 'needs_admin_rejected'`) that resends replay. See the ADR 0003 amendment of 2026-09-29.
+`apply` (order fixed) makes the row reclaimable at once, so the next resend resumes it. `reject` first cancels the sale's
+live order with `cancelOrderWorkflow`, then stores a `platform_error` rejection (`data.platformCode: 'TALLY_ADMIN_REJECTED'`)
+that resends replay; a new command id for the same sale then creates a new order. If Medusa refuses the cancel (for example
+an uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `needs_admin`: clean the order up by hand and
+run `reject` again. See the ADR 0003 amendment of 2026-09-29.
 
 ## Registers
 

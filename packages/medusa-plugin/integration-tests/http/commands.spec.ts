@@ -2,12 +2,16 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import {
+  convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, type CreateOrderWorkflowInput,
+} from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
+import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
@@ -478,7 +482,7 @@ medusaIntegrationTestRunner({
       it('a resume refused as needs_admin answers 409, parks the row with its reason, and logs one line', async () => {
         const { sale, log } = await park()
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
-          status: 'needs_admin', needs_admin_reason: { orderId: 'order_admin', detail },
+          status: 'needs_admin', needs_admin_reason: { orderId: 'order_admin', clientOrderId: sale.payload.clientOrderId, detail },
         })
         expect(log.mock.calls.filter(([line]) => String(line).includes('needs admin'))).toEqual([
           [`tally order.create needs admin: command ${sale.id}, order order_admin: ${detail}`],
@@ -495,16 +499,63 @@ medusaIntegrationTestRunner({
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
       })
 
-      it('tally-ledger-resolve reject stores a platform_error rejection that the resend replays', async () => {
-        const { sale } = await park()
+      // A converted order whose collection an admin partially captured: the real resume refuses it.
+      async function parkLiveOrder() {
+        const sale = command()
+        const planned = planOrderCreate(sale.payload, {
+          customer: null, commandId: sale.id, salesChannelId: data.channelId,
+          region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+          location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+          variants: { [data.variantA]: { id: data.variantA } },
+        })
+        if (!planned.ok) throw new Error('Expected a plan')
+        const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+        await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+        const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({ input: { order_id: draft.id, amount: 10 } })
+        await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
+        const response = await post([sale])
+        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
+        return { sale, orderId: draft.id }
+      }
+
+      it('tally-ledger-resolve reject cancels the live order and stores a TALLY_ADMIN_REJECTED platform_error that the resend replays', async () => {
+        const { sale, orderId } = await parkLiveOrder()
         await resolve(sale.id, 'reject', 'Refunded in the admin')
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+        const [order] = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId })
+        expect(order.status).toBe('canceled')
         const rejection = { id: sale.id, status: 'rejected', error: { code: 'platform_error', message: 'Refunded in the admin', data: {
-          platformCode: 'needs_admin_rejected', platformMessage: 'Refunded in the admin', orderId: 'order_admin',
+          platformCode: 'TALLY_ADMIN_REJECTED', platformMessage: 'Refunded in the admin', orderId,
         } } }
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'rejected', result: rejection })
         const response = await post([sale])
         expect([response.status, response.data.results]).toEqual([200, [rejection]])
         await expect(resolve(sale.id, 'apply')).rejects.toThrow('not needs_admin')
+      })
+
+      it('after a reject, a new command id for the same clientOrderId is applied as a new order', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        await resolve(sale.id, 'reject')
+        const retry = { ...command(), payload: sale.payload }
+        const response = await post([retry])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: retry.id, status: 'applied' })]])
+        const live = await liveOrders(sale.payload.clientOrderId)
+        expect(live).toEqual([expect.objectContaining({ id: response.data.results[0].serverRefs.orderId, status: 'completed' })])
+        expect(live[0].id).not.toBe(orderId)
+      })
+
+      it('tally-ledger-resolve reject refuses when the order cannot be cancelled and leaves the row needs_admin', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        // The package exports block deep imports; the module's own export is the one core-flows' getters read.
+        const cancel = require(path.join(path.dirname(require.resolve('@medusajs/core-flows')), 'order/workflows/cancel-order'))
+        jest.spyOn(cancel, 'cancelOrderWorkflow').mockReturnValue({ run: async () => { throw new Error('cancel probe') } })
+        const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+        await expect(resolve(sale.id, 'reject')).rejects.toThrow('cancel probe')
+        expect(log).toHaveBeenCalledWith(
+          `tally_ledger_resolve: reject refused for command ${sale.id}: order ${orderId} could not be cancelled: cancel probe`)
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin', result: null })
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
       })
 
       it('tally-ledger-resolve apply makes the row reclaimable and the resend completes the order', async () => {

@@ -74,7 +74,9 @@ export async function executeOrderCreate(
           })
         } catch (error) {
           if (isNeedsAdminError(error)) {
-            await ledger.markNeedsAdmin(id, claim.claimToken, { orderId: error.orderId, detail: error.detail })
+            await ledger.markNeedsAdmin(id, claim.claimToken, {
+              orderId: error.orderId, clientOrderId: command.payload.clientOrderId, detail: error.detail,
+            })
             completed = true
             container.resolve(ContainerRegistrationKeys.LOGGER)
               .error(`tally order.create needs admin: command ${id}, order ${error.orderId}: ${error.detail}`)
