@@ -9,7 +9,11 @@ import { mergeStockTopUps, planStockTopUp } from './stock'
 import { StoreConfigurationError } from './store-configuration-error'
 import { tallyOrderCreateWorkflow, type StockTopUp } from './workflow'
 
-export type TallyPluginOptions = { salesChannelId?: string; locationId?: string; shippingOptionId?: string }
+export type TallyPluginOptions = {
+  salesChannelId?: string; locationId?: string; shippingOptionId?: string
+  // Opt in to the experimental product change journal; disabled by default.
+  experimentalSync?: boolean
+}
 
 export async function runOrderCreate(
   container: MedusaContainer,
