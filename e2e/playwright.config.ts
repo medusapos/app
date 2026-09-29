@@ -17,13 +17,13 @@ export default defineConfig({
   reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
   use: { baseURL: appUrl || appLocalUrl, trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
-  // Outside CI, reuse only stays valid within this same checkout: the derived ports and
-  // database below are unique to it, so a reused server is always this checkout's own.
+  // Reuse only on request (E2E_REUSE=1, never in CI), since a reused server may be built from
+  // older code; the derived ports and database are unique to this checkout, so it is always its own.
   webServer: appUrl ? undefined : [
     {
       command: 'bash e2e/store/start.sh', cwd: '..',
       url: `${backendUrl}/health`, timeout: 600_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: !process.env.CI && process.env.E2E_REUSE === '1',
       env: {
         E2E_BACKEND_PORT: String(E2E_RUN.backendPort),
         E2E_APP_PORT: String(E2E_RUN.appPort),
@@ -33,7 +33,7 @@ export default defineConfig({
     {
       command: `EXPO_PUBLIC_MEDUSA_URL=${backendUrl} EXPO_PUBLIC_E2E_DEBUG=1 CI=1 EXPO_NO_TELEMETRY=1 pnpm --filter @medusapos/expo build:web --clear && node e2e/serve.mjs`,
       cwd: '..', url: appLocalUrl, timeout: 300_000,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: !process.env.CI && process.env.E2E_REUSE === '1',
       env: { E2E_APP_PORT: String(E2E_RUN.appPort) },
     },
   ],

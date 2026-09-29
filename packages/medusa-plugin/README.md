@@ -17,7 +17,8 @@ Module integration tests need local Postgres; set `DB_HOST`, `DB_USERNAME`, and 
 The test helper defaults to role `postgres`; use `DB_USERNAME=claude` if that is your local role.
 Set `MEDUSA_DISABLE_TELEMETRY=true` and `XDG_CONFIG_HOME=$PWD/.medusa/xdg` for Medusa commands.
 HTTP integration tests boot the apps in `integration-tests/app` and `integration-tests/plugin-app`
-on random ports and create/drop their own temporary databases; they do not use the dev store.
+and create/drop their own temporary databases; they do not use the dev store.
+CI uses random ports; outside CI each checkout gets its own port block (40000–43999, one per jest worker), and setting `PORT` overrides it.
 The HTTP test script builds the plugin first so `plugin-app` loads its published output.
 
 ## Command endpoint

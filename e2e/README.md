@@ -180,8 +180,8 @@ Chromium. Failures upload `test-results` and the HTML `playwright-report`.
 Global teardown force-drops only `medusapos_e2e` after the run; a failed drop logs a warning without failing the run.
 
 Every fresh harness start destroys only `medusapos_e2e`. It never touches the
-shared dev store. Playwright stops the servers it starts. Outside CI, already
-running e2e servers are reused: stop those yourself before repeating the full
+shared dev store. Playwright stops the servers it starts. Outside CI, `E2E_REUSE=1`
+reuses an already-running server; stop it yourself before repeating the full
 suite, since the short-sale scenario requires E2E-5 to start at 2. Traces are saved on first retry;
 results and temporary build/pack artifacts are ignored by Git.
 
