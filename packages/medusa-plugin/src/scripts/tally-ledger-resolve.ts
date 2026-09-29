@@ -18,12 +18,32 @@ export default async function tallyLedgerResolve({ container, args }: ExecArgs) 
   const row = await knex('tally_command').where({ id }).first()
   if (row?.status !== 'needs_admin') throw new Error(`Command ${id} is ${row?.status ?? 'missing'}, not needs_admin`)
   const reason = row.needs_admin_reason as { orderId: string; clientOrderId: string }
+  // The same per-sale lock execute.ts holds, so no order.create of this sale runs while it is resolved.
+  const connection = await knex.client.acquireConnection()
+  try {
+    const { rows: [{ locked }] } = await connection.query(
+      "select pg_try_advisory_lock(hashtext('tally_order'), hashtext($1)) as locked", [reason.clientOrderId])
+    if (!locked) {
+      logger.error(`tally_ledger_resolve: sale ${reason.clientOrderId} is in progress; try again`)
+      throw new Error(`Sale ${reason.clientOrderId} is in progress; nothing written`)
+    }
+    await resolveHeld(container, id, action, message, reason)
+      .finally(() => connection.query("select pg_advisory_unlock(hashtext('tally_order'), hashtext($1))", [reason.clientOrderId]))
+  } finally {
+    await knex.client.releaseConnection(connection)
+  }
+}
+
+async function resolveHeld(container: ExecArgs['container'], id: string, action: string, message: string,
+  reason: { orderId: string; clientOrderId: string }) {
+  const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+  const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   if (action === 'reject') {
     // A rejected command must never leave a live order behind, so the sale's live order is canceled first.
-    const live = await knex('order').select('id', 'metadata').whereRaw("metadata->>'tally_client_id' = ?", [reason.clientOrderId])
-      .whereNull('deleted_at').whereNot('status', 'canceled')
-    for (const order of live) {
-      // Cancelling releases reservations but not the plugin's top-up, so an unreversed top-up is taken back first.
+    const orders = await knex('order').select('id', 'status', 'metadata').whereRaw("metadata->>'tally_client_id' = ?", [reason.clientOrderId])
+      .whereNull('deleted_at')
+    for (const order of orders) {
+      // Cancelling releases reservations but not the plugin's top-up, so an unreversed one is taken back first, hand-cancelled or not.
       if (order.metadata?.tally_stock_topups && !order.metadata.tally_stock_topups_reversed) {
         try {
           await takeBackStockWorkflow(container).run({ input: { orderId: order.id } })
@@ -32,6 +52,7 @@ export default async function tallyLedgerResolve({ container, args }: ExecArgs) 
           throw error
         }
       }
+      if (order.status === 'canceled') continue
       try {
         await cancelOrderWorkflow(container).run({ input: { order_id: order.id } })
       } catch (error) {

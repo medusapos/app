@@ -37,7 +37,6 @@ it.each([
   const resumed = resumeOrderCreate(container({ is_draft_order: true, ...order }), 'order_1', 10, 'sloc_1', 'so_1')
   await expect(resumed).rejects.toThrow(NeedsAdminError)
   await expect(resumed).rejects.toMatchObject({ orderId: 'order_1', detail })
-  expect(mockRun).not.toHaveBeenCalledWith('convertDraftOrderWorkflow', expect.anything())
   expect(mockRun).not.toHaveBeenCalled()
 })
 
