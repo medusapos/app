@@ -1,7 +1,8 @@
 import path from 'node:path'
-import type { MedusaContainer } from '@medusajs/framework/types'
+import type { Logger, MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
+import tallySyncRescan from '../../src/scripts/tally-sync-rescan'
 import { TALLY_SYNC_MODULE } from '../../src/modules/tally-sync'
 import type TallySyncModuleService from '../../src/modules/tally-sync/service'
 import { ensureInitialized } from '../../src/modules/tally-sync/sync-state'
@@ -90,13 +91,70 @@ medusaIntegrationTestRunner({
         expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
     })
 
-    it('6. a later journal row for a different product does not stop the rescan from journaling an earlier direct write', async () => {
-      const { head, since } = await directWrite('product_variant', data.variantA, { title: 'Direct A' })
-      await container.resolve(Modules.PRODUCT).updateProducts(untouchedId, { title: 'Untouched updated' })
-      await settle()
-      expect((await sync.rescan(since))?.rows).toBeGreaterThanOrEqual(1)
-      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual(
-        expect.arrayContaining([expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })]))
+    it('6. a direct inventory-level write is journaled as an upsert for its product', async () => {
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const levelId = (await knex('inventory_level').where('inventory_item_id', data.inventoryA).select('id').first()).id
+      const { head, since } = await directWrite('inventory_level', levelId, { stocked_quantity: 42 })
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
+        expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
+    it('7. a direct option-value write is journaled as an upsert for its product', async () => {
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const valueId = (await knex('product_option_value as value')
+        .join('product_product_option as pivot', 'pivot.product_option_id', 'value.option_id')
+        .where('pivot.product_id', productId).select('value.id').first()).id
+      const { head, since } = await directWrite('product_option_value', valueId, { value: 'A2' })
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
+        expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
+    it('8. a direct sales-channel link write is journaled as an upsert for its product', async () => {
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const linkId = (await knex('product_sales_channel').where('product_id', productId).select('id').first()).id
+      const { head, since } = await directWrite('product_sales_channel', linkId, {})
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
+        expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
+    it('9. a direct inventory-item write is journaled as an upsert for its product', async () => {
+      const { head, since } = await directWrite('inventory_item', data.inventoryA, { title: 'Direct inventory item' })
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
+        expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
+    describe('the rescan script', () => {
+      const exitCodeBefore = process.exitCode
+
+      afterEach(() => { process.exitCode = exitCodeBefore })
+
+      it('10. a since without a timezone exits non-zero and logs the message', async () => {
+        const error = jest.spyOn(container.resolve<Logger>(ContainerRegistrationKeys.LOGGER), 'error').mockImplementation(() => undefined)
+        await tallySyncRescan({ container, args: ['2026-09-29T10:00:00'] })
+        expect(process.exitCode).toBe(1)
+        expect(error).toHaveBeenCalledWith(expect.stringContaining('since must include a timezone'))
+        error.mockRestore()
+      })
+
+      it('11. a missing since exits non-zero and logs the usage line', async () => {
+        const error = jest.spyOn(container.resolve<Logger>(ContainerRegistrationKeys.LOGGER), 'error').mockImplementation(() => undefined)
+        await tallySyncRescan({ container, args: [] })
+        expect(process.exitCode).toBe(1)
+        expect(error).toHaveBeenCalledWith(expect.stringContaining('usage: medusa exec'))
+        error.mockRestore()
+      })
+
+      it('12. a valid since journals the product', async () => {
+        const { head, since } = await directWrite('product_variant', data.variantA, { title: 'Direct via script' })
+        // An operator types an ISO timestamp, not Postgres's own `now()::text` rendering (no colon in its offset).
+        await tallySyncRescan({ container, args: [new Date(since).toISOString()] })
+        expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
+          expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+      })
     })
   },
 })

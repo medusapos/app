@@ -169,34 +169,46 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     })
   }
 
-  // Journals every product whose row, variants, prices, inventory levels, option values or sales-channel links were
-  // updated or deleted after the given since, catching up writes made
-  // outside the server. Price lists are the watcher's job. Returns null before initialization.
+  // Journals every product whose row, variants, prices, inventory items or levels, options, option values,
+  // inventory-item and price-set links, or sales-channel links were updated or deleted after the given since,
+  // catching up writes made outside the server. Price lists are the watcher's job. Returns null before
+  // initialization. Runs outside JOURNAL_LOCK: a journal row only means "re-fetch this product", so the scan's
+  // ordering relative to concurrent writers doesn't matter, and record() takes the lock itself for the inserts.
   @InjectManager()
   async rescan(since: string, @MedusaContext() sharedContext: Context = {}): Promise<{ since: string; rows: number } | null> {
-    return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
-      const [state] = await em.execute("select ?::timestamptz::text as since from tally_sync_state where id = 'sync'", [since])
-      if (!state) return null
-      const products: { id: string; deleted_at: Date | null }[] = await em.execute(`with changed as (
-          select id as product_id, updated_at, deleted_at from product
-          union all select product_id, updated_at, deleted_at from product_variant
-          union all select variant.product_id, price.updated_at, price.deleted_at from price
-            join product_variant_price_set as link on link.price_set_id = price.price_set_id
-            join product_variant as variant on variant.id = link.variant_id
-          union all select variant.product_id, level.updated_at, level.deleted_at from inventory_level as level
-            join product_variant_inventory_item as link on link.inventory_item_id = level.inventory_item_id
-            join product_variant as variant on variant.id = link.variant_id
-          union all select option.product_id, value.updated_at, value.deleted_at from product_option_value as value
-            join product_product_option as option on option.product_option_id = value.option_id
-          union all select product_id, updated_at, deleted_at from product_sales_channel)
-        select distinct product.id, product.deleted_at from changed join product on product.id = changed.product_id
-        where changed.updated_at > ?::timestamptz or changed.deleted_at > ?::timestamptz order by product.id`,
-      [state.since, state.since])
-      const rows = await this.record(products.map(product => ({
-        collection: 'products', objectId: product.id, op: product.deleted_at ? 'delete' as const : 'upsert' as const,
-      })), { manager: em })
-      return { since: state.since, rows }
-    })
+    const manager = sharedContext.manager as EntityManager
+    const [state] = await manager.execute("select ?::timestamptz::text as since from tally_sync_state where id = 'sync'", [since])
+    if (!state) return null
+    const products: { id: string; deleted_at: Date | null }[] = await manager.execute(`with changed as (
+        select id as product_id, updated_at, deleted_at from product
+        union all select product_id, updated_at, deleted_at from product_variant
+        union all select variant.product_id, price.updated_at, price.deleted_at from price
+          join product_variant_price_set as link on link.price_set_id = price.price_set_id
+          join product_variant as variant on variant.id = link.variant_id
+        union all select variant.product_id, level.updated_at, level.deleted_at from inventory_level as level
+          join product_variant_inventory_item as link on link.inventory_item_id = level.inventory_item_id
+          join product_variant as variant on variant.id = link.variant_id
+        union all select variant.product_id, item.updated_at, item.deleted_at from inventory_item as item
+          join product_variant_inventory_item as link on link.inventory_item_id = item.id
+          join product_variant as variant on variant.id = link.variant_id
+        union all select variant.product_id, link.updated_at, link.deleted_at
+          from product_variant_price_set as link join product_variant as variant on variant.id = link.variant_id
+        union all select variant.product_id, link.updated_at, link.deleted_at
+          from product_variant_inventory_item as link join product_variant as variant on variant.id = link.variant_id
+        union all select pivot.product_id, po.updated_at, po.deleted_at from product_option as po
+          join product_product_option as pivot on pivot.product_option_id = po.id
+        union all select product_id, updated_at, deleted_at from product_product_option
+        union all select option.product_id, value.updated_at, value.deleted_at from product_product_option_value as value
+          join product_product_option as option on option.id = value.product_product_option_id
+        union all select option.product_id, value.updated_at, value.deleted_at from product_option_value as value
+          join product_product_option as option on option.product_option_id = value.option_id
+        union all select product_id, updated_at, deleted_at from product_sales_channel)
+      select distinct product.id, product.deleted_at from changed join product on product.id = changed.product_id
+      where changed.updated_at > ?::timestamptz or changed.deleted_at > ?::timestamptz order by product.id`,
+    [state.since, state.since])
+    const rows = await this.record(products.map(product => ({
+      collection: 'products', objectId: product.id, op: product.deleted_at ? 'delete' as const : 'upsert' as const,
+    })), sharedContext)
+    return { since: state.since, rows }
   }
 }
