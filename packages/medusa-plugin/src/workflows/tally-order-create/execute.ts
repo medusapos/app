@@ -8,6 +8,7 @@ import { commandFingerprint } from './fingerprint'
 import type { StockTopUp } from './stock'
 import { payloadShapeErrors } from './payload-shape'
 import { runOrderCreate, type TallyPluginOptions } from './run'
+import { isNeedsAdminError } from './needs-admin-error'
 import { isStoreConfigurationError } from './store-configuration-error'
 
 export type ExecuteOutcome =
@@ -45,7 +46,7 @@ export async function executeOrderCreate(
           code: 'idempotency_mismatch', message: `Command ${id} was already used for a different payload.`,
         } } }
       }
-      if (claim.command.status === 'in_progress') return { kind: 'in_progress', id }
+      if (claim.command.status === 'in_progress' || claim.command.status === 'needs_admin') return { kind: 'in_progress', id }
       const result = parseCommandResult(claim.command.result)
       return { kind: 'result', result: claim.command.status === 'applied' ? { ...result, status: 'duplicate' } : result }
     }
@@ -72,6 +73,13 @@ export async function executeOrderCreate(
             claimToken: claim.claimToken, carriedTopUps: (claim.command.stock_topups_applied ?? []) as unknown as StockTopUp[],
           })
         } catch (error) {
+          if (isNeedsAdminError(error)) {
+            await ledger.markNeedsAdmin(id, claim.claimToken, { orderId: error.orderId, detail: error.detail })
+            completed = true
+            container.resolve(ContainerRegistrationKeys.LOGGER)
+              .error(`tally order.create needs admin: command ${id}, order ${error.orderId}: ${error.detail}`)
+            return { kind: 'in_progress', id }
+          }
           if (!isStoreConfigurationError(error)) throw error
           return { kind: 'result', result: { id, status: 'rejected', error: {
             code: 'store_configuration', message: error.message,

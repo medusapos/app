@@ -124,7 +124,7 @@ The `tally_ledger` module stores commands in `tally_command` with columns `id`
 (the client's UUIDv7 idempotency key), `type`, `fingerprint` (SHA-256 of canonical
 JSON of `{ type, version, payload }`), `claim_token`, `status`, nullable JSON `result`, and
 automatic `created_at`, `updated_at`, and `deleted_at` timestamps.
-Statuses are `in_progress` (the default), `applied`, and `rejected`.
+Statuses are `in_progress` (the default), `applied`, `rejected`, and `needs_admin`.
 `claim({ id, type, fingerprint }, context?)` atomically inserts or re-claims an
 `in_progress` command after a 120 s lease on `updated_at`, only for the same fingerprint.
 It returns `{ claimed: true, claimToken, command }` on success, otherwise
@@ -136,6 +136,14 @@ Stored results are parsed with the same validator when returned by claim or comp
 `release(id, claimToken, context?)` hard-deletes only an `in_progress` command
 with the current token. Stale tokens, finished commands and unknown ids are left alone.
 See [the lease ADR](../../docs/adr/0001-command-ledger-lease.md).
+
+`needs_admin`: a reclaimed `order.create` that finds its order in a state the recipe never creates (a refund, a partial
+capture, a non-system payment provider or a canceled fulfilment) stops before any write. The row is parked with
+`needs_admin_reason` (`{ orderId, detail }`) and one error log line, `claim` never reclaims it, and the till gets `409 in_progress`
+on every resend. The script builds to `.medusa/server/src/scripts/tally-ledger-resolve.js` (checked after `npm run build`);
+from the store's directory an admin runs `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-resolve.js <commandId> apply|reject [message]`:
+`apply` (order fixed) makes the row reclaimable at once, so the next resend resumes it; `reject` stores a `platform_error`
+rejection (`data.platformCode: 'needs_admin_rejected'`) that resends replay. See the ADR 0003 amendment of 2026-09-29.
 
 ## Registers
 

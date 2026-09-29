@@ -113,6 +113,28 @@ collection instead of trying to capture it, and when no other collection
 is left it creates a new one, as it does for an order with none, because
 the sale was paid at the till.
 
+## Amendment 2026-09-29: Forward, state-driven resume is the compensation mechanism
+
+Cross-pollination note for WCPOS v2's design (from TallyUI ADR-038's `platform_error` amendment).
+
+Medusa's recipe resumes a half-made order instead of rolling it back. Payment is marked paid
+because the money is already at the till, so there is nothing to refund. Every step reads the
+order's state and does only what is missing, so it is idempotent given the state it reads. A
+fully compensated (canceled) order is ignored by the dedupe lookup, and the retry starts afresh.
+
+Vendure's case differs: its ErrorResults are deterministic for the same command and state, so a
+platform refusal is stored as a `platform_error` rejection and replays as recorded. A Medusa
+resume failure is a thrown error (a race, a lock, a restart) and stays transient.
+
+Forward resume is safe only for states the recipe creates. Resume accepts a completed order,
+`not_paid`, `completed`, `canceled` and `failed` collections, and `authorized` or `awaiting`
+ones only when every session and payment uses `pp_system_default` (the provider
+`markPaymentCollectionAsPaid` uses). Any other collection status, any other provider, or a
+canceled fulfilment means an admin acted on the order. Resume then throws before any write,
+and the ledger row becomes `needs_admin`, which the reclaim never matches; the till gets
+`409 in_progress`. The `tally-ledger-resolve` exec script either reopens the row for a resume
+(`apply`) or stores a `platform_error` rejection with `platformCode: 'needs_admin_rejected'` (`reject`).
+
 ## Consequences
 
 Negative stock is visible to the merchant. A sales channel with several stock

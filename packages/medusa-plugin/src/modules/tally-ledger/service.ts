@@ -130,6 +130,20 @@ export default class TallyLedgerModuleService extends MedusaService({ TallyComma
     )
   }
 
+  /** Parks the command for an admin: claim() only reclaims in_progress rows, so the recipe never runs on it again. */
+  @InjectManager()
+  async markNeedsAdmin(
+    id: string, claimToken: string, reason: { orderId: string; detail: string },
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<boolean> {
+    const rows = await (sharedContext.manager as EntityManager).execute(
+      `update "tally_command" set "status" = 'needs_admin', "needs_admin_reason" = ?::jsonb, "updated_at" = now()
+       where "id" = ? and "status" = 'in_progress' and "claim_token" = ? returning "id"`,
+      [JSON.stringify(reason), id, claimToken]
+    )
+    return rows.length > 0
+  }
+
   @InjectManager()
   async release(
     id: string,

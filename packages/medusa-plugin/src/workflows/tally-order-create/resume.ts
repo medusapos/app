@@ -4,8 +4,12 @@ import {
   capturePaymentWorkflow, completeOrderWorkflow, convertDraftOrderWorkflow, createOrderFulfillmentWorkflow,
   createOrderPaymentCollectionWorkflow, markPaymentCollectionAsPaid,
 } from '@medusajs/medusa/core-flows'
+import { NeedsAdminError } from './needs-admin-error'
 import { fulfillmentGroups } from './plan'
 import { takeBackStockWorkflow } from './workflow'
+
+// The provider markPaymentCollectionAsPaid uses (core-flows systemPaymentProviderId).
+const SYSTEM_PROVIDER_ID = 'pp_system_default'
 
 export async function resumeOrderCreate(container: MedusaContainer, orderId: string,
   paymentAmount: number, locationId: string, shippingOptionId: string) {
@@ -13,10 +17,25 @@ export async function resumeOrderCreate(container: MedusaContainer, orderId: str
     entity: 'order', filters: { id: orderId }, fields: ['id', 'status', 'is_draft_order', 'metadata',
       'payment_collections.id', 'payment_collections.status', 'fulfillments.id', 'fulfillments.canceled_at',
       'payment_collections.payment_sessions.id', 'payment_collections.payment_sessions.status',
+      'payment_collections.payment_sessions.provider_id', 'payment_collections.payments.provider_id',
       'payment_collections.payments.id', 'payment_collections.payments.captured_at',
       'items.id', 'items.quantity', 'items.requires_shipping', 'items.detail.quantity', 'items.detail.fulfilled_quantity'],
   })
   if (order.status === 'completed') return
+  // Resume only drives states the recipe itself creates; an admin's refund, provider or cancel needs an admin.
+  for (const collection of order.payment_collections) {
+    if (['not_paid', 'completed', 'canceled', 'failed'].includes(collection.status)) continue
+    if (collection.status !== 'authorized' && collection.status !== 'awaiting') {
+      throw new NeedsAdminError(orderId, `payment collection ${collection.id} is ${collection.status}`)
+    }
+    const provider = [...collection.payment_sessions, ...collection.payments]
+      .find(item => item.provider_id !== SYSTEM_PROVIDER_ID)?.provider_id
+    if (provider !== undefined) {
+      throw new NeedsAdminError(orderId, `payment collection ${collection.id} uses provider ${provider}`)
+    }
+  }
+  const canceled = order.fulfillments.find(fulfillment => fulfillment.canceled_at)
+  if (canceled) throw new NeedsAdminError(orderId, `fulfillment ${canceled.id} is canceled`)
   if (order.is_draft_order) await convertDraftOrderWorkflow(container).run({ input: { id: orderId } })
   // ADR 0003 amendment, #22 review: skip dead collections; the sale was paid at the till.
   let collections = order.payment_collections.filter(collection => collection.status !== 'canceled' && collection.status !== 'failed')

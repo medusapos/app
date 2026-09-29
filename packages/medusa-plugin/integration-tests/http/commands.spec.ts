@@ -453,6 +453,71 @@ medusaIntegrationTestRunner({
       ])
     })
 
+    describe('needs_admin', () => {
+      const built = '../../.medusa/server/src'
+      const detail = 'payment collection pay_col_admin is refunded'
+      function spyRun() {
+        const run = require(`${built}/workflows/tally-order-create/run`) as typeof import('../../src/workflows/tally-order-create/run')
+        return jest.spyOn(run, 'runOrderCreate')
+      }
+      async function park() {
+        const { NeedsAdminError } = require(`${built}/workflows/tally-order-create/needs-admin-error`) as
+          typeof import('../../src/workflows/tally-order-create/needs-admin-error')
+        const spy = spyRun().mockRejectedValueOnce(new NeedsAdminError('order_admin', detail))
+        const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+        const sale = command()
+        const response = await post([sale])
+        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        return { sale, spy, log }
+      }
+      async function resolve(id: string, action: string, message?: string) {
+        const script = require(`${built}/scripts/tally-ledger-resolve`) as typeof import('../../src/scripts/tally-ledger-resolve')
+        await script.default({ container, args: [id, action, ...message ? [message] : []] })
+      }
+
+      it('a resume refused as needs_admin answers 409, parks the row with its reason, and logs one line', async () => {
+        const { sale, log } = await park()
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+          status: 'needs_admin', needs_admin_reason: { orderId: 'order_admin', detail },
+        })
+        expect(log.mock.calls.filter(([line]) => String(line).includes('needs admin'))).toEqual([
+          [`tally order.create needs admin: command ${sale.id}, order order_admin: ${detail}`],
+        ])
+      })
+
+      it('a needs_admin row past the lease is never reclaimed: the resend gets 409 without running the recipe', async () => {
+        const { sale, spy } = await park()
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        await knex('tally_command').where({ id: sale.id }).update({ updated_at: knex.raw("now() - interval '1 hour'") })
+        const response = await post([sale])
+        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        expect(spy).toHaveBeenCalledTimes(1)
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
+      })
+
+      it('tally-ledger-resolve reject stores a platform_error rejection that the resend replays', async () => {
+        const { sale } = await park()
+        await resolve(sale.id, 'reject', 'Refunded in the admin')
+        const rejection = { id: sale.id, status: 'rejected', error: { code: 'platform_error', message: 'Refunded in the admin', data: {
+          platformCode: 'needs_admin_rejected', platformMessage: 'Refunded in the admin', orderId: 'order_admin',
+        } } }
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'rejected', result: rejection })
+        const response = await post([sale])
+        expect([response.status, response.data.results]).toEqual([200, [rejection]])
+        await expect(resolve(sale.id, 'apply')).rejects.toThrow('not needs_admin')
+      })
+
+      it('tally-ledger-resolve apply makes the row reclaimable and the resend completes the order', async () => {
+        const { sale, spy } = await park()
+        await resolve(sale.id, 'apply')
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', needs_admin_reason: null })
+        spy.mockRestore()
+        const response = await post([sale])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: sale.id, status: 'applied' })]])
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ status: 'completed' })])
+      })
+    })
+
     it('validates all envelopes before claiming any command', async () => {
       const sale = command()
       const response = await post([sale, { ...command(), deviceId: undefined }])
