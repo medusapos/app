@@ -161,3 +161,34 @@ TallyUI registers c2 syncs a till's drawer to the store: sessions, cash movement
 - **`GET /tally/v1/registers/{id}`** (the drawer id) returns `{ counters, session? }`: the register's counters, plus its latest session (the non-closed one first) with `expected` and `salesCount`. An unknown register is a `404`. It uses the same admin authentication and CORS as the command endpoint.
 
 **The naming trap:** `order.create`'s `registerId`, stored as order metadata `tally_register_id`, is the **till's device id** (ADR 0017). The register commands, the `tally_register` tables and `/tally/v1/registers/{id}` mean the **drawer**. Never join the two.
+
+## Experimental sync (G4)
+
+This is a change journal and two read routes for TallyUI's G4 sync experiment. The design is [ADR 0020](../../docs/adr/0020-medusa-side-of-g4-sync.md), and the event evidence is the [G4 events spike](../../docs/spikes/g4-medusa-events.md). **It's experimental and unversioned:** the route shapes and the `sync: [1]` capability may change without a version bump until TallyUI's G2 names the driver interface. **It's off by default.**
+
+- **The switch** is the plugin option `experimentalSync: true`. When it's off, the subscriber writes nothing, both routes answer `404`, and `/tally/v1/info` doesn't list `sync`. The dev store reads it from `TALLY_EXPERIMENTAL_SYNC=1`.
+- **The `tally_sync` module** keeps:
+  - a `tally_change` journal (a gap-free `bigserial` `seq`, the collection, the object id, and `upsert` or `delete`);
+  - a one-row `tally_sync_state` (the epoch and the price-list watermark).
+
+  The first route call mints the epoch and backfills one `upsert` row per live product, once. There's no retention in G4.
+- **What feeds the journal:**
+  - One subscriber listens to the module entity events for products, variants, options and option values, prices, inventory levels and items, and to the product↔sales-channel, variant↔price-set and variant↔inventory-item link events. It resolves each to its product ids. The op is `delete` when the product is soft-deleted, `upsert` otherwise.
+  - **Price lists emit no event** when they're updated, change status, or start or end. A watcher covers them: it runs on every `/changes/tick` (at most once every 5 s per process) and every minute as a scheduled job. It journals the products of any price list whose `updated_at` passed the watermark, or whose `starts_at` or `ends_at` fell since the last run.
+- **`GET /tally/v1/changes?since=&limit=&collections=&epoch=`** returns `{ epoch, head, horizon, changes: [{ seq, collection, id, op, revision }], more }`. A cursor from another epoch, or one ahead of `head`, gets `410 { code: 'cursor_expired', epoch, head }`.
+- **`GET /tally/v1/changes/tick?since=&epoch=`** returns `304` when nothing changed, otherwise `{ epoch, head, horizon }`.
+- Both routes use the same admin authentication and CORS as the command endpoint.
+
+**Only writes made by the server (or its workers) are journaled.** Events reach subscribers in the process that wrote. On the local bus they never leave it, and on the Redis bus they're dropped at the emitter when that process has no subscriber for them (spike findings).
+- **`medusa exec` scripts are not journaled.** On the local bus, 5 of 5 direct price writes from `medusa exec` committed, and none reached the journal: no subscriber ran before the script exited.
+- **Catalogue changes made by a script** reach tills only through a later edit of the same products, or through a resync. Before initialization, the install backfill covers them.
+- **A demo reset** restores the journal with the database, so tills see either a new epoch or a cursor ahead of `head`. Both answer `410 cursor_expired`, and the till resyncs.
+
+**Journal ordering:** every journal write takes one advisory lock, so `seq` order is commit order and a cursor never skips a row. The lock wait is capped at 10 s. An event that times out is retried once, then logged as `tally_sync: journal lock timeout: … dropped` with its event name and id.
+
+**Not covered**, so these reach tills only through a later edit (or, from P3, the digest audit):
+- writes from `medusa exec` scripts or any other process that doesn't run the server, and raw SQL;
+- rows Medusa hard-deletes (a price removed through a price-set update, option values, product↔option links), when no sibling event fires. Every admin workflow measured does fire one.
+- a price-list change whose transaction commits after the watermark has already passed its `updated_at`;
+- an event dropped after its lock-timeout retry;
+- an event lost if the process crashes between the commit and the subscriber (ADR 0020, E2.1).
