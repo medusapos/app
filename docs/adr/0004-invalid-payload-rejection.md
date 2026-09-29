@@ -75,7 +75,7 @@ Only errors raised before any write are safe to reject. **Don't widen this rule 
 An applied id always answers its recorded result before any check that could refuse it, so orders applied before a check existed are never refused on resend. `invalid_payload` stays deterministic on the bytes and unstored.
 The bounds and NUL rule match TallyUI's shared checks (`payloadBoundErrors` for the lengths, after the replay lookup; `payloadShapeErrors` for types and NUL). Lengths count UTF-16 code units on both sides, and the till's clamp stays within them without splitting a surrogate pair: `customer.email` is at most 254; `clientOrderId`, `createdAt`, `currency`, line `clientLineId`, `variantId`, `title`, payment `clientPaymentId`, `method`, `reference`, `registerId`, `cashierRef` and `locationId` are at most 255. The existing `customer.customerId` (64) and `sessionId` (36) bounds remain. All these string fields refuse U+0000 before replay.
 A read-only collision pre-check before the claim is optional; the check under the lock is authoritative.
-The replay read answers only a finished row. An `in_progress` row falls through, so the new bounds apply to an
+An `in_progress` row with a matching fingerprint falls through the replay read, so the new bounds apply to an
 in-flight orphan too: a sale claimed before this change, whose payload breaks a new bound and whose worker died,
 gets `invalid_payload` on resend and its half-made order is not resumed under that id. This is accepted: it needs a
 row in flight across the deploy, and the till already bounds these fields.

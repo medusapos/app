@@ -185,7 +185,7 @@ command answers 503 rather than taking over until that lease expires (`CLAIM_LEA
 The live-order lookup skips canceled orders, so after an admin reject (which cancels the order) a retry under a new command id is a new sale; Medusa has no unique constraint on `metadata.tally_client_id`, so no id has to be released.
 
 An applied id always answers its recorded result before any check that could refuse it; orders applied before a check existed are never refused on resend.
-Version rules govern new work only: `unsupported_version` comes after the replay read, so an applied id resent at any version answers its recorded result.
+Version rules govern new work only: `unsupported_version` comes after the replay read, so an applied id resent at its recorded version, even one no longer supported, answers its recorded result (a different version changes the fingerprint and answers `idempotency_mismatch`).
 
 ## Consequences
 
