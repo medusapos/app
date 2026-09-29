@@ -79,6 +79,8 @@ async function resolveHeld(container: ExecArgs['container'], id: string, action:
           throw error
         }
       }
+      // Only the order this command parked was never placed; an earlier order of the sale an admin canceled keeps counting.
+      if (order.id !== reason.orderId) continue
       try {
         const service = container.resolve(Modules.ORDER)
         const { metadata } = await service.retrieveOrder(order.id)

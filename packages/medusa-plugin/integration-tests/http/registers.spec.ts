@@ -343,6 +343,49 @@ medusaIntegrationTestRunner({
       expect(closed.data.results[1].register.closure).toMatchObject({ expected: { cash: 1100 }, variance: { cash: 0 } })
     })
 
+    it('rejecting a new command for a sale marks only its parked order, and the order an admin canceled by hand still counts once', async () => {
+      const data = await seed(container)
+      const opening = open()
+      const sessionId = opening.payload.sessionId
+      const first = sale(data.variantB, sessionId)
+      const applied = await post([opening, first])
+      expect(applied.data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const handCanceled = applied.data.results[1].serverRefs.orderId
+      await knex('order').where({ id: handCanceled }).update({ status: 'canceled' })
+      expect(await loadSessionFigures(container, sessionId)).toEqual({ expected: { cash: 1100 }, salesCount: 1 })
+      const order = { ...first, id: randomUUID() }
+      const planned = planOrderCreate(order.payload as Parameters<typeof planOrderCreate>[0], {
+        customer: null, commandId: order.id, salesChannelId: data.channelId,
+        region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+        location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+        variants: { [data.variantB]: { id: data.variantB } },
+      })
+      if (!planned.ok) throw new Error('Expected a plan')
+      const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+      await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+      const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+        input: { order_id: draft.id, amount: order.payload.totalMinor / 100 },
+      })
+      await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+      await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
+      const parked = await post([order])
+      expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+      expect(await ledger.retrieveTallyCommand(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { orderId: draft.id } })
+      const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
+      await script.default({ container, args: [order.id, 'reject'] })
+      expect(await knex('order').where({ id: draft.id }).first()).toMatchObject({ status: 'canceled', metadata: { tally_rejected: true } })
+      const kept = await knex('order').where({ id: handCanceled }).first()
+      expect(kept.status).toBe('canceled')
+      expect(kept.metadata).not.toHaveProperty('tally_rejected')
+      expect(await loadSessionFigures(container, sessionId)).toEqual({ expected: { cash: 1100 }, salesCount: 1 })
+      const submission = closure(opening.payload)
+      submission.payload.orderIds = [first.payload.clientOrderId]
+      const closed = await post([close(sessionId), submission])
+      expect(closed.data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+      expect(closed.data.results[1].register.closure).toMatchObject({ expected: { cash: 1100 }, variance: { cash: 0 } })
+    })
+
     it('a failed order.create leaves no session order or cash figure, and its retry counts the sale once', async () => {
       const data = await seed(container)
       const opening = open()
@@ -414,8 +457,6 @@ medusaIntegrationTestRunner({
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       await knex('order').whereIn('id', response.data.results.slice(2).map(result => result.serverRefs.orderId))
         .update({ status })
-      const changed = await knex('order').whereIn('id', response.data.results.slice(2).map(result => result.serverRefs.orderId))
-      for (const order of changed) expect(order.metadata).not.toHaveProperty('tally_rejected')
       expect(await loadSessionFigures(container, sessionId)).toEqual(closedBefore)
       expect(await loadSessionFigures(container, liveSessionId)).toEqual(liveBefore)
     })

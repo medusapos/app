@@ -149,7 +149,8 @@ top-up the plugin made for the sale and hasn't reversed (ADR 0003), then cancels
 `cancelOrderWorkflow`, then stores a `platform_error` rejection (`data.platformCode: 'TALLY_ADMIN_REJECTED'`) that resends
 replay; a new command id for the same sale then creates a new order. If the take-back or the cancel fails (for example an
 uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `needs_admin`: clean the order up by hand and
-run `reject` again (cancelling the order by hand is fine: `reject` still takes back the plugin's top-up). See the ADR 0003 amendment of 2026-09-29.
+run `reject` again (rerun `reject`, not `apply`: an `apply` would leave the cancelled order unmarked, and it would count next to the new one).
+Cancelling the order by hand is fine: `reject` still takes back the plugin's top-up. See the ADR 0003 amendment of 2026-09-29.
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
 A new command id for the same live `clientOrderId` copies the original applied result, including its warnings,
 and stores it for duplicate replays; a superseded original copies its applied successor's result.
