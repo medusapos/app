@@ -12,7 +12,7 @@ Measured on 2026-09-29 for ADR 0020, Ruling Q3: before the plugin journal depend
 - **Add or remove a product on a sales channel through the sales-channel route, and the only event is `LinkProductSalesChannel.attached`/`detached`.** No `product.updated` fires. The payload carries only the link row id (`prodsc_…`).
 - **Latency on Redis is well inside a tick.** In every scenario the last event arrived within 250 ms of the HTTP response.
   - The product, variant and option *update* workflow events arrive before the response: p50 −66 to −7 ms.
-  - Other workflow events don't. `inventory-level.updated` arrived after the response in 11 of 14 writes (at most +5 ms). In the fixture's product create, `product.created` came +172 ms after and `product-variant.created` up to +115 ms after.
+  - Other workflow events don't. `inventory-level.updated` arrived after the response for 11 of its 14 events (from 8 writes; at most +5 ms). In the fixture's product create, `product.created` came +172 ms after and `product-variant.created` up to +115 ms after.
   - Internal module events at the lowest priority arrive p50 4 to 50 ms and p95 9 to 148 ms after the response.
   - The two 500-row bursts finished draining 191 ms (delete) and 203 ms (create) after the response.
   - On the local bus (which the demo uses), every event arrived before the response.
@@ -48,7 +48,7 @@ Measured on 2026-09-29 for ADR 0020, Ruling Q3: before the plugin journal depend
 - **Probe.** A `"*"` subscriber (`src/subscribers/g4-event-probe.ts`) appends every event with its arrival time. It's active only when `G4_EVENT_PROBE_FILE` is set, and otherwise subscribes to a name that never fires.
 - **Driver.** `scripts/probes/g4-events/driver.mjs` creates its own product (3 variants, a `Size` option, one price each, inventory at the seeded location). It then makes each write through the admin API, strictly one at a time, and collects events from the request start until at least 3 s after the response, plus 1 s of quiet.
 - **Coverage** counts the entity ids of the write that appear in some event's payload (any `id`, `*_id` or `*_ids` field).
-- **Attribution relies on timing.** The driver assigns an event to a write by arrival time alone. In the committed runs the latest event came 242 ms after its response, and scenarios are at least 3 s apart, so no event was counted against the wrong write. The harness now also bounds each window explicitly and reports events outside every window. A Redis rerun with the bounded windows showed 0 unattributed events, and no window hit the 15 s cap.
+- **Attribution relies on timing.** The driver assigns an event to a write by arrival time alone. In the committed runs the latest event came 242 ms after its response, and scenarios are at least 3 s apart, so no event was counted against the wrong write. The harness now also bounds each window explicitly and reports events outside every window. A Redis rerun with the bounded windows showed 0 unattributed events, and no window hit the 15 s cap (`g4-medusa-events/summary-redis-bounded.md`).
 - **Single client, sequential writes, on an otherwise idle instance.** No concurrent load was measured.
 - **Rerun:** `bash dev/medusa-store/scripts/probes/g4-events/run.sh redis|local <out-dir>`. It writes `events.jsonl`, `results.json` and `summary.md`. The raw summaries of this run are in `g4-medusa-events/summary-redis.md` and `summary-local.md`.
 
@@ -94,13 +94,13 @@ The event names are identical on both buses; this table uses the Redis run. Late
 | `LinkProductSalesChannel.detached` (link, internal) | 6 | 1 / 21 |
 | `pricing.price.created`, burst of 500 | 500 | 95 / 188 |
 | `pricing.price.deleted`, burst of 500 | 500 | 112 / 181 |
-| `inventory-level.updated` (workflow) | 14 | 11 of 14 after the response, at most +5 |
+| `inventory-level.updated` (workflow) | 14 | 11 of 14 events after the response, at most +5 |
 | `product.created` (workflow, fixture create) | 1 | +172 |
 
 **How to read the Redis numbers.** Workflow events are grouped and released when the workflow finishes.
 - For the product, variant and option updates, that happened before the route re-read and responded.
 - For the inventory-level writes and the fixture's product create, it didn't.
-- Module and link events go out as `internal` jobs at BullMQ priority 2,097,152, the lowest (workflow events use priority 100). They landed tens of milliseconds after the response, with the create burst the latest at 203 ms.
+- Module and link events go out as `internal` jobs at BullMQ priority 2,097,152, the lowest (workflow events use priority 100). They landed tens of milliseconds after the response. The latest was +242 ms, in the fixture product create (`LinkProductVariantPriceSet.attached`); the 500-row create burst drained at +203 ms.
 - On the local bus every event, of any kind, arrived before the response.
 
 **Bursts.**
