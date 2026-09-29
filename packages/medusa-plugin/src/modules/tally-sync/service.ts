@@ -110,9 +110,10 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
       const [state] = await em.execute("select epoch from tally_sync_state where id = 'sync'")
       if (state) return { epoch: state.epoch, created: false }
       const epoch = randomUUID()
-      // The backfill covers every price list edited or scheduled before this transaction's now().
+      // The backfill covers every price list edited or scheduled before this transaction's now(). The watermark
+      // starts one lag behind now(), the same as after a run, so a list edited just before initialize is still caught.
       await em.execute(`insert into tally_sync_state (id, epoch, price_list_watermark, price_window_run_at)
-        values ('sync', ?, now(), now())`, [epoch])
+        values ('sync', ?, now() - ?::interval, now())`, [epoch, PRICE_LIST_WATERMARK_LAG])
       const ids = productIds ?? (await em.execute<{ id: string }[]>('select id from product where deleted_at is null order by id'))
         .map(row => row.id)
       await this.record(ids.map(objectId => ({ collection: 'products', objectId, op: 'upsert' })), { manager: em })

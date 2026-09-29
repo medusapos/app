@@ -157,7 +157,11 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       expect(first).toEqual({ epoch: expect.any(String), created: true })
       expect(first.epoch).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
       const state = await service.getState()
-      expect(state).toEqual({ epoch: first.epoch, priceListWatermark: expect.any(String), priceWindowRunAt: state!.priceListWatermark })
+      expect(state).toEqual({ epoch: first.epoch, priceListWatermark: expect.any(String), priceWindowRunAt: expect.any(String) })
+      // The watermark starts one lag behind priceWindowRunAt, the same as after a watcher run.
+      const initialLagMs = new Date(state!.priceWindowRunAt!).getTime() - new Date(state!.priceListWatermark!).getTime()
+      expect(initialLagMs).toBeGreaterThan(9000)
+      expect(initialLagMs).toBeLessThan(11000)
       const rows = await sql('select collection, object_id, op from tally_change order by seq')
       expect(rows).toEqual([
         { collection: 'products', object_id: 'p1', op: 'upsert' },

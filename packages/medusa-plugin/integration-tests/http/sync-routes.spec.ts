@@ -80,7 +80,11 @@ medusaIntegrationTestRunner({
       expect(first.data.changes).toEqual(productUpsert())
       // initialize() with no ids read the products and set both watcher timestamps inside its transaction.
       const state = await sync.getState()
-      expect(state).toEqual({ epoch: first.data.epoch, priceListWatermark: expect.any(String), priceWindowRunAt: state!.priceListWatermark })
+      expect(state).toEqual({ epoch: first.data.epoch, priceListWatermark: expect.any(String), priceWindowRunAt: expect.any(String) })
+      // The watermark starts one lag behind priceWindowRunAt, the same as after a watcher run.
+      const initialLagMs = new Date(state!.priceWindowRunAt!).getTime() - new Date(state!.priceListWatermark!).getTime()
+      expect(initialLagMs).toBeGreaterThan(9000)
+      expect(initialLagMs).toBeLessThan(11000)
       const head = await settle()
       const all = await get('/tally/v1/changes?limit=1000')
       expect(all.data).toEqual(expect.objectContaining({ epoch: first.data.epoch, head, more: false }))
@@ -117,8 +121,8 @@ medusaIntegrationTestRunner({
         expect(bad.data.message).toEqual(expect.any(String))
       }
       const noEpoch = await get('/tally/v1/changes?since=1')
-      expect(noEpoch.status).toBe(400)
-      expect(noEpoch.data).toEqual({ message: 'epoch is required when since > 0' })
+      expect(noEpoch.status).toBe(410)
+      expect(noEpoch.data).toEqual({ code: 'cursor_expired', epoch, head })
     })
 
     it('3. tick answers 304 at the head with the current epoch, and 200 with epoch, head and horizon otherwise', async () => {
@@ -142,12 +146,50 @@ medusaIntegrationTestRunner({
     it('4. an unforced tick runs the watcher, which journals the product after its list is retitled and set to draft', async () => {
       await get('/tally/v1/changes')
       const listId = await createList('Sync sale')
-      const head = await settle()
+      await settle()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      // Push the list's updated_at outside the watermark's lag, so only the retitle's own updated_at can re-journal it.
+      await knex('price_list').where('id', listId).update({ updated_at: knex.raw("now() - interval '1 hour'") })
+      await runPriceListWatcher(container, { force: true })
+      let head = await sync.head()
       // Price-list edits emit no event, so only the watcher can journal these.
       await api.post(`/admin/price-lists/${listId}`, { title: 'Renamed sync sale' }, { headers })
-      await api.post(`/admin/price-lists/${listId}`, { status: 'draft' }, { headers })
       // Unforced ticks run the watcher at most once per 5 s per process, so keep ticking until one does.
       await expectProductRow(head, () => get('/tally/v1/changes/tick'), 12000)
+
+      await knex('price_list').where('id', listId).update({ updated_at: knex.raw("now() - interval '1 hour'") })
+      await runPriceListWatcher(container, { force: true })
+      head = await sync.head()
+      await api.post(`/admin/price-lists/${listId}`, { status: 'draft' }, { headers })
+      await expectProductRow(head, () => get('/tally/v1/changes/tick'), 12000)
+    })
+
+    it('4a. the watermark SQL: no match still advances it, a recent edit is caught on the next forced run too, and it never regresses', async () => {
+      await get('/tally/v1/changes')
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const watermark = async () =>
+        (await knex('tally_sync_state').where('id', 'sync').select('price_list_watermark').first()).price_list_watermark as Date
+
+      // 1. No price list matches the window: the watermark still advances towards now() - lag.
+      const beforeAnyList = await watermark()
+      await runPriceListWatcher(container, { force: true })
+      const afterNoMatch = await watermark()
+      expect(afterNoMatch.getTime()).toBeGreaterThan(beforeAnyList.getTime())
+
+      // 2. A list just edited is within the lag, so a forced run journals it, and the next forced run still does too.
+      await createList('Watermark sale')
+      await settle()
+      let head = await sync.head()
+      await runPriceListWatcher(container, { force: true })
+      expect((await sync.changesSince({ since: head, limit: 1000 })).changes).toEqual(productUpsert())
+      const beforeSecondMatch = await watermark()
+      head = await sync.head()
+      await runPriceListWatcher(container, { force: true })
+      expect((await sync.changesSince({ since: head, limit: 1000 })).changes).toEqual(productUpsert())
+
+      // 3. The watermark never moves backwards.
+      const afterSecondMatch = await watermark()
+      expect(afterSecondMatch.getTime()).toBeGreaterThanOrEqual(beforeSecondMatch.getTime())
     })
 
     it('5. the price-list watcher journals the product once a scheduled list starts', async () => {
