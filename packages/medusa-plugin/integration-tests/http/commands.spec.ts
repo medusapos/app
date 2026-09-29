@@ -741,17 +741,19 @@ medusaIntegrationTestRunner({
         await expectRejectedAndReversed(sale, orderId)
       })
 
-      it.each(['lock release', 'marker write'])('a take-back compensation whose %s throws after its re-adjustment keeps the stock right and a second run does not re-adjust', async fault => {
+      it.each(['lock release', 'marker write', 'rerun lock release'])('a take-back compensation whose %s throws after its re-adjustment keeps the stock right and a second run does not re-adjust', async fault => {
         const before = await levelC()
         const sale = saleOfC()
         const { orderId } = await parkLiveOrder(sale, 1)
         const fired = probeOrderWrites('tally_stock_topups_reversed', ...fault === 'marker write' ? ['tally_stock_take_back_compensated'] : [])
         const locking = container.resolve(Modules.LOCKING)
         const execute = locking.execute.bind(locking) as (...args: unknown[]) => Promise<unknown>
-        // Once the take-back's marker probe fired, the next execute is its compensation's.
-        if (fault === 'lock release') jest.spyOn(locking, 'execute').mockImplementation((async (...args: unknown[]) => {
+        // Once the take-back's marker probe fired, the next executes are its compensation's.
+        let compensationExecutes = 0
+        if (fault !== 'marker write') jest.spyOn(locking, 'execute').mockImplementation((async (...args: unknown[]) => {
           const result = await execute(...args)
           if (fired.length !== 1) return result
+          if (++compensationExecutes !== (fault === 'rerun lock release' ? 2 : 1)) return result
           fired.push('unlock')
           throw new Error('unlock probe')
         }) as never)
@@ -765,9 +767,11 @@ medusaIntegrationTestRunner({
         const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
         await expect(resolve(sale.id, 'reject')).rejects.toMatchObject(markerProbe)
         expect([await levelC(), fired]).toEqual([[before[0] + 1, before[1] + 2],
-          ['tally_stock_topups_reversed', fault === 'lock release' ? 'unlock' : 'tally_stock_take_back_compensated']])
+          ['tally_stock_topups_reversed', fault === 'marker write' ? 'tally_stock_take_back_compensated' : 'unlock']])
         expect(handler.compensate).toHaveBeenCalledTimes(1)
-        expect(log).toHaveBeenCalledWith(expect.stringContaining(`tally take-back compensation: order ${orderId} put its stock top-up back`))
+        expect(log).toHaveBeenCalledWith(expect.stringContaining(fault === 'rerun lock release'
+          ? `tally take-back compensation: order ${orderId} restored its markers, but the lock release failed: unlock probe`
+          : `tally take-back compensation: order ${orderId} put its stock top-up back`))
         await resolve(sale.id, 'reject')
         expect(await levelC()).toEqual(before)
         await expectRejectedAndReversed(sale, orderId)
