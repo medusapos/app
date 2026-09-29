@@ -1,5 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
-import { E2E_RUN } from './ports';
+import { E2E_RUN, isCI } from './ports';
 
 const appUrl = process.env.E2E_APP_URL;
 if (appUrl && !process.env.E2E_BACKEND_URL) throw new Error('E2E_APP_URL and E2E_BACKEND_URL are both needed for hosted runs');
@@ -14,8 +14,8 @@ export default defineConfig({
   // The hosted demo catalogue (~2,000 products) takes ~47 s to sync first and seconds per search, so 90 s can end a hosted test before its sale syncs.
   timeout: appUrl ? 5 * 60_000 : 90_000,
   expect: { timeout: 30_000 },
-  reporter: process.env.CI ? [['list'], ['html', { open: 'never' }]] : 'list',
-  use: { baseURL: appUrl || appLocalUrl, trace: process.env.CI ? 'retain-on-failure' : 'on-first-retry' },
+  reporter: isCI() ? [['list'], ['html', { open: 'never' }]] : 'list',
+  use: { baseURL: appUrl || appLocalUrl, trace: isCI() ? 'retain-on-failure' : 'on-first-retry' },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   // Reuse only on request (E2E_REUSE=1, never in CI), since a reused server may be built from
   // older code; the derived ports and database are unique to this checkout, so it is always its own.
@@ -23,7 +23,7 @@ export default defineConfig({
     {
       command: 'bash e2e/store/start.sh', cwd: '..',
       url: `${backendUrl}/health`, timeout: 600_000,
-      reuseExistingServer: !process.env.CI && process.env.E2E_REUSE === '1',
+      reuseExistingServer: !isCI() && process.env.E2E_REUSE === '1',
       env: {
         E2E_BACKEND_PORT: String(E2E_RUN.backendPort),
         E2E_APP_PORT: String(E2E_RUN.appPort),
@@ -33,7 +33,7 @@ export default defineConfig({
     {
       command: `EXPO_PUBLIC_MEDUSA_URL=${backendUrl} EXPO_PUBLIC_E2E_DEBUG=1 CI=1 EXPO_NO_TELEMETRY=1 pnpm --filter @medusapos/expo build:web --clear && node e2e/serve.mjs`,
       cwd: '..', url: appLocalUrl, timeout: 300_000,
-      reuseExistingServer: !process.env.CI && process.env.E2E_REUSE === '1',
+      reuseExistingServer: !isCI() && process.env.E2E_REUSE === '1',
       env: { E2E_APP_PORT: String(E2E_RUN.appPort) },
     },
   ],

@@ -7,12 +7,14 @@ const repoRoot = path.resolve(__dirname, '..');
 const id = createHash('sha1').update(repoRoot).digest('hex').slice(0, 8);
 const offset = parseInt(id, 16) % 400;
 
+/** CI=false, CI=0 and an empty CI are not CI; the same rule as isCI in packages/medusa-plugin/integration-tests/test-port.js. */
+export const isCI = (env: NodeJS.ProcessEnv = process.env) => env.CI != null && !['', '0', 'false'].includes(env.CI.toLowerCase());
 /**
  * Each checkout's own e2e ports and database, derived from its absolute path, so two checkouts
  * running the harness at once never collide on :9100, :8099 or `medusapos_e2e` (2026-09-25).
  * `E2E_BACKEND_URL`/`E2E_APP_URL` (hosted mode) still override everything, as before this file
  * existed. CI keeps today's fixed values so CI and its docs are unchanged.
  */
-export const E2E_RUN = process.env.CI
+export const E2E_RUN = isCI()
   ? { id, backendPort: 9100, appPort: 8099, database: 'medusapos_e2e' }
   : { id, backendPort: 9100 + offset, appPort: 8100 + offset, database: `medusapos_e2e_${id}` };

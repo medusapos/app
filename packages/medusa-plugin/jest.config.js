@@ -23,6 +23,7 @@ if (process.env.TEST_TYPE === "integration:modules") {
   module.exports.testPathIgnorePatterns = ["\\.unit\\.spec\\.[jt]s$"];
 } else if (process.env.TEST_TYPE === "integration:http") {
   module.exports.testMatch = ["**/integration-tests/http/*.spec.[jt]s"];
+  module.exports.globalSetup = "<rootDir>/integration-tests/port-global-setup.js";
 } else if (process.env.TEST_TYPE === "unit") {
   module.exports.testMatch = ["**/src/**/__tests__/**/*.unit.spec.[jt]s"];
 }
