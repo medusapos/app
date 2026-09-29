@@ -107,6 +107,15 @@ Window 2, the take-back:
 - A resume that finds the take-back started but not reversed skips the
   adjustment and only sets the flag. Stock is too high by the shortfall if
   the crash came before the adjustment, and never taken back twice.
+- Every await after the take-back's adjustment commits is covered
+  (2026-09-29): a failed lock release is logged and the step succeeds; a
+  failed `tally_stock_topups_reversed` write is logged and returns
+  `StepResponse.permanentFailure` with the success compensation data, so
+  Medusa puts the stock back exactly once and a retry takes it back again.
+  The compensation writes its restore together with
+  `tally_stock_take_back_compensated` (this run's attempt id) right after
+  its re-adjustment, so a rerun never re-adjusts, and a failed lock release
+  or write after the re-adjustment is logged, not rethrown.
 
 Also from the #22 review: resume skips a `canceled` or `failed` payment
 collection instead of trying to capture it, and when no other collection
