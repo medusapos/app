@@ -180,6 +180,9 @@ the original is marked `superseded` by the new command and resends return its re
 A rejected original with a live order answers 503 and logs an error; a missing ledger row resumes as an orphan.
 The live-order lookup skips canceled orders, so after an admin reject (which cancels the order) a retry under a new command id is a new sale; Medusa has no unique constraint on `metadata.tally_client_id`, so no id has to be released.
 
+An applied id always answers its recorded result before any check that could refuse it; orders applied before a check existed are never refused on resend.
+Version rules govern new work only: `unsupported_version` comes after the replay read, so an applied id resent at any version answers its recorded result.
+
 ## Consequences
 
 Negative stock is visible to the merchant. A sales channel with several stock

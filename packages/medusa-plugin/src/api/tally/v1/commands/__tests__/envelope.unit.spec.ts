@@ -6,10 +6,25 @@ const command = {
   createdAt: '2026-09-23T10:00:00Z', deviceId: 'register-1', attempt: 1,
 }
 
+const container = { resolve: () => ({ listTallyCommands: async () => [] }) } as unknown as MedusaContainer
+
 describe('validateBatch', () => {
   it('accepts a valid batch and leaves payload validation to the workflow', () => {
     expect(validateBatch({ commands: [command] })).toEqual({ ok: true, commands: [command] })
     expect(validateBatch({ commands: Array(50).fill(command) }).ok).toBe(true)
+  })
+
+  it('rejects a NUL in the envelope id', () => {
+    expect(validateBatch({ commands: [{ ...command, id: 'sale\0id' }] })).toEqual({
+      ok: false, status: 400, message: 'Invalid commands[0].id',
+    })
+  })
+
+  it('rejects NUL before replay and version rules without touching the container', async () => {
+    const outcome = await processBatch({} as MedusaContainer, [{ ...command, version: 4, payload: { clientOrderId: '\0' } } as never], {})
+    expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: 'clientOrderId: expected no NUL character',
+    } }] } })
   })
 
   it('rejects more than 50 commands', () => {
@@ -52,8 +67,8 @@ describe('validateBatch', () => {
     })
   })
 
-  it('rejects an unsupported version before any payload rule or ledger claim', async () => {
-    const outcome = await processBatch({} as MedusaContainer, [{ ...command, version: 4, payload: { display: {} } } as never], {})
+  it('rejects an unsupported version after the replay read and before shape checks or ledger claim', async () => {
+    const outcome = await processBatch(container, [{ ...command, version: 4, payload: { display: {} } } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
       code: 'unsupported_version', message: 'order.create version 4 is not supported; this server supports 1, 2, 3',
       data: { orderCreate: 3 },
@@ -66,7 +81,7 @@ describe('validateBatch', () => {
     const outcomes: BatchOutcome[] = []
     for (const version of [1, 2, 3]) {
       const fields = version === 2 ? { discountMinor: 1 } : version === 3 ? { display: {}, taxByRate: [] } : {}
-      outcomes.push(await processBatch({} as MedusaContainer, [{ ...command, version, payload: { ...payload, ...fields } } as never], {}))
+      outcomes.push(await processBatch(container, [{ ...command, version, payload: { ...payload, ...fields } } as never], {}))
     }
     for (const outcome of outcomes) expect(outcome).toEqual({ status: 200, body: { results: [{
       id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: 'lines: expected a non-empty array' },
@@ -74,7 +89,7 @@ describe('validateBatch', () => {
   })
 
   it('does not require discountMinor for version 3', async () => {
-    const outcome = await processBatch({} as MedusaContainer, [{ ...command, version: 3 } as never], {})
+    const outcome = await processBatch(container, [{ ...command, version: 3 } as never], {})
     expect(outcome).toMatchObject({ status: 200, body: { results: [{ error: {
       code: 'invalid_payload', message: expect.stringContaining('clientOrderId: expected'),
     } }] } })
@@ -91,15 +106,15 @@ describe('validateBatch', () => {
     [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId requires version 3'],
     [1, { customer: { customerId: 'customer' } }, 'customerId requires version 3'],
     [2, { customer: { customerId: 'customer' }, discountMinor: 1 }, 'customerId requires version 3'],
-  ])('rejects version %s fields %j before touching the container', async (version, payload, message) => {
-    const outcome = await processBatch({} as MedusaContainer, [{ ...command, version, payload } as never], {})
+  ])('rejects version %s fields %j after the replay read', async (version, payload, message) => {
+    const outcome = await processBatch(container, [{ ...command, version, payload } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
       code: 'invalid_payload', message,
     } }] } })
   })
 
-  it('rejects a version 2 command without a discount before touching the container', async () => {
-    const outcome = await processBatch({} as MedusaContainer, [{ ...command, id: 'sale-2', version: 2 } as never], {})
+  it('rejects a version 2 command without a discount after the replay read', async () => {
+    const outcome = await processBatch(container, [{ ...command, id: 'sale-2', version: 2 } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: 'sale-2', status: 'rejected', error: {
       code: 'invalid_payload', message: 'version 2 requires discountMinor',
     } }] } })
@@ -108,8 +123,8 @@ describe('validateBatch', () => {
   it.each([
     ['on a line', { lines: [{ clientLineId: 'line_1' }, { clientLineId: 'line_2', discountMinor: 100 }] }],
     ['on the payload', { lines: [{ clientLineId: 'line_1' }], discountMinor: 100 }],
-  ])('rejects a version 1 command carrying discountMinor %s before touching the container', async (_where, payload) => {
-    const outcome = await processBatch({} as MedusaContainer, [{ ...command, id: 'sale-1', payload } as never], {})
+  ])('rejects a version 1 command carrying discountMinor %s after the replay read', async (_where, payload) => {
+    const outcome = await processBatch(container, [{ ...command, id: 'sale-1', payload } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: 'sale-1', status: 'rejected', error: {
       code: 'invalid_payload', message: 'discountMinor requires version 2',
     } }] } })

@@ -62,3 +62,16 @@ Only errors raised before any write are safe to reject. **Don't widen this rule 
 **Consequences.**
 - Multi-profile carts, which would need one shipping method and fulfillment per profile, are out of scope for the MVP. Stores sell each profile's products in separate sales, or put POS products on one profile.
 - For a new sale the rejection is raised before any write, so it follows this ADR's store-configuration rule: not stored, and it applies once the store is fixed. For a resumed order the same failure stays transient (previous amendment).
+
+## Amendment: Step order and bounds (2026-09-29)
+
+1. `validateBatch` validates the envelope, including refusing a NUL in the id.
+2. A NUL-only payload check returns unstored `invalid_payload`.
+3. The read-only replay read answers a recorded result.
+4. Version rules answer `unsupported_version` or the existing version/field `invalid_payload`.
+5. Type shape, length bounds and v3 fiscal checks return unstored `invalid_payload`.
+6. The claim, sale lock, authoritative collision check and recipe are unchanged.
+
+An applied id always answers its recorded result before any check that could refuse it, so orders applied before a check existed are never refused on resend. `invalid_payload` stays deterministic on the bytes and unstored.
+The bounds and NUL rule match TallyUI's shared `payloadShapeErrors`: `customer.email` is at most 254 characters; `clientOrderId`, `createdAt`, `currency`, line `clientLineId`, `variantId`, `title`, payment `clientPaymentId`, `method`, `reference`, `registerId`, `cashierRef` and `locationId` are at most 255. The existing `customer.customerId` (64) and `sessionId` (36) bounds remain. All these string fields refuse U+0000 before replay.
+A read-only collision pre-check before the claim is optional; the check under the lock is authoritative.

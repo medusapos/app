@@ -3,6 +3,7 @@ import { ContainerRegistrationKeys, MedusaError } from '@medusajs/framework/util
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
+import type { TallyCommandRecord } from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'
 import { commandFingerprint } from './fingerprint'
 import type { StockTopUp } from './stock'
@@ -16,6 +17,34 @@ export type ExecuteOutcome =
   | { kind: 'result'; result: CommandResult }
   | { kind: 'in_progress'; id: string }
   | { kind: 'transient'; id: string; message: string }
+
+export async function replayOrderCreate(container: MedusaContainer, command: CommandEnvelope<OrderCreatePayload>): Promise<ExecuteOutcome | null> {
+  const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
+  try {
+    const [row] = await ledger.listTallyCommands({ id: command.id })
+    return row ? await replayResult(ledger, row, command.id, commandFingerprint(command)) : null
+  } catch (error) {
+    return { kind: 'transient', id: command.id, message: error.message }
+  }
+}
+
+async function replayResult(ledger: TallyLedgerModuleService, row: TallyCommandRecord, id: string, fingerprint: string): Promise<ExecuteOutcome | null> {
+  if (row.fingerprint !== fingerprint) {
+    return { kind: 'result', result: { id, status: 'rejected', error: {
+      code: 'idempotency_mismatch', message: `Command ${id} was already used for a different payload.`,
+    } } }
+  }
+  if (row.status === 'in_progress') return null
+  if (row.status === 'needs_admin') return { kind: 'in_progress', id }
+  if (row.status === 'superseded') {
+    const successor = row.superseded_by ? await ledger.retrieveCommandState(row.superseded_by) : null
+    return successor?.status === 'applied'
+      ? { kind: 'result', result: { ...parseCommandResult(successor.result), id, status: 'duplicate' } }
+      : { kind: 'in_progress', id }
+  }
+  const result = parseCommandResult(row.result)
+  return { kind: 'result', result: row.status === 'applied' ? { ...result, status: 'duplicate' } : result }
+}
 
 export async function executeOrderCreate(
   container: MedusaContainer,
@@ -41,22 +70,7 @@ export async function executeOrderCreate(
       }
       throw error
     }
-    if (!claim.claimed) {
-      if (claim.command.fingerprint !== fingerprint) {
-        return { kind: 'result', result: { id, status: 'rejected', error: {
-          code: 'idempotency_mismatch', message: `Command ${id} was already used for a different payload.`,
-        } } }
-      }
-      if (claim.command.status === 'in_progress' || claim.command.status === 'needs_admin') return { kind: 'in_progress', id }
-      if (claim.command.status === 'superseded') {
-        const successor = claim.command.superseded_by ? await ledger.retrieveCommandState(claim.command.superseded_by) : null
-        return successor?.status === 'applied'
-          ? { kind: 'result', result: { ...parseCommandResult(successor.result), id, status: 'duplicate' } }
-          : { kind: 'in_progress', id }
-      }
-      const result = parseCommandResult(claim.command.result)
-      return { kind: 'result', result: claim.command.status === 'applied' ? { ...result, status: 'duplicate' } : result }
-    }
+    if (!claim.claimed) return await replayResult(ledger, claim.command, id, fingerprint) ?? { kind: 'in_progress', id }
     let completed = false
     try {
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)

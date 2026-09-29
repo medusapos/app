@@ -179,6 +179,70 @@ medusaIntegrationTestRunner({
       expect(replay.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'duplicate' })])
     })
 
+    describe('step order', () => {
+      it('an applied id resent with an over-long title answers duplicate', async () => {
+        const first = await post([command()])
+        expect(first.status).toBe(200)
+        expect(first.data.results[0].status).toBe('applied')
+        const overLong = command()
+        overLong.payload.lines[0].title = 'x'.repeat(256)
+        const claim = await ledger.claim({ id: overLong.id, type: overLong.type, fingerprint: commandFingerprint(overLong) })
+        if (!claim.claimed) throw new Error('Expected a fresh claim')
+        const result = { ...first.data.results[0], id: overLong.id }
+        await ledger.complete(overLong.id, claim.claimToken, result)
+        const response = await post([overLong])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...result, status: 'duplicate' }])
+      })
+
+      it('an applied id recorded at version 4 answers duplicate', async () => {
+        const first = await post([command()])
+        expect(first.status).toBe(200)
+        expect(first.data.results[0].status).toBe('applied')
+        const version4 = { ...command(), version: 4 }
+        const claim = await ledger.claim({ id: version4.id, type: version4.type, fingerprint: commandFingerprint(version4 as unknown as Parameters<typeof commandFingerprint>[0]) })
+        if (!claim.claimed) throw new Error('Expected a fresh claim')
+        const result = { ...first.data.results[0], id: version4.id }
+        await ledger.complete(version4.id, claim.claimToken, result)
+        const response = await post([version4])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...result, status: 'duplicate' }])
+      })
+
+      it('a fresh command with a 256-character title answers unstored invalid_payload', async () => {
+        const sale = command()
+        sale.payload.lines[0].title = 'x'.repeat(256)
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'lines[0].title: expected at most 255 characters',
+        } }])
+        expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
+      })
+
+      it('a fresh command with NUL in clientOrderId answers unstored invalid_payload', async () => {
+        const sale = command({ clientOrderId: 'order\0id' })
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'clientOrderId: expected no NUL character',
+        } }])
+        expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
+      })
+
+      it('a rejected id resent with an over-long title answers its recorded rejection', async () => {
+        const sale = command()
+        sale.payload.lines[0].title = 'x'.repeat(256)
+        const claim = await ledger.claim({ id: sale.id, type: sale.type, fingerprint: commandFingerprint(sale) })
+        if (!claim.claimed) throw new Error('Expected a fresh claim')
+        const result = { id: sale.id, status: 'rejected' as const, error: { code: 'underpaid', message: 'Payments do not cover the total.' } }
+        await ledger.complete(sale.id, claim.claimToken, result)
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([result])
+      })
+    })
+
     // 19% inclusive: 1000 − 100 = 900 gross (net 756, tax 144); and 1000 − 1000 = 0, which has no payment collection.
     it.each([[100, 756, 144, 900], [1000, 0, 0, 0]])('replays a v2 sale discounted by %i as duplicate twice, with one order and one adjustment',
       async (discountMinor, subtotalMinor, taxMinor, totalMinor) => {
