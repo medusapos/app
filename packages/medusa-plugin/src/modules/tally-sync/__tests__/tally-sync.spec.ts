@@ -1,6 +1,6 @@
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils'
 import { HORIZON, TALLY_SYNC_MODULE } from '..'
-import TallySyncModuleService from '../service'
+import TallySyncModuleService, { setJournalLockTimeoutForTests } from '../service'
 
 moduleIntegrationTestRunner<TallySyncModuleService>({
   moduleName: TALLY_SYNC_MODULE,
@@ -113,6 +113,39 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       expect([...page.changes, ...next.changes].map(change => change.id)).toEqual(expect.arrayContaining(['before', 'between']))
     })
 
+    it('changesSince reports head as at least the last seq when its head read is older than a committed row', async () => {
+      const staleHead = await service.head()
+      await service.record([{ ...product, objectId: 'after-head' }])
+      const [last] = await sql('select seq from tally_change order by seq desc limit 1')
+      jest.spyOn(TallySyncModuleService.prototype, 'head').mockResolvedValueOnce(staleHead)
+      const page = await service.changesSince({ since: 0, limit: 10 })
+      jest.restoreAllMocks()
+      expect(page.head).toBeGreaterThanOrEqual(Number(last.seq))
+      expect(page.changes.map(change => change.id)).toContain('after-head')
+    })
+
+    it('record rejects with 55P03 when another connection holds the journal lock past the timeout', async () => {
+      let release!: () => void
+      const released = new Promise<void>(resolve => { release = resolve })
+      let locked!: () => void
+      const holding = new Promise<void>(resolve => { locked = resolve })
+      const holder = MikroOrmWrapper.forkManager().transactional(async em => {
+        await service.record([{ ...product, objectId: 'holder' }], { manager: em })
+        locked()
+        await released
+      })
+      await Promise.race([holding, holder])
+      setJournalLockTimeoutForTests('200ms')
+      try {
+        await expect(service.record([{ ...product, objectId: 'blocked' }])).rejects.toMatchObject({ code: '55P03' })
+      } finally {
+        setJournalLockTimeoutForTests()
+        release()
+        await holder
+      }
+      expect((await sql('select object_id from tally_change')).map(row => row.object_id)).toEqual(['holder'])
+    })
+
     it('recordEvent returns 0 and writes nothing for an event it does not resolve', async () => {
       expect(await service.recordEvent('product.product-type.updated', 'ptyp_1')).toBe(0)
       expect(await sql('select seq from tally_change')).toEqual([])
@@ -123,7 +156,12 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       const first = await service.initialize(['p1', 'p2'])
       expect(first).toEqual({ epoch: expect.any(String), created: true })
       expect(first.epoch).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-      expect(await service.getState()).toEqual({ epoch: first.epoch, priceListWatermark: null, priceWindowRunAt: null })
+      const state = await service.getState()
+      expect(state).toEqual({ epoch: first.epoch, priceListWatermark: expect.any(String), priceWindowRunAt: expect.any(String) })
+      // The watermark starts one lag behind priceWindowRunAt, the same as after a watcher run.
+      const initialLagMs = new Date(state!.priceWindowRunAt!).getTime() - new Date(state!.priceListWatermark!).getTime()
+      expect(initialLagMs).toBeGreaterThan(9000)
+      expect(initialLagMs).toBeLessThan(11000)
       const rows = await sql('select collection, object_id, op from tally_change order by seq')
       expect(rows).toEqual([
         { collection: 'products', object_id: 'p1', op: 'upsert' },

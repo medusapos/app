@@ -13,9 +13,20 @@ import { resolveProductChanges } from './resolve-products'
 const JOURNAL_LOCK = 2026093009
 
 // Bounds the wait for JOURNAL_LOCK so one stuck holder (a long backfill, an idle-in-transaction connection) cannot
-// stall every queued event indefinitely. A timeout is an error: the subscriber logs it and moves on, so a
-// timed-out event is logged but not journaled -- the digest audit (P3) is the backstop for that gap.
+// stall every queued event indefinitely. A timeout is an error: the subscriber retries the event once, then logs it as
+// dropped -- the digest audit (P3) is the backstop for that gap. It is set with the lock in one statement; when record
+// runs inside a caller's transaction, the timeout stays set for the rest of that transaction.
 const JOURNAL_LOCK_TIMEOUT = '10s'
+let journalLockTimeout = JOURNAL_LOCK_TIMEOUT // for tests only, the setter shortens it; no argument restores the default
+export const setJournalLockTimeoutForTests = (timeout = JOURNAL_LOCK_TIMEOUT) => { journalLockTimeout = timeout }
+
+// Transaction advisory lock key for the price-list watcher, so concurrent runs never scan the same window twice.
+// Lock order is always PRICE_LIST_WATCHER_LOCK, then JOURNAL_LOCK (inside record); nothing takes them the other way.
+const PRICE_LIST_WATCHER_LOCK = 2026093010
+
+// How far the price-list watermark trails the database's now(). A list write that commits, or whose app clock skews,
+// less than this after its updated_at is still caught; the cost is re-journaling a list's products for this long.
+const PRICE_LIST_WATERMARK_LAG = '10 seconds'
 
 // Postgres caps a statement at 65,535 parameters; this many rows (3 params each) stays well under it.
 const RECORD_CHUNK_SIZE = 1000
@@ -27,8 +38,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     const unique = [...new Map(changes.map(c => [JSON.stringify([c.collection, c.objectId, c.op]), c])).values()]
     if (!unique.length) return 0
     return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
-      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
       for (let i = 0; i < unique.length; i += RECORD_CHUNK_SIZE) {
         const chunk = unique.slice(i, i + RECORD_CHUNK_SIZE)
         await em.execute(
@@ -44,8 +54,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   @InjectManager()
   async recordEvent(eventName: string, id: string, @MedusaContext() sharedContext: Context = {}): Promise<number> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
-      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
       const changes = await resolveProductChanges(em.getTransactionContext<Knex.Transaction>()!, eventName, id)
       return this.record(changes.map(({ productId, op }) => ({ collection: 'products', objectId: productId, op })), { manager: em })
     })
@@ -94,15 +103,20 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   }
 
   @InjectManager()
-  async initialize(productIds: string[], @MedusaContext() sharedContext: Context = {}): Promise<{ epoch: string; created: boolean }> {
+  // Without productIds, the backfill reads every live product inside the lock, so no product write can fall between it and the epoch.
+  async initialize(productIds?: string[], @MedusaContext() sharedContext: Context = {}): Promise<{ epoch: string; created: boolean }> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
-      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
-      await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
       const [state] = await em.execute("select epoch from tally_sync_state where id = 'sync'")
       if (state) return { epoch: state.epoch, created: false }
       const epoch = randomUUID()
-      await em.execute("insert into tally_sync_state (id, epoch) values ('sync', ?)", [epoch])
-      await this.record(productIds.map(objectId => ({ collection: 'products', objectId, op: 'upsert' })), { manager: em })
+      // The backfill covers every price list edited or scheduled before this transaction's now(). The watermark
+      // starts one lag behind now(), the same as after a run, so a list edited just before initialize is still caught.
+      await em.execute(`insert into tally_sync_state (id, epoch, price_list_watermark, price_window_run_at)
+        values ('sync', ?, now() - ?::interval, now())`, [epoch, PRICE_LIST_WATERMARK_LAG])
+      const ids = productIds ?? (await em.execute<{ id: string }[]>('select id from product where deleted_at is null order by id'))
+        .map(row => row.id)
+      await this.record(ids.map(objectId => ({ collection: 'products', objectId, op: 'upsert' })), { manager: em })
       return { epoch, created: true }
     })
   }
@@ -113,5 +127,45 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     await (sharedContext.manager as EntityManager).execute(
       "update tally_sync_state set price_list_watermark = ?, price_window_run_at = ?, updated_at = now() where id = 'sync'",
       [watermark, priceWindowRunAt])
+  }
+
+  // The price-list watcher's transaction (behaviour and known gap: runPriceListWatcher in sync-state.ts); returns rows written.
+  @InjectManager()
+  async watchPriceLists(@MedusaContext() sharedContext: Context = {}): Promise<number> {
+    return (sharedContext.manager as EntityManager).transactional(async em => {
+      // A run that times out waiting is logged by the caller and retried on the next tick or minute.
+      await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, PRICE_LIST_WATCHER_LOCK])
+      // Timestamps stay as text so the microsecond precision of Postgres survives the round trip.
+      const [state] = await em.execute(`select now()::text as now, price_list_watermark::text as watermark,
+        price_window_run_at::text as window_run_at from tally_sync_state where id = 'sync'`)
+      if (!state) return 0
+      const { now, watermark, window_run_at: windowRunAt } = state
+      if (watermark === null || windowRunAt === null) {
+        await this.setPriceListWatermark(watermark ?? now, windowRunAt ?? now, { manager: em })
+        return 0
+      }
+      // The watermark trails now() by PRICE_LIST_WATERMARK_LAG, so lists updated within it are re-journaled until it passes.
+      const [lists] = await em.execute(`select array_agg(id) as ids,
+          greatest(?::timestamptz, least(max(updated_at), ?::timestamptz - ?::interval))::text as watermark,
+          greatest(?::timestamptz, ?::timestamptz)::text as window_run_at
+        from price_list where updated_at > ?::timestamptz
+          or (starts_at > ?::timestamptz and starts_at <= ?::timestamptz) or (ends_at > ?::timestamptz and ends_at <= ?::timestamptz)`,
+      [watermark, now, PRICE_LIST_WATERMARK_LAG, windowRunAt, now, watermark, windowRunAt, now, windowRunAt, now])
+      let written = 0
+      if (lists.ids?.length) {
+        // MikroORM inlines an array parameter as a comma list, so the ids go through `in (?)`.
+        const products: { id: string; deleted_at: Date | null }[] = await em.execute(`select distinct product.id, product.deleted_at
+          from price
+          join product_variant_price_set as link on link.price_set_id = price.price_set_id
+          join product_variant as variant on variant.id = link.variant_id
+          join product on product.id = variant.product_id
+          where price.price_list_id in (?)`, [lists.ids])
+        written = await this.record(products.map(product => ({
+          collection: 'products', objectId: product.id, op: product.deleted_at ? 'delete' as const : 'upsert' as const,
+        })), { manager: em })
+      }
+      await this.setPriceListWatermark(lists.watermark, lists.window_run_at, { manager: em })
+      return written
+    })
   }
 }

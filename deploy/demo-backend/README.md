@@ -98,7 +98,9 @@ not), drops `medusapos_demo` with `WITH (FORCE)` (which ends the backend's
 connections), recreates it from the golden copy, then sends SIGTERM to PID 1.
 The container exits and Docker's restart policy starts it again, running the
 migrations. The task may report a failed exit because its `docker exec`
-session ends with the container.
+session ends with the container. The reset also clears the sync journal
+(`tally_change`, `tally_sync_state`), so the next `/changes` call mints a new
+epoch and tills resync.
 
 To change what the demo resets to, reseed or edit the demo, stop the backend,
 drop `medusapos_demo_golden` and create it again as above.
