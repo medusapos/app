@@ -157,6 +157,15 @@ and the ledger row becomes `needs_admin`, which the reclaim never matches; the t
 `platformCode: 'TALLY_ADMIN_REJECTED'` (`reject`). A cancel Medusa refuses leaves the row `needs_admin`,
 so a rejected command never has a live order.
 
+A new command id for an existing live `clientOrderId` follows the original command's ledger state:
+an applied result is copied with its stored warnings and the new id, and stored for duplicate replays;
+a superseded original copies its successor only when that successor is applied, otherwise the answer is transient.
+A fresh `in_progress` lease or `needs_admin` row answers 503 without storing the new command; a stale lease
+is taken over and the order resumes under the new command (a lost takeover answers 409). After completion,
+the original is marked `superseded` by the new command and resends return its result as a duplicate.
+A rejected original with a live order answers 503 and logs an error; a missing ledger row resumes as an orphan.
+The live-order lookup skips canceled orders, so after an admin reject (which cancels the order) a retry under a new command id is a new sale; Medusa has no unique constraint on `metadata.tally_client_id`, so no id has to be released.
+
 ## Consequences
 
 Negative stock is visible to the merchant. A sales channel with several stock
