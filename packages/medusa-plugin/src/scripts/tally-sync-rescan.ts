@@ -20,8 +20,13 @@ export default async function tallySyncRescan({ container, args }: ExecArgs) {
     process.exitCode = 1
     return
   }
-  if (!SINCE_TIMEZONE_RE.test(args[0]) || Number.isNaN(Date.parse(args[0]))) {
+  if (!SINCE_TIMEZONE_RE.test(args[0])) {
     logger.error('tally_sync rescan: since must include a timezone, e.g. 2026-09-29T10:00:00Z or 2026-09-29T20:00:00+10:00')
+    process.exitCode = 1
+    return
+  }
+  if (Number.isNaN(Date.parse(args[0]))) {
+    logger.error(`tally_sync rescan: since is not a valid timestamp: ${args[0]}`)
     process.exitCode = 1
     return
   }
