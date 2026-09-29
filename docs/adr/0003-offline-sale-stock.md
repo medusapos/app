@@ -112,21 +112,35 @@ Window 2, the take-back:
   failed `tally_stock_topups_reversed` write is logged and returns
   `StepResponse.permanentFailure` with the success compensation data, so
   Medusa puts the stock back exactly once and a retry takes it back again.
-  The compensation writes its restore together with
+  The compensation reads the order's metadata and checks its marker under
+  the stock lock, and writes its restore together with
   `tally_stock_take_back_compensated` (this run's attempt id) right after
-  its re-adjustment, so a rerun never re-adjusts, and a failed lock release
-  or write after the re-adjustment is logged, not rethrown.
-- **Upstream constraint (Medusa `@medusajs/core-flows` 2.21.0):**
-  `createOrderFulfillmentWorkflow`'s compensation does not restore the
-  fulfilled quantities. So an `order.create` that fails after its fulfilment
-  steps (in the take-back, or at `completeOrderWorkflow`) leaves stock short by
-  the quantity sold, whether or not a top-up happened. It was found on
-  2026-09-29 by logging every stock adjustment in fault tests. Our own
-  compensating step after the fulfilment steps closes it (the next PR). Until
-  then, the take-back fault test expects the pre-sale level minus the sale
-  quantity. Nothing is filed upstream. Cross-pollination note for WCPOS v2: a
-  platform's fulfilment rollback may not undo its stock movement, so check
-  it with a fault test rather than assume it.
+  its re-adjustment under the same lock, so a rerun never re-adjusts and the
+  restore never overwrites metadata written while it waited. A throw after
+  its first write (the re-adjustment, or the restore when it has nothing to
+  re-adjust) is logged, not rethrown, so the compensations after it (the
+  top-up reversal, the order cancel) still run.
+  A failed write after the compensation's re-adjustment leaves `started`
+  or `reversed` set. Where the order survives (resume, reject), a retry
+  then skips the take-back and the stock ends too high by the shortfall,
+  with only a log line: the same direction as the rule above (stock may end
+  too high, never too low). In `order.create` the order cancel and the
+  top-up reversal still run, so stock ends exact.
+- **Fulfilment compensation (fixed 2026-09-29):** our two fulfilment steps
+  were `createOrderFulfillmentWorkflow.runAsStep(...)` renamed with
+  `.config({ name })` inside `when`. In Medusa 2.21 that loses their
+  compensation: `refRet.config` builds a handler for the new name
+  (`workflows-sdk/dist/utils/composer/create-step.js:69`), but
+  `when().then()` calls `step.if()` (`when.js`), which re-registers the
+  pre-rename handler under the new name (`create-step.js:89-99`). Its
+  compensation looks up the step's output under the old name
+  (`create-step-handler.js`), finds none, and `runAsStep`'s compensation
+  (`create-workflow.js:195-224`) cancels by transaction id, which throws
+  "could not be found" (`transaction-orchestrator.js:1150`) because the
+  fulfilment workflow is never stored. So a failed `order.create` never
+  reversed a fulfilment's stock write. The fix wraps each group in its own
+  workflow (`tally-fulfill-first-group`, `tally-fulfill-second-group`),
+  called without a rename. Rule: never rename a step inside `when`.
 
 Also from the #22 review: resume skips a `canceled` or `failed` payment
 collection instead of trying to capture it, and when no other collection
