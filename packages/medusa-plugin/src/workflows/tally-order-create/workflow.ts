@@ -1,4 +1,4 @@
-import { MedusaError, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, MedusaError, Modules } from '@medusajs/framework/utils'
 import { createStep, createWorkflow, StepResponse, transform, when, WorkflowResponse, type StepExecutionContext } from '@medusajs/framework/workflows-sdk'
 import {
   adjustInventoryLevelsStep, createInventoryLevelsStep,
@@ -45,15 +45,25 @@ const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: st
   const orders = container.resolve(Modules.ORDER)
   const order = await orders.retrieveOrder(orderId)
   const topUps = order.metadata!.tally_stock_topups as StockTopUp[]
-  const adjusted = order.metadata!.tally_stock_take_back_started !== true
+  const started = order.metadata!.tally_stock_take_back_started ?? null
+  const adjusted = started !== true
   if (adjusted) await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: true } })
+  let took = false
   if (adjusted) await container.resolve(Modules.LOCKING).execute(Array.from(new Set(topUps.map(topUp => topUp.inventory_item_id))), async () => {
     await container.resolve(Modules.INVENTORY).adjustInventory(topUps.map(topUp => ({
       inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: -topUp.shortfall,
     })))
+    took = true
+  }).catch(async (error: unknown) => {
+    // A throw after the adjustment (the unlock) still succeeds, so neither this step nor the top-up is compensated twice.
+    if (took) return container.resolve(ContainerRegistrationKeys.LOGGER)
+      .error(`tally take-back: order ${orderId} took its stock top-up back, but the lock release failed: ${(error as Error).message}`)
+    // A throw before it took nothing back, so the retry adjusts.
+    await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: started } })
+    throw error
   })
   await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: true, tally_stock_topups_reversed: true } })
-  return new StepResponse(undefined, { orderId, topUps, adjusted, started: order.metadata!.tally_stock_take_back_started ?? null,
+  return new StepResponse(undefined, { orderId, topUps, adjusted, started,
     flag: order.metadata!.tally_stock_topups_reversed ?? null })
 }, async (data, { container }) => {
   if (!data) return

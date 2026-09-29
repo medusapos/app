@@ -43,7 +43,7 @@ export async function executeRegisterCommand(container: MedusaContainer, command
           code: 'idempotency_mismatch', message: `Command ${id} was already used for a different payload.`,
         } } }
       }
-      if (claim.command.status === 'in_progress') return { kind: 'in_progress', id }
+      if (claim.command.status === 'in_progress' || claim.command.status === 'needs_admin') return { kind: 'in_progress', id }
       const result = parseCommandResult(claim.command.result)
       return { kind: 'result', result: claim.command.status === 'applied' ? { ...result, status: 'duplicate' } : result }
     }

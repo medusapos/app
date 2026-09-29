@@ -86,7 +86,8 @@
           "enumItems": [
             "in_progress",
             "applied",
-            "rejected"
+            "rejected",
+            "needs_admin"
           ],
           "mappedType": "enum"
         },
@@ -124,6 +125,22 @@
         },
         "stock_topups_pending": {
           "name": "stock_topups_pending",
+          "type": "jsonb",
+          "unsigned": false,
+          "autoincrement": false,
+          "primary": false,
+          "nullable": true,
+          "unique": false,
+          "length": null,
+          "precision": null,
+          "scale": null,
+          "default": null,
+          "comment": null,
+          "enumItems": [],
+          "mappedType": "json"
+        },
+        "needs_admin_reason": {
+          "name": "needs_admin_reason",
           "type": "jsonb",
           "unsigned": false,
           "autoincrement": false,

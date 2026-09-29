@@ -2,12 +2,17 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import {
+  cancelOrderWorkflow, convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, markPaymentCollectionAsPaid,
+  type CreateOrderWorkflowInput,
+} from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
+import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
 import { seed } from './seed'
 
 jest.setTimeout(180000)
@@ -325,6 +330,38 @@ medusaIntegrationTestRunner({
       })
     })
 
+    it('a short sale whose take-back unlock throws is applied and takes its top-up back exactly once', async () => {
+      const inventory = container.resolve(Modules.INVENTORY)
+      const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      const quantity = Math.max(Number(before.stocked_quantity) - Number(before.reserved_quantity), 0) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const locking = container.resolve(Modules.LOCKING)
+      const execute = locking.execute.bind(locking) as (...args: unknown[]) => Promise<unknown>
+      let probes = 0
+      // Only the take-back's execute runs after it marks the order started; that one throws after its job.
+      jest.spyOn(locking, 'execute').mockImplementation((async (...args: unknown[]) => {
+        const result = await execute(...args)
+        const [order] = await liveOrders(sale.payload.clientOrderId)
+        if (probes || order?.metadata?.tally_stock_take_back_started !== true) return result
+        probes++
+        throw new Error('unlock probe')
+      }) as never)
+      const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+      const response = await post([sale])
+      const [after] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      expect([Number(after.stocked_quantity), Number(after.reserved_quantity)])
+        .toEqual([Number(before.stocked_quantity) - quantity, Number(before.reserved_quantity)])
+      expect([response.status, response.data.results[0].status, probes]).toEqual([200, 'applied', 1])
+      const [order] = await liveOrders(sale.payload.clientOrderId)
+      expect(order.metadata).toMatchObject({ tally_stock_take_back_started: true, tally_stock_topups_reversed: true })
+      expect(log).toHaveBeenCalledWith(expect.stringContaining(`order ${order.id} took its stock top-up back, but the lock release failed: unlock probe`))
+      await inventory.adjustInventory(data.inventoryC, data.berlinId, quantity)
+    })
+
     it('ignores a pending top-up whose outcome is unknown', async () => {
       const inventory = container.resolve(Modules.INVENTORY)
       const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
@@ -451,6 +488,291 @@ medusaIntegrationTestRunner({
       expect(retry.data.results.map(result => [result.id, result.status])).toEqual([
         [sales[0].id, 'duplicate'], [sales[1].id, 'applied'], [sales[2].id, 'applied'],
       ])
+    })
+
+    describe('needs_admin', () => {
+      const built = '../../.medusa/server/src'
+      const detail = 'payment collection pay_col_admin is refunded'
+      function spyRun() {
+        const run = require(`${built}/workflows/tally-order-create/run`) as typeof import('../../src/workflows/tally-order-create/run')
+        return jest.spyOn(run, 'runOrderCreate')
+      }
+      async function park() {
+        const { NeedsAdminError } = require(`${built}/workflows/tally-order-create/needs-admin-error`) as
+          typeof import('../../src/workflows/tally-order-create/needs-admin-error')
+        const spy = spyRun().mockRejectedValueOnce(new NeedsAdminError('order_admin', detail))
+        const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+        const sale = command()
+        const response = await post([sale])
+        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        return { sale, spy, log }
+      }
+      async function resolve(id: string, action: string, message?: string) {
+        const script = require(`${built}/scripts/tally-ledger-resolve`) as typeof import('../../src/scripts/tally-ledger-resolve')
+        await script.default({ container, args: [id, action, ...message ? [message] : []] })
+      }
+
+      it('a resume refused as needs_admin answers 409, parks the row with its reason, and logs one line', async () => {
+        const { sale, log } = await park()
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+          status: 'needs_admin', needs_admin_reason: { orderId: 'order_admin', clientOrderId: sale.payload.clientOrderId, detail },
+        })
+        expect(log.mock.calls.filter(([line]) => String(line).includes('needs admin'))).toEqual([
+          [`tally order.create needs admin: command ${sale.id}, order order_admin: ${detail}`],
+        ])
+      })
+
+      it('a needs_admin row past the lease is never reclaimed: the resend gets 409 without running the recipe', async () => {
+        const { sale, spy } = await park()
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        await knex('tally_command').where({ id: sale.id }).update({ updated_at: knex.raw("now() - interval '1 hour'") })
+        const response = await post([sale])
+        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        expect(spy).toHaveBeenCalledTimes(1)
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
+      })
+
+      // A converted order whose run crashed once paid; `topUp` is the plugin's unreversed stock top-up of item C.
+      async function halfWrittenOrder(sale: CommandEnvelope<OrderCreatePayload>, topUp = 0) {
+        const planned = planOrderCreate(sale.payload, {
+          customer: null, commandId: sale.id, salesChannelId: data.channelId,
+          region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+          location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+          variants: Object.fromEntries(sale.payload.lines.map(line => [line.variantId, { id: line.variantId }])),
+        })
+        if (!planned.ok) throw new Error('Expected a plan')
+        if (topUp) {
+          await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, topUp)
+          planned.plan.draftOrder.metadata.tally_stock_topups = [{ inventory_item_id: data.inventoryC, location_id: data.berlinId, shortfall: topUp }]
+        }
+        const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+        await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+        const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+          input: { order_id: draft.id, amount: sale.payload.totalMinor / 100 },
+        })
+        await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+        return { orderId: draft.id, collectionId: collection.id }
+      }
+
+      // An admin then marks the collection partially captured: the real resume refuses it.
+      async function parkLiveOrder(sale = command(), topUp = 0) {
+        const { orderId, collectionId } = await halfWrittenOrder(sale, topUp)
+        await container.resolve(Modules.PAYMENT).updatePaymentCollections(collectionId, { status: 'partially_captured' })
+        const response = await post([sale])
+        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
+        return { sale, orderId, collectionId }
+      }
+
+      async function levelC() {
+        const [level] = await container.resolve(Modules.INVENTORY).listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+        return [Number(level.stocked_quantity), Number(level.reserved_quantity)]
+      }
+
+      it('a claim lost while parking logs a warning, not needs admin, and neither releases nor parks the row', async () => {
+        jest.spyOn(ledger, 'markNeedsAdmin').mockResolvedValueOnce(false)
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        const { sale, log } = await park()
+        expect(warn).toHaveBeenCalledWith(
+          `tally order.create: claim lost while parking command ${sale.id} for an admin (order order_admin: ${detail})`)
+        expect(log.mock.calls.filter(([line]) => String(line).includes('needs admin'))).toEqual([])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', needs_admin_reason: null })
+      })
+
+      // Two of item C, one of them topped up by the plugin.
+      function saleOfC() {
+        return command({
+          lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity: 2, unitPriceMinor: 300 }],
+          subtotalMinor: 504, taxMinor: 96, totalMinor: 600,
+          payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 600 }],
+        })
+      }
+
+      async function expectRejectedAndReversed(sale: CommandEnvelope<OrderCreatePayload>, orderId: string) {
+        const [order] = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId })
+        expect([order.status, order.metadata.tally_stock_topups_reversed]).toEqual(['canceled', true])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'rejected', result: { error: { data: { orderId } } } })
+      }
+
+      it('tally-ledger-resolve reject takes back the plugin\'s unreversed stock top-up before cancelling', async () => {
+        const before = await levelC()
+        const sale = saleOfC()
+        const { orderId } = await parkLiveOrder(sale, 1)
+        expect(await levelC()).toEqual([before[0] + 1, before[1] + 2])
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        await expectRejectedAndReversed(sale, orderId)
+      })
+
+      it('a take-back whose adjustment throws restores its started marker, so the next reject takes the stock back', async () => {
+        const before = await levelC()
+        const sale = saleOfC()
+        const { orderId } = await parkLiveOrder(sale, 1)
+        jest.spyOn(container.resolve(Modules.INVENTORY), 'adjustInventory').mockRejectedValueOnce(new Error('adjust probe'))
+        // The workflow engine rethrows a serialized error, not an Error instance.
+        await expect(resolve(sale.id, 'reject')).rejects.toMatchObject({ message: 'adjust probe' })
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin', result: null })
+        expect(await levelC()).toEqual([before[0] + 1, before[1] + 2])
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        await expectRejectedAndReversed(sale, orderId)
+      })
+
+      it('a take-back whose unlock throws after its adjustment committed still succeeds, so the reject completes and the stock is taken back once', async () => {
+        const before = await levelC()
+        const sale = saleOfC()
+        const { orderId } = await parkLiveOrder(sale, 1)
+        const locking = container.resolve(Modules.LOCKING)
+        const execute = locking.execute.bind(locking) as (...args: unknown[]) => Promise<unknown>
+        jest.spyOn(locking, 'execute').mockImplementationOnce((async (...args: unknown[]) => {
+          await execute(...args)
+          throw new Error('unlock probe')
+        }) as never)
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        await expectRejectedAndReversed(sale, orderId)
+        await expect(resolve(sale.id, 'reject')).rejects.toThrow('not needs_admin')
+        expect(await levelC()).toEqual(before)
+      })
+
+      it('tally-ledger-resolve destroys a connection whose unlock failed before the pool gets it back, disposed', async () => {
+        const { sale } = await parkLiveOrder()
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        const acquire = knex.client.acquireConnection.bind(knex.client)
+        let locked: { __knex__disposed?: unknown } | undefined
+        let probed = 0
+        // Background work shares the pool, so the probe fails the first sale unlock on whichever connection runs it.
+        jest.spyOn(knex.client, 'acquireConnection').mockImplementation(async () => {
+          const connection = await acquire()
+          if (jest.isMockFunction(connection.query)) return connection
+          const query = connection.query.bind(connection)
+          jest.spyOn(connection, 'query').mockImplementation((...args: unknown[]) => {
+            if (locked || !String(args[0]).includes('pg_advisory_unlock')) return query(...args)
+            locked = connection
+            probed = connection.query.mock.invocationCallOrder.slice(-1)[0]
+            return Promise.reject(new Error('unlock probe'))
+          })
+          return connection
+        })
+        const destroy = jest.spyOn(knex.client, 'destroyRawConnection')
+        const release = jest.spyOn(knex.client, 'releaseConnection')
+        await resolve(sale.id, 'apply')
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', needs_admin_reason: null })
+        // Calls on that connection after the probe; the pool's validator may destroy it again once it is back.
+        const order = (spy: jest.SpyInstance) => spy.mock.invocationCallOrder.filter((at, index) => at > probed && spy.mock.calls[index][0] === locked)
+        expect([order(release).length, order(destroy)[0] < order(release)[0]]).toEqual([1, true])
+        expect(locked!.__knex__disposed).toBeTruthy()
+      })
+
+      it('tally-ledger-resolve re-reads the row under the sale lock and refuses, touching no order, when it changed', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        const acquire = knex.client.acquireConnection.bind(knex.client)
+        // The script's first read takes the first connection; the second is the one that takes the sale lock.
+        jest.spyOn(knex.client, 'acquireConnection').mockImplementationOnce(acquire).mockImplementationOnce(async () => {
+          await knex('tally_command').where({ id: sale.id }).update({ status: 'in_progress' })
+          return acquire()
+        })
+        await expect(resolve(sale.id, 'reject')).rejects.toThrow(`Command ${sale.id} changed while resolving; nothing written`)
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', result: null })
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
+      })
+
+      it('tally-ledger-resolve reject takes back the top-up of an order an admin already cancelled by hand', async () => {
+        const before = await levelC()
+        const sale = saleOfC()
+        const { orderId } = await parkLiveOrder(sale, 1)
+        await cancelOrderWorkflow(container).run({ input: { order_id: orderId } })
+        expect(await levelC()).toEqual([before[0] + 1, before[1]])
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        await expectRejectedAndReversed(sale, orderId)
+      })
+
+      it('tally-ledger-resolve refuses while the sale\'s lock is held and changes nothing', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        const row = await ledger.retrieveTallyCommand(sale.id)
+        const busy = `tally_ledger_resolve: sale ${sale.payload.clientOrderId} is in progress; try again`
+        const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        const connection = await knex.client.acquireConnection()
+        try {
+          await connection.query("select pg_advisory_lock(hashtext('tally_order'), hashtext($1))", [sale.payload.clientOrderId])
+          for (const action of ['apply', 'reject']) await expect(resolve(sale.id, action)).rejects.toThrow('is in progress; nothing written')
+        } finally {
+          await connection.query("select pg_advisory_unlock(hashtext('tally_order'), hashtext($1))", [sale.payload.clientOrderId])
+          await knex.client.releaseConnection(connection)
+        }
+        expect(log.mock.calls).toEqual([[busy], [busy]])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toEqual(row)
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
+      })
+
+      it.each(['create', 'resume'])('the recipe\'s own fulfilment compensation on %s leaves no canceled fulfilment linked, so the resend is applied', async path => {
+        const sale = command()
+        if (path === 'resume') await halfWrittenOrder(sale)
+        jest.spyOn(container.resolve(Modules.ORDER), 'registerFulfillment').mockRejectedValueOnce(new Error('fulfilment probe'))
+        expect((await post([sale])).status).toBe(503)
+        const ids = (await liveOrders(sale.payload.clientOrderId)).map(order => order.id)
+        expect(ids).toHaveLength(path === 'resume' ? 1 : 0)
+        const { data: orders } = ids.length ? await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'order', filters: { id: ids }, fields: ['fulfillments.id', 'fulfillments.canceled_at'] }) : { data: [] }
+        expect(orders.flatMap(order => order.fulfillments).filter(fulfillment => fulfillment?.canceled_at)).toEqual([])
+        const response = await post([sale])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: sale.id, status: 'applied' })]])
+      })
+
+      it('tally-ledger-resolve reject cancels the live order and stores a TALLY_ADMIN_REJECTED platform_error that the resend replays', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        await resolve(sale.id, 'reject', 'Refunded in the admin')
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+        const [order] = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId })
+        expect(order.status).toBe('canceled')
+        const rejection = { id: sale.id, status: 'rejected', error: { code: 'platform_error', message: 'Refunded in the admin', data: {
+          platformCode: 'TALLY_ADMIN_REJECTED', platformMessage: 'Refunded in the admin', orderId,
+        } } }
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'rejected', result: rejection })
+        const response = await post([sale])
+        expect([response.status, response.data.results]).toEqual([200, [rejection]])
+        await expect(resolve(sale.id, 'apply')).rejects.toThrow('not needs_admin')
+      })
+
+      it('after a reject, a new command id for the same clientOrderId is applied as a new order', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        await resolve(sale.id, 'reject')
+        const retry = { ...command(), payload: sale.payload }
+        const response = await post([retry])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: retry.id, status: 'applied' })]])
+        const live = await liveOrders(sale.payload.clientOrderId)
+        expect(live).toEqual([expect.objectContaining({ id: response.data.results[0].serverRefs.orderId, status: 'completed' })])
+        expect(live[0].id).not.toBe(orderId)
+      })
+
+      it('tally-ledger-resolve reject refuses when the order cannot be cancelled and leaves the row needs_admin', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        // The package exports block deep imports; the module's own export is the one core-flows' getters read.
+        const cancel = require(path.join(path.dirname(require.resolve('@medusajs/core-flows')), 'order/workflows/cancel-order'))
+        jest.spyOn(cancel, 'cancelOrderWorkflow').mockReturnValue({ run: async () => { throw new Error('cancel probe') } })
+        const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+        await expect(resolve(sale.id, 'reject')).rejects.toThrow('cancel probe')
+        expect(log).toHaveBeenCalledWith(
+          `tally_ledger_resolve: reject refused for command ${sale.id}: order ${orderId} could not be cancelled: cancel probe`)
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin', result: null })
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
+      })
+
+      it('tally-ledger-resolve apply makes the row reclaimable and the resend completes the order the admin fixed', async () => {
+        const { sale, orderId, collectionId } = await parkLiveOrder()
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('payment_collection')
+          .where({ id: collectionId }).update({ status: 'completed' })
+        await resolve(sale.id, 'apply')
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', needs_admin_reason: null })
+        const response = await post([sale])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({
+          id: sale.id, status: 'applied', serverRefs: expect.objectContaining({ orderId }),
+        })]])
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId, status: 'completed' })])
+      })
     })
 
     it('validates all envelopes before claiming any command', async () => {
