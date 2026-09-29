@@ -8,5 +8,5 @@ module.exports = defineConfig({
       jwtSecret: 'integration-test-jwt-secret', cookieSecret: 'integration-test-cookie-secret',
     },
   },
-  plugins: [{ resolve: path.resolve(__dirname, '../..'), options: {} }],
+  plugins: [{ resolve: path.resolve(__dirname, '../..'), options: { experimentalSync: true } }],
 })
