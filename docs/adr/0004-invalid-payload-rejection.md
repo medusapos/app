@@ -73,14 +73,18 @@ Only errors raised before any write are safe to reject. **Don't widen this rule 
 6. The claim, sale lock, authoritative collision check and recipe are unchanged.
 
 An applied id always answers its recorded result before any check that could refuse it, so orders applied before a check existed are never refused on resend. `invalid_payload` stays deterministic on the bytes and unstored.
-The bounds and NUL rule match TallyUI's shared `payloadShapeErrors`: `customer.email` is at most 254 characters; `clientOrderId`, `createdAt`, `currency`, line `clientLineId`, `variantId`, `title`, payment `clientPaymentId`, `method`, `reference`, `registerId`, `cashierRef` and `locationId` are at most 255. The existing `customer.customerId` (64) and `sessionId` (36) bounds remain. All these string fields refuse U+0000 before replay.
+The bounds and NUL rule match TallyUI's shared checks (`payloadBoundErrors` for the lengths, after the replay lookup; `payloadShapeErrors` for types and NUL). Lengths count UTF-16 code units on both sides, and the till's clamp stays within them without splitting a surrogate pair: `customer.email` is at most 254; `clientOrderId`, `createdAt`, `currency`, line `clientLineId`, `variantId`, `title`, payment `clientPaymentId`, `method`, `reference`, `registerId`, `cashierRef` and `locationId` are at most 255. The existing `customer.customerId` (64) and `sessionId` (36) bounds remain. All these string fields refuse U+0000 before replay.
 A read-only collision pre-check before the claim is optional; the check under the lock is authoritative.
+The replay read answers only a finished row. An `in_progress` row falls through, so the new bounds apply to an
+in-flight orphan too: a sale claimed before this change, whose payload breaks a new bound and whose worker died,
+gets `invalid_payload` on resend and its half-made order is not resumed under that id. This is accepted: it needs a
+row in flight across the deploy, and the till already bounds these fields.
 
 ## Amendment: Rejection classification (2026-09-29)
 
 - `invalid_payload`: unstored, before the claim (shape, bounds, NUL, the version rules' `invalid_payload`, and the v3 fiscal checks).
 - `unsupported_version`: after the replay read, never recorded.
 - `store_configuration` and `unsupported_currency`: store-wide setup, unstored, with the claim released.
-- `unknown_variant` (including soft-deleted variants and products, unpublished products and products outside the sale's channel), `invalid_quantity`, and `underpaid`: per-sale facts, decided after the claim and stored.
+- `unknown_variant` (a variant that doesn't exist or is soft-deleted, a product that is soft-deleted, not `published`, or outside the sale's channel), `invalid_quantity`, and `underpaid`: per-sale facts, decided after the claim and stored. Soft-deleted variants and products were already `unknown_variant` before this amendment, because Medusa's query leaves them out (a product's soft delete cascades to its variants); the explicit `deleted_at` check is defensive. The new cases are unpublished products and products outside the channel. A stored `unknown_variant` is permanent: publishing the product later doesn't revive the sale.
 
-A stored `unsupported_currency` rejected the sale forever even after the region was fixed, so it is now unstored.
+A stored `unsupported_currency` rejected the sale forever even after the region was fixed, so it is now unstored. Rows stored before this change still replay as recorded, because the replay read answers any recorded result. The demo database is rebuilt nightly from a golden copy taken right after seeding, so it holds none. Any other store can find them with `select id from tally_command where result->'error'->>'code' = 'unsupported_currency'`, and remove them once the store is fixed, so that the till's resend applies.
