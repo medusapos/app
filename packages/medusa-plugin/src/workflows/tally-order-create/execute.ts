@@ -74,12 +74,14 @@ export async function executeOrderCreate(
           })
         } catch (error) {
           if (isNeedsAdminError(error)) {
-            await ledger.markNeedsAdmin(id, claim.claimToken, {
+            const parked = await ledger.markNeedsAdmin(id, claim.claimToken, {
               orderId: error.orderId, clientOrderId: command.payload.clientOrderId, detail: error.detail,
             })
+            // Parked, or the claim was lost: either way the row is not ours to release or delete.
             completed = true
-            container.resolve(ContainerRegistrationKeys.LOGGER)
-              .error(`tally order.create needs admin: command ${id}, order ${error.orderId}: ${error.detail}`)
+            const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
+            if (parked) logger.error(`tally order.create needs admin: command ${id}, order ${error.orderId}: ${error.detail}`)
+            else logger.warn(`tally order.create: claim lost while parking command ${id} for an admin (order ${error.orderId}: ${error.detail})`)
             return { kind: 'in_progress', id }
           }
           if (!isStoreConfigurationError(error)) throw error

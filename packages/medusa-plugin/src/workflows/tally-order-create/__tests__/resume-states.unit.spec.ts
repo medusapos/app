@@ -33,10 +33,11 @@ it.each([
     'payment collection pay_col_1 uses provider pp_stripe_stripe'],
   ['a canceled fulfilment', { payment_collections: [collection('completed')], fulfillments: [{ id: 'ful_1', canceled_at: new Date() }] },
     'fulfillment ful_1 is canceled'],
-])('resume refuses %s with NeedsAdminError before running any workflow', async (_name, order, detail) => {
-  const resumed = resumeOrderCreate(container(order), 'order_1', 10, 'sloc_1', 'so_1')
+])('resume refuses %s with NeedsAdminError before running any workflow, even on a draft', async (_name, order, detail) => {
+  const resumed = resumeOrderCreate(container({ is_draft_order: true, ...order }), 'order_1', 10, 'sloc_1', 'so_1')
   await expect(resumed).rejects.toThrow(NeedsAdminError)
   await expect(resumed).rejects.toMatchObject({ orderId: 'order_1', detail })
+  expect(mockRun).not.toHaveBeenCalledWith('convertDraftOrderWorkflow', expect.anything())
   expect(mockRun).not.toHaveBeenCalled()
 })
 

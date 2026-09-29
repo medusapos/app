@@ -3,7 +3,8 @@ import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import {
-  convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, type CreateOrderWorkflowInput,
+  convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, markPaymentCollectionAsPaid,
+  type CreateOrderWorkflowInput,
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
@@ -499,25 +500,82 @@ medusaIntegrationTestRunner({
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
       })
 
-      // A converted order whose collection an admin partially captured: the real resume refuses it.
-      async function parkLiveOrder() {
-        const sale = command()
+      // A converted order whose run crashed once paid; `topUp` is the plugin's unreversed stock top-up of item C.
+      async function halfWrittenOrder(sale: CommandEnvelope<OrderCreatePayload>, topUp = 0) {
         const planned = planOrderCreate(sale.payload, {
           customer: null, commandId: sale.id, salesChannelId: data.channelId,
           region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
           location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
-          variants: { [data.variantA]: { id: data.variantA } },
+          variants: Object.fromEntries(sale.payload.lines.map(line => [line.variantId, { id: line.variantId }])),
         })
         if (!planned.ok) throw new Error('Expected a plan')
+        if (topUp) {
+          await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, topUp)
+          planned.plan.draftOrder.metadata.tally_stock_topups = [{ inventory_item_id: data.inventoryC, location_id: data.berlinId, shortfall: topUp }]
+        }
         const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
         await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
-        const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({ input: { order_id: draft.id, amount: 10 } })
-        await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
+        const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+          input: { order_id: draft.id, amount: sale.payload.totalMinor / 100 },
+        })
+        await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+        return { orderId: draft.id, collectionId: collection.id }
+      }
+
+      // An admin then marks the collection partially captured: the real resume refuses it.
+      async function parkLiveOrder(sale = command(), topUp = 0) {
+        const { orderId, collectionId } = await halfWrittenOrder(sale, topUp)
+        await container.resolve(Modules.PAYMENT).updatePaymentCollections(collectionId, { status: 'partially_captured' })
         const response = await post([sale])
         expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
-        return { sale, orderId: draft.id }
+        return { sale, orderId, collectionId }
       }
+
+      async function levelC() {
+        const [level] = await container.resolve(Modules.INVENTORY).listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+        return [Number(level.stocked_quantity), Number(level.reserved_quantity)]
+      }
+
+      it('a claim lost while parking logs a warning, not needs admin, and neither releases nor parks the row', async () => {
+        jest.spyOn(ledger, 'markNeedsAdmin').mockResolvedValueOnce(false)
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        const { sale, log } = await park()
+        expect(warn).toHaveBeenCalledWith(
+          `tally order.create: claim lost while parking command ${sale.id} for an admin (order order_admin: ${detail})`)
+        expect(log.mock.calls.filter(([line]) => String(line).includes('needs admin'))).toEqual([])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', needs_admin_reason: null })
+      })
+
+      it('tally-ledger-resolve reject takes back the plugin\'s unreversed stock top-up before cancelling', async () => {
+        const before = await levelC()
+        const sale = command({
+          lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity: 2, unitPriceMinor: 300 }],
+          subtotalMinor: 504, taxMinor: 96, totalMinor: 600,
+          payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 600 }],
+        })
+        const { orderId } = await parkLiveOrder(sale, 1)
+        expect(await levelC()).toEqual([before[0] + 1, before[1] + 2])
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        const [order] = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId })
+        expect([order.status, order.metadata.tally_stock_topups_reversed]).toEqual(['canceled', true])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'rejected', result: { error: { data: { orderId } } } })
+      })
+
+      it.each(['create', 'resume'])('the recipe\'s own fulfilment compensation on %s leaves no canceled fulfilment linked, so the resend is applied', async path => {
+        const sale = command()
+        if (path === 'resume') await halfWrittenOrder(sale)
+        jest.spyOn(container.resolve(Modules.ORDER), 'registerFulfillment').mockRejectedValueOnce(new Error('fulfilment probe'))
+        expect((await post([sale])).status).toBe(503)
+        const ids = (await liveOrders(sale.payload.clientOrderId)).map(order => order.id)
+        expect(ids).toHaveLength(path === 'resume' ? 1 : 0)
+        const { data: orders } = ids.length ? await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'order', filters: { id: ids }, fields: ['fulfillments.id', 'fulfillments.canceled_at'] }) : { data: [] }
+        expect(orders.flatMap(order => order.fulfillments).filter(fulfillment => fulfillment?.canceled_at)).toEqual([])
+        const response = await post([sale])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: sale.id, status: 'applied' })]])
+      })
 
       it('tally-ledger-resolve reject cancels the live order and stores a TALLY_ADMIN_REJECTED platform_error that the resend replays', async () => {
         const { sale, orderId } = await parkLiveOrder()
@@ -558,14 +616,17 @@ medusaIntegrationTestRunner({
         expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
       })
 
-      it('tally-ledger-resolve apply makes the row reclaimable and the resend completes the order', async () => {
-        const { sale, spy } = await park()
+      it('tally-ledger-resolve apply makes the row reclaimable and the resend completes the order the admin fixed', async () => {
+        const { sale, orderId, collectionId } = await parkLiveOrder()
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('payment_collection')
+          .where({ id: collectionId }).update({ status: 'completed' })
         await resolve(sale.id, 'apply')
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', needs_admin_reason: null })
-        spy.mockRestore()
         const response = await post([sale])
-        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: sale.id, status: 'applied' })]])
-        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ status: 'completed' })])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({
+          id: sale.id, status: 'applied', serverRefs: expect.objectContaining({ orderId }),
+        })]])
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId, status: 'completed' })])
       })
     })
 

@@ -147,6 +147,7 @@ live order with `cancelOrderWorkflow`, then stores a `platform_error` rejection 
 that resends replay; a new command id for the same sale then creates a new order. If Medusa refuses the cancel (for example
 an uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `needs_admin`: clean the order up by hand and
 run `reject` again. See the ADR 0003 amendment of 2026-09-29.
+A second command id for the same `clientOrderId` parks as its own `needs_admin` row and needs its own resolve.
 
 ## Registers
 

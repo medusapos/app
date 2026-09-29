@@ -3,6 +3,7 @@ import type { ExecArgs } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import { cancelOrderWorkflow } from '@medusajs/medusa/core-flows'
 import { parseCommandResult } from '../modules/tally-ledger/command-result'
+import { takeBackStockWorkflow } from '../workflows/tally-order-create/workflow'
 
 // npx medusa exec <built path>/tally-ledger-resolve.js <commandId> apply|reject [message]
 // Resolves an order.create the ledger parked as needs_admin (see the plugin README).
@@ -19,9 +20,18 @@ export default async function tallyLedgerResolve({ container, args }: ExecArgs) 
   const reason = row.needs_admin_reason as { orderId: string; clientOrderId: string }
   if (action === 'reject') {
     // A rejected command must never leave a live order behind, so the sale's live order is canceled first.
-    const live = await knex('order').select('id').whereRaw("metadata->>'tally_client_id' = ?", [reason.clientOrderId])
+    const live = await knex('order').select('id', 'metadata').whereRaw("metadata->>'tally_client_id' = ?", [reason.clientOrderId])
       .whereNull('deleted_at').whereNot('status', 'canceled')
     for (const order of live) {
+      // Cancelling releases reservations but not the plugin's top-up, so an unreversed top-up is taken back first.
+      if (order.metadata?.tally_stock_topups && !order.metadata.tally_stock_topups_reversed) {
+        try {
+          await takeBackStockWorkflow(container).run({ input: { orderId: order.id } })
+        } catch (error) {
+          logger.error(`tally_ledger_resolve: reject refused for command ${id}: stock top-up on order ${order.id} could not be reversed: ${error.message}`)
+          throw error
+        }
+      }
       try {
         await cancelOrderWorkflow(container).run({ input: { order_id: order.id } })
       } catch (error) {
