@@ -426,6 +426,7 @@ medusaIntegrationTestRunner({
     it.each(['the second fulfilment group', 'completeOrderWorkflow'])('a two-group sale that fails at %s puts every fulfilled group\'s stock back exactly', async failure => {
       const before = [await levelC(), await levelA()]
       // A shipped line of C and, overridden to not require shipping, a line of A: two fulfilment groups.
+      // The spy patches the built plugin the server loads, so this needs a fresh .medusa build (pretest runs it).
       const plan = require('../../.medusa/server/src/workflows/tally-order-create/plan') as typeof import('../../src/workflows/tally-order-create/plan')
       const planOrderCreate = plan.planOrderCreate
       jest.spyOn(plan, 'planOrderCreate').mockImplementation((...args) => {
@@ -577,6 +578,156 @@ medusaIntegrationTestRunner({
       expect(retry.data.results.map(result => [result.id, result.status])).toEqual([
         [sales[0].id, 'duplicate'], [sales[1].id, 'applied'], [sales[2].id, 'applied'],
       ])
+    })
+
+    describe('clientOrderId collision', () => {
+      it('a sale lock held on another connection gives B 409 in_progress without a row', async () => {
+        const a = command()
+        expect((await post([a])).status).toBe(200)
+        const b = { ...a, id: randomUUID() }
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        const connection = await knex.client.acquireConnection()
+        try {
+          await connection.query("select pg_advisory_lock(hashtext('tally_order'), hashtext($1))", [a.payload.clientOrderId])
+          const response = await post([b])
+          expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: b.id }])
+          expect(await ledger.listTallyCommands({ id: b.id })).toHaveLength(0)
+        } finally {
+          await connection.query("select pg_advisory_unlock(hashtext('tally_order'), hashtext($1))", [a.payload.clientOrderId])
+          await knex.client.releaseConnection(connection)
+        }
+      })
+
+      it('a fresh in_progress A gives B 503 without a row and leaves the order unchanged', async () => {
+        const a = command()
+        expect((await post([a])).status).toBe(200)
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        await knex('tally_command').where({ id: a.id }).update({ status: 'in_progress', result: null, updated_at: knex.fn.now() })
+        const before = await liveOrders(a.payload.clientOrderId)
+        const b = { ...a, id: randomUUID() }
+        const response = await post([b])
+        expect(response.status).toBe(503)
+        expect(response.data).toMatchObject({ code: 'transient', id: b.id })
+        expect(await ledger.listTallyCommands({ id: b.id })).toHaveLength(0)
+        expect(await liveOrders(a.payload.clientOrderId)).toEqual(before)
+      })
+
+      it('a stale in_progress A is superseded by applied B and replays B as duplicate with id A', async () => {
+        const a = command()
+        const first = await post([a])
+        expect(first.status).toBe(200)
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        await knex('tally_command').where({ id: a.id }).update({
+          status: 'in_progress', result: null, updated_at: knex.raw("now() - interval '1 hour'"),
+        })
+        const b = { ...a, id: randomUUID() }
+        const response = await post([b])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({
+          id: b.id, status: 'applied', serverRefs: first.data.results[0].serverRefs,
+        })]])
+        expect(await ledger.retrieveTallyCommand(b.id)).toMatchObject({ status: 'applied', result: response.data.results[0] })
+        expect(await ledger.retrieveTallyCommand(a.id)).toMatchObject({ status: 'superseded', superseded_by: b.id })
+        const replay = await post([a])
+        expect([replay.status, replay.data.results]).toEqual([200, [{ ...response.data.results[0], id: a.id, status: 'duplicate' }]])
+        expect(await liveOrders(a.payload.clientOrderId)).toHaveLength(1)
+      })
+
+      it('two concurrent Bs on stale A apply exactly one, return 409 without a row for the loser, and supersede A', async () => {
+        const a = command()
+        expect((await post([a])).status).toBe(200)
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        await knex('tally_command').where({ id: a.id }).update({
+          status: 'in_progress', result: null, updated_at: knex.raw("now() - interval '1 hour'"),
+        })
+        const bs = [{ ...a, id: randomUUID() }, { ...a, id: randomUUID() }]
+        const responses = await Promise.all(bs.map(b => post([b])))
+        expect(responses.map(response => response.status).sort()).toEqual([200, 409])
+        const winner = responses.find(response => response.status === 200)!.data.results[0]
+        const loser = bs.find(b => b.id !== winner.id)!
+        expect(winner.status).toBe('applied')
+        expect(responses.find(response => response.status === 409)!.data).toEqual({ code: 'in_progress', id: loser.id })
+        expect(await ledger.listTallyCommands({ id: loser.id })).toHaveLength(0)
+        expect(await ledger.retrieveTallyCommand(winner.id)).toMatchObject({ status: 'applied' })
+        expect(await ledger.retrieveTallyCommand(a.id)).toMatchObject({ status: 'superseded', superseded_by: winner.id })
+        expect(await liveOrders(a.payload.clientOrderId)).toHaveLength(1)
+      })
+
+      it('an applied A copies its stored warnings and serverRefs to B despite a different totalMinor, then B replays as duplicate', async () => {
+        const a = command({ totalMinor: 999 })
+        const first = await post([a])
+        expect(first.status).toBe(200)
+        expect(first.data.results[0].warnings).toContainEqual({ code: 'total_mismatch', expectedMinor: 999, serverMinor: 1000 })
+        const b = { ...a, id: randomUUID(), payload: { ...a.payload, totalMinor: 1000 } }
+        const response = await post([b])
+        const copied = { ...first.data.results[0], id: b.id, status: 'applied' }
+        expect([response.status, response.data.results]).toEqual([200, [copied]])
+        expect(await ledger.retrieveTallyCommand(b.id)).toMatchObject({ status: 'applied', result: copied })
+        const replay = await post([b])
+        expect([replay.status, replay.data.results]).toEqual([200, [{ ...copied, status: 'duplicate' }]])
+        expect(await liveOrders(a.payload.clientOrderId)).toHaveLength(1)
+      })
+
+      it('a needs_admin A gives B 503 without a row and leaves A unchanged', async () => {
+        const a = command()
+        expect((await post([a])).status).toBe(200)
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        await knex('tally_command').where({ id: a.id }).update({ status: 'needs_admin', result: null })
+        const before = await knex('tally_command').where({ id: a.id }).first()
+        const b = { ...a, id: randomUUID() }
+        const response = await post([b])
+        expect(response.status).toBe(503)
+        expect(response.data).toMatchObject({ code: 'transient', id: b.id })
+        expect(await ledger.listTallyCommands({ id: b.id })).toHaveLength(0)
+        expect(await knex('tally_command').where({ id: a.id }).first()).toEqual(before)
+      })
+
+      it('a deleted A row lets B resume the orphan order with the same order id', async () => {
+        const a = command()
+        const first = await post([a])
+        expect(first.status).toBe(200)
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_command').where({ id: a.id }).delete()
+        const b = { ...a, id: randomUUID() }
+        const response = await post([b])
+        expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({
+          id: b.id, status: 'applied', serverRefs: first.data.results[0].serverRefs,
+        })]])
+        expect(await ledger.retrieveTallyCommand(b.id)).toMatchObject({ status: 'applied' })
+        expect(await liveOrders(a.payload.clientOrderId)).toHaveLength(1)
+      })
+
+      it('a rejected A with a live order gives B 503 and logs the rejected-command error once', async () => {
+        const a = command()
+        const first = await post([a])
+        expect(first.status).toBe(200)
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_command').where({ id: a.id }).update({
+          status: 'rejected', result: JSON.stringify({ id: a.id, status: 'rejected', error: { code: 'platform_error', message: 'probe' } }),
+        })
+        const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+        const b = { ...a, id: randomUUID() }
+        const response = await post([b])
+        expect(response.status).toBe(503)
+        expect(response.data).toMatchObject({ code: 'transient', id: b.id })
+        expect(await ledger.listTallyCommands({ id: b.id })).toHaveLength(0)
+        expect(log.mock.calls.filter(([line]) => String(line).startsWith('tally order.create: rejected command'))).toEqual([
+          [`tally order.create: rejected command ${a.id} still has live order ${first.data.results[0].serverRefs.orderId}`],
+        ])
+      })
+
+      it('an A superseded by applied C lets a new D copy C serverRefs and stored warnings', async () => {
+        const a = command()
+        expect((await post([a])).status).toBe(200)
+        const c = command({ totalMinor: 998 })
+        const successor = await post([c])
+        expect(successor.status).toBe(200)
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_command').where({ id: a.id }).update({
+          status: 'superseded', result: null, superseded_by: c.id,
+        })
+        const d = { ...a, id: randomUUID() }
+        const response = await post([d])
+        const copied = { ...successor.data.results[0], id: d.id, status: 'applied' }
+        expect([response.status, response.data.results]).toEqual([200, [copied]])
+        expect(await ledger.retrieveTallyCommand(d.id)).toMatchObject({ status: 'applied', result: copied })
+      })
     })
 
     describe('needs_admin', () => {

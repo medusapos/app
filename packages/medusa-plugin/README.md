@@ -148,7 +148,12 @@ top-up the plugin made for the sale and hasn't reversed (ADR 0003), then cancels
 replay; a new command id for the same sale then creates a new order. If the take-back or the cancel fails (for example an
 uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `needs_admin`: clean the order up by hand and
 run `reject` again (cancelling the order by hand is fine: `reject` still takes back the plugin's top-up). See the ADR 0003 amendment of 2026-09-29.
-A second command id for the same `clientOrderId` parks as its own `needs_admin` row and needs its own resolve.
+A new command id for the same live `clientOrderId` copies the original applied result, including its warnings,
+and stores it for duplicate replays; a superseded original copies its applied successor's result.
+A fresh lease or `needs_admin` row answers 503 without storing the new command; a busy sale lock or lost takeover
+answers 409. A stale lease is taken over, the order resumes under the new command, and the original becomes
+`superseded` by it, so resending the original returns the new result as a duplicate. A rejected original with
+a live order answers 503 and logs an error; an order without a ledger row resumes as orphan recovery.
 
 ## Registers
 

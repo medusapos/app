@@ -20,6 +20,84 @@ moduleIntegrationTestRunner<TallyLedgerModuleService>({
     }
     afterEach(() => jest.restoreAllMocks())
 
+    it('retrieveCommandState reads missing, fresh, stale and applied commands with parsed results', async () => {
+      expect(await service.retrieveCommandState('unknown')).toBeNull()
+      const { command: claim } = await service.claim(input)
+      expect(await service.retrieveCommandState(input.id)).toEqual({ status: 'in_progress', result: null, stale: false })
+      await MikroOrmWrapper.forkManager().execute(
+        `update tally_command set updated_at = now() - make_interval(secs => ?) where id = ?`,
+        [CLAIM_LEASE_SECONDS + 1, input.id]
+      )
+      expect(await service.retrieveCommandState(input.id)).toEqual({ status: 'in_progress', result: null, stale: true })
+      await service.complete(input.id, claim.claim_token, result)
+      await MikroOrmWrapper.forkManager().execute(
+        `update tally_command set updated_at = now() - make_interval(secs => ?), result = ?::jsonb where id = ?`,
+        [CLAIM_LEASE_SECONDS + 1, JSON.stringify({ ...result, extra: true }), input.id]
+      )
+      expect(await service.retrieveCommandState(input.id)).toEqual({ status: 'applied', result, stale: false })
+    })
+
+    it('takeOverStaleClaim refreshes only an expired lease and fences out its old token', async () => {
+      expect(await service.takeOverStaleClaim('unknown')).toBeNull()
+      const { command: first } = await service.claim(input)
+      expect(await service.takeOverStaleClaim(input.id)).toBeNull()
+      expect(await service.retrieveTallyCommand(input.id)).toEqual(first)
+      await MikroOrmWrapper.forkManager().execute(
+        `update tally_command set updated_at = now() - make_interval(secs => ?) where id = ?`,
+        [CLAIM_LEASE_SECONDS + 1, input.id]
+      )
+      const aged = await service.retrieveTallyCommand(input.id)
+      const token = await service.takeOverStaleClaim(input.id)
+      expect(token).toEqual(expect.any(String))
+      expect(token).not.toBe(first.claim_token)
+      if (token === null) throw new Error('Expected takeover')
+      const next = await service.retrieveTallyCommand(input.id)
+      expect(next.claim_token).toBe(token)
+      expect(next.updated_at.getTime()).toBeGreaterThan(aged.updated_at.getTime())
+      expect(next.updated_at.getTime()).toBeGreaterThanOrEqual(first.updated_at.getTime())
+      expect((await service.retrieveCommandState(input.id))?.stale).toBe(false)
+      await expect(service.assertClaim(input.id, first.claim_token))
+        .rejects.toMatchObject({ type: MedusaError.Types.CONFLICT, message: 'claim lost' })
+      await expect(service.assertClaim(input.id, token)).resolves.toBeUndefined()
+      expect(await service.takeOverStaleClaim(input.id)).toBeNull()
+      expect(await service.retrieveTallyCommand(input.id)).toEqual(next)
+      await service.complete(input.id, token, result)
+      await MikroOrmWrapper.forkManager().execute(
+        `update tally_command set updated_at = now() - make_interval(secs => ?) where id = ?`,
+        [CLAIM_LEASE_SECONDS + 1, input.id]
+      )
+      const applied = await service.retrieveTallyCommand(input.id)
+      expect(await service.takeOverStaleClaim(input.id)).toBeNull()
+      expect(await service.retrieveTallyCommand(input.id)).toEqual(applied)
+    })
+
+    it('markSuperseded requires the current in-progress token and records its replacement', async () => {
+      const { command: claim } = await service.claim(input)
+      const replacement = { ...input, id: 'replacement' }
+      const { command: other } = await service.claim(replacement)
+      expect(await service.markSuperseded(input.id, 'wrong-token', replacement.id)).toBe(false)
+      expect(await service.retrieveTallyCommand(input.id)).toEqual(claim)
+      expect(await service.markSuperseded(input.id, claim.claim_token, replacement.id)).toBe(true)
+      expect(await service.retrieveTallyCommand(input.id)).toMatchObject({
+        status: 'superseded', superseded_by: replacement.id, claim_token: claim.claim_token,
+      })
+      const applied = await service.complete(replacement.id, other.claim_token, { ...result, id: replacement.id })
+      expect(await service.markSuperseded(replacement.id, other.claim_token, input.id)).toBe(false)
+      expect(await service.retrieveTallyCommand(replacement.id)).toEqual(applied)
+    })
+
+    it('claim never reclaims an aged superseded command with its own fingerprint', async () => {
+      const { command: claim } = await service.claim(input)
+      expect(await service.markSuperseded(input.id, claim.claim_token, 'replacement')).toBe(true)
+      await MikroOrmWrapper.forkManager().execute(
+        `update tally_command set updated_at = now() - make_interval(secs => ?) where id = ?`,
+        [CLAIM_LEASE_SECONDS + 1, input.id]
+      )
+      const aged = await service.retrieveTallyCommand(input.id)
+      expect(await service.claim(input)).toEqual({ claimed: false, command: aged })
+      expect((await service.retrieveTallyCommand(input.id)).status).toBe('superseded')
+    })
+
     it('records top-ups with claim fencing and stores empty lists as null', async () => {
       const { command: claim } = await service.claim(input)
       const applied = [{ inventory_item_id: 'i', location_id: 'berlin', shortfall: 1 }]
