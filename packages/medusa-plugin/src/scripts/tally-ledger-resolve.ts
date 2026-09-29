@@ -27,8 +27,15 @@ export default async function tallyLedgerResolve({ container, args }: ExecArgs) 
       logger.error(`tally_ledger_resolve: sale ${reason.clientOrderId} is in progress; try again`)
       throw new Error(`Sale ${reason.clientOrderId} is in progress; nothing written`)
     }
-    await resolveHeld(container, id, action, message, reason)
-      .finally(() => connection.query("select pg_advisory_unlock(hashtext('tally_order'), hashtext($1))", [reason.clientOrderId]))
+    try {
+      await resolveHeld(container, id, action, message, reason)
+    } finally {
+      try {
+        await connection.query("select pg_advisory_unlock(hashtext('tally_order'), hashtext($1))", [reason.clientOrderId])
+      } catch (error) {
+        logger.error(`tally_ledger_resolve: could not unlock sale ${reason.clientOrderId}: ${error.message}`)
+      }
+    }
   } finally {
     await knex.client.releaseConnection(connection)
   }
@@ -38,6 +45,9 @@ async function resolveHeld(container: ExecArgs['container'], id: string, action:
   reason: { orderId: string; clientOrderId: string }) {
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
+  // Re-read under the sale lock: the row may have been resolved between the first read and the lock.
+  const current = await knex('tally_command').where({ id }).first('status')
+  if (current?.status !== 'needs_admin') throw new Error(`Command ${id} changed while resolving; nothing written`)
   if (action === 'reject') {
     // A rejected command must never leave a live order behind, so the sale's live order is canceled first.
     const orders = await knex('order').select('id', 'status', 'metadata').whereRaw("metadata->>'tally_client_id' = ?", [reason.clientOrderId])

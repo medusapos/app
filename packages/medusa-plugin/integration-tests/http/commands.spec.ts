@@ -586,6 +586,38 @@ medusaIntegrationTestRunner({
         await expectRejectedAndReversed(sale, orderId)
       })
 
+      it('a take-back that throws after its adjustment committed is marked reversed, so the next reject never takes the stock back twice', async () => {
+        const before = await levelC()
+        const sale = saleOfC()
+        const { orderId } = await parkLiveOrder(sale, 1)
+        const locking = container.resolve(Modules.LOCKING)
+        const execute = locking.execute.bind(locking) as (...args: unknown[]) => Promise<unknown>
+        jest.spyOn(locking, 'execute').mockImplementationOnce((async (...args: unknown[]) => {
+          await execute(...args)
+          throw new Error('unlock probe')
+        }) as never)
+        await expect(resolve(sale.id, 'reject')).rejects.toMatchObject({ message: 'unlock probe' })
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin', result: null })
+        expect(await levelC()).toEqual([before[0], before[1] + 2])
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        await expectRejectedAndReversed(sale, orderId)
+      })
+
+      it('tally-ledger-resolve re-reads the row under the sale lock and refuses, touching no order, when it changed', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        const acquire = knex.client.acquireConnection.bind(knex.client)
+        // The script's first read takes the first connection; the second is the one that takes the sale lock.
+        jest.spyOn(knex.client, 'acquireConnection').mockImplementationOnce(acquire).mockImplementationOnce(async () => {
+          await knex('tally_command').where({ id: sale.id }).update({ status: 'in_progress' })
+          return acquire()
+        })
+        await expect(resolve(sale.id, 'reject')).rejects.toThrow(`Command ${sale.id} changed while resolving; nothing written`)
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'in_progress', result: null })
+        expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
+      })
+
       it('tally-ledger-resolve reject takes back the top-up of an order an admin already cancelled by hand', async () => {
         const before = await levelC()
         const sale = saleOfC()

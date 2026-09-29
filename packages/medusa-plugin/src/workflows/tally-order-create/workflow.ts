@@ -48,13 +48,16 @@ const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: st
   const started = order.metadata!.tally_stock_take_back_started ?? null
   const adjusted = started !== true
   if (adjusted) await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: true } })
+  let took = false
   if (adjusted) await container.resolve(Modules.LOCKING).execute(Array.from(new Set(topUps.map(topUp => topUp.inventory_item_id))), async () => {
     await container.resolve(Modules.INVENTORY).adjustInventory(topUps.map(topUp => ({
       inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: -topUp.shortfall,
     })))
+    took = true
   }).catch(async (error: unknown) => {
-    // A thrown lock or adjustment took nothing back, so the retry must adjust; only a process crash leaves the marker set.
-    await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: started } })
+    // A throw before the adjustment took nothing back, so the retry adjusts; one after it (the unlock) marks it reversed.
+    const marker = took ? { tally_stock_take_back_started: true, tally_stock_topups_reversed: true } : { tally_stock_take_back_started: started }
+    await orders.updateOrders(orderId, { metadata: { ...order.metadata, ...marker } })
     throw error
   })
   await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: true, tally_stock_topups_reversed: true } })
