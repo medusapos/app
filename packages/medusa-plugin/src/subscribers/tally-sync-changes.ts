@@ -6,13 +6,23 @@ import type TallyLedgerModuleService from '../modules/tally-ledger/service'
 import { TALLY_SYNC_MODULE } from '../modules/tally-sync'
 import type TallySyncModuleService from '../modules/tally-sync/service'
 
+// A burst (e.g. a 300-price price-list write) can fire hundreds of events at once on the local
+// bus. Each recordEvent call opens a transaction and waits on the journal's advisory lock, and a
+// waiting handler holds a pooled connection meanwhile -- the same pool the admin API uses. Chaining
+// every call on this module-level promise serialises them before a connection is taken, so a process
+// holds at most one journal connection at a time; the advisory lock still orders writes across processes.
+let queue: Promise<unknown> = Promise.resolve()
+
 export default async function tallySyncChanges({ event: { name, data }, container }: SubscriberArgs<{ id: string }>) {
   let logger: Logger | undefined
   try {
     logger = container.resolve(ContainerRegistrationKeys.LOGGER)
     const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
     if (!ledger.getPluginOptions().experimentalSync) return
-    const written = await container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE).recordEvent(name, data.id)
+    const sync = container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE)
+    const link = queue.then(() => sync.recordEvent(name, data.id))
+    queue = link.catch(() => undefined) // caught here so one failed event never breaks the chain
+    const written = await link
     if (!written) logger.debug(`tally_sync: no products resolved for ${name} (${data.id})`)
   } catch (error) {
     logger?.error(`tally_sync: failed to record ${name}: ${error}`)

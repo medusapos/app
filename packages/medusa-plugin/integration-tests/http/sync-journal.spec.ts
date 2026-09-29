@@ -62,9 +62,9 @@ medusaIntegrationTestRunner({
       }
     }
 
-    async function expectChanges(since: number, productIds: string[], op: 'upsert' | 'delete' = 'upsert') {
+    async function expectChanges(since: number, productIds: string[], op: 'upsert' | 'delete' = 'upsert', ms = 5000) {
       const expected = productIds.map(id => expect.objectContaining({ collection: 'products', id, op }))
-      const deadline = Date.now() + 5000
+      const deadline = Date.now() + ms
       let page: Awaited<ReturnType<TallySyncModuleService['changesSince']>>
       do {
         page = await sync.changesSince({ since, limit: 100 })
@@ -188,6 +188,21 @@ medusaIntegrationTestRunner({
       await expect(sync.recordEvent('product.product.updated', productId)).resolves.toBe(1)
       expect((await sync.changesSince({ since: headBefore, limit: 10 })).changes).toEqual([
         expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
+    it('12. a 300-price burst holds one connection per process: admin stays responsive, and every affected product lands in the journal', async () => {
+      const headBefore = await sync.head()
+      const variantIds = [data.variantA, data.variantB, data.variantC, data.variantD]
+      await api.post('/admin/price-lists', {
+        title: 'G4 burst', description: 'G4 burst', status: 'active', type: 'sale',
+        prices: Array.from({ length: 300 }, (_, index) => ({
+          variant_id: variantIds[index % variantIds.length], min_quantity: index + 1, currency_code: 'eur', amount: 6,
+        })),
+      }, { headers })
+      const start = Date.now()
+      await api.get('/admin/products?limit=1', { headers })
+      expect(Date.now() - start).toBeLessThan(5000)
+      await expectChanges(headBefore, [productId], 'upsert', 60000)
     })
   },
 })
