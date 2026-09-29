@@ -426,6 +426,7 @@ medusaIntegrationTestRunner({
     it.each(['the second fulfilment group', 'completeOrderWorkflow'])('a two-group sale that fails at %s puts every fulfilled group\'s stock back exactly', async failure => {
       const before = [await levelC(), await levelA()]
       // A shipped line of C and, overridden to not require shipping, a line of A: two fulfilment groups.
+      // The spy patches the built plugin the server loads, so this needs a fresh .medusa build (pretest runs it).
       const plan = require('../../.medusa/server/src/workflows/tally-order-create/plan') as typeof import('../../src/workflows/tally-order-create/plan')
       const planOrderCreate = plan.planOrderCreate
       jest.spyOn(plan, 'planOrderCreate').mockImplementation((...args) => {

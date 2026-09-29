@@ -132,7 +132,7 @@ Window 2, the take-back:
   compensation: `refRet.config` builds a handler for the new name
   (`workflows-sdk/dist/utils/composer/create-step.js:69`), but
   `when().then()` calls `step.if()` (`when.js`), which re-registers the
-  pre-rename handler under the new name (`create-step.js:89-99`). Its
+  pre-rename handler under the new name (`create-step.js:90-99`). Its
   compensation looks up the step's output under the old name
   (`create-step-handler.js`), finds none, and `runAsStep`'s compensation
   (`create-workflow.js:195-224`) cancels by transaction id, which throws
