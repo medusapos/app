@@ -24,6 +24,10 @@ export const setJournalLockTimeoutForTests = (timeout = JOURNAL_LOCK_TIMEOUT) =>
 // Lock order is always PRICE_LIST_WATCHER_LOCK, then JOURNAL_LOCK (inside record); nothing takes them the other way.
 const PRICE_LIST_WATCHER_LOCK = 2026093010
 
+// How far the price-list watermark trails the database's now(). A list write that commits, or whose app clock skews,
+// less than this after its updated_at is still caught; the cost is re-journaling a list's products for this long.
+const PRICE_LIST_WATERMARK_LAG = '10 seconds'
+
 // Postgres caps a statement at 65,535 parameters; this many rows (3 params each) stays well under it.
 const RECORD_CHUNK_SIZE = 1000
 
@@ -99,14 +103,19 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   }
 
   @InjectManager()
-  async initialize(productIds: string[], @MedusaContext() sharedContext: Context = {}): Promise<{ epoch: string; created: boolean }> {
+  // Without productIds, the backfill reads every live product inside the lock, so no product write can fall between it and the epoch.
+  async initialize(productIds?: string[], @MedusaContext() sharedContext: Context = {}): Promise<{ epoch: string; created: boolean }> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
       await em.execute("select set_config('lock_timeout', ?, true), pg_advisory_xact_lock(?)", [journalLockTimeout, JOURNAL_LOCK])
       const [state] = await em.execute("select epoch from tally_sync_state where id = 'sync'")
       if (state) return { epoch: state.epoch, created: false }
       const epoch = randomUUID()
-      await em.execute("insert into tally_sync_state (id, epoch) values ('sync', ?)", [epoch])
-      await this.record(productIds.map(objectId => ({ collection: 'products', objectId, op: 'upsert' })), { manager: em })
+      // The backfill covers every price list edited or scheduled before this transaction's now().
+      await em.execute(`insert into tally_sync_state (id, epoch, price_list_watermark, price_window_run_at)
+        values ('sync', ?, now(), now())`, [epoch])
+      const ids = productIds ?? (await em.execute<{ id: string }[]>('select id from product where deleted_at is null order by id'))
+        .map(row => row.id)
+      await this.record(ids.map(objectId => ({ collection: 'products', objectId, op: 'upsert' })), { manager: em })
       return { epoch, created: true }
     })
   }
@@ -134,10 +143,13 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
         await this.setPriceListWatermark(watermark ?? now, windowRunAt ?? now, { manager: em })
         return 0
       }
-      const [lists] = await em.execute(`select array_agg(id) as ids, greatest(max(updated_at), ?::timestamptz)::text as watermark
+      // The watermark trails now() by PRICE_LIST_WATERMARK_LAG, so lists updated within it are re-journaled until it passes.
+      const [lists] = await em.execute(`select array_agg(id) as ids,
+          greatest(?::timestamptz, least(max(updated_at), ?::timestamptz - ?::interval))::text as watermark,
+          greatest(?::timestamptz, ?::timestamptz)::text as window_run_at
         from price_list where updated_at > ?::timestamptz
           or (starts_at > ?::timestamptz and starts_at <= ?::timestamptz) or (ends_at > ?::timestamptz and ends_at <= ?::timestamptz)`,
-      [watermark, watermark, windowRunAt, now, windowRunAt, now])
+      [watermark, now, PRICE_LIST_WATERMARK_LAG, windowRunAt, now, watermark, windowRunAt, now, windowRunAt, now])
       let written = 0
       if (lists.ids?.length) {
         // MikroORM inlines an array parameter as a comma list, so the ids go through `in (?)`.
@@ -151,7 +163,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
           collection: 'products', objectId: product.id, op: product.deleted_at ? 'delete' as const : 'upsert' as const,
         })), { manager: em })
       }
-      await this.setPriceListWatermark(lists.watermark, now, { manager: em })
+      await this.setPriceListWatermark(lists.watermark, lists.window_run_at, { manager: em })
       return written
     })
   }

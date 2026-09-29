@@ -134,7 +134,7 @@ Auth is unchanged for every route: `authenticate('user', ['bearer', 'session'])`
 
 **Backfill at install.** On module install (the migration, or first boot), the plugin mints the epoch and writes one row per existing document. A document untouched since install then still has a revision, and a digest entry once P3 adds the audit.
 
-**What feeds the journal in G4.** It's built, behind `experimentalSync` (medusapos #110, and this PR). The spike (E7) decided the event set: module entity events rather than workflow events, because direct module writes emit only those.
+**What feeds the journal in G4.** It's built, behind `experimentalSync` (medusapos #110 and #112). The spike (E7) decided the event set: module entity events rather than workflow events, because direct module writes emit only those.
 
 | Source | Journal rows |
 |---|---|
@@ -146,11 +146,11 @@ Auth is unchanged for every route: `authenticate('user', ['bearer', 'session'])`
 
 How the journal behaves:
 - **One subscriber resolves each event** to products with SQL that never filters on `deleted_at`. The op is `delete` when the product is soft-deleted, `upsert` otherwise, taken from the product's current state rather than from the event name (E7).
-- **Ordering.** Every journal write takes one advisory transaction lock, so seq order is commit order and a cursor never skips a row. Resolution runs inside that lock, so the op reflects committed state. The lock wait is capped at 10 s; a timed-out event is logged with its name and id, and not journaled. A per-process queue keeps an event burst to one database connection: on the local bus, a 300-price write had all 300 handlers in flight at once.
+- **Ordering.** Every journal write takes one advisory transaction lock, so seq order is commit order and a cursor never skips a row. Resolution runs inside that lock, so the op reflects committed state. The lock wait is capped at 10 s; a timed-out event is retried once, then logged as dropped with its name and id. A per-process queue keeps an event burst to one database connection: on the local bus, a 300-price write had all 300 handlers in flight at once.
 - **Known gaps.** They reach tills only through a later edit, or from P3 through the digest audit:
   - hard-deleted rows (a price removed through a price-set update, option values, product↔option links), whose `.deleted` events can't resolve. G4 relies on the sibling `product-variant.updated` and `product-option.updated` events that every such workflow also emits. A direct module call that only hard-deletes is uncovered; an owner table would close it at P3.
   - writes from `medusa exec` scripts (0 of 5 journaled on the local bus: no subscriber ran before the script exited), from any other process than the server, and raw SQL;
-  - a price-list transaction that commits after the watermark passed its `updated_at`;
+  - a price-list transaction that commits more than 10 s after its `updated_at` (the watermark lags `now()` by 10 s);
   - a journal-lock timeout;
   - an event lost to a crash between commit and delivery (E2.1).
 
@@ -357,7 +357,7 @@ Measured on 2026-09-29 on a throwaway Medusa 2.21 instance on the Mac mini. It h
 5. **The `upsertWithReplace` paths (option values, price-list price batches) emit one event per changed row.** A price-list batch "update" of one variant's tiered prices changed only one row. That's a Medusa write quirk, not an event gap.
 6. **Deleting 500 price-list prices in one batch took 9.8 s over HTTP on Redis, and 25.5 s on local.**
 
-Building the journal (#110) found three more things:
+Building the journal (#110) found four more things:
 - **A product delete cascades to variant, price, level and link events that arrive after the product's own `deleted` event.** In a test, 1 `delete` row was followed by 14 `upsert` rows. So the op comes from the product's current `deleted_at`, read inside the journal lock.
 - **A `bigserial` seq becomes visible only at commit,** so concurrent writers would let a cursor skip rows. One advisory lock makes seq order commit order, and `head` is read before the rows and returned as `max(head, last seq)`.
 - **On the local bus, a 300-price write ran all 300 journal handlers at once,** each holding a pooled connection. A per-process queue caps that at one.

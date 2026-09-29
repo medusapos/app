@@ -61,8 +61,8 @@ medusaIntegrationTestRunner({
 
     const productUpsert = () => expect.arrayContaining([expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
 
-    async function expectProductRow(since: number, poke: () => Promise<unknown>) {
-      const deadline = Date.now() + 10000
+    async function expectProductRow(since: number, poke: () => Promise<unknown>, ms = 10000) {
+      const deadline = Date.now() + ms
       let page: Awaited<ReturnType<TallySyncModuleService['changesSince']>>
       do {
         await poke()
@@ -78,6 +78,9 @@ medusaIntegrationTestRunner({
       expect(first.status).toBe(200)
       expect(first.data).toEqual(expect.objectContaining({ epoch: expect.any(String), horizon: 0, more: false }))
       expect(first.data.changes).toEqual(productUpsert())
+      // initialize() with no ids read the products and set both watcher timestamps inside its transaction.
+      const state = await sync.getState()
+      expect(state).toEqual({ epoch: first.data.epoch, priceListWatermark: expect.any(String), priceWindowRunAt: state!.priceListWatermark })
       const head = await settle()
       const all = await get('/tally/v1/changes?limit=1000')
       expect(all.data).toEqual(expect.objectContaining({ epoch: first.data.epoch, head, more: false }))
@@ -113,6 +116,9 @@ medusaIntegrationTestRunner({
         expect(bad.status).toBe(400)
         expect(bad.data.message).toEqual(expect.any(String))
       }
+      const noEpoch = await get('/tally/v1/changes?since=1')
+      expect(noEpoch.status).toBe(400)
+      expect(noEpoch.data).toEqual({ message: 'epoch is required when since > 0' })
     })
 
     it('3. tick answers 304 at the head with the current epoch, and 200 with epoch, head and horizon otherwise', async () => {
@@ -129,24 +135,19 @@ medusaIntegrationTestRunner({
       expect(bare.data).toEqual({ epoch, head, horizon: 0 })
     })
 
-    it('4. the price-list watcher journals the product after a list is created, retitled and set to draft', async () => {
+    const createList = (title: string) => api.post('/admin/price-lists', {
+      title, description: 'Watcher test', status: 'active', prices: [{ variant_id: data.variantA, currency_code: 'eur', amount: 8 }],
+    }, { headers }).then(created => created.data.price_list.id as string)
+
+    it('4. an unforced tick runs the watcher, which journals the product after its list is retitled and set to draft', async () => {
       await get('/tally/v1/changes')
-      let head = await settle()
-      const created = await api.post('/admin/price-lists', {
-        title: 'Sync sale', description: 'Watcher test', status: 'active',
-        prices: [{ variant_id: data.variantA, currency_code: 'eur', amount: 8 }],
-      }, { headers })
-      const listId = created.data.price_list.id
-      // Unforced ticks run the watcher at most once per 5 s per process, so keep ticking until one does.
-      await expectProductRow(head, () => get('/tally/v1/changes/tick'))
-
-      head = await settle()
+      const listId = await createList('Sync sale')
+      const head = await settle()
+      // Price-list edits emit no event, so only the watcher can journal these.
       await api.post(`/admin/price-lists/${listId}`, { title: 'Renamed sync sale' }, { headers })
-      await expectProductRow(head, () => runPriceListWatcher(container, { force: true }))
-
-      head = await settle()
       await api.post(`/admin/price-lists/${listId}`, { status: 'draft' }, { headers })
-      await expectProductRow(head, () => runPriceListWatcher(container, { force: true }))
+      // Unforced ticks run the watcher at most once per 5 s per process, so keep ticking until one does.
+      await expectProductRow(head, () => get('/tally/v1/changes/tick'), 12000)
     })
 
     it('5. the price-list watcher journals the product once a scheduled list starts', async () => {

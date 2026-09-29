@@ -24,6 +24,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   if (limit === undefined || limit < 1 || limit > 1000) return res.status(400).json({ message: 'limit must be an integer from 1 to 1000' })
   if (rawCollections !== undefined && typeof rawCollections !== 'string') return res.status(400).json({ message: 'collections must be a comma list' })
   if (rawEpoch !== undefined && typeof rawEpoch !== 'string') return res.status(400).json({ message: 'epoch must be a string' })
+  if (since > 0 && rawEpoch === undefined) return res.status(400).json({ message: 'epoch is required when since > 0' })
 
   const { epoch } = await ensureInitialized(req.scope)
   const sync = req.scope.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE)

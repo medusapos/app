@@ -1,4 +1,3 @@
-import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import type { Logger, MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import { TALLY_SYNC_MODULE } from '.'
@@ -13,22 +12,15 @@ export async function ensureInitialized(container: MedusaContainer): Promise<{ e
   const sync = container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE)
   const state = await sync.getState()
   if (state) return { epoch: state.epoch }
-  const knex = container.resolve<Knex>(ContainerRegistrationKeys.PG_CONNECTION)
-  const rows: { id: string }[] = await knex.raw('select id from product where deleted_at is null order by id').then(r => r.rows)
-  const { epoch, created } = await sync.initialize(rows.map(row => row.id))
-  if (created) {
-    // The backfill covers every price list edited or scheduled before this point.
-    const [{ now }] = (await knex.raw('select now()::text as now')).rows
-    await sync.setPriceListWatermark(now, now)
-  }
+  const { epoch } = await sync.initialize()
   return { epoch }
 }
 
 /**
  * Journals the products of price lists edited since the watermark, or whose starts_at or ends_at passed since the
  * last run: price-list edits emit no event and a sale starting or ending writes nothing.
- * Known gap: the watermark is strict, so a price-list write whose transaction commits after the watermark has passed
- * its updated_at is missed until that list's next edit.
+ * Known gap: the watermark trails now() by 10 s, so a price-list write whose transaction commits (or whose app clock
+ * skews) longer than that after its updated_at is missed until that list's next edit.
  */
 export async function runPriceListWatcher(container: MedusaContainer, { force = false }: { force?: boolean } = {}): Promise<void> {
   if (!force && Date.now() - lastWatcherRunAt < WATCHER_THROTTLE_MS) return

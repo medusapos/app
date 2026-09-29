@@ -182,13 +182,13 @@ This is a change journal and two read routes for TallyUI's G4 sync experiment. T
 **Only writes made by the server (or its workers) are journaled.** Events reach subscribers in the process that wrote. On the local bus they never leave it, and on the Redis bus they're dropped at the emitter when that process has no subscriber for them (spike findings).
 - **`medusa exec` scripts are not journaled.** On the local bus, 5 of 5 direct price writes from `medusa exec` committed, and none reached the journal: no subscriber ran before the script exited.
 - **Catalogue changes made by a script** reach tills only through a later edit of the same products, or through a resync. Before initialization, the install backfill covers them.
-- **A demo reset** restores the journal with the database, so tills see either a new epoch or a cursor ahead of `head`. Both answer `410 cursor_expired`, and the till resyncs.
+- **A demo reset** clears the journal and the sync state, so the next route call mints a new epoch. Every till's cursor then answers `410 cursor_expired`, and the till resyncs.
 
 **Journal ordering:** every journal write takes one advisory lock, so `seq` order is commit order and a cursor never skips a row. The lock wait is capped at 10 s. An event that times out is retried once, then logged as `tally_sync: journal lock timeout: … dropped` with its event name and id.
 
 **Not covered**, so these reach tills only through a later edit (or, from P3, the digest audit):
 - writes from `medusa exec` scripts or any other process that doesn't run the server, and raw SQL;
 - rows Medusa hard-deletes (a price removed through a price-set update, option values, product↔option links), when no sibling event fires. Every admin workflow measured does fire one.
-- a price-list change whose transaction commits after the watermark has already passed its `updated_at`;
+- a price-list change whose transaction commits longer than 10 s after its `updated_at` (the watermark lags `now()` by 10 s);
 - an event dropped after its lock-timeout retry;
 - an event lost if the process crashes between the commit and the subscriber (ADR 0020, E2.1).

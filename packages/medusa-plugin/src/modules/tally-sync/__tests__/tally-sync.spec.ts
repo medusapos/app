@@ -156,7 +156,8 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       const first = await service.initialize(['p1', 'p2'])
       expect(first).toEqual({ epoch: expect.any(String), created: true })
       expect(first.epoch).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
-      expect(await service.getState()).toEqual({ epoch: first.epoch, priceListWatermark: null, priceWindowRunAt: null })
+      const state = await service.getState()
+      expect(state).toEqual({ epoch: first.epoch, priceListWatermark: expect.any(String), priceWindowRunAt: state!.priceListWatermark })
       const rows = await sql('select collection, object_id, op from tally_change order by seq')
       expect(rows).toEqual([
         { collection: 'products', object_id: 'p1', op: 'upsert' },
