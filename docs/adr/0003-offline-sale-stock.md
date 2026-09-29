@@ -116,6 +116,17 @@ Window 2, the take-back:
   `tally_stock_take_back_compensated` (this run's attempt id) right after
   its re-adjustment, so a rerun never re-adjusts, and a failed lock release
   or write after the re-adjustment is logged, not rethrown.
+- **Upstream constraint (Medusa `@medusajs/core-flows` 2.21.0):**
+  `createOrderFulfillmentWorkflow`'s compensation does not restore the
+  fulfilled quantities. So an `order.create` that fails after its fulfilment
+  steps (in the take-back, or at `completeOrderWorkflow`) leaves stock short by
+  the quantity sold, whether or not a top-up happened. It was found on
+  2026-09-29 by logging every stock adjustment in fault tests. Our own
+  compensating step after the fulfilment steps closes it (the next PR). Until
+  then, the take-back fault test expects the pre-sale level minus the sale
+  quantity. Nothing is filed upstream. Cross-pollination note for WCPOS v2: a
+  platform's fulfilment rollback may not undo its stock movement, so check
+  it with a fault test rather than assume it.
 
 Also from the #22 review: resume skips a `canceled` or `failed` payment
 collection instead of trying to capture it, and when no other collection
