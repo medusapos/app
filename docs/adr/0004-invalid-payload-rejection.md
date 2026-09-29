@@ -75,3 +75,12 @@ Only errors raised before any write are safe to reject. **Don't widen this rule 
 An applied id always answers its recorded result before any check that could refuse it, so orders applied before a check existed are never refused on resend. `invalid_payload` stays deterministic on the bytes and unstored.
 The bounds and NUL rule match TallyUI's shared `payloadShapeErrors`: `customer.email` is at most 254 characters; `clientOrderId`, `createdAt`, `currency`, line `clientLineId`, `variantId`, `title`, payment `clientPaymentId`, `method`, `reference`, `registerId`, `cashierRef` and `locationId` are at most 255. The existing `customer.customerId` (64) and `sessionId` (36) bounds remain. All these string fields refuse U+0000 before replay.
 A read-only collision pre-check before the claim is optional; the check under the lock is authoritative.
+
+## Amendment: Rejection classification (2026-09-29)
+
+- `invalid_payload`: unstored, before the claim (shape, bounds, NUL, the version rules' `invalid_payload`, and the v3 fiscal checks).
+- `unsupported_version`: after the replay read, never recorded.
+- `store_configuration` and `unsupported_currency`: store-wide setup, unstored, with the claim released.
+- `unknown_variant` (including soft-deleted variants and products, unpublished products and products outside the sale's channel), `invalid_quantity`, and `underpaid`: per-sale facts, decided after the claim and stored.
+
+A stored `unsupported_currency` rejected the sale forever even after the region was fixed, so it is now unstored.

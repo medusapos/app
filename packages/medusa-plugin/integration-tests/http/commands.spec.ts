@@ -2,9 +2,9 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { WorkflowManager } from '@medusajs/framework/orchestration'
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, Modules, ProductStatus } from '@medusajs/framework/utils'
 import {
-  cancelOrderWorkflow, convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, markPaymentCollectionAsPaid,
+  cancelOrderWorkflow, convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, createProductsWorkflow, markPaymentCollectionAsPaid,
   type CreateOrderWorkflowInput,
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
@@ -177,6 +177,126 @@ medusaIntegrationTestRunner({
       const replay = await post([sale])
       expect(replay.status).toBe(200)
       expect(replay.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'duplicate' })])
+    })
+
+    describe('unsellable variants and currency', () => {
+      it('stores unknown_variant for a soft-deleted variant and replays it without creating an order', async () => {
+        const sale = command()
+        const products = container.resolve(Modules.PRODUCT)
+        await products.softDeleteProductVariants([data.variantA])
+        try {
+          const response = await post([sale])
+          expect(response.status).toBe(200)
+          expect(response.data.results).toEqual([expect.objectContaining({
+            id: sale.id, status: 'rejected', error: expect.objectContaining({ code: 'unknown_variant' }),
+          })])
+          expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+            status: 'rejected', result: response.data.results[0],
+          })
+          const replay = await post([sale])
+          expect(replay.status).toBe(200)
+          expect(replay.data.results).toEqual(response.data.results)
+          expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+            .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(0)
+        } finally {
+          await products.restoreProductVariants([data.variantA])
+        }
+      })
+
+      it('stores unknown_variant for a soft-deleted product and replays it without creating an order', async () => {
+        const sale = command()
+        const products = container.resolve(Modules.PRODUCT)
+        const variant = await products.retrieveProductVariant(data.variantA)
+        await products.softDeleteProducts([variant.product_id!])
+        try {
+          const response = await post([sale])
+          expect(response.status).toBe(200)
+          expect(response.data.results).toEqual([expect.objectContaining({
+            id: sale.id, status: 'rejected', error: expect.objectContaining({ code: 'unknown_variant' }),
+          })])
+          expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+            status: 'rejected', result: response.data.results[0],
+          })
+          const replay = await post([sale])
+          expect(replay.status).toBe(200)
+          expect(replay.data.results).toEqual(response.data.results)
+          expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+            .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(0)
+        } finally {
+          await products.restoreProducts([variant.product_id!])
+        }
+      })
+
+      it('stores unknown_variant for a draft product and replays it without creating an order', async () => {
+        const sale = command()
+        const products = container.resolve(Modules.PRODUCT)
+        const variant = await products.retrieveProductVariant(data.variantA, { relations: ['product'] })
+        await products.updateProducts(variant.product_id!, { status: ProductStatus.DRAFT })
+        try {
+          const response = await post([sale])
+          expect(response.status).toBe(200)
+          expect(response.data.results).toEqual([expect.objectContaining({
+            id: sale.id, status: 'rejected', error: expect.objectContaining({ code: 'unknown_variant' }),
+          })])
+          expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+            status: 'rejected', result: response.data.results[0],
+          })
+          const replay = await post([sale])
+          expect(replay.status).toBe(200)
+          expect(replay.data.results).toEqual(response.data.results)
+          expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+            .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(0)
+        } finally {
+          await products.updateProducts(variant.product_id!, { status: variant.product!.status })
+        }
+      })
+
+      it('stores unknown_variant for a product removed from the sales channel and replays it without creating an order', async () => {
+        const { data: [variant] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'product_variant', fields: ['product.shipping_profile.id'], filters: { id: data.variantA },
+        })
+        const { result: [product] } = await createProductsWorkflow(container).run({ input: { products: [{
+          title: 'Removed from POS channel', handle: `off-channel-${randomUUID()}`, status: ProductStatus.PUBLISHED,
+          shipping_profile_id: variant.product!.shipping_profile!.id, sales_channels: [{ id: data.channelId }],
+          options: [{ title: 'Variant', values: ['A'] }],
+          variants: [{ title: 'A', manage_inventory: false, options: { Variant: 'A' }, prices: [{ currency_code: 'eur', amount: 10 }] }],
+        }] } })
+        await container.resolve(ContainerRegistrationKeys.LINK).dismiss({
+          [Modules.PRODUCT]: { product_id: product.id },
+          [Modules.SALES_CHANNEL]: { sales_channel_id: data.channelId },
+        })
+        const sale = command()
+        sale.payload.lines[0].variantId = product.variants[0].id
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([expect.objectContaining({
+          id: sale.id, status: 'rejected', error: expect.objectContaining({ code: 'unknown_variant' }),
+        })])
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
+          status: 'rejected', result: response.data.results[0],
+        })
+        const replay = await post([sale])
+        expect(replay.status).toBe(200)
+        expect(replay.data.results).toEqual(response.data.results)
+        expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+          .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(0)
+      })
+
+      it('rejects unsupported_currency without a ledger row on either send and creates no order', async () => {
+        const sale = command({ currency: 'USD' })
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([expect.objectContaining({
+          id: sale.id, status: 'rejected', error: expect.objectContaining({ code: 'unsupported_currency' }),
+        })])
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        const replay = await post([sale])
+        expect(replay.status).toBe(200)
+        expect(replay.data.results).toEqual(response.data.results)
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+          .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(0)
+      })
     })
 
     describe('step order', () => {

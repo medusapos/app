@@ -115,7 +115,7 @@ export async function executeOrderCreate(
           }
           if (!isStoreConfigurationError(error)) throw error
           return { kind: 'result', result: { id, status: 'rejected', error: {
-            code: 'store_configuration', message: error.message,
+            code: error.code, message: error.message,
           } } }
         }
         await ledger.complete(id, claim.claimToken, result)
