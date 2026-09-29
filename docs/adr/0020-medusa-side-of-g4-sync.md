@@ -134,18 +134,25 @@ Auth is unchanged for every route: `authenticate('user', ['bearer', 'session'])`
 
 **Backfill at install.** On module install (the migration, or first boot), the plugin mints the epoch and writes one row per existing document. A document untouched since install then still has a revision, and a digest entry once P3 adds the audit.
 
-The subscribers for G4:
+**What feeds the journal in G4.** It's built, behind `experimentalSync` (medusapos #110, and this PR). The spike (E7) decided the event set: module entity events rather than workflow events, because direct module writes emit only those.
 
-| Medusa event (`utils/dist/core-flows/events.js`) | Journal rows |
+| Source | Journal rows |
 |---|---|
-| `product.created/updated/deleted` (554-588) | `products:{id}` |
-| `product-variant.created/updated/deleted` (515-549) | `products:{product_id}`, since variants live inside the product document |
-| Module events `pricing.price.created/updated/deleted` and `pricing.price-set.*` (`utils/dist/pricing/events.js:8-9`; internal, E2.1) | Resolved price → price set → variant (`product_variant_price_set` link) → `products:{product_id}`. This is meant to cover price edits on any route, including ones that bypass the variant workflow. G4 verifies that coverage, including the `upsertWithReplace` path (Ruling Q3). |
-| Module events `pricing.price-list.*` (internal) | Every product with a price in that list |
-| `inventory-level.created/updated/deleted` (1071-1113) and `inventory-item.*` (1026-1066) | Resolved to `products:{product_id}` through the variant–inventory-item link. The payload carries `order_id` when an order flow caused it (1094-1095). |
-| Product ↔ sales-channel link changes | No subscriber exists today. G4 adds one or records the gap (Ruling Q3). |
+| Module events `product.product.*`, `product.product-variant.*`, `product.product-option.*`, `product.product-option-value.*`, `product.product-product-option(-value).*` | Resolved to the product ids |
+| Module events `pricing.price.created/updated/deleted` | Price → price set → variant (`product_variant_price_set`) → product |
+| Module events `inventory.inventory-level.*`, `inventory.inventory-item.updated/deleted` | Level or item → variant (`product_variant_inventory_item`) → product |
+| Link events `LinkProductSalesChannel.attached/detached`, `LinkProductVariantPriceSet.*`, `LinkProductVariantInventoryItem.*` | The link row id → product |
+| **The price-list watcher**, on every `/changes/tick` (at most once every 5 s per process) and every minute as a scheduled job | The products of every price list whose `updated_at` passed the watermark, or whose `starts_at`/`ends_at` fell since the last run. **Price lists emit no event** for an update, a status change or a sale window (E7), so this takes the place of the price-window job below for G4. |
 
-G4 counts these events against writes before anything depends on them (Ruling Q3).
+How the journal behaves:
+- **One subscriber resolves each event** to products with SQL that never filters on `deleted_at`. The op is `delete` when the product is soft-deleted, `upsert` otherwise, taken from the product's current state rather than from the event name (E7).
+- **Ordering.** Every journal write takes one advisory transaction lock, so seq order is commit order and a cursor never skips a row. Resolution runs inside that lock, so the op reflects committed state. The lock wait is capped at 10 s; a timed-out event is logged with its name and id, and not journaled. A per-process queue keeps an event burst to one database connection: on the local bus, a 300-price write had all 300 handlers in flight at once.
+- **Known gaps.** They reach tills only through a later edit, or from P3 through the digest audit:
+  - hard-deleted rows (a price removed through a price-set update, option values, product↔option links), whose `.deleted` events can't resolve. G4 relies on the sibling `product-variant.updated` and `product-option.updated` events that every such workflow also emits. A direct module call that only hard-deletes is uncovered; an owner table would close it at P3.
+  - writes from a process that doesn't load the plugin, and raw SQL;
+  - a price-list transaction that commits after the watermark passed its `updated_at`;
+  - a journal-lock timeout;
+  - an event lost to a crash between commit and delivery (E2.1).
 
 **Deferred to P3 (milestone M-b).** Kept here so the design isn't lost.
 
@@ -155,8 +162,9 @@ G4 counts these events against writes before anything depends on them (Ruling Q3
 | `GET /tally/v1/digests/{collection}/{bucket}` | `{ ids: [{ id, revision, content_hash }] }` |
 | Subscribers on `customer.created/updated/deleted` (75-109) | `customers:{id}` |
 | Subscribers on `order.placed/updated/completed/canceled/archived`, `order-edit.confirmed` (114-309) | `orders:{id}`, for the till's own order history. Through G4 the till keeps TallyUI ADR-024's outbox view (Ruling Q5). |
-| Subscribers on `product-option.*`, `product-option-value.*`, `product-tag/type/category/collection.*` | The affected products, or their own reference collections |
-| The price-window job. **No event at all fires when time passes**: a price list's `starts_at`/`ends_at` boundary or a sale ending writes nothing. | A plugin scheduled job every minute (a proposal) journals the products of every price list whose `starts_at` or `ends_at` fell since its last run. Together with the price events above, this replaces the connector's 30-minute calculated-price pass and nightly base-price pass. It stays out until G4's event numbers exist (Ruling Q3). |
+| Subscribers on `product-tag/type/category/collection.*` | The affected products, or their own reference collections (the option subscribers moved into G4) |
+| ~~The price-window job~~ | Replaced in G4 by the price-list watcher above, which covers edits and the `starts_at`/`ends_at` boundaries (Front desk, 2026-09-29). |
+| An owner table for hard-deleted rows | It records each price's, option value's and option link's product on create and update, and reads it back on `.deleted`, closing the hard-delete gap above. |
 
 **Later, and only if G4's numbers demand it: `GET /tally/v1/changes/stream`.** This is not part of G4 or P3 (Ruling Q4). It comes only if the polled tick misses "within a tick", and then over streaming `expo/fetch`. Sketch: SSE sending `event: head` `data: {epoch, head}` on each commit, coalesced to at most 1 per second, with a `: ping` every 25 s. The client re-ticks on reconnect. It is fed by an in-process listener on journal inserts.
 
@@ -335,6 +343,25 @@ There is no websocket, `socket.io` or data-change stream in `medusa/dist`, `fram
 - Each module has its own manager, so a workflow's writes across modules aren't one transaction. Consistency comes from step compensation.
 - A plugin module's own tables do get real transactions. `tally_register` relies on this (ADR 0019), and the journal can too.
 
+### E7: events counted against writes (the G4 spike, Ruling Q3)
+
+Measured on 2026-09-29 on a throwaway Medusa 2.21 instance on the Mac mini. It had its own database, and ran on both the local and the Redis event bus, with one client writing one thing at a time. The full report, with its numbers and limits, is [`docs/spikes/g4-medusa-events.md`](../spikes/g4-medusa-events.md).
+1. **Price-list updates and status changes emit no event:** 0 events over 7 writes, on both buses, while `price_list.updated_at` moves. A sale starting or ending writes nothing at all (E2.1). So price lists are watched, not subscribed to (§3).
+2. **Direct module writes emit only module entity events,** never workflow events. On Redis they're dropped at the emitter when the writing process has no subscriber for them (`event-bus-redis.js:214-219`). On the local bus they never leave the writing process. The journal therefore subscribes to the module events, and every writing process must load the plugin.
+3. **A sales-channel add or remove through `/admin/sales-channels/:id/products` emits only `LinkProductSalesChannel.attached`/`detached`,** and the payload is the link row id. Level, price and option events likewise carry only their own ids. Every event is resolved to products in SQL, without filtering soft-deleted rows. A dismissed link row is soft-deleted, so it still resolves. Price-list price removal is a soft delete too (`softDeletePrices`; pinned by a test in #110).
+4. **Latency on Redis:** every event arrived within 250 ms of the HTTP response.
+   - The lowest-priority module events landed p50 4–50 ms and p95 9–148 ms after it.
+   - Two 500-row bursts drained within 191 and 203 ms.
+   - On the local bus, everything arrived before the response.
+   - Single client only: the concurrent-till measurement is still to come (§2).
+5. **The `upsertWithReplace` paths (option values, price-list price batches) emit one event per changed row.** A price-list batch "update" of one variant's tiered prices changed only one row. That's a Medusa write quirk, not an event gap.
+6. **Deleting 500 price-list prices in one batch took 9.8 s over HTTP on Redis, and 25.5 s on local.**
+
+Building the journal (#110) found three more things:
+- **A product delete cascades to variant, price, level and link events that arrive after the product's own `deleted` event.** In a test, 1 `delete` row was followed by 14 `upsert` rows. So the op comes from the product's current `deleted_at`, read inside the journal lock.
+- **A `bigserial` seq becomes visible only at commit,** so concurrent writers would let a cursor skip rows. One advisory lock makes seq order commit order, and `head` is read before the rows and returned as `max(head, last seq)`.
+- **On the local bus, a 300-price write ran all 300 journal handlers at once,** each holding a pooled connection. A per-process queue caps that at one.
+
 ### Baseline cited from TallyUI
 
 These connector citations, and those in the Context section, describe TallyUI's code at `origin/main` `e151099`. The one exception is `apps/expo/lib/use-replicated-products.ts:131-193`, which is medusapos's own app file. The TallyUI track confirmed them on 2026-09-29, correcting the runner count to one combined pull (three sub-feeds) plus four reconcilers. The handoff copies of ADR-067, ADR-068 and the adoption plan (`~/agent/handoff/tallyui-*.md`) are the TallyUI inputs.
@@ -349,8 +376,8 @@ Cited at `origin/main` `e151099`:
 
 - **G4's answer from Medusa is "driver-typed `payload`",** backed by the data a Woo shape would lose (Decision 1). The monorepo half of G4 still has to run the three experiments through the engine. This ADR gives it the server surface and the numbers to beat.
 - **The plugin grows a `tally_sync` module in two steps.**
-  - For G4: the journal table with its backfill, the product, variant, inventory and price subscribers, and two read routes (`/changes`, `/changes/tick`). Their shape and `sync: [1]` are experimental until G2.
-  - At P3 (M-b): the digest routes, the customer and order subscribers and the price-window job (§3, Deferred to P3).
+  - For G4, behind the plugin option `experimentalSync` (off by default): the journal table with its backfill; one subscriber over the product, variant, option, price, inventory and link events; the price-list watcher; and two read routes (`/changes`, `/changes/tick`). Their shape and `sync: [1]` are experimental until G2.
+  - At P3 (M-b): the digest routes, the customer and order subscribers, and the owner table for hard-deleted rows (§3, Deferred to P3). The price-list watcher, which replaces the price-window job, is already in G4.
   - All are additive and gated by `contracts.sync` in `/tally/v1/info`. The command endpoint is unchanged, and `order.create` and `register.*` keep their ledger.
 - **The connector's combined pull and four reconcile runners retire when the driver lands (P3).** They stay in service for testers until then (ADR-067 decision 7).
 - **A lost event is caught by the digest audit, once P3 builds it, because the digest hashes content.** Medusa's event bus releases events after the workflow finishes (E2.1), so a crash between commit and subscriber loses the pointer. The id and revision then stay the same, but the content hash doesn't, so the bucket's digest changes (§3). The audit's cadence bounds how long the loss lasts. Until P3, nothing catches it.
