@@ -1,4 +1,5 @@
 import net from 'node:net'
+import os from 'node:os'
 import { assertPortsFree, integrationTestPort, isCI, resolveTestPort } from '../../integration-tests/test-port'
 
 const pathA = '/Users/a/medusapos/packages/medusa-plugin'
@@ -51,10 +52,15 @@ it('refuses a fifth jest worker instead of wrapping onto worker 1', () => {
 
 describe('resolveTestPort', () => {
   const derived = String(integrationTestPort(pathA, 2))
-  it('leaves an explicit PORT alone', () => expect(resolveTestPort({ PORT: '5000' }, pathA, 2)).toBeUndefined())
-  it('leaves CI=true to get-port', () => expect(resolveTestPort({ CI: 'true' }, pathA, 2)).toBeUndefined())
-  it('derives the port for CI=false', () => expect(resolveTestPort({ CI: 'false' }, pathA, 2)).toBe(derived))
-  it('derives the port when CI and PORT are unset', () => expect(resolveTestPort({}, pathA, 2)).toBe(derived))
+  const http = { TEST_TYPE: 'integration:http' }
+  it('leaves an explicit PORT alone', () => expect(resolveTestPort({ ...http, PORT: '5000' }, pathA, 2)).toBeUndefined())
+  it('leaves CI=true to get-port', () => expect(resolveTestPort({ ...http, CI: 'true' }, pathA, 2)).toBeUndefined())
+  it('derives the port for CI=false', () => expect(resolveTestPort({ ...http, CI: 'false' }, pathA, 2)).toBe(derived))
+  it('derives the port when CI and PORT are unset', () => expect(resolveTestPort(http, pathA, 2)).toBe(derived))
+  it.each([{ TEST_TYPE: 'unit' }, {}])('leaves %p alone on worker 9, without throwing', env =>
+    expect(resolveTestPort(env, pathA, 9)).toBeUndefined())
+  it('refuses worker 9 in the HTTP suite', () =>
+    expect(() => resolveTestPort(http, pathA, 9)).toThrow('integration tests use at most 4 jest workers per checkout (worker 9)'))
 })
 
 describe('isCI', () => {
@@ -82,25 +88,22 @@ describe('assertPortsFree', () => {
     await expect(assertPortsFree([await freePort()])).resolves.toBeUndefined()
   })
 
-  it('rejects, naming the port, when a server holds it on 127.0.0.1 only', async () => {
-    const port = await freePort()
-    let holder: net.Server | undefined
-    try {
-      holder = await listen(port, '127.0.0.1')
-      await expect(assertPortsFree([port])).rejects.toThrow(`integration test port(s) ${port} busy on 127.0.0.1`)
-    } finally {
-      await close(holder)
-    }
-  })
-
-  it('rejects, naming the port, when a server holds it on ::', async () => {
-    const port = await freePort()
-    let holder: net.Server | undefined
-    try {
-      holder = await listen(port, '::')
-      await expect(assertPortsFree([port])).rejects.toThrow(new RegExp(`port\\(s\\) ${port} busy on .*::`))
-    } finally {
-      await close(holder)
-    }
-  })
+  // ::1 and :: need IPv6: without an IPv6 loopback interface those two cases are skipped.
+  const hasIPv6 = Object.values(os.networkInterfaces()).flat().some(i => i?.family === 'IPv6' && i.internal)
+  const busyHosts = (message: string, port: number) => message.match(new RegExp(`${port} busy on ([^;]*)`))?.[1].split(', ')
+  for (const [host, connected] of [['127.0.0.1', '127.0.0.1'], ['0.0.0.0', '127.0.0.1'], ['::1', '::1'], ['::', '::1']]) {
+    const run = host.includes(':') && !hasIPv6 ? it.skip : it
+    run(`rejects, naming ${host} and ${connected} (connect), when a server holds the port on ${host} (IPv6 hosts skip without IPv6)`, async () => {
+      const port = await freePort()
+      let holder: net.Server | undefined
+      try {
+        holder = await listen(port, host)
+        const message = await assertPortsFree([port]).then(() => 'resolved', (err: Error) => err.message)
+        expect(message).toMatch(`integration test port(s) ${port} busy on `)
+        expect(busyHosts(message, port)).toEqual(expect.arrayContaining([host, `${connected} (connect)`]))
+      } finally {
+        await close(holder)
+      }
+    })
+  }
 })

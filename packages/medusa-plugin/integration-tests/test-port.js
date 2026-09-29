@@ -13,20 +13,31 @@ function isCI(env = process.env) {
 }
 // The PORT setup.js sets for a jest worker: none when PORT is explicit, or in CI, where get-port picks.
 function resolveTestPort(env, packageDir, workerId) {
+  if (env.TEST_TYPE !== "integration:http") return undefined // setup.js runs for every test type; the others keep get-port
   return env.PORT || isCI(env) ? undefined : String(integrationTestPort(packageDir, workerId))
 }
 // Node binds `::` by default, which on macOS can succeed while another process holds
-// 127.0.0.1:<port>, so a `localhost` request could reach it: probe both hosts and fail loudly.
+// 127.0.0.1, ::1 or 0.0.0.0 on the port, so a `localhost` request could reach it: bind all four, connect to both loopbacks.
 async function assertPortsFree(ports) {
   const busy = []
   for (const port of ports) {
-    for (const host of ["127.0.0.1", "::"]) {
+    const hosts = []
+    for (const host of ["127.0.0.1", "::1", "0.0.0.0", "::"]) {
       const err = await new Promise(resolve => {
         const server = require("node:net").createServer().once("error", resolve)
         server.listen(port, host, () => server.close(() => resolve(null)))
       })
-      if (err && !(host === "::" && err.code === "EADDRNOTAVAIL")) busy.push(`${port} busy on ${host}`) // no IPv6 is free
+      if (err && !(host.includes(":") && ["EADDRNOTAVAIL", "EAFNOSUPPORT"].includes(err.code))) hosts.push(host) // no IPv6 is free
     }
+    for (const host of ["127.0.0.1", "::1"]) {
+      const connected = await new Promise(resolve => {
+        const socket = require("node:net").connect({ port, host, timeout: 500 })
+        const done = ok => { socket.destroy(); resolve(ok) }
+        socket.once("connect", () => done(true)).once("timeout", () => done(false)).once("error", () => done(false)) // ECONNREFUSED is free
+      })
+      if (connected) hosts.push(`${host} (connect)`)
+    }
+    if (hosts.length) busy.push(`${port} busy on ${hosts.join(", ")}`)
   }
   if (busy.length) throw new Error(`integration test port(s) ${busy.join(", ")}; stop the process holding it, or set PORT to a free port`)
 }
