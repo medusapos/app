@@ -115,7 +115,7 @@ Window 2, the take-back:
   The compensation reads the order's metadata and checks its marker under
   the stock lock, and writes its restore together with
   `tally_stock_take_back_compensated` (this run's attempt id) right after
-  its re-adjustment under the same lock, so a rerun never re-adjusts, the
+  its re-adjustment under the same lock, so a rerun never re-adjusts and the
   restore never overwrites metadata written while it waited. A throw after
   its first write (the re-adjustment, or the restore when it has nothing to
   re-adjust) is logged, not rethrown, so the compensations after it (the
