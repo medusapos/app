@@ -88,3 +88,5 @@ bash dev/medusa-store/scripts/probes/g4-events/run.sh redis "$PWD/.g4-out/redis"
 Redis mode uses `redis://127.0.0.1:6379/5`. Each output directory contains
 `events.jsonl`, `results.json`, and `server.log`. The server stops on exit.
 The probe and Redis module override are disabled when their G4 env vars are unset.
+`summary.md` reports ID coverage, event counts, latency percentiles, and burst drain time from `results.json`.
+The direct-write scenario uses module services in a separate `medusa exec` process, with only the server recording events.

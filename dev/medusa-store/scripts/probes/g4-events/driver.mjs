@@ -1,5 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { setTimeout } from "node:timers/promises"
+import { spawn } from "node:child_process"
 
 const [baseUrl, probeFile, resultsFile] = process.argv.slice(2)
 const startedAt = Date.now()
@@ -9,18 +10,20 @@ const fixture = { variantIds: [], priceIds: [], inventoryItemIds: [], levelIds: 
 
 function ids(value) {
   if (Array.isArray(value)) {
-    return value.flatMap(item => typeof item === "string" ? [item] : ids(item))
+    return value.flatMap(ids)
   }
   if (!value || typeof value !== "object") return []
   return Object.entries(value).flatMap(([key, item]) =>
-    key === "id" && typeof item === "string" ? [item] : ids(item))
+    (key === "id" || key.endsWith("_id")) && typeof item === "string" ? [item]
+      : key.endsWith("_ids") && Array.isArray(item)
+        ? item.flatMap(value => typeof value === "string" ? [value] : ids(value)) : ids(item))
 }
 
 async function measure(scenario, iteration, write, expectedIds) {
   const t0 = Date.now()
   const response = await write()
   const body = await response.text()
-  const t1 = Date.now()
+  const t1 = response.exitedAt ?? Date.now()
   let quietSince = t1
   let previousLines = -1
   let lines
@@ -173,6 +176,83 @@ try {
       method: "POST", headers, body: JSON.stringify({ sales_channels: channels.map(({ id }) => ({ id })) }),
     }), [product.id])
   }
+  const listCreation = await measure("price-list.create", 1, () => fetch(`${baseUrl}/admin/price-lists`, {
+    method: "POST", headers,
+    body: JSON.stringify({ title: "G4 list", description: "G4 list", status: "active", type: "sale",
+      prices: fixture.variantIds.flatMap(variant_id => [1, 2, 3].map(min_quantity => ({
+        variant_id, min_quantity, currency_code: region.currency_code, amount: 8,
+      }))),
+    }),
+  }), [])
+  const listId = listCreation.data.price_list.id
+  const pricesResponse = await fetch(`${baseUrl}/admin/price-lists/${listId}/prices?limit=500`, { headers })
+  if (!pricesResponse.ok) throw new Error(`Price readback failed: ${pricesResponse.status} ${await pricesResponse.text()}`)
+  let { prices: listPrices } = await pricesResponse.json()
+  listCreation.record.createdIds = [listId, ...listPrices.map(price => price.id)]
+  listCreation.record.expectedIds.push(...listCreation.record.createdIds)
+  for (let iteration = 1; iteration <= 3; iteration++) {
+    const updated = listPrices.slice(0, 3)
+    const deletedId = listPrices[3].id
+    const batch = await measure("price-list.batch", iteration,
+      () => fetch(`${baseUrl}/admin/price-lists/${listId}/prices/batch`, {
+        method: "POST", headers,
+        body: JSON.stringify({
+          create: [0, 1].map(index => ({ variant_id: fixture.variantIds[index],
+            min_quantity: 4 + (iteration - 1) * 2 + index, currency_code: region.currency_code, amount: 7,
+          })),
+          update: updated.map(price => ({ id: price.id, variant_id: price.price_set.variant.id, amount: 8 + iteration })),
+          delete: [deletedId],
+        }),
+      }), [...updated.map(price => price.id), deletedId])
+    batch.record.createdIds = batch.data.created.map(price => price.id)
+    batch.record.expectedIds.push(...batch.record.createdIds)
+    listPrices = [...listPrices.filter(price => price.id !== deletedId), ...batch.data.created]
+  }
+  for (let iteration = 1; iteration <= 3; iteration++) {
+    await measure("price-list.update", iteration, () => fetch(`${baseUrl}/admin/price-lists/${listId}`, {
+      method: "POST", headers,
+      body: JSON.stringify({ title: `G4 list ${iteration}`,
+        starts_at: new Date(startedAt + iteration * 86400000).toISOString(),
+        ends_at: new Date(startedAt + (iteration + 1) * 86400000).toISOString(),
+      }),
+    }), [listId])
+  }
+  const burst = await measure("price-list.burst.create", 1, () => fetch(`${baseUrl}/admin/price-lists`, {
+    method: "POST", headers,
+    body: JSON.stringify({ title: "G4 burst", description: "G4 burst", status: "active", type: "sale",
+      prices: Array.from({ length: 500 }, (_, index) => ({ variant_id: fixture.variantIds[index % 3],
+        min_quantity: index + 1, currency_code: region.currency_code, amount: 6,
+      })),
+    }),
+  }), [])
+  const burstId = burst.data.price_list.id
+  burst.record.createdIds = [burstId]
+  burst.record.expectedIds.push(burstId)
+  const burstResponse = await fetch(`${baseUrl}/admin/price-lists/${burstId}/prices?limit=500`, { headers })
+  if (!burstResponse.ok) throw new Error(`Burst readback failed: ${burstResponse.status} ${await burstResponse.text()}`)
+  const { prices: burstPrices } = await burstResponse.json()
+  await measure("price-list.burst.update", 1, () => fetch(`${baseUrl}/admin/price-lists/${burstId}/prices/batch`, {
+    method: "POST", headers,
+    body: JSON.stringify({ update: burstPrices.map(price => ({
+      id: price.id, variant_id: price.price_set.variant.id, amount: 7,
+    })) }),
+  }), [burstId])
+  const directEnv = { ...process.env, G4_DIRECT_IDS: JSON.stringify({
+    priceId: fixture.priceIds[1], levelId: fixture.levelIds[1], inventoryItemId: fixture.inventoryItemIds[1],
+    locationId: fixture.locationId, variantId: fixture.variantIds[1],
+  }) }
+  // Only the server's subscriber may record delivery, including on the local bus.
+  delete directEnv.G4_EVENT_PROBE_FILE
+  await measure("direct.module.writes", 1, () => new Promise((resolve, reject) => {
+    const child = spawn("npx", ["medusa", "exec", "./src/scripts/g4-direct-writes.ts"], {
+      cwd: new URL("../../../apps/backend/", import.meta.url), env: directEnv, stdio: "inherit",
+    })
+    child.once("error", reject)
+    child.once("exit", (code, signal) => resolve({
+      exitedAt: Date.now(), status: code, ok: code === 0,
+      text: async () => JSON.stringify({ code, signal }),
+    }))
+  }), [fixture.priceIds[1], fixture.levelIds[1], fixture.variantIds[1]])
 } catch (error) {
   console.error(error)
   process.exitCode = 1

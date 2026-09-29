@@ -9,3 +9,4 @@ e2e/.tmp/
 test-results/
 playwright-report/
 .vercel
+.g4-out/

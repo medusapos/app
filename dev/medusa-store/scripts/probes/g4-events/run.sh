@@ -59,3 +59,4 @@ until curl -fsS --max-time 1 http://127.0.0.1:9200/health >/dev/null 2>&1; do
   sleep 1
 done
 node "$script_dir/driver.mjs" http://127.0.0.1:9200 "$out_dir/events.jsonl" "$out_dir/results.json"
+node "$script_dir/summarize.mjs" "$out_dir/results.json" > "$out_dir/summary.md"
