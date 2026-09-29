@@ -121,14 +121,16 @@ Window 2, the take-back:
   re-adjust) is logged, not rethrown, so the compensations after it (the
   top-up reversal, the order cancel) still run.
   A failed write after the compensation's re-adjustment leaves `started`
-  or `reversed` set, so a retry skips the take-back and the stock ends too
-  high by the shortfall, with only a log line: the same direction as the
-  rule above (stock may end too high, never too low).
+  or `reversed` set. Where the order survives (resume, reject), a retry
+  then skips the take-back and the stock ends too high by the shortfall,
+  with only a log line: the same direction as the rule above (stock may end
+  too high, never too low). In `order.create` the order cancel and the
+  top-up reversal still run, so stock ends exact.
 - **Fulfilment compensation (fixed 2026-09-29):** our two fulfilment steps
   were `createOrderFulfillmentWorkflow.runAsStep(...)` renamed with
   `.config({ name })` inside `when`. In Medusa 2.21 that loses their
   compensation: `refRet.config` builds a handler for the new name
-  (`workflows-sdk/dist/utils/composer/create-step.js:68`), but
+  (`workflows-sdk/dist/utils/composer/create-step.js:69`), but
   `when().then()` calls `step.if()` (`when.js`), which re-registers the
   pre-rename handler under the new name (`create-step.js:89-99`). Its
   compensation looks up the step's output under the old name
