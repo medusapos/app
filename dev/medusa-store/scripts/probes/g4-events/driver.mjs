@@ -28,6 +28,8 @@ async function measure(scenario, iteration, write, expectedIds) {
   let quietSince = t1
   let previousLines = -1
   let lines
+  let windowEnd
+  let capHit
   while (true) {
     const text = await readFile(probeFile, "utf8")
     lines = text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean)
@@ -36,14 +38,19 @@ async function measure(scenario, iteration, write, expectedIds) {
       previousLines = lines.length
       quietSince = now
     }
-    if ((now - t1 >= 3000 && now - quietSince >= 1000) || now - t1 >= 15000) break
+    const quiet = now - t1 >= 3000 && now - quietSince >= 1000
+    if (quiet || now - t1 >= 15000) {
+      windowEnd = now
+      capHit = !quiet
+      break
+    }
     await setTimeout(50)
   }
   const events = lines.map(line => JSON.parse(line))
-    .filter(event => event.receivedAt >= t0)
+    .filter(event => event.receivedAt >= t0 && event.receivedAt <= windowEnd)
     .map(event => ({ name: event.name, receivedAt: event.receivedAt, ids: ids(event.data),
       fromStart: event.receivedAt - t0, fromResponse: event.receivedAt - t1 }))
-  const record = { scenario, iteration, t0, t1, status: response.status, expectedIds, events }
+  const record = { scenario, iteration, t0, t1, windowEnd, capHit, status: response.status, expectedIds, events }
   records.push(record)
   if (!response.ok) throw new Error(`${scenario} ${iteration} failed: ${response.status} ${body}`)
   return { record, data: JSON.parse(body) }
@@ -275,11 +282,18 @@ try {
   }), [fixture.priceIds[1], fixture.levelIds[1], fixture.variantIds[1]])
   childProbe.record.childEvents = (await readFile(childProbeFile, "utf8")).split("\n").filter(Boolean)
     .map(line => JSON.parse(line))
+    .filter(event => event.receivedAt >= childProbe.record.t0 && event.receivedAt <= childProbe.record.windowEnd)
     .map(event => ({ name: event.name, receivedAt: event.receivedAt, ids: ids(event.data),
       fromStart: event.receivedAt - childProbe.record.t0 }))
 } catch (error) {
   console.error(error)
   process.exitCode = 1
 } finally {
-  await writeFile(resultsFile, JSON.stringify({ bus, startedAt, records, fixture }, null, 2) + "\n")
+  const text = await readFile(probeFile, "utf8")
+  const unattributed = text.slice(0, text.lastIndexOf("\n") + 1).split("\n").filter(Boolean)
+    .map(line => JSON.parse(line))
+    .filter(event => event.receivedAt > startedAt && !records.some(record =>
+      event.receivedAt >= record.t0 && event.receivedAt <= record.windowEnd))
+    .map(event => ({ name: event.name, receivedAt: event.receivedAt, ids: ids(event.data) }))
+  await writeFile(resultsFile, JSON.stringify({ bus, startedAt, records, fixture, unattributed }, null, 2) + "\n")
 }

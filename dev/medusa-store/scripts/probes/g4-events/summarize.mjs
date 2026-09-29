@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises"
 
-const { bus, startedAt, records } = JSON.parse(await readFile(process.argv[2], "utf8"))
+const { bus, startedAt, records, unattributed } = JSON.parse(await readFile(process.argv[2], "utf8"))
 const scenarios = new Map()
 const eventNames = new Map()
 for (const record of records) {
@@ -19,6 +19,10 @@ function latency(events, key) {
 }
 
 console.log(`# G4 events — ${bus}\n\nRun start: ${new Date(startedAt).toISOString()}\n`)
+const unattributedCounts = new Map()
+for (const event of unattributed) unattributedCounts.set(event.name, (unattributedCounts.get(event.name) ?? 0) + 1)
+const unattributedNames = [...unattributedCounts].map(([name, count]) => `${name}: ${count}`).join(", ")
+console.log(`Unattributed events: ${unattributed.length}${unattributed.length ? ` (${unattributedNames})` : ""}\n`)
 console.log("| Scenario | Iterations | IDs covered / expected | Events (total counts) | fromStart p50 ms | fromStart p95 ms | fromResponse p50 ms | fromResponse p95 ms |")
 console.log("| --- | ---: | ---: | --- | ---: | ---: | ---: | ---: |")
 for (const [scenario, iterations] of scenarios) {
@@ -39,6 +43,7 @@ for (const [scenario, iterations] of scenarios) {
     const childNames = [...childCounts].map(([name, count]) => `${name}: ${count}`).join(", ") || "—"
     names = `server: ${names}; child: ${childNames}`
   }
+  if (iterations.some(record => record.capHit)) names += "; Cap hit"
   console.log(`| ${scenario} | ${iterations.length} | ${covered}/${total} | ${names} | ${latency(events, "fromStart")} | ${latency(events, "fromResponse")} |`)
 }
 

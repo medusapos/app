@@ -76,8 +76,9 @@ one filtered on the product's `updated_at` does not.
 
 ## `g4-events`
 
-The G4 event probe measures events and arrival times for five sequential
-product updates on the local or Redis event bus. It drops and recreates only
+The G4 event probe measures events and arrival times on the local or Redis event bus for a fixture product;
+product, variant, price, inventory, option, sales-channel link, price-list and direct module writes; and bursts.
+It drops and recreates only
 its own `medusapos_g4` database and serves it on port 9200. Run from the repo root:
 
 ```sh
