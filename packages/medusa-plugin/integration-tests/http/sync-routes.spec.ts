@@ -152,14 +152,28 @@ medusaIntegrationTestRunner({
 
     it('5. the price-list watcher journals the product once a scheduled list starts', async () => {
       await get('/tally/v1/changes')
-      const createdAt = Date.now()
-      await api.post('/admin/price-lists', {
-        title: 'Scheduled sale', description: 'Starts soon', status: 'active', starts_at: new Date(createdAt + 3000).toISOString(),
-        prices: [{ variant_id: data.variantA, currency_code: 'eur', amount: 7 }],
-      }, { headers })
+      // Setting starts_at through the admin route would also bump updated_at, and the watermark's lag would
+      // journal the list on its own. Set it up with direct SQL instead, so only the window clause can fire.
+      const listId = await createList('Scheduled sale')
+      await settle()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      await knex('price_list').where('id', listId).update({
+        updated_at: knex.raw("now() - interval '1 hour'"),
+        starts_at: knex.raw("now() + interval '3 seconds'"),
+      })
       await runPriceListWatcher(container, { force: true })
-      const head = await settle()
-      await sleep(Math.max(0, createdAt + 4000 - Date.now()))
+      const head = await sync.head()
+      await runPriceListWatcher(container, { force: true })
+      const unstarted = await sync.changesSince({ since: head, limit: 1000 })
+      expect(unstarted.changes.some(change => change.collection === 'products' && change.id === productId)).toBe(false)
+      const deadline = Date.now() + 10000
+      let started = false
+      while (!started && Date.now() < deadline) {
+        const row = await knex('price_list').where('id', listId).select(knex.raw('(now() > starts_at) as started')).first()
+        started = row.started
+        if (!started) await sleep(250)
+      }
+      expect(started).toBe(true)
       await runPriceListWatcher(container, { force: true })
       expect((await sync.changesSince({ since: head, limit: 1000 })).changes).toEqual(productUpsert())
     })
