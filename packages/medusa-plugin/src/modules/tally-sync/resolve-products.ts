@@ -4,7 +4,9 @@ export async function resolveProductChanges(knex: Knex, eventName: string, id: s
   productId: string; op: 'upsert' | 'delete'
 }[]> {
   if (/^product\.product\.(created|updated|restored|deleted)$/.test(eventName)) {
-    return [{ productId: id, op: eventName.endsWith('.deleted') ? 'delete' : 'upsert' }]
+    const [product] = await knex('product').select('deleted_at').where('id', id)
+    if (!product) return []
+    return [{ productId: id, op: product.deleted_at ? 'delete' : 'upsert' }]
   }
 
   // Keep soft-deleted rows visible: deletion and detach events arrive after the write.
@@ -50,6 +52,8 @@ export async function resolveProductChanges(knex: Knex, eventName: string, id: s
   } else {
     return []
   }
-  const rows: { product_id: string }[] = await query.distinct()
-  return rows.map(row => ({ productId: row.product_id, op: 'upsert' }))
+  const rows: { product_id: string; deleted_at: string | Date | null }[] = await knex(query.as('resolved'))
+    .join('product', 'product.id', 'resolved.product_id')
+    .distinct('resolved.product_id', 'product.deleted_at')
+  return rows.map(row => ({ productId: row.product_id, op: row.deleted_at ? 'delete' : 'upsert' }))
 }

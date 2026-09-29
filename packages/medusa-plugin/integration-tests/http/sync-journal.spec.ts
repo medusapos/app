@@ -106,10 +106,26 @@ medusaIntegrationTestRunner({
       await expectChanges(headBefore, [productId])
     })
 
-    it('6. journals a delete after an admin product delete', async () => {
+    async function latestOpAfterSettling(since: number, id: string): Promise<'upsert' | 'delete' | undefined> {
+      const deadline = Date.now() + 5000
+      let page = await sync.changesSince({ since, limit: 1000 })
+      let stableSince = Date.now()
+      let lastLength = page.changes.length
+      while (Date.now() < deadline && Date.now() - stableSince < 1000) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        page = await sync.changesSince({ since, limit: 1000 })
+        if (page.changes.length !== lastLength) {
+          lastLength = page.changes.length
+          stableSince = Date.now()
+        }
+      }
+      return page.changes.filter(change => change.collection === 'products' && change.id === id).at(-1)?.op
+    }
+
+    it('6. journals a delete as the latest row after an admin product delete', async () => {
       const headBefore = await sync.head()
       await api.delete(`/admin/products/${productId}`, { headers })
-      await expectChanges(headBefore, [productId], 'delete')
+      await expect(latestOpAfterSettling(headBefore, productId)).resolves.toBe('delete')
     })
 
     it('7. journals every linked product when an option value is added', async () => {
@@ -129,6 +145,12 @@ medusaIntegrationTestRunner({
         expect(page.changes).toEqual([])
         await new Promise(resolve => setTimeout(resolve, 100))
       } while (Date.now() < deadline)
+    })
+
+    it('9. journals an upsert, not a delete, after deleting one variant of a multi-variant product', async () => {
+      const headBefore = await sync.head()
+      await api.delete(`/admin/products/${productId}/variants/${data.variantD}`, { headers })
+      await expect(latestOpAfterSettling(headBefore, productId)).resolves.toBe('upsert')
     })
   },
 })

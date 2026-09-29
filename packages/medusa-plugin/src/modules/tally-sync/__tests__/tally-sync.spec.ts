@@ -26,6 +26,13 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       expect(await sql('select seq from tally_change')).toHaveLength(4)
     })
 
+    it('record of 2,500 distinct changes inserts 2,500 rows in input order', async () => {
+      const changes = Array.from({ length: 2500 }, (_, i) => ({ ...product, objectId: `chunk${i}` }))
+      await service.record(changes)
+      const rows = await sql('select object_id from tally_change order by seq')
+      expect(rows.map(row => row.object_id)).toEqual(changes.map(change => change.objectId))
+    })
+
     it('head is zero when empty and then equals the last seq', async () => {
       expect(HORIZON).toBe(0)
       expect(await service.head()).toBe(0)

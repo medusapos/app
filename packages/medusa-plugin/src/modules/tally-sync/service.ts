@@ -9,15 +9,22 @@ import { TallySyncState } from './models/tally-sync-state'
 // Fixed transaction advisory lock key reserved for tally_sync epoch creation and backfill.
 const INITIALIZE_LOCK = 2026093009
 
+// Postgres caps a statement at 65,535 parameters; this many rows (3 params each) stays well under it.
+const RECORD_CHUNK_SIZE = 1000
+
 export default class TallySyncModuleService extends MedusaService({ TallyChange, TallySyncState }) {
   @InjectManager()
   async record(changes: { collection: string; objectId: string; op: 'upsert' | 'delete' }[],
     @MedusaContext() sharedContext: Context = {}): Promise<void> {
     const unique = [...new Map(changes.map(c => [JSON.stringify([c.collection, c.objectId, c.op]), c])).values()]
     if (!unique.length) return
-    await (sharedContext.manager as EntityManager).execute(
-      `insert into tally_change (collection, object_id, op) values ${unique.map(() => '(?, ?, ?)').join(', ')}`,
-      unique.flatMap(c => [c.collection, c.objectId, c.op]))
+    const manager = sharedContext.manager as EntityManager
+    for (let i = 0; i < unique.length; i += RECORD_CHUNK_SIZE) {
+      const chunk = unique.slice(i, i + RECORD_CHUNK_SIZE)
+      await manager.execute(
+        `insert into tally_change (collection, object_id, op) values ${chunk.map(() => '(?, ?, ?)').join(', ')}`,
+        chunk.flatMap(c => [c.collection, c.objectId, c.op]))
+    }
   }
 
   @InjectManager()
