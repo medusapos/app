@@ -17,6 +17,10 @@ const JOURNAL_LOCK = 2026093009
 // timed-out event is logged but not journaled -- the digest audit (P3) is the backstop for that gap.
 const JOURNAL_LOCK_TIMEOUT = '10s'
 
+// Transaction advisory lock key for the price-list watcher, so concurrent runs never scan the same window twice.
+// Lock order is always PRICE_LIST_WATCHER_LOCK, then JOURNAL_LOCK (inside record); nothing takes them the other way.
+const PRICE_LIST_WATCHER_LOCK = 2026093010
+
 // Postgres caps a statement at 65,535 parameters; this many rows (3 params each) stays well under it.
 const RECORD_CHUNK_SIZE = 1000
 
@@ -113,5 +117,43 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     await (sharedContext.manager as EntityManager).execute(
       "update tally_sync_state set price_list_watermark = ?, price_window_run_at = ?, updated_at = now() where id = 'sync'",
       [watermark, priceWindowRunAt])
+  }
+
+  // The price-list watcher's transaction (behaviour and known gap: runPriceListWatcher in sync-state.ts); returns rows written.
+  @InjectManager()
+  async watchPriceLists(@MedusaContext() sharedContext: Context = {}): Promise<number> {
+    return (sharedContext.manager as EntityManager).transactional(async em => {
+      // A run that times out waiting is logged by the caller and retried on the next tick or minute.
+      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
+      await em.execute('select pg_advisory_xact_lock(?)', [PRICE_LIST_WATCHER_LOCK])
+      // Timestamps stay as text so the microsecond precision of Postgres survives the round trip.
+      const [state] = await em.execute(`select now()::text as now, price_list_watermark::text as watermark,
+        price_window_run_at::text as window_run_at from tally_sync_state where id = 'sync'`)
+      if (!state) return 0
+      const { now, watermark, window_run_at: windowRunAt } = state
+      if (watermark === null || windowRunAt === null) {
+        await this.setPriceListWatermark(watermark ?? now, windowRunAt ?? now, { manager: em })
+        return 0
+      }
+      const [lists] = await em.execute(`select array_agg(id) as ids, greatest(max(updated_at), ?::timestamptz)::text as watermark
+        from price_list where updated_at > ?::timestamptz
+          or (starts_at > ?::timestamptz and starts_at <= ?::timestamptz) or (ends_at > ?::timestamptz and ends_at <= ?::timestamptz)`,
+      [watermark, watermark, windowRunAt, now, windowRunAt, now])
+      let written = 0
+      if (lists.ids?.length) {
+        // MikroORM inlines an array parameter as a comma list, so the ids go through `in (?)`.
+        const products: { id: string; deleted_at: Date | null }[] = await em.execute(`select distinct product.id, product.deleted_at
+          from price
+          join product_variant_price_set as link on link.price_set_id = price.price_set_id
+          join product_variant as variant on variant.id = link.variant_id
+          join product on product.id = variant.product_id
+          where price.price_list_id in (?)`, [lists.ids])
+        written = await this.record(products.map(product => ({
+          collection: 'products', objectId: product.id, op: product.deleted_at ? 'delete' as const : 'upsert' as const,
+        })), { manager: em })
+      }
+      await this.setPriceListWatermark(lists.watermark, now, { manager: em })
+      return written
+    })
   }
 }
