@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ExecArgs } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import { cancelOrderWorkflow } from '@medusajs/medusa/core-flows'
 import { parseCommandResult } from '../modules/tally-ledger/command-result'
 import { takeBackStockWorkflow } from '../workflows/tally-order-create/workflow'
@@ -71,11 +71,20 @@ async function resolveHeld(container: ExecArgs['container'], id: string, action:
           throw error
         }
       }
-      if (order.status === 'canceled') continue
+      if (order.status !== 'canceled') {
+        try {
+          await cancelOrderWorkflow(container).run({ input: { order_id: order.id } })
+        } catch (error) {
+          logger.error(`tally_ledger_resolve: reject refused for command ${id}: order ${order.id} could not be cancelled: ${error.message}`)
+          throw error
+        }
+      }
       try {
-        await cancelOrderWorkflow(container).run({ input: { order_id: order.id } })
+        const service = container.resolve(Modules.ORDER)
+        const { metadata } = await service.retrieveOrder(order.id)
+        await service.updateOrders(order.id, { metadata: { ...metadata, tally_rejected: true } })
       } catch (error) {
-        logger.error(`tally_ledger_resolve: reject refused for command ${id}: order ${order.id} could not be cancelled: ${error.message}`)
+        logger.error(`tally_ledger_resolve: reject refused for command ${id}: order ${order.id} could not be marked rejected: ${error.message}`)
         throw error
       }
     }

@@ -675,6 +675,7 @@ medusaIntegrationTestRunner({
       async function expectRejectedAndReversed(sale: CommandEnvelope<OrderCreatePayload>, orderId: string) {
         const [order] = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId })
         expect([order.status, order.metadata.tally_stock_topups_reversed]).toEqual(['canceled', true])
+        expect(order.metadata.tally_rejected).toBe(true)
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'rejected', result: { error: { data: { orderId } } } })
       }
 
@@ -820,7 +821,7 @@ medusaIntegrationTestRunner({
         expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
       })
 
-      it('tally-ledger-resolve reject takes back the top-up of an order an admin already cancelled by hand', async () => {
+      it('tally-ledger-resolve reject marks tally_rejected and takes back the top-up of an order an admin already cancelled by hand', async () => {
         const before = await levelC()
         const sale = saleOfC()
         const { orderId } = await parkLiveOrder(sale, 1)
@@ -868,12 +869,13 @@ medusaIntegrationTestRunner({
         expect(await levelA()).toEqual([before[0] - 1, before[1]])
       })
 
-      it('tally-ledger-resolve reject cancels the live order and stores a TALLY_ADMIN_REJECTED platform_error that the resend replays', async () => {
+      it('tally-ledger-resolve reject cancels and marks the live order tally_rejected and stores a TALLY_ADMIN_REJECTED platform_error that the resend replays', async () => {
         const { sale, orderId } = await parkLiveOrder()
         await resolve(sale.id, 'reject', 'Refunded in the admin')
         expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
         const [order] = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId })
         expect(order.status).toBe('canceled')
+        expect(order.metadata.tally_rejected).toBe(true)
         const rejection = { id: sale.id, status: 'rejected', error: { code: 'platform_error', message: 'Refunded in the admin', data: {
           platformCode: 'TALLY_ADMIN_REJECTED', platformMessage: 'Refunded in the admin', orderId,
         } } }
@@ -894,7 +896,7 @@ medusaIntegrationTestRunner({
         expect(live[0].id).not.toBe(orderId)
       })
 
-      it('tally-ledger-resolve reject refuses when the order cannot be cancelled and leaves the row needs_admin', async () => {
+      it('tally-ledger-resolve reject refuses when the order cannot be cancelled and leaves the row needs_admin without tally_rejected', async () => {
         const { sale, orderId } = await parkLiveOrder()
         // The package exports block deep imports; the module's own export is the one core-flows' getters read.
         const cancel = require(path.join(path.dirname(require.resolve('@medusajs/core-flows')), 'order/workflows/cancel-order'))
@@ -905,6 +907,8 @@ medusaIntegrationTestRunner({
           `tally_ledger_resolve: reject refused for command ${sale.id}: order ${orderId} could not be cancelled: cancel probe`)
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin', result: null })
         expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId })])
+        const order = await container.resolve(Modules.ORDER).retrieveOrder(orderId)
+        expect(order.metadata).not.toHaveProperty('tally_rejected')
       })
 
       it('tally-ledger-resolve apply makes the row reclaimable and the resend completes the order the admin fixed', async () => {
