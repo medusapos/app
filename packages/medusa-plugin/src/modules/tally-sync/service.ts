@@ -29,7 +29,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   }
 
   @InjectManager()
-  async listChanges({ since, limit, collections }: { since: number; limit: number; collections?: string[] },
+  async changesSince({ since, limit, collections }: { since: number; limit: number; collections?: string[] },
     @MedusaContext() sharedContext: Context = {}): Promise<{
       head: number; changes: { seq: number; collection: string; id: string; op: 'upsert' | 'delete' }[]; more: boolean
     }> {

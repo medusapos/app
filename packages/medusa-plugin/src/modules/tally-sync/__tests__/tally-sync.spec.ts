@@ -34,24 +34,24 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       expect(await service.head()).toBe(Number(last.seq))
     })
 
-    it('listChanges honours since, limit, the 1000 cap, collections, and more', async () => {
+    it('changesSince honours since, limit, the 1000 cap, collections, and more', async () => {
       await service.record(Array.from({ length: 1002 }, (_, i) => ({ ...product, objectId: `p${i}` })))
       await service.record([{ collection: 'prices', objectId: 'price1', op: 'delete' }])
       const head = await service.head()
-      const first = await service.listChanges({ since: 0, limit: 1 })
+      const first = await service.changesSince({ since: 0, limit: 1 })
       expect(first).toEqual({ head, changes: [{ seq: expect.any(Number), collection: 'products', id: 'p0', op: 'upsert' }], more: true })
-      const capped = await service.listChanges({ since: first.changes[0].seq, limit: 2000, collections: ['products'] })
+      const capped = await service.changesSince({ since: first.changes[0].seq, limit: 2000, collections: ['products'] })
       expect(capped.changes).toHaveLength(1000)
       expect(capped.more).toBe(true)
       expect(capped.head).toBe(head)
       expect(capped.changes[0].id).toBe('p1')
-      const last = await service.listChanges({ since: capped.changes[999].seq, limit: 1000, collections: ['products'] })
+      const last = await service.changesSince({ since: capped.changes[999].seq, limit: 1000, collections: ['products'] })
       expect(last).toEqual({ head, changes: [{ seq: expect.any(Number), collection: 'products', id: 'p1001', op: 'upsert' }], more: false })
-      expect(await service.listChanges({ since: 0, limit: 10, collections: ['prices'] })).toEqual({
+      expect(await service.changesSince({ since: 0, limit: 10, collections: ['prices'] })).toEqual({
         head, changes: [{ seq: head, collection: 'prices', id: 'price1', op: 'delete' }], more: false,
       })
-      expect(await service.listChanges({ since: head, limit: 10 })).toEqual({ head, changes: [], more: false })
-      expect(await service.listChanges({ since: 0, limit: 10, collections: [] })).toEqual({ head, changes: [], more: false })
+      expect(await service.changesSince({ since: head, limit: 10 })).toEqual({ head, changes: [], more: false })
+      expect(await service.changesSince({ since: 0, limit: 10, collections: [] })).toEqual({ head, changes: [], more: false })
     })
 
     it('initialize creates an epoch and backfill once, and a second call adds nothing', async () => {
