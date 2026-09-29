@@ -145,6 +145,47 @@ export default class TallyLedgerModuleService extends MedusaService({ TallyComma
   }
 
   @InjectManager()
+  async retrieveCommandState(
+    id: string,
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<{ status: TallyCommandRecord['status']; result: CommandResult | null; stale: boolean } | null> {
+    const [row] = await (sharedContext.manager as EntityManager).execute(
+      `select "status", "result", "status" = 'in_progress' and "updated_at" < now() - make_interval(secs => ?) as "stale"
+       from "tally_command" where "id" = ?`,
+      [CLAIM_LEASE_SECONDS, id]
+    )
+    return row ? { status: row.status, result: row.result === null ? null : parseCommandResult(row.result), stale: row.stale } : null
+  }
+
+  @InjectManager()
+  async takeOverStaleClaim(
+    id: string,
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<string | null> {
+    const claimToken = randomUUID()
+    const rows = await (sharedContext.manager as EntityManager).execute(
+      `update "tally_command" set "claim_token" = ?, "updated_at" = now()
+       where "id" = ? and "status" = 'in_progress'
+         and "updated_at" < now() - make_interval(secs => ?) returning "id"`,
+      [claimToken, id, CLAIM_LEASE_SECONDS]
+    )
+    return rows.length > 0 ? claimToken : null
+  }
+
+  @InjectManager()
+  async markSuperseded(
+    id: string, claimToken: string, supersededBy: string,
+    @MedusaContext() sharedContext: Context = {}
+  ): Promise<boolean> {
+    const rows = await (sharedContext.manager as EntityManager).execute(
+      `update "tally_command" set "status" = 'superseded', "superseded_by" = ?, "updated_at" = now()
+       where "id" = ? and "status" = 'in_progress' and "claim_token" = ? returning "id"`,
+      [supersededBy, id, claimToken]
+    )
+    return rows.length > 0
+  }
+
+  @InjectManager()
   async release(
     id: string,
     claimToken: string,
