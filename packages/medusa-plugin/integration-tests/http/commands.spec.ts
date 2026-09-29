@@ -423,7 +423,7 @@ medusaIntegrationTestRunner({
       await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, quantity)
     })
 
-    it('a sale whose second fulfilment group fails puts the first group\'s stock back exactly', async () => {
+    it.each(['the second fulfilment group', 'completeOrderWorkflow'])('a two-group sale that fails at %s puts every fulfilled group\'s stock back exactly', async failure => {
       const before = [await levelC(), await levelA()]
       // A shipped line of C and, overridden to not require shipping, a line of A: two fulfilment groups.
       const plan = require('../../.medusa/server/src/workflows/tally-order-create/plan') as typeof import('../../src/workflows/tally-order-create/plan')
@@ -435,8 +435,9 @@ medusaIntegrationTestRunner({
       })
       const orders = container.resolve(Modules.ORDER)
       const registerFulfillment = orders.registerFulfillment.bind(orders)
-      const register = jest.spyOn(orders, 'registerFulfillment')
-      register.mockImplementationOnce(registerFulfillment).mockRejectedValueOnce(new Error('second group probe'))
+      const register = jest.spyOn(orders, 'registerFulfillment').mockImplementationOnce(registerFulfillment)
+      if (failure === 'completeOrderWorkflow') jest.spyOn(orders, 'completeOrder').mockRejectedValueOnce(new Error('complete probe'))
+      else register.mockRejectedValueOnce(new Error('second group probe'))
       const sale = command({
         lines: [
           { clientLineId: randomUUID(), variantId: data.variantC, quantity: 1, unitPriceMinor: 300 },
