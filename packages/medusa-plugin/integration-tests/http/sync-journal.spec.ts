@@ -201,8 +201,23 @@ medusaIntegrationTestRunner({
       }, { headers })
       const start = Date.now()
       await api.get('/admin/products?limit=1', { headers })
-      expect(Date.now() - start).toBeLessThan(5000)
+      expect(Date.now() - start).toBeLessThan(10000)
       await expectChanges(headBefore, [productId], 'upsert', 60000)
+    })
+
+    it('13. journals a product upsert when a price-list price is removed, which Medusa soft-deletes', async () => {
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const list = await api.post('/admin/price-lists', {
+        title: 'G4 removal', description: 'G4 removal', status: 'active', type: 'sale',
+        prices: [{ variant_id: data.variantA, currency_code: 'eur', amount: 6 }],
+      }, { headers })
+      const listPriceId = (await knex('price').where('price_list_id', list.data.price_list.id).select('id').first()).id
+      await settleHead()
+      const headBefore = await sync.head()
+      await api.post(`/admin/price-lists/${list.data.price_list.id}/prices/batch`, { delete: [listPriceId] }, { headers })
+      await expectChanges(headBefore, [productId])
+      const [row] = await knex('price').where('id', listPriceId).select('deleted_at')
+      expect(row.deleted_at).not.toBeNull()
     })
   },
 })

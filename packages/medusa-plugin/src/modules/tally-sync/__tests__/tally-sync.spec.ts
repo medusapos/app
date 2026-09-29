@@ -97,21 +97,20 @@ moduleIntegrationTestRunner<TallySyncModuleService>({
       expect(cursor.ids).toEqual(['a', 'b'])
     })
 
-    it('changesSince reads head after the rows, so a row committed between the reads is not in the page', async () => {
+    it('changesSince reads head before the rows, so a row committed during the head read is not lost', async () => {
       await service.record([{ ...product, objectId: 'before' }])
       const head = TallySyncModuleService.prototype.head
       const spy = jest.spyOn(TallySyncModuleService.prototype, 'head').mockImplementationOnce(
         async function (this: TallySyncModuleService, ...args: Parameters<typeof head>) {
-          const value = await head.apply(this, args)
           await service.record([{ ...product, objectId: 'between' }])
-          return value
+          return head.apply(this, args)
         })
       const page = await service.changesSince({ since: 0, limit: 10 })
       expect(spy).toHaveBeenCalledTimes(1)
       spy.mockRestore()
       expect(page.head).toBeGreaterThanOrEqual(page.changes.at(-1)!.seq)
-      expect(page).toEqual({ head: page.changes[0].seq, changes: [expect.objectContaining({ id: 'before' })], more: false })
-      expect((await service.changesSince({ since: page.head, limit: 10 })).changes).toEqual([expect.objectContaining({ id: 'between' })])
+      const next = await service.changesSince({ since: page.head, limit: 10 })
+      expect([...page.changes, ...next.changes].map(change => change.id)).toEqual(expect.arrayContaining(['before', 'between']))
     })
 
     it('recordEvent returns 0 and writes nothing for an event it does not resolve', async () => {

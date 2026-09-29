@@ -12,6 +12,11 @@ import { resolveProductChanges } from './resolve-products'
 // Held until commit, it serialises journal writers so seq order is commit order and a cursor never skips a row.
 const JOURNAL_LOCK = 2026093009
 
+// Bounds the wait for JOURNAL_LOCK so one stuck holder (a long backfill, an idle-in-transaction connection) cannot
+// stall every queued event indefinitely. A timeout is an error: the subscriber logs it and moves on, so a
+// timed-out event is logged but not journaled -- the digest audit (P3) is the backstop for that gap.
+const JOURNAL_LOCK_TIMEOUT = '10s'
+
 // Postgres caps a statement at 65,535 parameters; this many rows (3 params each) stays well under it.
 const RECORD_CHUNK_SIZE = 1000
 
@@ -22,6 +27,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     const unique = [...new Map(changes.map(c => [JSON.stringify([c.collection, c.objectId, c.op]), c])).values()]
     if (!unique.length) return 0
     return (sharedContext.manager as EntityManager).transactional(async em => {
+      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
       await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
       for (let i = 0; i < unique.length; i += RECORD_CHUNK_SIZE) {
         const chunk = unique.slice(i, i + RECORD_CHUNK_SIZE)
@@ -38,6 +44,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   @InjectManager()
   async recordEvent(eventName: string, id: string, @MedusaContext() sharedContext: Context = {}): Promise<number> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
+      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
       await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
       const changes = await resolveProductChanges(em.getTransactionContext<Knex.Transaction>()!, eventName, id)
       return this.record(changes.map(({ productId, op }) => ({ collection: 'products', objectId: productId, op })), { manager: em })
@@ -59,6 +66,9 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
     }> {
     const pageSize = Math.min(limit, 1000)
     const filter = collections ? (collections.length ? `and collection in (${collections.map(() => '?').join(', ')})` : 'and false') : ''
+    // Read head before the rows: under JOURNAL_LOCK, rows commit in seq order, so anything that commits between
+    // the two reads has seq > head and lands in this page (or a later one, via more) instead of being skipped.
+    const head = await this.head(sharedContext)
     const rows = await (sharedContext.manager as EntityManager).execute(
       `select seq, collection, object_id as id, op from tally_change where seq > ? ${filter} order by seq limit ?`,
       [since, ...(collections ?? []), pageSize + 1])
@@ -67,9 +77,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
       assert(Number.isSafeInteger(seq), 'tally_change seq exceeds safe integer range')
       return { seq, collection: row.collection, id: row.id, op: row.op }
     })
-    // Read head after the rows so it is never behind the page.
-    const head = Math.max(await this.head(sharedContext), changes.at(-1)?.seq ?? 0)
-    return { head, changes, more: rows.length > pageSize }
+    return { head: Math.max(head, changes.at(-1)?.seq ?? 0), changes, more: rows.length > pageSize }
   }
 
   @InjectManager()
@@ -88,6 +96,7 @@ export default class TallySyncModuleService extends MedusaService({ TallyChange,
   @InjectManager()
   async initialize(productIds: string[], @MedusaContext() sharedContext: Context = {}): Promise<{ epoch: string; created: boolean }> {
     return (sharedContext.manager as EntityManager).transactional(async em => {
+      await em.execute(`set local lock_timeout = '${JOURNAL_LOCK_TIMEOUT}'`)
       await em.execute('select pg_advisory_xact_lock(?)', [JOURNAL_LOCK])
       const [state] = await em.execute("select epoch from tally_sync_state where id = 'sync'")
       if (state) return { epoch: state.epoch, created: false }

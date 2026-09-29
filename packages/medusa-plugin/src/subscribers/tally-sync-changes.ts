@@ -25,7 +25,10 @@ export default async function tallySyncChanges({ event: { name, data }, containe
     const written = await link
     if (!written) logger.debug(`tally_sync: no products resolved for ${name} (${data.id})`)
   } catch (error) {
-    logger?.error(`tally_sync: failed to record ${name}: ${error}`)
+    const isLockTimeout = (error as { code?: string } | undefined)?.code === '55P03'
+      || String(error).includes('canceling statement due to lock timeout')
+    const message = `tally_sync: failed to record ${name} (${data.id}): ${error}`
+    logger?.error(isLockTimeout ? `tally_sync: journal lock timeout: ${message}` : message)
   }
 }
 
