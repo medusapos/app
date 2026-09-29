@@ -49,8 +49,10 @@ A `200 { results: CommandResult[] }` returns one result per command in the same 
 `applied`, `duplicate` with the original `serverRefs` and warnings, or `rejected`.
 Reusing an id with a different payload rejects it with
 `idempotency_mismatch`; a stored rejection replays as rejected.
+A recorded `order.create` id answers its recorded result before version, shape, bounds and fiscal checks; string bounds are email 254 and other strings 255 (customerId 64 and sessionId 36), with no NUL allowed before replay.
 `invalid_payload` rejects a malformed payload shape before claiming, with the validation errors in the message. For a register command, it also rejects what the current state refuses after the claim: an unknown session, a missing or already-voided void target, an id that belongs to another session, or a closure whose `registerId` isn't its session's drawer. Neither kind is stored in the ledger, so a resend is checked again.
 `store_configuration` rejects a sale the store can't take yet, before any write. Examples: no sales channel, no stock location or address, no shipping option at the location for the products' shipping profile, or a sale that mixes shipping profiles. The message names what to fix, it isn't stored, and the same command applies once the store is fixed (ADR 0004). When the sale resumes an order a crashed attempt already started, the same failures are a transient `503` instead, because writes have already happened.
+`unsupported_currency`, like `store_configuration`, isn't stored, so the same command can apply once the store is fixed.
 An unsupported version is a per-command `unsupported_version` with `error.data` naming the highest supported version (`orderCreate` or `register`).
 
 - `400`: unsupported protocol (`{ code: 'unsupported_protocol' }`) or invalid envelope.

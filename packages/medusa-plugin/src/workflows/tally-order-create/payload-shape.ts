@@ -1,6 +1,6 @@
 /** Shape errors of an order.create payload, e.g. ['lines: expected a non-empty array',
- * 'payments[0].method: expected a string']; [] when the shape is valid. Checks types and
- * presence only (numbers are finite numbers; value ranges are the planner's job). */
+ * 'payments[0].method: expected a string']; [] when the shape is valid. Checks presence, types, string
+ * bounds and NUL (numbers are finite numbers; value ranges are the planner's job). */
 export function payloadShapeErrors(payload: unknown): string[] {
   const errors: string[] = []
   const object = (value: unknown): value is Record<string, unknown> =>
@@ -70,5 +70,34 @@ export function payloadShapeErrors(payload: unknown): string[] {
   for (const field of ['registerId', 'cashierRef', 'locationId']) {
     if (payload[field] !== undefined) check(typeof payload[field] === 'string', field, 'a string')
   }
-  return errors
+  return [...errors, ...payloadStringErrors(payload, true)].slice(0, 10)
+}
+
+export function payloadNulErrors(payload: unknown): string[] {
+  return payloadStringErrors(payload, false)
+}
+
+function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) return []
+  const value = payload as Record<string, unknown>
+  const fields: [string, unknown, number][] = ['clientOrderId', 'createdAt', 'currency', 'registerId', 'cashierRef', 'locationId']
+    .map(key => [key, value[key], 255])
+  const customer = value.customer as Record<string, unknown> | null | undefined
+  fields.push(['customer.email', customer?.email, 254], ['customer.customerId', customer?.customerId, 0], ['sessionId', value.sessionId, 0])
+  for (const field of ['lines', 'payments']) {
+    const items = value[field]
+    if (!Array.isArray(items)) continue
+    for (const [index, item] of items.entries()) {
+      for (const key of field === 'lines' ? ['clientLineId', 'variantId', 'title'] : ['clientPaymentId', 'method', 'reference']) {
+        fields.push([`${field}[${index}].${key}`, item?.[key], 255])
+      }
+    }
+  }
+  const errors: string[] = []
+  for (const [path, text, max] of fields) {
+    if (typeof text !== 'string') continue
+    if (bounds && max && text.length > max) errors.push(`${path}: expected at most ${max} characters`)
+    if (text.includes('\0')) errors.push(`${path}: expected no NUL character`)
+  }
+  return errors.slice(0, 10)
 }

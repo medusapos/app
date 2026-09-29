@@ -11,7 +11,7 @@ import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyu
 import { runOrderCreate } from '../../src/workflows'
 import { majorToMinor } from '../../src/workflows/tally-order-create/money'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
-import { isStoreConfigurationError } from '../../src/workflows/tally-order-create/store-configuration-error'
+import { isStoreConfigurationError, StoreConfigurationError } from '../../src/workflows/tally-order-create/store-configuration-error'
 import { takeBackStockWorkflow } from '../../src/workflows/tally-order-create/workflow'
 import { seed } from './seed'
 
@@ -543,18 +543,25 @@ medusaIntegrationTestRunner({
       await expectStock(data.inventoryA, 9)
     })
 
-    it.each(['unknown_variant', 'underpaid', 'unsupported_currency'])(
+    it.each(['unknown_variant', 'underpaid'])(
       'rejects %s without creating an order', async code => {
         const sale = command()
         if (code === 'unknown_variant') sale.payload.lines[0].variantId = 'variant_unknown'
         if (code === 'underpaid') sale.payload.payments[0].amountMinor = 999
-        if (code === 'unsupported_currency') sale.payload.currency = 'USD'
         const result = await runOrderCreate(container, sale)
         expect(result).toMatchObject({ id: sale.id, status: 'rejected', error: { code } })
         expect(result.serverRefs).toBeUndefined()
         expect(await ordersFor(sale.payload.clientOrderId)).toHaveLength(0)
       }
     )
+
+    it('throws unsupported_currency as a StoreConfigurationError without creating an order', async () => {
+      const sale = command({ currency: 'USD' })
+      const attempt = runOrderCreate(container, sale)
+      await expect(attempt).rejects.toBeInstanceOf(StoreConfigurationError)
+      await expect(attempt).rejects.toMatchObject({ code: 'unsupported_currency' })
+      expect(await ordersFor(sale.payload.clientOrderId)).toHaveLength(0)
+    })
 
     it('compensates a fulfillment failure after payment, leaving no live order, reservations, or stock change', async () => {
       const sale = shortSale()

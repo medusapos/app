@@ -1,11 +1,11 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
-import { executeOrderCreate } from '../../../../workflows/tally-order-create/execute'
+import { executeOrderCreate, replayOrderCreate } from '../../../../workflows/tally-order-create/execute'
 import { executeRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
-import { payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
+import { payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
 import { SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
@@ -29,7 +29,7 @@ export function validateBatch(body: unknown):
       return { ok: false, status: 400, message: `Invalid commands[${index}]: expected object` }
     }
     let field: string | undefined
-    if (typeof command.id !== 'string' || command.id.length === 0 || command.id.length > 64) field = 'id'
+    if (typeof command.id !== 'string' || command.id.length === 0 || command.id.length > 64 || command.id.includes('\0')) field = 'id'
     else if (!['order.create', 'register.session.open', 'register.session.transition', 'register.movement.record',
       'register.movement.void', 'register.closure.submit'].includes(command.type)) field = 'type'
     else if (!Number.isSafeInteger(command.version) || command.version < 1) field = 'version'
@@ -69,6 +69,21 @@ export async function processBatch(
       continue
     }
     const command = envelope as CommandEnvelope<OrderCreatePayload>
+    const nulErrors = payloadNulErrors(command.payload)
+    if (nulErrors.length) {
+      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: nulErrors.join('; ') } })
+      continue
+    }
+    const replay = await replayOrderCreate(container, command)
+    if (replay?.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: replay.id } }
+    if (replay?.kind === 'transient') {
+      container.resolve(ContainerRegistrationKeys.LOGGER).error(`Command ${replay.id} failed transiently: ${replay.message}`)
+      return { status: 503, body: { code: 'transient', id: replay.id, message: 'Temporary failure, retry later.' } }
+    }
+    if (replay?.kind === 'result') {
+      results.push(replay.result)
+      continue
+    }
     if (!SUPPORTED_ORDER_CREATE_VERSIONS.includes(command.version)) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'unsupported_version',
         message: `order.create version ${command.version} is not supported; this server supports ${SUPPORTED_ORDER_CREATE_VERSIONS.join(', ')}`,
