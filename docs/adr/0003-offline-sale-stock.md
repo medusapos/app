@@ -112,10 +112,16 @@ Window 2, the take-back:
   failed `tally_stock_topups_reversed` write is logged and returns
   `StepResponse.permanentFailure` with the success compensation data, so
   Medusa puts the stock back exactly once and a retry takes it back again.
-  The compensation writes its restore together with
+  The compensation reads the order's metadata and checks its marker under
+  the stock lock, and writes its restore together with
   `tally_stock_take_back_compensated` (this run's attempt id) right after
-  its re-adjustment, so a rerun never re-adjusts, and a failed lock release
-  or write after the re-adjustment is logged, not rethrown.
+  its re-adjustment under the same lock, so a rerun never re-adjusts, the
+  restore never overwrites metadata written while it waited, and a failed
+  lock release or write after the re-adjustment is logged, not rethrown.
+  A failed write after the compensation's re-adjustment leaves `started`
+  or `reversed` set, so a retry skips the take-back and the stock ends too
+  high by the shortfall, with only a log line: the same direction as the
+  rule above (stock may end too high, never too low).
 - **Upstream constraint (Medusa `@medusajs/core-flows` 2.21.0):**
   `createOrderFulfillmentWorkflow`'s compensation does not restore the
   fulfilled quantities. So an `order.create` that fails after its fulfilment
