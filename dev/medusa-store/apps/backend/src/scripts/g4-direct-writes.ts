@@ -9,7 +9,8 @@ export default async function g4DirectWrites({ container }: ExecArgs) {
   const inventory = container.resolve(Modules.INVENTORY)
   const product = container.resolve(Modules.PRODUCT)
 
-  await pricing.updatePrices({ id: priceId, amount })
+  // MedusaService generates the method, but IPricingModuleService doesn't declare it.
+  await (pricing as unknown as { updatePrices(data: { id: string; amount: number }): Promise<unknown> }).updatePrices({ id: priceId, amount })
   console.log(`Updated price ${priceId}`)
   await inventory.updateInventoryLevels({
     id: levelId, inventory_item_id: inventoryItemId, location_id: locationId, stocked_quantity: stocked,
