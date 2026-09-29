@@ -5,15 +5,16 @@ Measured on 2026-09-29 for ADR 0020, Ruling Q3: before the plugin journal depend
 ## The answer in short
 
 - **Every write that changed a product-document row emitted at least one event, with three exceptions.**
-  1. **A price-list update or status change emits nothing.** 0 events over 7 writes, on both buses. Title, `starts_at`, `ends_at` and `status` all changed in the database, and `price_list.updated_at` moved.
+  1. **A price-list update or status change emits nothing.** 0 events over 7 writes, on both buses. A manual `psql` check after the runs (not recorded by the harness) showed that the title, `starts_at` and `ends_at` changed in the database and that `price_list.updated_at` moved. The status change wasn't read back.
   2. **On the Redis bus, a module write from a process with no matching subscriber is dropped at the emitter.** 0 of 3 direct writes from a `medusa exec` child reached the server. With a `"*"` subscriber loaded in the child, all 3 arrived.
   3. **On the local bus, events never leave the writing process.** The same 3 direct writes reached the child's own subscriber and never the server.
 - **Workflow events alone are not enough.** A write that bypasses the workflows (a direct module call) emits only module entity events (`pricing.price.updated`, `inventory.inventory-level.updated`, `product.product-variant.updated`). The journal must subscribe to those.
 - **Add or remove a product on a sales channel through the sales-channel route, and the only event is `LinkProductSalesChannel.attached`/`detached`.** No `product.updated` fires. The payload carries only the link row id (`prodsc_…`).
 - **Latency on Redis is well inside a tick.** In every scenario the last event arrived within 250 ms of the HTTP response.
-  - Workflow events arrive *before* the response: p50 −66 to −7 ms.
-  - Internal module events at the lowest priority arrive p50 4 to 50 ms and p95 9 to 148 ms after it.
-  - A 500-row burst drained 181 to 191 ms after the response.
+  - The product, variant and option *update* workflow events arrive before the response: p50 −66 to −7 ms.
+  - Other workflow events don't. `inventory-level.updated` arrived after the response in 11 of 14 writes (at most +5 ms). In the fixture's product create, `product.created` came +172 ms after and `product-variant.created` up to +115 ms after.
+  - Internal module events at the lowest priority arrive p50 4 to 50 ms and p95 9 to 148 ms after the response.
+  - The two 500-row bursts finished draining 191 ms (delete) and 203 ms (create) after the response.
   - On the local bus (which the demo uses), every event arrived before the response.
 - **The upsertWithReplace paths emit per row.** Option values replaced through `POST /admin/product-options/:id` fired created, updated and deleted value events. Price-list price batches fired created, updated and deleted price events. The counts matched the rows that actually changed.
 
@@ -31,7 +32,13 @@ Measured on 2026-09-29 for ADR 0020, Ruling Q3: before the plugin journal depend
    - A price event carries only the price id, so resolve price → price set → variant link → product.
    - Option events carry no product id (options are many-to-many in 2.21), so resolve option → products.
 4. **Price lists need a scan, not a subscriber.** No event covers a price-list update or status change. `price_list.updated_at` does move, so the price-window job (ADR 0020 §3, deferred) also journals every list whose `updated_at` is newer than its last run. Until that job exists, a price-list edit reaches the till only through the digest audit.
-5. **The subscriber has to be registered in every process that writes.** Because the journal row lands in Postgres, the process that handles the event doesn't matter. With the plugin installed, `medusa exec` loads subscribers (the child probe above proves it), so scripts are covered. Writes from a process that doesn't load the plugin, or raw SQL, are not; that's the digest audit's job.
+5. **The subscriber has to be registered in every process that writes.** Because the journal row lands in Postgres, the process that handles the event doesn't matter. What this spike shows is narrower than "scripts are covered":
+   - A *project* subscriber loads in `medusa exec`. On the local bus the child's own probe recorded all three writes. On Redis the child's subscriber made the child enqueue them.
+   - No plugin was installed in this instance, so plugin subscribers in `exec` were not tested.
+   - `exec` runs the child in worker mode `server` (`medusa/dist/commands/exec.js:46`), so on Redis the server consumed the jobs.
+   - `exec` calls `process.exit()` right after the script (`exec.js:76`). On the local bus, a journal insert slower than the probe's file append (about 70 ms here) could be cut off.
+
+   The plugin job verifies both points: plugin subscribers load in `exec`, and the journal insert completes before exit. Writes from a process that doesn't load the plugin, or raw SQL, are not covered; that's the digest audit's job.
 
 ## Setup
 
@@ -41,6 +48,7 @@ Measured on 2026-09-29 for ADR 0020, Ruling Q3: before the plugin journal depend
 - **Probe.** A `"*"` subscriber (`src/subscribers/g4-event-probe.ts`) appends every event with its arrival time. It's active only when `G4_EVENT_PROBE_FILE` is set, and otherwise subscribes to a name that never fires.
 - **Driver.** `scripts/probes/g4-events/driver.mjs` creates its own product (3 variants, a `Size` option, one price each, inventory at the seeded location). It then makes each write through the admin API, strictly one at a time, and collects events from the request start until at least 3 s after the response, plus 1 s of quiet.
 - **Coverage** counts the entity ids of the write that appear in some event's payload (any `id`, `*_id` or `*_ids` field).
+- **Attribution relies on timing.** The driver assigns an event to a write by arrival time alone. In the committed runs the latest event came 242 ms after its response, and scenarios are at least 3 s apart, so no event was counted against the wrong write. A later harness change bounds each window explicitly.
 - **Single client, sequential writes, on an otherwise idle instance.** No concurrent load was measured.
 - **Rerun:** `bash dev/medusa-store/scripts/probes/g4-events/run.sh redis|local <out-dir>`. It writes `events.jsonl`, `results.json` and `summary.md`. The raw summaries of this run are in `g4-medusa-events/summary-redis.md` and `summary-local.md`.
 
@@ -67,7 +75,7 @@ The event names are identical on both buses; this table uses the Redis run. Late
 | Direct module writes from `medusa exec`, no subscriber in the child | 3 | **none reached the server** | 0/3 | – | – |
 | The same, with a `"*"` subscriber in the child | 3 | Redis: the server got `pricing.price.updated`, `inventory.inventory-level.updated`, `product.product-variant.updated`. Local: the server got none, and the child got all 3. | Redis 3/3, local 0/3 | (process start dominates) | – |
 
-**The batch "update 3" changed one row.** Each batch asked for three amount changes on one variant's tiered prices (`min_quantity` 1, 2, 3). Medusa changed only one of them: the database shows one row at the new amount and the other two unchanged. The 500-price `update` burst behaved the same way, changing 3 of 500 (one per variant). The events match the rows that changed, so this is a Medusa write behaviour, not an event gap. It's recorded here because a tiered bulk edit may not do what the admin asked. It wasn't investigated further.
+**The batch "update 3" changed one row.** Each batch asked for three amount changes on one variant's tiered prices (`min_quantity` 1, 2, 3). Medusa changed only one of them: a manual `psql` check after the local run showed one row at the new amount and the other two unchanged. An earlier harness version (commit 400029b) sent a 500-price `update` batch across 3 variants. The same check showed it changed 3 of 500 rows (one per variant) and emitted 3 events. That scenario was then replaced by the 500-price delete, which really writes 500 rows. The events match the rows that changed, so this is a Medusa write behaviour, not an event gap. It's recorded here because a tiered bulk edit may not do what the admin asked. It wasn't investigated further.
 
 ## Latency by event (Redis, after the HTTP response)
 
@@ -85,12 +93,18 @@ The event names are identical on both buses; this table uses the Redis run. Late
 | `product.product-option-value.updated` (module) | 18 | 50 / 143 |
 | `LinkProductSalesChannel.detached` (link, internal) | 6 | 1 / 21 |
 | `pricing.price.created`, burst of 500 | 500 | 95 / 188 |
-| `pricing.price.deleted`, burst of 500 | 500 | 111 / 181 |
+| `pricing.price.deleted`, burst of 500 | 500 | 112 / 181 |
+| `inventory-level.updated` (workflow) | 14 | 11 of 14 after the response, at most +5 |
+| `product.created` (workflow, fixture create) | 1 | +172 |
 
-**How to read the Redis numbers.** Workflow events are grouped and released when the workflow finishes, which is before the route re-reads and responds. Module and link events go out as `internal` jobs at BullMQ priority 2,097,152, the lowest (workflow events use priority 100). They landed tens of milliseconds after the response. On the local bus every event, of any kind, arrived before the response.
+**How to read the Redis numbers.** Workflow events are grouped and released when the workflow finishes.
+- For the product, variant and option updates, that happened before the route re-read and responded.
+- For the inventory-level writes and the fixture's product create, it didn't.
+- Module and link events go out as `internal` jobs at BullMQ priority 2,097,152, the lowest (workflow events use priority 100). They landed tens of milliseconds after the response, with the create burst the latest at 203 ms.
+- On the local bus every event, of any kind, arrived before the response.
 
 **Bursts.**
-- Creating a price list with 500 prices took 328 ms over HTTP on Redis (1,192 ms on local), and its 500 events drained within 188 ms of the response.
+- Creating a price list with 500 prices took 328 ms over HTTP on Redis (1,192 ms on local), and its 500 events drained within 203 ms of the response.
 - Deleting those 500 prices in one batch took **9,820 ms** over HTTP on Redis and **25,513 ms** on local. All 500 events arrived within 191 ms of the response on Redis, and before it on local.
 - The local figure includes the probe's own file append for each event, in-process. The slow delete itself is a Medusa cost worth knowing about for bulk edits, but it isn't an event-delivery problem.
 
