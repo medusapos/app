@@ -1258,6 +1258,57 @@ medusaIntegrationTestRunner({
         })]])
         expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId, status: 'completed' })])
       })
+
+      // A reject made before tally-ledger-resolve marked its order: rejected normally, then the marker removed.
+      async function rejectUnmarked(sale = command()) {
+        const { orderId } = await parkLiveOrder(sale)
+        await resolve(sale.id, 'reject')
+        // The order module merges metadata; an empty string deletes the key.
+        await container.resolve(Modules.ORDER).updateOrders(orderId, { metadata: { tally_rejected: '' } })
+        const row = await orderRow(orderId)
+        expect([row.status, row.metadata]).toEqual(['canceled', expect.not.objectContaining({ tally_rejected: expect.anything() })])
+        return { sale, orderId }
+      }
+      function orderRow(id: string) {
+        return container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id }).first()
+      }
+      async function backfill() {
+        const script = require(`${built}/scripts/tally-ledger-backfill-rejected`) as typeof import('../../src/scripts/tally-ledger-backfill-rejected')
+        const info = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'info')
+        await script.default({ container, args: [] })
+        const lines = info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith('tally_ledger_backfill_rejected'))
+        info.mockRestore()
+        return lines
+      }
+
+      it('tally-ledger-backfill-rejected marks an unmarked rejected order, and a second run marks none', async () => {
+        const { orderId } = await rejectUnmarked()
+        expect(await backfill()).toEqual(['tally_ledger_backfill_rejected: marked 1 order(s), skipped 0 (already marked 0, not canceled 0, missing 0)'])
+        expect((await orderRow(orderId)).metadata).toMatchObject({ tally_rejected: true, tally_client_id: expect.any(String) })
+        expect(await backfill()).toEqual(['tally_ledger_backfill_rejected: marked 0 order(s), skipped 1 (already marked 1, not canceled 0, missing 0)'])
+      })
+
+      it('tally-ledger-backfill-rejected leaves an earlier canceled order of the same sale unmarked', async () => {
+        const first = command()
+        const applied = await post([first])
+        expect(applied.data.results[0].status).toBe('applied')
+        const earlier = applied.data.results[0].serverRefs.orderId
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: earlier }).update({ status: 'canceled' })
+        const { orderId } = await rejectUnmarked({ ...first, id: randomUUID() })
+        expect(await backfill()).toEqual(['tally_ledger_backfill_rejected: marked 1 order(s), skipped 0 (already marked 0, not canceled 0, missing 0)'])
+        expect((await orderRow(orderId)).metadata.tally_rejected).toBe(true)
+        expect(await orderRow(earlier)).toMatchObject({ status: 'canceled', metadata: expect.not.objectContaining({ tally_rejected: true }) })
+      })
+
+      it('tally-ledger-backfill-rejected skips and warns about a rejected command whose order is not canceled', async () => {
+        const { sale, orderId } = await rejectUnmarked()
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId }).update({ status: 'completed' })
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        expect(await backfill()).toEqual(['tally_ledger_backfill_rejected: marked 0 order(s), skipped 1 (already marked 0, not canceled 1, missing 0)'])
+        expect(warn).toHaveBeenCalledWith(
+          `tally_ledger_backfill_rejected: command ${sale.id} is rejected but its order ${orderId} is completed; left unmarked`)
+        expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected')
+      })
     })
 
     it('validates all envelopes before claiming any command', async () => {
