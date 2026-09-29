@@ -190,6 +190,18 @@ medusaIntegrationTestRunner({
         expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
     })
 
+    it('22. a variant and its price written in the same window journal one upsert for their product', async () => {
+      await ensureInitialized(container)
+      const head = await settle()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const since = (await knex.raw('select now()::text as now')).rows[0].now as string
+      await knex('product_variant').where('id', data.variantA).update({ updated_at: knex.raw('now()') })
+      await knex('price').where('id', await priceId()).update({ updated_at: knex.raw('now()') })
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
+        expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
     describe('the rescan script', () => {
       const exitCodeBefore = process.exitCode
 
@@ -239,7 +251,7 @@ medusaIntegrationTestRunner({
       })
 
       it('21. a since with a +10:00 offset reaches rescan as the equivalent Z ISO string', async () => {
-        const rescan = jest.spyOn(sync, 'rescan')
+        const rescan = jest.spyOn(sync, 'rescan').mockResolvedValue(null)
         await tallySyncRescan({ container, args: ['2026-09-29T20:00:00+10:00'] })
         expect(rescan).toHaveBeenCalledWith('2026-09-29T10:00:00.000Z')
       })
