@@ -10,6 +10,7 @@ import { payloadShapeErrors } from './payload-shape'
 import { runOrderCreate, type TallyPluginOptions } from './run'
 import { isNeedsAdminError } from './needs-admin-error'
 import { isStoreConfigurationError } from './store-configuration-error'
+import { checkCollision } from './collision'
 
 export type ExecuteOutcome =
   | { kind: 'result'; result: CommandResult }
@@ -47,6 +48,12 @@ export async function executeOrderCreate(
         } } }
       }
       if (claim.command.status === 'in_progress' || claim.command.status === 'needs_admin') return { kind: 'in_progress', id }
+      if (claim.command.status === 'superseded') {
+        const successor = claim.command.superseded_by ? await ledger.retrieveCommandState(claim.command.superseded_by) : null
+        return successor?.status === 'applied'
+          ? { kind: 'result', result: { ...parseCommandResult(successor.result), id, status: 'duplicate' } }
+          : { kind: 'in_progress', id }
+      }
       const result = parseCommandResult(claim.command.result)
       return { kind: 'result', result: claim.command.status === 'applied' ? { ...result, status: 'duplicate' } : result }
     }
@@ -67,6 +74,14 @@ export async function executeOrderCreate(
           }
           throw error
         }
+        const collision = await checkCollision(container, command)
+        if (collision.kind === 'copy') {
+          await ledger.complete(id, claim.claimToken, collision.result)
+          completed = true
+          return { kind: 'result', result: collision.result }
+        }
+        if (collision.kind === 'transient') throw new Error(collision.message)
+        if (collision.kind === 'busy') return { kind: 'in_progress', id }
         let result: CommandResult
         try {
           result = await runOrderCreate(container, command, options, {
@@ -91,6 +106,15 @@ export async function executeOrderCreate(
         }
         await ledger.complete(id, claim.claimToken, result)
         completed = true
+        if (collision.kind === 'takeover') {
+          try {
+            if (!await ledger.markSuperseded(collision.commandId, collision.claimToken, id)) {
+              container.resolve(ContainerRegistrationKeys.LOGGER).warn(`tally order.create: could not supersede command ${collision.commandId} by ${id}`)
+            }
+          } catch (error) {
+            container.resolve(ContainerRegistrationKeys.LOGGER).warn(`tally order.create: could not supersede command ${collision.commandId} by ${id}: ${error.message}`)
+          }
+        }
         return { kind: 'result', result }
       } finally {
         try {

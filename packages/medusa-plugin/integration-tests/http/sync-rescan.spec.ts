@@ -30,6 +30,8 @@ medusaIntegrationTestRunner({
       untouchedId = (await container.resolve(Modules.PRODUCT).createProducts({ title: 'Untouched product' })).id
     })
 
+    afterEach(() => jest.restoreAllMocks())
+
     // Subscribers journal asynchronously; wait until the head has not moved for a second.
     async function settle(): Promise<number> {
       let head = await sync.head()
@@ -145,7 +147,7 @@ medusaIntegrationTestRunner({
         expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
     })
 
-    it('12. a direct product-option write is journaled as an upsert for every product linked through the pivot', async () => {
+    it('12. a direct product-option write is journaled as an upsert for the product linked to it through the pivot', async () => {
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const optionId = (await knex('product_product_option').where('product_id', productId).select('product_option_id').first()).product_option_id
       const { head, since } = await directWrite('product_option', optionId, { title: 'Variant 2' })
@@ -169,6 +171,20 @@ medusaIntegrationTestRunner({
         .join('product_product_option as option', 'option.id', 'value.product_product_option_id')
         .where('option.product_id', productId).select('value.id').first()).id
       const { head, since } = await directWrite('product_product_option_value', pivotId, {})
+      await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
+      expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
+        expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
+    })
+
+    it('20. a direct variant deleted_at write with an old updated_at is journaled as an upsert for its live product', async () => {
+      await ensureInitialized(container)
+      const head = await settle()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const since = (await knex.raw('select now()::text as now')).rows[0].now as string
+      await knex('product_variant').where('id', data.variantA).update({
+        deleted_at: knex.raw('now()'),
+        updated_at: knex.raw("now() - interval '1 hour'"),
+      })
       await expect(sync.rescan(since)).resolves.toEqual({ since: expect.any(String), rows: 1 })
       expect((await sync.changesSince({ since: head, limit: 100 })).changes).toEqual([
         expect.objectContaining({ collection: 'products', id: productId, op: 'upsert' })])
@@ -220,6 +236,12 @@ medusaIntegrationTestRunner({
         expect(error).toHaveBeenCalledWith(expect.stringContaining('tally_sync rescan: failed:'))
         error.mockRestore()
         jest.restoreAllMocks()
+      })
+
+      it('21. a since with a +10:00 offset reaches rescan as the equivalent Z ISO string', async () => {
+        const rescan = jest.spyOn(sync, 'rescan')
+        await tallySyncRescan({ container, args: ['2026-09-29T20:00:00+10:00'] })
+        expect(rescan).toHaveBeenCalledWith('2026-09-29T10:00:00.000Z')
       })
     })
   },

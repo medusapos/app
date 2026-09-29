@@ -31,7 +31,7 @@ export default async function tallySyncRescan({ container, args }: ExecArgs) {
     return
   }
   try {
-    const result = await container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE).rescan(args[0])
+    const result = await container.resolve<TallySyncModuleService>(TALLY_SYNC_MODULE).rescan(new Date(args[0]).toISOString())
     logger.info(result ? `tally_sync rescan: ${result.rows} products journaled since ${result.since}` : 'tally_sync rescan: journal not initialized')
   } catch (error) {
     logger.error(`tally_sync rescan: failed: ${error}`)
