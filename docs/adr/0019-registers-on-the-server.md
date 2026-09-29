@@ -84,3 +84,9 @@ Rows are never deleted or rewritten. The exceptions are a session's status field
 - **The claim check:** the register write path checks it still holds its ledger claim (`assertClaim`) just before the service call, as order.create does. The check and the write aren't one transaction, so a stalled worker whose lease was taken over can still write in that narrow window (ADR 0001). A stale transition would then flip open and counting until the next transition.
 - A refused register command stops that register's queue on the till (ADR-068 decision 4). So the server refuses only what the till can't produce, and never turns a retry into a refusal.
 - Refunds stay 0 in c2.
+
+## Never-placed orders (2026-09-29)
+
+A canceled order counts because an admin cancel is a later correction. An order canceled by `tally-ledger-resolve reject` was never placed: it carries `tally_rejected` and never counts, so the new order a retry creates is counted once. Only the order the rejected command parked is marked; an earlier order of the same sale that an admin canceled by hand keeps counting.
+
+A failed `order.create` leaves no order row: Medusa's `createOrdersStep` compensation deletes it. The session figures integration test pins that deletion and counts the sale once after its retry.

@@ -40,6 +40,8 @@ export async function loadSessionFigures(container: MedusaContainer, sessionId: 
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const query = knex('order').select(knex.raw("metadata->'tally_payments' as payments"))
     .whereNull('deleted_at').whereIn('status', ORDER_STATUSES_COUNTED).where('is_draft_order', false)
+    // A rejected sale was never placed.
+    .whereRaw("metadata->>'tally_rejected' is distinct from 'true'")
     .whereRaw("metadata->'tally_payments' is not null").orderBy('created_at', 'asc')
   if (input.closure) {
     query.whereRaw("metadata->>'tally_client_id' = any(?)", [input.closure.orderIds])

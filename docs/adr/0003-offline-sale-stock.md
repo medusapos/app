@@ -178,10 +178,14 @@ A fresh `in_progress` lease or `needs_admin` row answers 503 without storing the
 is taken over and the order resumes under the new command (a lost takeover answers 409). After completion,
 the original is marked `superseded` by the new command and resends return its result as a duplicate.
 A rejected original with a live order answers 503 and logs an error; a missing ledger row resumes as an orphan.
+A takeover resumes the original's order with the new command's payload (its `totalMinor` and lines), as orphan
+recovery does, so its warnings come from that payload; only a copy keeps the original's recorded warnings.
+The takeover refreshes the original's lease, so if the new command then fails transiently, the next colliding
+command answers 503 rather than taking over until that lease expires (`CLAIM_LEASE_SECONDS`, 120 s); this heals itself.
 The live-order lookup skips canceled orders, so after an admin reject (which cancels the order) a retry under a new command id is a new sale; Medusa has no unique constraint on `metadata.tally_client_id`, so no id has to be released.
 
 An applied id always answers its recorded result before any check that could refuse it; orders applied before a check existed are never refused on resend.
-Version rules govern new work only: `unsupported_version` comes after the replay read, so an applied id resent at any version answers its recorded result.
+Version rules govern new work only: `unsupported_version` comes after the replay read, so an applied id resent at its recorded version, even one no longer supported, answers its recorded result (a different version changes the fingerprint and answers `idempotency_mismatch`).
 
 ## Consequences
 
