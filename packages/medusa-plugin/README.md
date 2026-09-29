@@ -153,7 +153,10 @@ uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `n
 run `reject` again, not `apply`: an `apply` would leave the cancelled order unmarked, and it would count next to the new one.
 Cancelling the order by hand is fine: `reject` still takes back the plugin's top-up. See the ADR 0003 amendment of 2026-09-29.
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
-Orders rejected before `reject` marked them are marked by running `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js` once, which marks only each rejection's own canceled order and warns about one that is not canceled.
+Orders rejected before `reject` marked them are marked by the manual script `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js [--apply | --undo]`; nothing runs it automatically.
+It marks only each rejection's own canceled order and warns about one that is not canceled. Without an argument it is a dry run that writes nothing;
+`--apply` writes `tally_rejected` and `tally_rejected_by: 'backfill'`, and `--undo` removes both from the orders `--apply` marked.
+Each run logs each order and each affected register session's expected figures and sales count before and after.
 A new command id for the same live `clientOrderId` copies the original applied result, including its warnings,
 and stores it for duplicate replays; a superseded original copies its applied successor's result.
 A fresh lease or `needs_admin` row answers 503 without storing the new command; a busy sale lock or lost takeover
