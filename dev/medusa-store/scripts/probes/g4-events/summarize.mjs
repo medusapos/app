@@ -32,7 +32,13 @@ for (const [scenario, iterations] of scenarios) {
   }
   const counts = new Map()
   for (const event of events) counts.set(event.name, (counts.get(event.name) ?? 0) + 1)
-  const names = [...counts].map(([name, count]) => `${name}: ${count}`).join(", ") || "—"
+  let names = [...counts].map(([name, count]) => `${name}: ${count}`).join(", ") || "—"
+  if (scenario === "direct.module.writes.child-probe") {
+    const childCounts = new Map()
+    for (const event of iterations.flatMap(record => record.childEvents)) childCounts.set(event.name, (childCounts.get(event.name) ?? 0) + 1)
+    const childNames = [...childCounts].map(([name, count]) => `${name}: ${count}`).join(", ") || "—"
+    names = `server: ${names}; child: ${childNames}`
+  }
   console.log(`| ${scenario} | ${iterations.length} | ${covered}/${total} | ${names} | ${latency(events, "fromStart")} | ${latency(events, "fromResponse")} |`)
 }
 
@@ -41,6 +47,6 @@ console.log("| --- | ---: | ---: | ---: | ---: | ---: |")
 for (const [name, events] of eventNames) {
   console.log(`| ${name} | ${events.length} | ${latency(events, "fromStart")} | ${latency(events, "fromResponse")} |`)
 }
-const burst = (scenarios.get("price-list.burst.update") ?? []).flatMap(record => record.events)
+const burst = (scenarios.get("price-list.burst.delete") ?? []).flatMap(record => record.events)
 const drain = burst.length ? `${Math.round(Math.max(...burst.map(event => event.fromResponse)))} ms` : "—"
-console.log(`\nprice-list.burst.update: ${burst.length} events; drain time (max fromResponse): ${drain}`)
+console.log(`\nprice-list.burst.delete: ${burst.length} events; drain time (max fromResponse): ${drain}`)

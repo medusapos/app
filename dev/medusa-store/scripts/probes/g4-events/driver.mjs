@@ -1,6 +1,7 @@
 import { readFile, writeFile } from "node:fs/promises"
 import { setTimeout } from "node:timers/promises"
 import { spawn } from "node:child_process"
+import { dirname, join } from "node:path"
 
 const [baseUrl, probeFile, resultsFile] = process.argv.slice(2)
 const startedAt = Date.now()
@@ -217,6 +218,12 @@ try {
       }),
     }), [listId])
   }
+  for (let iteration = 1; iteration <= 4; iteration++) {
+    await measure("price-list.status", iteration, () => fetch(`${baseUrl}/admin/price-lists/${listId}`, {
+      method: "POST", headers,
+      body: JSON.stringify({ status: iteration % 2 ? "draft" : "active" }),
+    }), [listId])
+  }
   const burst = await measure("price-list.burst.create", 1, () => fetch(`${baseUrl}/admin/price-lists`, {
     method: "POST", headers,
     body: JSON.stringify({ title: "G4 burst", description: "G4 burst", status: "active", type: "sale",
@@ -231,11 +238,9 @@ try {
   const burstResponse = await fetch(`${baseUrl}/admin/price-lists/${burstId}/prices?limit=500`, { headers })
   if (!burstResponse.ok) throw new Error(`Burst readback failed: ${burstResponse.status} ${await burstResponse.text()}`)
   const { prices: burstPrices } = await burstResponse.json()
-  await measure("price-list.burst.update", 1, () => fetch(`${baseUrl}/admin/price-lists/${burstId}/prices/batch`, {
+  await measure("price-list.burst.delete", 1, () => fetch(`${baseUrl}/admin/price-lists/${burstId}/prices/batch`, {
     method: "POST", headers,
-    body: JSON.stringify({ update: burstPrices.map(price => ({
-      id: price.id, variant_id: price.price_set.variant.id, amount: 7,
-    })) }),
+    body: JSON.stringify({ delete: burstPrices.map(price => price.id) }),
   }), [burstId])
   const directEnv = { ...process.env, G4_DIRECT_IDS: JSON.stringify({
     priceId: fixture.priceIds[1], levelId: fixture.levelIds[1], inventoryItemId: fixture.inventoryItemIds[1],
@@ -243,6 +248,7 @@ try {
   }) }
   // Only the server's subscriber may record delivery, including on the local bus.
   delete directEnv.G4_EVENT_PROBE_FILE
+  directEnv.G4_DIRECT_VALUES = JSON.stringify({ amount: 42, stocked: 42, title: "M direct" })
   await measure("direct.module.writes", 1, () => new Promise((resolve, reject) => {
     const child = spawn("npx", ["medusa", "exec", "./src/scripts/g4-direct-writes.ts"], {
       cwd: new URL("../../../apps/backend/", import.meta.url), env: directEnv, stdio: "inherit",
@@ -253,6 +259,24 @@ try {
       text: async () => JSON.stringify({ code, signal }),
     }))
   }), [fixture.priceIds[1], fixture.levelIds[1], fixture.variantIds[1]])
+  const childProbeFile = join(dirname(probeFile), "child-events.jsonl")
+  await writeFile(childProbeFile, "")
+  directEnv.G4_EVENT_PROBE_FILE = childProbeFile
+  directEnv.G4_DIRECT_VALUES = JSON.stringify({ amount: 43, stocked: 43, title: "M direct 2" })
+  const childProbe = await measure("direct.module.writes.child-probe", 1, () => new Promise((resolve, reject) => {
+    const child = spawn("npx", ["medusa", "exec", "./src/scripts/g4-direct-writes.ts"], {
+      cwd: new URL("../../../apps/backend/", import.meta.url), env: directEnv, stdio: "inherit",
+    })
+    child.once("error", reject)
+    child.once("exit", (code, signal) => resolve({
+      exitedAt: Date.now(), status: code, ok: code === 0,
+      text: async () => JSON.stringify({ code, signal }),
+    }))
+  }), [fixture.priceIds[1], fixture.levelIds[1], fixture.variantIds[1]])
+  childProbe.record.childEvents = (await readFile(childProbeFile, "utf8")).split("\n").filter(Boolean)
+    .map(line => JSON.parse(line))
+    .map(event => ({ name: event.name, receivedAt: event.receivedAt, ids: ids(event.data),
+      fromStart: event.receivedAt - childProbe.record.t0 }))
 } catch (error) {
   console.error(error)
   process.exitCode = 1
