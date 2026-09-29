@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
+import { WorkflowManager } from '@medusajs/framework/orchestration'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import {
   cancelOrderWorkflow, convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, markPaymentCollectionAsPaid,
@@ -63,6 +64,27 @@ medusaIntegrationTestRunner({
       return container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
         .whereRaw("metadata->>'tally_client_id' = ?", [clientOrderId])
         .whereNull('deleted_at').whereNot('status', 'canceled')
+    }
+
+    async function levelC() {
+      const [level] = await container.resolve(Modules.INVENTORY).listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+      return [Number(level.stocked_quantity), Number(level.reserved_quantity)]
+    }
+
+    // The real order write commits, then throws once for the first write that sets each metadata key; returns the keys fired.
+    function probeOrderWrites(...keys: string[]) {
+      const orders = container.resolve(Modules.ORDER)
+      const update = orders.updateOrders.bind(orders) as (...args: unknown[]) => Promise<unknown>
+      const fired: string[] = []
+      jest.spyOn(orders, 'updateOrders').mockImplementation((async (...args: unknown[]) => {
+        const result = await update(...args)
+        const metadata = (args[1] as { metadata?: Record<string, unknown> } | undefined)?.metadata ?? {}
+        const key = keys.find(key => metadata[key] && !fired.includes(key))
+        if (!key) return result
+        fired.push(key)
+        throw new Error(`${key} probe`)
+      }) as never)
+      return fired
     }
 
     it('requires admin authentication and protocol 1', async () => {
@@ -362,6 +384,28 @@ medusaIntegrationTestRunner({
       await inventory.adjustInventory(data.inventoryC, data.berlinId, quantity)
     })
 
+    it('a short sale whose take-back marker write throws after its adjustment fails cleanly with its top-up and take-back each reversed once, and the retry takes it back once', async () => {
+      const before = await levelC()
+      const quantity = Math.max(before[0] - before[1], 0) + 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252 * quantity, taxMinor: 48 * quantity, totalMinor: 300 * quantity,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 * quantity }],
+      })
+      const fired = probeOrderWrites('tally_stock_topups_reversed')
+      const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+      expect((await post([sale])).status).toBe(503)
+      // Medusa ran the take-back's compensation with its data, then reversed the top-up: both exactly once. Medusa's own
+      // fulfilment compensation does not put the fulfilled quantity back, with or without a take-back, so that stays out.
+      expect([await levelC(), fired]).toEqual([[before[0] - quantity, before[1]], ['tally_stock_topups_reversed']])
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('took its stock top-up back, but the reversed marker write failed: tally_stock_topups_reversed probe'))
+      expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      const response = await post([sale])
+      expect([response.status, response.data.results[0].status]).toEqual([200, 'applied'])
+      expect(await levelC()).toEqual([before[0] - 2 * quantity, before[1]])
+      await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, 2 * quantity)
+    })
+
     it('ignores a pending top-up whose outcome is unknown', async () => {
       const inventory = container.resolve(Modules.INVENTORY)
       const [before] = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
@@ -564,11 +608,6 @@ medusaIntegrationTestRunner({
         return { sale, orderId, collectionId }
       }
 
-      async function levelC() {
-        const [level] = await container.resolve(Modules.INVENTORY).listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
-        return [Number(level.stocked_quantity), Number(level.reserved_quantity)]
-      }
-
       it('a claim lost while parking logs a warning, not needs admin, and neither releases nor parks the row', async () => {
         jest.spyOn(ledger, 'markNeedsAdmin').mockResolvedValueOnce(false)
         const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
@@ -633,6 +672,60 @@ medusaIntegrationTestRunner({
         await expectRejectedAndReversed(sale, orderId)
         await expect(resolve(sale.id, 'reject')).rejects.toThrow('not needs_admin')
         expect(await levelC()).toEqual(before)
+      })
+
+      const markerProbe = { message: expect.stringContaining('the reversed marker write failed: tally_stock_topups_reversed probe') }
+
+      it.each(['resume', 'reject'])('a take-back whose marker write throws after its adjustment on %s surfaces the error, puts the stock back, and the retry takes it back once', async path => {
+        const before = await levelC()
+        const sale = saleOfC()
+        const { orderId } = path === 'resume' ? await halfWrittenOrder(sale, 1) : await parkLiveOrder(sale, 1)
+        const fired = probeOrderWrites('tally_stock_topups_reversed')
+        if (path === 'resume') expect((await post([sale])).status).toBe(503)
+        else await expect(resolve(sale.id, 'reject')).rejects.toMatchObject(markerProbe)
+        // The resume fulfilled both items before its take-back failed.
+        expect([await levelC(), fired]).toEqual([path === 'resume' ? [before[0] - 1, before[1]] : [before[0] + 1, before[1] + 2], ['tally_stock_topups_reversed']])
+        if (path === 'resume') {
+          const response = await post([sale])
+          expect([response.status, response.data.results[0].status]).toEqual([200, 'applied'])
+          expect(await levelC()).toEqual([before[0] - 2, before[1]])
+          return
+        }
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        await expectRejectedAndReversed(sale, orderId)
+      })
+
+      it.each(['lock release', 'marker write'])('a take-back compensation whose %s throws after its re-adjustment keeps the stock right and a second run does not re-adjust', async fault => {
+        const before = await levelC()
+        const sale = saleOfC()
+        const { orderId } = await parkLiveOrder(sale, 1)
+        const fired = probeOrderWrites('tally_stock_topups_reversed', ...fault === 'marker write' ? ['tally_stock_take_back_compensated'] : [])
+        const locking = container.resolve(Modules.LOCKING)
+        const execute = locking.execute.bind(locking) as (...args: unknown[]) => Promise<unknown>
+        // Once the take-back's marker probe fired, the next execute is its compensation's.
+        if (fault === 'lock release') jest.spyOn(locking, 'execute').mockImplementation((async (...args: unknown[]) => {
+          const result = await execute(...args)
+          if (fired.length !== 1) return result
+          fired.push('unlock')
+          throw new Error('unlock probe')
+        }) as never)
+        // The real compensation runs twice with the same data, as when a crash comes before Medusa records the first run.
+        const handler = WorkflowManager.getWorkflow('tally-take-back-stock').handlers_.get('tally-take-back-stock')
+        const compensate = handler.compensate
+        jest.spyOn(handler, 'compensate').mockImplementation(async (...args: unknown[]) => {
+          await compensate(...args)
+          return compensate(...args)
+        })
+        const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
+        await expect(resolve(sale.id, 'reject')).rejects.toMatchObject(markerProbe)
+        expect([await levelC(), fired]).toEqual([[before[0] + 1, before[1] + 2],
+          ['tally_stock_topups_reversed', fault === 'lock release' ? 'unlock' : 'tally_stock_take_back_compensated']])
+        expect(handler.compensate).toHaveBeenCalledTimes(1)
+        expect(log).toHaveBeenCalledWith(expect.stringContaining(`tally take-back compensation: order ${orderId} put its stock top-up back`))
+        await resolve(sale.id, 'reject')
+        expect(await levelC()).toEqual(before)
+        await expectRejectedAndReversed(sale, orderId)
       })
 
       it('tally-ledger-resolve destroys a connection whose unlock failed before the pool gets it back, disposed', async () => {

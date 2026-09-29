@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { ContainerRegistrationKeys, MedusaError, Modules } from '@medusajs/framework/utils'
 import { createStep, createWorkflow, StepResponse, transform, when, WorkflowResponse, type StepExecutionContext } from '@medusajs/framework/workflows-sdk'
 import {
@@ -43,10 +44,13 @@ const recordStockTopUpIntentStep = createStep('tally-record-stock-topup-intent',
 const recordStockTopUpAppliedStep = createStep('tally-record-stock-topup-applied', recordStockTopUps, restoreStockTopUps)
 const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: string, { container }) => {
   const orders = container.resolve(Modules.ORDER)
+  const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const order = await orders.retrieveOrder(orderId)
   const topUps = order.metadata!.tally_stock_topups as StockTopUp[]
   const started = order.metadata!.tally_stock_take_back_started ?? null
   const adjusted = started !== true
+  // attempt keys the compensation's progress marker to this run's data.
+  const data = { orderId, topUps, adjusted, started, flag: order.metadata!.tally_stock_topups_reversed ?? null, attempt: randomUUID() }
   if (adjusted) await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: true } })
   let took = false
   if (adjusted) await container.resolve(Modules.LOCKING).execute(Array.from(new Set(topUps.map(topUp => topUp.inventory_item_id))), async () => {
@@ -56,25 +60,44 @@ const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: st
     took = true
   }).catch(async (error: unknown) => {
     // A throw after the adjustment (the unlock) still succeeds, so neither this step nor the top-up is compensated twice.
-    if (took) return container.resolve(ContainerRegistrationKeys.LOGGER)
-      .error(`tally take-back: order ${orderId} took its stock top-up back, but the lock release failed: ${(error as Error).message}`)
+    if (took) return logger.error(`tally take-back: order ${orderId} took its stock top-up back, but the lock release failed: ${(error as Error).message}`)
     // A throw before it took nothing back, so the retry adjusts.
     await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: started } })
     throw error
   })
-  await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: true, tally_stock_topups_reversed: true } })
-  return new StepResponse(undefined, { orderId, topUps, adjusted, started,
-    flag: order.metadata!.tally_stock_topups_reversed ?? null })
+  try {
+    await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: true, tally_stock_topups_reversed: true } })
+  } catch (error) {
+    if (!took) throw error
+    // A failure after the adjustment carries the compensation data, so Medusa puts the stock back exactly once (ADR 0003).
+    const message = `tally take-back: order ${orderId} took its stock top-up back, but the reversed marker write failed: ${(error as Error).message}`
+    logger.error(message)
+    return StepResponse.permanentFailure(message, data)
+  }
+  return new StepResponse(undefined, data)
 }, async (data, { container }) => {
   if (!data) return
-  if (data.adjusted) await container.resolve(Modules.LOCKING).execute(Array.from(new Set(data.topUps.map(topUp => topUp.inventory_item_id))), async () => {
+  const orders = container.resolve(Modules.ORDER)
+  const { metadata } = await orders.retrieveOrder(data.orderId)
+  // The restore carries this run's progress marker, so a rerun, or a throw after the re-adjustment, never re-adjusts.
+  const restore = () => orders.updateOrders(data.orderId, { metadata: { ...metadata, tally_stock_take_back_compensated: data.attempt,
+    tally_stock_take_back_started: data.started, tally_stock_topups_reversed: data.flag } })
+  if (!data.adjusted || metadata?.tally_stock_take_back_compensated === data.attempt) {
+    await restore()
+    return
+  }
+  let took = false
+  await container.resolve(Modules.LOCKING).execute(Array.from(new Set(data.topUps.map(topUp => topUp.inventory_item_id))), async () => {
     await container.resolve(Modules.INVENTORY).adjustInventory(data.topUps.map(topUp => ({
       inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: topUp.shortfall,
     })))
+    took = true
+    await restore()
+  }).catch((error: unknown) => {
+    if (!took) throw error
+    container.resolve(ContainerRegistrationKeys.LOGGER).error(
+      `tally take-back compensation: order ${data.orderId} put its stock top-up back, but a later write or the lock release failed: ${(error as Error).message}`)
   })
-  const orders = container.resolve(Modules.ORDER)
-  const order = await orders.retrieveOrder(data.orderId)
-  await orders.updateOrders(data.orderId, { metadata: { ...order.metadata, tally_stock_take_back_started: data.started, tally_stock_topups_reversed: data.flag } })
 })
 export const takeBackStockWorkflow = createWorkflow('tally-take-back-stock', function (input: { orderId: string }) {
   takeBackStockStep(input.orderId)
