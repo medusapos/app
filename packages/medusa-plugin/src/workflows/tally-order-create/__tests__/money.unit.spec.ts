@@ -46,3 +46,26 @@ it.each([0, 2, 3])('round trips safe minor amounts at exponent %s', decimals => 
     expect(majorToMinor(minorToMajor(minor, decimals), decimals)).toBe(minor)
   }
 })
+
+it('rejects a long digit run without quadratic backtracking (CodeQL ReDoS)', () => {
+  const value = '9'.repeat(50000) + 'x'
+  const start = performance.now()
+  expect(() => majorToMinor(value, 2)).toThrow()
+  expect(performance.now() - start).toBeLessThan(200)
+})
+
+it.each([
+  '1', '1.', '1.5', '.5', '-0.005', '+12.340', '1e3', '1.25E-2', '.5e+1',
+  '', '.', '-', '1.2.3', 'e5', '1e', '1x', ' 1',
+])('matches the pre-fix regex exactly for %j', input => {
+  // Pre-fix pattern, kept only for this equivalence check.
+  const oldRegex = /^([+-]?)(\d+\.?\d*|\.\d+)(?:e([+-]?\d+))?$/i
+  const newRegex = /^([+-]?)(\d+(?:\.\d*)?|\.\d+)(?:e([+-]?\d+))?$/i
+  const oldMatch = oldRegex.exec(input)
+  const newMatch = newRegex.exec(input)
+  if (oldMatch === null || newMatch === null) {
+    expect(newMatch).toBe(oldMatch)
+  } else {
+    expect([...newMatch]).toEqual([...oldMatch])
+  }
+})

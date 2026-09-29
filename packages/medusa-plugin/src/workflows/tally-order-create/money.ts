@@ -13,7 +13,7 @@ export function minorToMajor(minor: number, decimals: number): string {
 
 /** Rounds a major-unit decimal to minor units, half away from zero, without float scaling. */
 export function majorToMinor(value: string | number, decimals: number): number {
-  const match = /^([+-]?)(\d+\.?\d*|\.\d+)(?:e([+-]?\d+))?$/i.exec(String(value))
+  const match = /^([+-]?)(\d+(?:\.\d*)?|\.\d+)(?:e([+-]?\d+))?$/i.exec(String(value))
   if (!match) throw new RangeError('value must be a finite decimal')
   const [, sign, mantissa, exponent = '0'] = match
   const [whole, fraction = ''] = mantissa.split('.')
