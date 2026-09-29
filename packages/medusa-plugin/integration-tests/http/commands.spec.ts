@@ -66,10 +66,11 @@ medusaIntegrationTestRunner({
         .whereNull('deleted_at').whereNot('status', 'canceled')
     }
 
-    async function levelC() {
-      const [level] = await container.resolve(Modules.INVENTORY).listInventoryLevels({ inventory_item_id: data.inventoryC, location_id: data.berlinId })
+    async function levelC(inventoryItemId = data.inventoryC) {
+      const [level] = await container.resolve(Modules.INVENTORY).listInventoryLevels({ inventory_item_id: inventoryItemId, location_id: data.berlinId })
       return [Number(level.stocked_quantity), Number(level.reserved_quantity)]
     }
+    const levelA = () => levelC(data.inventoryA)
 
     // The real order write commits, then throws once for the first write that sets each metadata key; returns the keys fired.
     function probeOrderWrites(...keys: string[]) {
@@ -395,15 +396,59 @@ medusaIntegrationTestRunner({
       const fired = probeOrderWrites('tally_stock_topups_reversed')
       const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
       expect((await post([sale])).status).toBe(503)
-      // Medusa ran the take-back's compensation with its data, then reversed the top-up: both exactly once. Medusa's own
-      // fulfilment compensation does not put the fulfilled quantity back, with or without a take-back, so that stays out.
-      expect([await levelC(), fired]).toEqual([[before[0] - quantity, before[1]], ['tally_stock_topups_reversed']])
+      // Medusa ran the take-back's compensation with its data, the fulfilment's, then reversed the top-up: each exactly once.
+      expect([await levelC(), fired]).toEqual([before, ['tally_stock_topups_reversed']])
       expect(log).toHaveBeenCalledWith(expect.stringContaining('took its stock top-up back, but the reversed marker write failed: tally_stock_topups_reversed probe'))
       expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
       const response = await post([sale])
       expect([response.status, response.data.results[0].status]).toEqual([200, 'applied'])
-      expect(await levelC()).toEqual([before[0] - 2 * quantity, before[1]])
-      await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, 2 * quantity)
+      expect(await levelC()).toEqual([before[0] - quantity, before[1]])
+      await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, quantity)
+    })
+
+    it('a sale that fails at completeOrderWorkflow puts its fulfilled stock back exactly, and the retry takes it once', async () => {
+      const before = await levelC()
+      const quantity = 1
+      const sale = command({
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantC, quantity, unitPriceMinor: 300 }],
+        subtotalMinor: 252, taxMinor: 48, totalMinor: 300,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 300 }],
+      })
+      jest.spyOn(container.resolve(Modules.ORDER), 'completeOrder').mockRejectedValueOnce(new Error('complete probe'))
+      expect((await post([sale])).status).toBe(503)
+      expect([await levelC(), await liveOrders(sale.payload.clientOrderId)]).toEqual([before, []])
+      const response = await post([sale])
+      expect([response.status, response.data.results[0].status]).toEqual([200, 'applied'])
+      expect(await levelC()).toEqual([before[0] - quantity, before[1]])
+      await container.resolve(Modules.INVENTORY).adjustInventory(data.inventoryC, data.berlinId, quantity)
+    })
+
+    it.each(['the second fulfilment group', 'completeOrderWorkflow'])('a two-group sale that fails at %s puts every fulfilled group\'s stock back exactly', async failure => {
+      const before = [await levelC(), await levelA()]
+      // A shipped line of C and, overridden to not require shipping, a line of A: two fulfilment groups.
+      const plan = require('../../.medusa/server/src/workflows/tally-order-create/plan') as typeof import('../../src/workflows/tally-order-create/plan')
+      const planOrderCreate = plan.planOrderCreate
+      jest.spyOn(plan, 'planOrderCreate').mockImplementation((...args) => {
+        const planned = planOrderCreate(...args)
+        if (planned.ok) Object.assign(planned.plan.draftOrder.items.find(item => item.variant_id === data.variantA)!, { requires_shipping: false })
+        return planned
+      })
+      const orders = container.resolve(Modules.ORDER)
+      const registerFulfillment = orders.registerFulfillment.bind(orders)
+      const register = jest.spyOn(orders, 'registerFulfillment').mockImplementationOnce(registerFulfillment)
+      if (failure === 'completeOrderWorkflow') jest.spyOn(orders, 'completeOrder').mockRejectedValueOnce(new Error('complete probe'))
+      else register.mockRejectedValueOnce(new Error('second group probe'))
+      const sale = command({
+        lines: [
+          { clientLineId: randomUUID(), variantId: data.variantC, quantity: 1, unitPriceMinor: 300 },
+          { clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000 },
+        ],
+        subtotalMinor: 1092, taxMinor: 208, totalMinor: 1300,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 1300 }],
+      })
+      expect((await post([sale])).status).toBe(503)
+      expect(register).toHaveBeenCalledTimes(2)
+      expect([await levelC(), await levelA(), await liveOrders(sale.payload.clientOrderId)]).toEqual([...before, []])
     })
 
     it('ignores a pending top-up whose outcome is unknown', async () => {
@@ -846,17 +891,19 @@ medusaIntegrationTestRunner({
         await expectRejectedAndReversed(sale, orderId)
       })
 
-      it.each(['lock release', 'marker write'])('a take-back compensation whose %s throws after its re-adjustment keeps the stock right and a second run does not re-adjust', async fault => {
+      it.each(['lock release', 'marker write', 'rerun lock release'])('a take-back compensation whose %s throws after its re-adjustment keeps the stock right and a second run does not re-adjust', async fault => {
         const before = await levelC()
         const sale = saleOfC()
         const { orderId } = await parkLiveOrder(sale, 1)
         const fired = probeOrderWrites('tally_stock_topups_reversed', ...fault === 'marker write' ? ['tally_stock_take_back_compensated'] : [])
         const locking = container.resolve(Modules.LOCKING)
         const execute = locking.execute.bind(locking) as (...args: unknown[]) => Promise<unknown>
-        // Once the take-back's marker probe fired, the next execute is its compensation's.
-        if (fault === 'lock release') jest.spyOn(locking, 'execute').mockImplementation((async (...args: unknown[]) => {
+        // Once the take-back's marker probe fired, the next executes are its compensation's.
+        let compensationExecutes = 0
+        if (fault !== 'marker write') jest.spyOn(locking, 'execute').mockImplementation((async (...args: unknown[]) => {
           const result = await execute(...args)
           if (fired.length !== 1) return result
+          if (++compensationExecutes !== (fault === 'rerun lock release' ? 2 : 1)) return result
           fired.push('unlock')
           throw new Error('unlock probe')
         }) as never)
@@ -870,9 +917,11 @@ medusaIntegrationTestRunner({
         const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
         await expect(resolve(sale.id, 'reject')).rejects.toMatchObject(markerProbe)
         expect([await levelC(), fired]).toEqual([[before[0] + 1, before[1] + 2],
-          ['tally_stock_topups_reversed', fault === 'lock release' ? 'unlock' : 'tally_stock_take_back_compensated']])
+          ['tally_stock_topups_reversed', fault === 'marker write' ? 'tally_stock_take_back_compensated' : 'unlock']])
         expect(handler.compensate).toHaveBeenCalledTimes(1)
-        expect(log).toHaveBeenCalledWith(expect.stringContaining(`tally take-back compensation: order ${orderId} put its stock top-up back`))
+        expect(log).toHaveBeenCalledWith(expect.stringContaining(fault === 'rerun lock release'
+          ? `tally take-back compensation: order ${orderId} restored its markers, but the lock release failed: unlock probe`
+          : `tally take-back compensation: order ${orderId} put its stock top-up back`))
         await resolve(sale.id, 'reject')
         expect(await levelC()).toEqual(before)
         await expectRejectedAndReversed(sale, orderId)
@@ -952,10 +1001,13 @@ medusaIntegrationTestRunner({
       })
 
       it.each(['create', 'resume'])('the recipe\'s own fulfilment compensation on %s leaves no canceled fulfilment linked, so the resend is applied', async path => {
+        const before = await levelA()
         const sale = command()
         if (path === 'resume') await halfWrittenOrder(sale)
         jest.spyOn(container.resolve(Modules.ORDER), 'registerFulfillment').mockRejectedValueOnce(new Error('fulfilment probe'))
         expect((await post([sale])).status).toBe(503)
+        // The half-written order keeps its reservation of the one item until the resend fulfils it.
+        expect(await levelA()).toEqual([before[0], before[1] + (path === 'resume' ? 1 : 0)])
         const ids = (await liveOrders(sale.payload.clientOrderId)).map(order => order.id)
         expect(ids).toHaveLength(path === 'resume' ? 1 : 0)
         const { data: orders } = ids.length ? await container.resolve(ContainerRegistrationKeys.QUERY).graph({
@@ -963,6 +1015,7 @@ medusaIntegrationTestRunner({
         expect(orders.flatMap(order => order.fulfillments).filter(fulfillment => fulfillment?.canceled_at)).toEqual([])
         const response = await post([sale])
         expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: sale.id, status: 'applied' })]])
+        expect(await levelA()).toEqual([before[0] - 1, before[1]])
       })
 
       it('tally-ledger-resolve reject cancels the live order and stores a TALLY_ADMIN_REJECTED platform_error that the resend replays', async () => {

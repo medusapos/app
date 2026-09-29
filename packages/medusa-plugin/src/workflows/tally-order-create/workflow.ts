@@ -78,30 +78,43 @@ const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: st
 }, async (data, { container }) => {
   if (!data) return
   const orders = container.resolve(Modules.ORDER)
-  const { metadata } = await orders.retrieveOrder(data.orderId)
-  // The restore carries this run's progress marker, so a rerun, or a throw after the re-adjustment, never re-adjusts.
-  const restore = () => orders.updateOrders(data.orderId, { metadata: { ...metadata, tally_stock_take_back_compensated: data.attempt,
-    tally_stock_take_back_started: data.started, tally_stock_topups_reversed: data.flag } })
-  if (!data.adjusted || metadata?.tally_stock_take_back_compensated === data.attempt) {
-    await restore()
-    return
-  }
   let took = false
+  let restored = false
+  // The read, the marker check, the re-adjustment and the restore all run under the lock, so the restore never
+  // overwrites metadata written while it waited.
   await container.resolve(Modules.LOCKING).execute(Array.from(new Set(data.topUps.map(topUp => topUp.inventory_item_id))), async () => {
-    await container.resolve(Modules.INVENTORY).adjustInventory(data.topUps.map(topUp => ({
-      inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: topUp.shortfall,
-    })))
-    took = true
-    await restore()
+    const { metadata } = await orders.retrieveOrder(data.orderId)
+    // The restore carries this run's progress marker, so a rerun, or a throw after the re-adjustment, never re-adjusts.
+    if (data.adjusted && metadata?.tally_stock_take_back_compensated !== data.attempt) {
+      await container.resolve(Modules.INVENTORY).adjustInventory(data.topUps.map(topUp => ({
+        inventoryItemId: topUp.inventory_item_id, locationId: topUp.location_id, adjustment: topUp.shortfall,
+      })))
+      took = true
+    }
+    await orders.updateOrders(data.orderId, { metadata: { ...metadata, tally_stock_take_back_compensated: data.attempt,
+      tally_stock_take_back_started: data.started, tally_stock_topups_reversed: data.flag } })
+    restored = true
   }).catch((error: unknown) => {
-    if (!took) throw error
-    container.resolve(ContainerRegistrationKeys.LOGGER).error(
-      `tally take-back compensation: order ${data.orderId} put its stock top-up back, but a later write or the lock release failed: ${(error as Error).message}`)
+    // Only a throw before any write propagates: a throwing compensation could stop the compensations after it.
+    if (!took && !restored) throw error
+    container.resolve(ContainerRegistrationKeys.LOGGER).error(took
+      ? `tally take-back compensation: order ${data.orderId} put its stock top-up back, but a later write or the lock release failed: ${(error as Error).message}`
+      : `tally take-back compensation: order ${data.orderId} restored its markers, but the lock release failed: ${(error as Error).message}`)
   })
 })
 export const takeBackStockWorkflow = createWorkflow('tally-take-back-stock', function (input: { orderId: string }) {
   takeBackStockStep(input.orderId)
   return new WorkflowResponse(undefined)
+})
+
+// In Medusa 2.21, when().then() re-registers a step renamed by .config({ name }) under its pre-rename handler, which
+// loses its compensation, so we never rename a step inside when: each fulfilment group runs as its own workflow (ADR 0003).
+type FulfillmentInput = Parameters<typeof createOrderFulfillmentWorkflow.runAsStep>[0]['input']
+const fulfillFirstGroupWorkflow = createWorkflow('tally-fulfill-first-group', function (input: FulfillmentInput) {
+  return new WorkflowResponse(createOrderFulfillmentWorkflow.runAsStep({ input }))
+})
+const fulfillSecondGroupWorkflow = createWorkflow('tally-fulfill-second-group', function (input: FulfillmentInput) {
+  return new WorkflowResponse(createOrderFulfillmentWorkflow.runAsStep({ input }))
 })
 
 export const tallyOrderCreateWorkflow = createWorkflow('tally-order-create', function (input: TallyOrderCreateInput) {
@@ -146,14 +159,14 @@ export const tallyOrderCreateWorkflow = createWorkflow('tally-order-create', fun
       order_id: draft.id, items: groups[0], location_id: input.locationId,
       shipping_option_id: input.shippingOptionId, no_notification: true,
     }))
-    createOrderFulfillmentWorkflow.runAsStep({ input: fulfillment }).config({ name: 'fulfill-first-group' })
+    fulfillFirstGroupWorkflow.runAsStep({ input: fulfillment })
   })
   when('has-second-fulfillment', { groups }, ({ groups }) => groups.length > 1).then(() => {
     const fulfillment = transform({ input, draft, groups }, ({ input, draft, groups }) => ({
       order_id: draft.id, items: groups[1], location_id: input.locationId,
       shipping_option_id: input.shippingOptionId, no_notification: true,
     }))
-    createOrderFulfillmentWorkflow.runAsStep({ input: fulfillment }).config({ name: 'fulfill-second-group' })
+    fulfillSecondGroupWorkflow.runAsStep({ input: fulfillment })
   })
   when('has-stock-to-take-back', { input }, ({ input }) => ((input.draftOrder.metadata.tally_stock_topups as StockTopUp[] | undefined) ?? []).length > 0).then(() => {
     takeBackStockStep(draft.id)
