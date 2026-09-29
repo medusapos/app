@@ -175,12 +175,14 @@ This is a change journal and two read routes for TallyUI's G4 sync experiment. T
 - **What feeds the journal:**
   - One subscriber listens to the module entity events for products, variants, options and option values, prices, inventory levels and items, and to the product↔sales-channel, variant↔price-set and variant↔inventory-item link events. It resolves each to its product ids. The op is `delete` when the product is soft-deleted, `upsert` otherwise.
   - **Price lists emit no event** when they're updated, change status, or start or end. A watcher covers them: it runs on every `/changes/tick` (at most once every 5 s per process) and every minute as a scheduled job. It journals the products of any price list whose `updated_at` passed the watermark, or whose `starts_at` or `ends_at` fell since the last run.
-- **`GET /tally/v1/changes?since=&limit=&collections=&epoch=`** returns `{ epoch, head, horizon, changes: [{ seq, collection, id, op, revision }], more }`. A cursor from another epoch, or one ahead of `head`, gets `410 { code: 'cursor_expired', epoch, head }`.
+- **`GET /tally/v1/changes?since=&limit=&collections=&epoch=`** returns `{ epoch, head, horizon, changes: [{ seq, collection, id, op, revision }], more }`. A cursor from another epoch, one ahead of `head`, or `since > 0` without an `epoch`, gets `410 { code: 'cursor_expired', epoch, head }`.
 - **`GET /tally/v1/changes/tick?since=&epoch=`** returns `304` when nothing changed, otherwise `{ epoch, head, horizon }`.
 - Both routes use the same admin authentication and CORS as the command endpoint.
 
 **Only writes made by the server (or its workers) are journaled.** Events reach subscribers in the process that wrote. On the local bus they never leave it, and on the Redis bus they're dropped at the emitter when that process has no subscriber for them (spike findings).
 - **`medusa exec` scripts are not journaled.** On the local bus, 5 of 5 direct price writes from `medusa exec` committed, and none reached the journal: no subscriber ran before the script exited.
+
+  **Catch up with a rescan** after an import, a script or raw SQL, from the store's backend directory: `npx medusa exec ./node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-sync-rescan.js [since]`. It journals every product whose row, variants, prices, inventory levels, option values or sales-channel links have an `updated_at` or `deleted_at` after `since` (an ISO timestamp; by default, the latest journal row). A soft-deleted product gets `delete`, any other `upsert`. It doesn't cover price lists, which are the watcher's job (any `/changes/tick` runs it), or hard-deleted rows. With `experimentalSync` off it does nothing, and before the first route call it logs `journal not initialized`.
 - **Catalogue changes made by a script** reach tills only through a later edit of the same products, or through a resync. Before initialization, the install backfill covers them.
 - **A demo reset** clears the journal and the sync state, so the next route call mints a new epoch. Every till's cursor then answers `410 cursor_expired`, and the till resyncs.
 

@@ -177,8 +177,10 @@ medusaIntegrationTestRunner({
       expect(afterNoMatch.getTime()).toBeGreaterThan(beforeAnyList.getTime())
 
       // 2. A list just edited is within the lag, so a forced run journals it, and the next forced run still does too.
-      await createList('Watermark sale')
+      const listId = await createList('Watermark sale')
       await settle()
+      // Backdate the edit a fixed 5 s, well inside the 10 s lag, so setup time cannot push it out before the second run.
+      await knex('price_list').where('id', listId).update({ updated_at: knex.raw("now() - interval '5 seconds'") })
       let head = await sync.head()
       await runPriceListWatcher(container, { force: true })
       expect((await sync.changesSince({ since: head, limit: 1000 })).changes).toEqual(productUpsert())
@@ -216,8 +218,12 @@ medusaIntegrationTestRunner({
         if (!started) await sleep(250)
       }
       expect(started).toBe(true)
+      // The list's updated_at is below the watermark, so only greatest() keeps the starts_at run from regressing it.
+      const watermark = async () => (await sync.getState())!.priceListWatermark!
+      const beforeStart = await watermark()
       await runPriceListWatcher(container, { force: true })
       expect((await sync.changesSince({ since: head, limit: 1000 })).changes).toEqual(productUpsert())
+      expect(new Date(await watermark()).getTime()).toBeGreaterThanOrEqual(new Date(beforeStart).getTime())
     })
 
     it('6. flag off: both routes answer 404 and /info drops sync', async () => {
