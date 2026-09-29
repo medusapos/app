@@ -149,7 +149,7 @@ How the journal behaves:
 - **Ordering.** Every journal write takes one advisory transaction lock, so seq order is commit order and a cursor never skips a row. Resolution runs inside that lock, so the op reflects committed state. The lock wait is capped at 10 s; a timed-out event is logged with its name and id, and not journaled. A per-process queue keeps an event burst to one database connection: on the local bus, a 300-price write had all 300 handlers in flight at once.
 - **Known gaps.** They reach tills only through a later edit, or from P3 through the digest audit:
   - hard-deleted rows (a price removed through a price-set update, option values, product↔option links), whose `.deleted` events can't resolve. G4 relies on the sibling `product-variant.updated` and `product-option.updated` events that every such workflow also emits. A direct module call that only hard-deletes is uncovered; an owner table would close it at P3.
-  - writes from a process that doesn't load the plugin, and raw SQL;
+  - writes from `medusa exec` scripts (0 of 5 journaled on the local bus: no subscriber ran before the script exited), from any other process than the server, and raw SQL;
   - a price-list transaction that commits after the watermark passed its `updated_at`;
   - a journal-lock timeout;
   - an event lost to a crash between commit and delivery (E2.1).
@@ -361,6 +361,9 @@ Building the journal (#110) found three more things:
 - **A product delete cascades to variant, price, level and link events that arrive after the product's own `deleted` event.** In a test, 1 `delete` row was followed by 14 `upsert` rows. So the op comes from the product's current `deleted_at`, read inside the journal lock.
 - **A `bigserial` seq becomes visible only at commit,** so concurrent writers would let a cursor skip rows. One advisory lock makes seq order commit order, and `head` is read before the rows and returned as `max(head, last seq)`.
 - **On the local bus, a 300-price write ran all 300 journal handlers at once,** each holding a pooled connection. A per-process queue caps that at one.
+- **Writes from `medusa exec` scripts aren't journaled.** On the local bus, with the plugin installed and the flag on, 5 of 5 direct price writes from `medusa exec` committed and none reached the journal. No subscriber ran before `exec` called `process.exit()`.
+  - Only server-process writes feed the journal; the install backfill covers scripts run before initialization.
+  - Whether the plugin's subscribers load in `exec` at all, or lose the race to exit, wasn't separated.
 
 ### Baseline cited from TallyUI
 
