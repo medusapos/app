@@ -376,22 +376,12 @@ medusaIntegrationTestRunner({
         .whereRaw('lower(email) = lower(?)', [email]).whereNull('deleted_at').select('id', 'email', 'has_account')
     }
 
-    it('two concurrent first sales carrying the same new email create one customer, and the loser applies on retry', async () => {
+    it('two concurrent first sales carrying the same new email both apply with one customer', async () => {
       const email = `first-${randomUUID()}@example.com`
       const sales = [emailSale(email), emailSale(email)]
       const outcomes = await Promise.all(sales.map(sale => executeOrderCreate(container, sale)))
-      // Medusa's findOrCreateCustomerStep reads then inserts; the unique (email, has_account) index stops the second
-      // insert, and the loser's workflow compensates and comes back transient. Sometimes the second read wins the race.
-      for (const [i, outcome] of outcomes.entries()) {
-        if (outcome.kind === 'result') {
-          expect(outcome.result.status).toBe('applied')
-          continue
-        }
-        expect(outcome).toEqual({ kind: 'transient', id: sales[i].id,
-          message: `Customer with email: ${email}, has_account: false, already exists.` })
-        expect(await liveOrders(sales[i].payload.clientOrderId)).toHaveLength(0)
-        expect(result(await executeOrderCreate(container, sales[i])).status).toBe('applied')
-      }
+      // The tally_customer lock serialises them.
+      for (const outcome of outcomes) expect(outcome).toMatchObject({ kind: 'result', result: { status: 'applied' } })
       const orders = await Promise.all(sales.map(async sale => (await liveOrders(sale.payload.clientOrderId))[0]))
       expect(await customersByEmail(email)).toEqual([{ id: orders[0].customer_id, email, has_account: false }])
       expect(orders[1].customer_id).toBe(orders[0].customer_id)
@@ -409,6 +399,18 @@ medusaIntegrationTestRunner({
       expect(await customersByEmail(email)).toEqual([{ id: stored.id, email, has_account: false }])
       const [, afterCount] = await customers.listAndCountCustomers()
       expect(afterCount).toBe(beforeCount)
+    })
+
+    it('a sale whose customerId is unknown but whose email matches a stored guest in a different case links to that guest', async () => {
+      const email = `Buyer-${randomUUID()}@Example.com`
+      const stored = await container.resolve(Modules.CUSTOMER).createCustomers({ email, has_account: false })
+      const base = command()
+      const payload: OrderCreatePayloadV3 = { ...base.payload, customer: { customerId: 'cus_unknown', email: email.toLowerCase() } }
+      const sale = { ...base, version: 3, payload } as unknown as CommandEnvelope<OrderCreatePayloadV3>
+      expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBe(stored.id)
+      expect(await customersByEmail(email)).toEqual([{ id: stored.id, email, has_account: false }])
     })
 
     it('an email-only sale prefers an account over a guest with the same email ignoring case', async () => {
@@ -463,9 +465,11 @@ medusaIntegrationTestRunner({
       })
       await ready
       const sale = emailSale(email)
-      const pending = executeOrderCreate(container, sale)
+      let settled = false
+      const pending = executeOrderCreate(container, sale).finally(() => { settled = true })
       try {
         await new Promise(resolve => setTimeout(resolve, 300))
+        expect(settled).toBe(false)
         expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
       } finally {
         release()
