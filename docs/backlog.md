@@ -33,11 +33,6 @@ review).
 
 Tap race: a line added at the instant new store settings land is dropped from the cart (nothing is charged); the sale-idle hold should also cover the add that races the swap (from #58 review).
 
-## Register part B follow-ups (from the #89 re-review)
-
-- **The "Finish closing" wording:** "Close not finished" is the "The last close didn't finish" state. Keep the tester guide's wording in step with TallyUI's pill and card copy.
-- **Also "1 products":** the catalogue status reads "1 products" for a single product (pre-existing).
-
 ## Swap the plugin's local order.create v3 types for @tallyui/core
 
 `packages/medusa-plugin/src/workflows/tally-order-create/fiscal-figures.ts` holds local copies of TallyUI's v3 wire types (`OrderCreateDisplay`, `OrderCreateTaxRate`, `OrderCreatePayloadV3`), each marked `BRIDGE`, because `@tallyui/core` doesn't export them yet. TallyUI's order.create v3 ships in `@tallyui/*` 2.1.0. At that bump:
