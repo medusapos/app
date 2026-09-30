@@ -1,16 +1,24 @@
 # Release checklist
 
-Work through this before tagging a release of the app or the plugin. An item that doesn't apply to the release is marked "n/a" with a reason in the release PR, never skipped silently.
+Work through this before tagging a release of the app or the plugin. An item that doesn't apply to a release is marked "n/a" with a reason in the release PR, never skipped silently.
 
 ## Gates
 
-- [ ] **RxDB 17.5 storage (TallyUI 17.5 packages):** no app release on `@tallyui/*` packages built on RxDB 17.5 until TallyUI/tallyui#242 has proven the upgrade on browser OPFS, iOS and Android (issue #128).
-  - **Never roll a release back across this version.** The upgrade changes local storage one way. A till that ran the new version and is rolled back to an older build shows no orders until it's upgraded again. A fix after release goes forward, never back.
-  - The bump PR carries a carry-over test for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
+- [ ] **TallyUI 3.0.0 (RxDB 17.5.0 storage).** The app's next release moves to `@tallyui/*` 3.0.0, which is built on `rxdb` 17.5.0 (TallyUI #223). Nothing is tagged and nothing is published until **both** of these hold:
+  1. TallyUI/tallyui#242 has proven the storage upgrade on browser OPFS, iOS and Android;
+  2. Paul has given the go-ahead on #242.
+
+  **Scope of this gate:** it holds back the next app release, and any plugin release shipped with it. A plugin-only release that doesn't change the app may go first only if Paul says so in the release PR.
+- [ ] **No rollback across TallyUI 3.0.0.** The storage upgrade is one-way.
+  - Once a till has opened the new storage, an older build shows none of its orders and sends none of its waiting sales, until the till is updated again.
+  - A sale that seems to have vanished must never be rung again: it comes back after the update and would count twice.
+  - Fixes go forward, never back.
+  - The release notes for the store owner say this in plain words (see `release-notes/next.md`).
+- [ ] **Carry-over test:** the bump PR for TallyUI 3.0.0 carries one for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
 
 ## Every release
 
-- [ ] CI is green on the release commit: plugin suites, the seeded backfill run, end-to-end (web), and the demo backend image.
-- [ ] The release notes draft (`docs/release-notes/v<version>.md`) lists what changed for tills, stores and operators, and every gate above that applies.
-- [ ] Plugin: `npm run build` from `packages/medusa-plugin`, and the package contents are checked (`.medusa/server` only).
+- [ ] CI is green on the release commit: every check, including the Medusa plugin job (with the seeded backfill run), Typecheck and unit tests, Dev store unit tests, Web export, End-to-end (web) and the demo backend image.
+- [ ] The release notes (`docs/release-notes/v<version>.md`, renamed from `next.md`) say what changes for the store owner, and every gate above that applies.
+- [ ] Plugin: `npm run build` from `packages/medusa-plugin`, and check the package contents (`.medusa/server` only).
 - [ ] Any change to the command contract (codes, limits, fields) matches the TallyUI core version the app pins, and says which `@tallyui/*` version the app needs.

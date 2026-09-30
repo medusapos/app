@@ -1,17 +1,35 @@
 # Medusa POS, next release (draft)
 
-A running draft for the next release. At release time, rename it to `v<version>.md` and fill in the version and date. The [release checklist](../release-checklist.md) comes first.
+**Not releasable yet.** This draft waits for the app's move to TallyUI 3.0.0, and nothing is tagged or published before TallyUI/tallyui#242 is proven and Paul gives the go-ahead (see the [release checklist](../release-checklist.md)). At release time, rename it to `v<version>.md` and fill in the version and date.
 
-## Before this release can ship
+## Before you update your tills
 
-- **RxDB 17.5 gate:** if this release moves the app to TallyUI's RxDB 17.5 packages, it waits for TallyUI/tallyui#242, which must prove the storage upgrade on browser OPFS, iOS and Android. It also carries the carry-over test for every app-owned collection (issue #128).
-- **No rollback across it:** once a till has run the RxDB 17.5 build, never roll it back to an older build; that till would show no orders. Fixes go forward.
+This update changes how each till stores its sales, and there is no going back.
+- **Before you update,** make sure every till has sent all its sales: nothing waiting to sync.
+- **After you update,** don't install an older version again. An older version can't read the new storage. It shows none of the till's sales and doesn't send the ones still waiting.
+- **If a till ever shows no sales after going back to an older version, don't ring those sales again.** Update the till and they come back. Ringing them again would count them twice.
 
-## Plugin changes since 0.1.0 (merged)
+## What's new for your store
 
-- **Stock safety:** a failed sale puts back its stock top-up, fulfilment and take-back exactly once (#116, #117).
-- **clientOrderId collisions:** a new command id for a sale that already has an order follows the original command's ledger state (#118).
-- **Replay first:** a recorded command answers its recorded result before any check that could refuse it (#120), with string length bounds and NUL refused.
-- **Rejected sales:** a sale an admin rejects never counts in register figures (#121). A one-off backfill marks rejects made before that, as a dry run by default with a per-session report and undo (#127).
-- **Stock location:** a sale's stock location must exist and belong to its sales channel (#130).
-- **Oversized batches:** they answer 413 `batch_too_large` or `body_too_large` with the limit (#134).
+- **Registers are checked by the server.** When a till opens, counts and closes a register, your Medusa store records it. The store works out what the drawer should hold from the sales it received, and you can compare that with the till's own count.
+- **Sales that need an admin are held, not lost.** If a sale can't be finished automatically (for example, its order was changed by hand in Medusa), it waits for an admin. The admin then completes it or rejects it with one command.
+- **Rejected sales don't count in the day's figures.** A sale an admin rejects no longer counts in the register's expected cash. A one-off step fixes sales rejected before this update. It first shows you exactly which closed days would change, and it can be undone.
+- **Stock stays right when a sale fails.** If a sale fails partway, the stock it took is put back exactly once.
+- **The till's stock location must belong to your sales channel.** A sale can no longer take stock from a location that isn't linked to your sales channel. The till tells you it's a store setup problem; link the location to the channel and the till's retry goes through.
+- **Resent sales answer the same way.** A sale the store already recorded always answers its recorded result when a till sends it again. That includes after a server update, and when two tills send the same sale.
+- **Oversized batches get a clear answer.** A batch with too many sales, or one too large, is refused with the limit, so the till can split it and resend.
+- **Experimental catalogue sync is included but off.** It's the server side of a faster catalogue sync. It stays off unless you turn it on.
+
+## For developers
+
+Plugin changes since 0.1.0 (merged):
+- **Registers:** the register commands, server-derived `expected`/`salesCount`, and `GET /tally/v1/registers/{id}` (#98, #99, #100). A stored register rejection replays unchanged (#108).
+- **`needs_admin` and the `tally-ledger-resolve` apply/reject script** (#115).
+- **Stock safety:** the take-back and fulfilment compensation are failure-safe (#116, #117).
+- **A new command id for a `clientOrderId` that already has an order** follows the original command's ledger state (#118).
+- **Replay first,** then length bounds and NUL (#120); a docs follow-up (#122).
+- **Rejected orders:** marked `tally_rejected` and excluded from register figures (#121). A one-off backfill with a dry run, a per-session report and undo (#127).
+- **Stock location:** it must exist and belong to the sale's sales channel (#130).
+- **413 answers:** `batch_too_large` / `body_too_large` (#134).
+- **Experimental sync:** the `tally_sync` change journal, `/changes` routes and the rescan script, behind `experimentalSync`, off by default (#110, #112, #114).
+- **Security:** the `majorToMinor` ReDoS fix (#111).
