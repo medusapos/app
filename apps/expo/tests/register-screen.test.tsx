@@ -21,7 +21,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { posConnector } from '../lib/pos-connector';
 import { RegisterProvider } from '../lib/register-context';
 import { saveSession } from '../lib/session';
-import { SessionProvider } from '../lib/session-context';
+import { SessionProvider, useSession } from '../lib/session-context';
 import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { openTestRegister } from './register-fixture';
@@ -117,9 +117,15 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 
+/** The mounted SessionProvider's own value: its signOut and signIn change the store under RegisterProvider. */
+let signedIn!: ReturnType<typeof useSession>;
+function SessionProbe() {
+  signedIn = useSession();
+  return null;
+}
 async function mount() {
   await act(async () => {
-    render(<SessionProvider><RegisterProvider orders={store.orders}><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>);
+    render(<SessionProvider><SessionProbe /><RegisterProvider orders={store.orders}><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>);
   });
 }
 const sessions = () => registerCollections(store.orders).sessions;
@@ -482,10 +488,16 @@ describe('closing the register', () => {
     expect(localStorage.getItem(`medusapos.approvers.${baseUrl}`)).toBeNull();
   });
 
-  /** Holds every closure insert until `release()`: the session is closed in storage, its closure not yet written. */
+  /** Every hold's release, run after each test (before the store closes) even when it failed: a held closure write
+   *  left behind keeps TallyUI's module-level in-flight close stuck, and later tests would join it. */
+  const holds: (() => void)[] = [];
+  afterEach(() => { for (const release of holds.splice(0)) release(); });
+  /** Holds every closure insert until `release()` (twice is harmless): the session is closed in storage, its closure
+   *  not yet written. */
   function holdClosureWrites() {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
+    holds.push(release);
     let waiting = 0;
     registerCollections(store.orders).closures.preInsert(async () => { waiting++; await held; }, false);
     return { release, waiting: () => waiting };
@@ -566,6 +578,62 @@ describe('closing the register', () => {
     expect(within(await screen.findByTestId('closure-sheet')).getByTestId('closure-number').textContent).toBe('Closure #1');
     expect(screen.queryByTestId('close-error')).toBeNull();
     expect(await closures()).toHaveLength(1);
+  });
+
+  /** Signs out, then in to `target`: another store bound to the same register (so it sees the same session and
+   *  closures), or the same store again; RegisterProvider stays mounted, as on native. */
+  async function switchStore(target: 'another store' | 'the same store') {
+    const other = target === 'the same store' ? baseUrl : `https://register-${++sequence}.test`;
+    if (other !== baseUrl) {
+      saveCachedSettings(localStorage, other, settings);
+      await bindRegister(sessions(), other, { id: 'register-1', name: 'Register 1' });
+    }
+    stubMedusa(() => json({ token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` }));
+    await act(async () => { signedIn.signOut(); });
+    expect(signedIn.session).toBeNull();
+    await act(async () => { await signedIn.signIn(other, 'admin@store.test', PASSWORD); });
+    expect(signedIn.session?.baseUrl).toBe(other);
+  }
+  const TARGETS = ['another store', 'the same store'] as const;
+
+  // A close's state is reset on a change of store or a sign-out (Register part B follow-ups).
+  it.each(TARGETS)('a count close\'s error is reset: signed out and in to %s, its Finish closing card shows without it', async (target) => {
+    registerCollections(store.orders).closures.preInsert(() => { throw new Error('Storage is full'); }, false);
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await closeWith(await startCount(), '100.00');
+    await screen.findByTestId('register-column-finish-close');
+    expect(screen.getByTestId('close-error').textContent).toContain('Storage is full');
+    await switchStore(target);
+    await screen.findByTestId('register-column-finish-close');
+    expect(screen.queryByTestId('close-error')).toBeNull();
+  });
+
+  it.each(TARGETS)('a shown closure sheet is reset: signed out and in to %s, its open card shows without it', async (target) => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await closeWith(await startCount(), '100.00');
+    await screen.findByTestId('closure-sheet');
+    await switchStore(target);
+    await screen.findByTestId('open-register-card');
+    // Long enough for the store's last closure (the same row) to reach the render.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(screen.queryByTestId('closure-sheet')).toBeNull();
+  });
+
+  it.each(TARGETS)('a close that settles after signing out and in to %s shows no closure sheet', async (target) => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    const count = await startCount();
+    const hold = holdClosureWrites();
+    await closeWith(count, '100.00');
+    await waitFor(() => expect(hold.waiting()).toBe(1));
+    await switchStore(target);
+    await act(async () => { hold.release(); });
+    await waitFor(async () => expect(await closures()).toHaveLength(1));
+    // Long enough for the settled close to reach the render.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(screen.queryByTestId('closure-sheet')).toBeNull();
   });
 });
 

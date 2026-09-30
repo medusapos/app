@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { RxCollection } from 'rxdb';
 import {
   bindRegister, getBoundRegisterId, observeRegister$, useRegisterSession, type PosOrder,
@@ -74,25 +74,39 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
     // which a close resumed after a restart needs. Read at call time, so an approval just made is found.
     labels: { registerName: current?.name ?? undefined, resolveCashierName: (id) => loadApprovers(defaultStorage(), storeKey)[id] ?? id },
   });
-  const [shown, setShown] = useState<string | null>(null);
-  const [closeError, setCloseError] = useState('');
+  // Cleared when the store changes (on native nothing remounts this provider on a change of store or a sign-out), and
+  // tagged with the store they were made in, as `bound` is, so the new store's first render, before the clear, shows
+  // neither.
+  const [shown, setShown] = useState<{ storeKey: string; id: string } | null>(null);
+  const [closeError, setCloseError] = useState({ storeKey, message: '' });
+  // Replaced on every change of store (A, signed out, A again included): a close started before it sets nothing.
+  const storeTurn = useRef({});
+  useEffect(() => {
+    storeTurn.current = {};
+    setShown(null);
+    setCloseError({ storeKey, message: '' });
+  }, [storeKey]);
   // TallyUI #175 runs one close per register (a second closeSession joins it) and exposes `register.closing`, with
   // which RegisterColumn keeps the count up during a close and shows its Finish closing card only for a closed
   // session that isn't closing: the app no longer masks anything.
   const close: CloseFlow = {
     async run(input, fromCount) {
-      setCloseError('');
+      const turn = storeTurn.current;
+      setCloseError({ storeKey, message: '' });
       try {
         const closure = await register.actions.closeSession(input);
-        setShown(closure.id);
+        if (storeTurn.current === turn) setShown({ storeKey, id: closure.id });
         return closure;
       } catch (error) {
         // The card shows its own run's error itself; only the count's would otherwise go unseen.
-        if (fromCount) setCloseError(error instanceof Error ? error.message : String(error));
+        if (fromCount && storeTurn.current === turn) {
+          setCloseError({ storeKey, message: error instanceof Error ? error.message : String(error) });
+        }
         throw error;
       }
     },
-    shown, dismiss: () => setShown(null), error: closeError,
+    shown: shown?.storeKey === storeKey ? shown.id : null, dismiss: () => setShown(null),
+    error: closeError.storeKey === storeKey ? closeError.message : '',
   };
   const value: RegisterContextValue = {
     register, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,
