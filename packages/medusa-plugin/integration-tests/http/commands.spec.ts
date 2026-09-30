@@ -954,6 +954,46 @@ medusaIntegrationTestRunner({
       ])
     })
 
+    describe('storm', () => {
+      // One device resending the same sale over flaky wifi: every copy is its own request, all in flight at once.
+      const STORM = 50
+
+      it(`one order.create posted ${STORM} times at once makes one order, one captured payment, one ledger row and one stock take`, async () => {
+        const sale = command()
+        const before = await levelA()
+        const storm = await Promise.all(Array.from({ length: STORM }, () => post([sale])))
+        // The money first: a second order or stock take fails here, whatever the answers were.
+        const orders = await liveOrders(sale.payload.clientOrderId)
+        expect(orders).toHaveLength(1)
+        expect(await levelA()).toEqual([before[0] - sale.payload.lines[0].quantity, before[1]])
+        // 409 in_progress is the documented answer while another request holds the claim.
+        for (const response of storm) {
+          if (response.status === 409) expect(response.data).toEqual({ code: 'in_progress', id: sale.id })
+          else expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: sale.id })]])
+        }
+        const answers = storm.map(response => response.status === 409 ? 'in_progress' : response.data.results[0].status)
+        expect(answers.filter(answer => answer === 'applied')).toHaveLength(1)
+        expect(answers.filter(answer => answer !== 'applied' && answer !== 'duplicate' && answer !== 'in_progress')).toEqual([])
+        const applied = storm.find(response => response.status === 200 && response.data.results[0].status === 'applied')!.data.results[0]
+        // Every other copy answers duplicate with the applied result, at once or on a retry after its 409.
+        for (const [index, answer] of answers.entries()) {
+          if (answer === 'applied') continue
+          let response = storm[index]
+          for (let attempt = 0; response.status === 409 && attempt < 10; attempt++) response = await post([sale])
+          expect([response.status, response.data.results]).toEqual([200, [{ ...applied, status: 'duplicate' }]])
+        }
+        const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'order', filters: { id: orders[0].id },
+          fields: ['id', 'payment_collections.status', 'payment_collections.payments.id', 'payment_collections.payments.captured_at'],
+        })
+        expect(order.id).toBe(applied.serverRefs.orderId)
+        const payments = order.payment_collections.flatMap(collection => collection!.payments)
+        expect(payments).toEqual([expect.objectContaining({ captured_at: expect.anything() })])
+        expect(await ledger.listTallyCommands({ id: sale.id })).toEqual([expect.objectContaining({ status: 'applied' })])
+        expect(await levelA()).toEqual([before[0] - sale.payload.lines[0].quantity, before[1]])
+      })
+    })
+
     describe('clientOrderId collision', () => {
       it('a sale lock held on another connection gives B 409 in_progress without a row', async () => {
         const a = command()
