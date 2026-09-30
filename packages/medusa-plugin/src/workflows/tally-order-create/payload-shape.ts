@@ -1,5 +1,5 @@
 import type { CommandEnvelope, OrderCreateLine, OrderCreatePayment } from '@tallyui/core' with { 'resolution-mode': 'import' }
-import { clientTimeErrors } from '../../api/tally/v1/commands/client-time'
+import { clientTimeErrors } from '../client-time'
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 
 // The fields of each order.create version (ruling 17): @tallyui/core 2.0.0 OrderCreatePayload, OrderCreateLine and

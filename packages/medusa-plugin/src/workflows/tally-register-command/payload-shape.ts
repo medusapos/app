@@ -1,7 +1,7 @@
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { RegisterClosureSubmitPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
   RegisterSessionOpenPayload, RegisterSessionTransitionPayload } from '../../modules/tally-register/types'
-import { clientTimeErrors } from '../../api/tally/v1/commands/client-time'
+import { clientTimeErrors } from '../client-time'
 
 // Register v1 fields (ruling 17): exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
 // makes tsc refuse a missing or an extra field. Register version 1 is the only one (versions.ts); process.ts refuses others.
