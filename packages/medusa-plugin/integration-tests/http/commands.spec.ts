@@ -139,7 +139,10 @@ medusaIntegrationTestRunner({
       const cookie = session.headers['set-cookie']![0].split(';')[0]
       for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
         const response = await info(requestHeaders)
-        expect([response.status, response.data]).toEqual([200, { contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] } }])
+        expect([response.status, response.data]).toEqual([200, {
+          contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] },
+          taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
+        }])
       }
       expect((await info({})).status).toBe(401)
       for (const origin of ['http://localhost', 'https://untrusted.example']) {
@@ -155,7 +158,10 @@ medusaIntegrationTestRunner({
     it('/info lists order.create versions 1, 2 and 3', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
-      expect(response.data).toEqual({ contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] } })
+      expect(response.data).toEqual({
+        contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] },
+        taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
+      })
     })
 
     it('a batch with a version-4 command and a version-1 command rejects only the first, as unsupported_version, and applies the second', async () => {

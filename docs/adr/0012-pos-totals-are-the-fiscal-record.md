@@ -17,6 +17,11 @@ stored total exactly equal to the till's.
 The POS receipt figures (recorded as `tally_pos_totals`) and TallyUI's frozen
 X/Z closures are the fiscal figures. Medusa's `raw_total` and `tax_total` are
 not; Medusa keeps unrounded tax and settles within one minor unit.
+The plugin advertises `taxRounding: per_order / half_away_from_zero` on
+`/tally/v1/info` (TallyUI #309, ADR-071): Medusa never rounds totals, tax
+providers return rates only (`types/dist/tax/common.d.ts:440-486`),
+`majorToMinor` rounds `raw_total` once (`money.ts:15-32`), and #133 found 0
+differences in 340,230 sales.
 
 ## Evidence
 
