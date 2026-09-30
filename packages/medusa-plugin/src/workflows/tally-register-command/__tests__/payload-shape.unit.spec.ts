@@ -44,7 +44,7 @@ it('the payment-method keys are exhaustive: a Record<PaymentMethodKind, true> wi
 
 it('an unknown command type allows no keys', () => {
   expect(registerPayloadErrors('register.unknown', { sessionId: 's' }))
-    .toEqual(['payload.sessionId: unknown field for register.unknown version 1', 'payload.type: expected a register command type'])
+    .toEqual(['payload.sessionId: unknown field for register.unknown version 1', 'type: expected a register command type'])
 })
 
 type Recorded = [string, { type: string; payload: unknown }]

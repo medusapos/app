@@ -101,7 +101,7 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
       }
       break
     default:
-      check(false, 'type', 'a register command type')
+      if (errors.length < 10) errors.push('type: expected a register command type')
   }
   return errors
 }
