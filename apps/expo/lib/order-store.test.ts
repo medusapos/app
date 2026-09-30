@@ -345,11 +345,11 @@ async function storedCollections(name: string) {
   const db = await createRxDatabase({ name, storage: memoryStorage(), multiInstance: false });
   try {
     return (await getAllCollectionDocuments(db.internalStore)).map((meta) => meta.key);
-  } finally { await db.remove(); }
+  } finally { await db.close(); }
 }
 
 describe('carryOverOrders', () => {
-  it('copies every document with its syncStatus, writes the marker, then removes the source', async () => {
+  it('copies every document with its syncStatus, writes the marker, and keeps the source', async () => {
     const fromName = 'legacy-carry-basic';
     const legacy = await memoryOrdersDb(fromName);
     const pending = sale();
@@ -367,7 +367,7 @@ describe('carryOverOrders', () => {
     expect(marker?.toJSON().data).toMatchObject({ count: 2 });
 
     const reopenedLegacy = await memoryOrdersDb(fromName);
-    expect(await reopenedLegacy.pos_orders.find().exec()).toEqual([]);
+    expect((await reopenedLegacy.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, rejected].sort(byId));
     await reopenedLegacy.remove();
     await to.remove();
   });
@@ -403,48 +403,40 @@ describe('carryOverOrders', () => {
     expect(finalIds.sort()).toEqual(orders.map((o) => o.id).sort());
     expect(await to.getLocal('legacy-orders-migrated')).not.toBeNull();
 
-    const legacyGone = await memoryOrdersDb(fromName);
-    expect(await legacyGone.pos_orders.find().exec()).toEqual([]);
-    await legacyGone.remove();
+    const legacyKept = await memoryOrdersDb(fromName);
+    expect((await legacyKept.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual(orders.sort(byId));
+    await legacyKept.remove();
     await to.remove();
   });
 
-  it('with the marker already present, still carries over a legacy sale with a new id before removing the source', async () => {
-    // F1: another tab still on the old build wrote this sale after a first copy wrote the marker.
+  it('once the marker is written, a later open never reads the legacy database, even when it has a new order', async () => {
+    // Another tab still on the old build writes a sale after the first copy wrote the marker.
     const fromName = 'legacy-carry-marker';
     const legacy = await memoryOrdersDb(fromName);
-    const late = sale();
-    await legacy.pos_orders.insert(late);
+    const first = sale();
+    await legacy.pos_orders.insert(first);
     await legacy.close();
 
     const to = await memoryOrdersDb('target-carry-marker', true);
-    const marker = { count: 1, at: new Date(0).toISOString() };
-    await to.insertLocal('legacy-orders-migrated', marker);
-    // Records the order of the insert into the new store and any removal of a source storage instance.
-    const events: string[] = [];
-    const realBulkInsert = to.pos_orders.bulkInsert.bind(to.pos_orders);
-    vi.spyOn(to.pos_orders, 'bulkInsert').mockImplementationOnce(async (docs: PosOrder[]) => {
-      const result = await realBulkInsert(docs);
-      events.push(`inserted ${docs.map((doc) => doc.id).join()}`);
-      return result;
-    });
-    const base = memoryStorage();
-    const fromStorage: typeof base = { ...base, createStorageInstance: async (params) => {
-      const instance = await base.createStorageInstance(params);
-      const remove = instance.remove.bind(instance);
-      instance.remove = async () => { events.push('source removed'); return remove(); };
-      return instance;
-    } };
+    const bulkInsert = vi.spyOn(to.pos_orders, 'bulkInsert');
+    await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
+    const marker = (await to.getLocal('legacy-orders-migrated'))?.toJSON().data;
+    expect(marker).toMatchObject({ count: 1 });
+    const late = sale();
+    const reopenedLegacy = await memoryOrdersDb(fromName);
+    await reopenedLegacy.pos_orders.insert(late);
+    await reopenedLegacy.close();
+    const exists = vi.fn(legacyExists);
 
-    await carryOverOrders({ fromStorage, fromName, to, legacyExists });
-    expect(events[0]).toBe(`inserted ${late.id}`);
-    expect(events.slice(1)).toContain('source removed');
-    expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toEqual([late]);
+    await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists: exists });
+    expect(exists).not.toHaveBeenCalled();
+    expect(bulkInsert).toHaveBeenCalledTimes(1);
+    expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toEqual([first]);
     expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toEqual(marker);
 
-    const legacyGone = await memoryOrdersDb(fromName);
-    expect(await legacyGone.pos_orders.find().exec()).toEqual([]);
-    await legacyGone.remove();
+    const legacyKept = await memoryOrdersDb(fromName);
+    expect((await legacyKept.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([first, late].sort(byId));
+    await legacyKept.remove();
     await to.remove();
   });
 
@@ -462,9 +454,9 @@ describe('carryOverOrders', () => {
     expect((await to.pos_orders.find().exec()).map((doc) => doc.syncStatus)).toEqual(['applied']);
     expect(await to.getLocal('legacy-orders-migrated')).not.toBeNull();
 
-    const legacyGone = await memoryOrdersDb(fromName);
-    expect(await legacyGone.pos_orders.find().exec()).toEqual([]);
-    await legacyGone.remove();
+    const legacyKept = await memoryOrdersDb(fromName);
+    expect((await legacyKept.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([{ ...order, syncStatus: 'pending' }]);
+    await legacyKept.remove();
     await to.remove();
   });
 
@@ -478,11 +470,11 @@ describe('carryOverOrders', () => {
     await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
     expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual([migrated(original)]);
     expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 1 });
-    expect(await olderDocuments(from, fromName, [pending.id])).toEqual([]);
+    expect(await olderDocuments(from, fromName, [pending.id])).toEqual([original]);
     await to.remove();
   });
 
-  it.each([0, 1] as const)('carries a version-%i order over from a store under Dexie\'s index rule, removes the source, and a rerun is a no-op', async (from) => {
+  it.each([0, 1] as const)('carries a version-%i order over from a store under Dexie\'s index rule, keeps the source, and a rerun is a no-op', async (from) => {
     const fromName = `legacy-carry-dexie-v${from}`;
     const pending = olderSale(from);
     const original = structuredClone(pending);
@@ -500,15 +492,15 @@ describe('carryOverOrders', () => {
       expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual(expected);
       const marker = (await to.getLocal('legacy-orders-migrated'))?.toJSON().data;
       expect(marker).toMatchObject({ count: 1 });
-      expect(await olderDocuments(from, fromName, [pending.id])).toEqual([]);
-      expect(await storedCollections(fromName)).toEqual([]);
+      expect(await olderDocuments(from, fromName, [pending.id])).toEqual([original]);
+      expect(await storedCollections(fromName)).toEqual([`pos_orders-${from}`]);
 
       await carryOver();
       expect(warn).not.toHaveBeenCalled();
       expect(bulkInsert).toHaveBeenCalledTimes(1);
       expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual(expected);
       expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toEqual(marker);
-      expect(await storedCollections(fromName)).toEqual([]);
+      expect(await storedCollections(fromName)).toEqual([`pos_orders-${from}`]);
     } finally {
       warn.mockRestore();
       await to.remove();
@@ -516,7 +508,7 @@ describe('carryOverOrders', () => {
   });
 
   // The legacy store is read, never migrated in place, so no DM4: the new store refuses the order v6 rejects, and the
-  // read-back (M3's catch: a removal before it would lose that order) keeps the source for the next open.
+  // read-back keeps the marker absent on failure (M3), so the next open retries the copy.
   it.each([0, 1] as const)('an order v6 refuses keeps the version-%i legacy source and writes no marker; after a fix, the next carry-over copies the rest once', async (from) => {
     const fromName = `legacy-carry-dm4-v${from}`;
     const pending = olderSale(from);
@@ -543,7 +535,7 @@ describe('carryOverOrders', () => {
       expect(bulkInsert).toHaveBeenLastCalledWith([migrated(fixed)]);
       expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].map(migrated).sort(byId));
       expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 2 });
-      expect(await olderDocuments(from, fromName, [pending.id, invalid.id])).toEqual([]);
+      expect((await olderDocuments(from, fromName, [pending.id, invalid.id])).sort(byId)).toEqual([pending, fixed].sort(byId));
     } finally {
       warn.mockRestore();
       await to.remove();

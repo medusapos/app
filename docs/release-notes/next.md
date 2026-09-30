@@ -22,6 +22,8 @@ This update changes how each till stores its sales, and there is no going back.
 
 ## For developers
 
+- **Legacy sales carry-over (#160):** after the verified copy writes its marker, it never runs again; the legacy database is kept (Front desk ruling, 2026-09-30), with deletion left to a later release. Sales written later by a tab on a pre-SQLite build are not carried over.
+
 Plugin changes since 0.1.0 (merged):
 - **Registers:** the register commands, server-derived `expected`/`salesCount`, and `GET /tally/v1/registers/{id}` (#98, #99, #100). A stored register rejection replays unchanged (#108).
 - **`needs_admin` and the `tally-ledger-resolve` apply/reject script** (#115).
