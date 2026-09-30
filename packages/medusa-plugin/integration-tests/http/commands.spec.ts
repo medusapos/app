@@ -1582,13 +1582,25 @@ medusaIntegrationTestRunner({
       })))
     })
 
-    // A sale padded so that the JSON body `post` sends for it alone is exactly `bytes` long.
+    // The exact request body for `commands`, padded with insignificant whitespace after the opening
+    // brace to exactly `bytes` bytes. Strict fields refuse an extra field, and string fields are capped.
+    function paddedBody(commands: unknown[], bytes: number) {
+      const json = JSON.stringify({ commands })
+      const body = `{${' '.repeat(bytes - Buffer.byteLength(json))}${json.slice(1)}`
+      expect(Buffer.byteLength(body)).toBe(bytes)
+      return body
+    }
+
+    // A body holding one sale, exactly `bytes` long.
     function paddedSale(bytes: number) {
       const sale = command()
-      const padded = (padding: string) => ({ ...sale, payload: { ...sale.payload, padding } })
-      const sized = padded('x'.repeat(bytes - Buffer.byteLength(JSON.stringify({ commands: [padded('')] }))))
-      expect(Buffer.byteLength(JSON.stringify({ commands: [sized] }))).toBe(bytes)
-      return sized
+      return { sale, body: paddedBody([sale], bytes) }
+    }
+
+    // Sends `body` unchanged (no axios JSON transform).
+    function postRaw(body: string) {
+      return api.post('/tally/v1/commands', body, { headers: { ...headers, 'Content-Type': 'application/json' },
+        transformRequest: [(data: string) => data], validateStatus: () => true })
     }
 
     it('rejects a JSON body over MAX_BODY_BYTES with 413', async () => {
@@ -1602,14 +1614,14 @@ medusaIntegrationTestRunner({
     })
 
     it('accepts and applies a body of exactly MAX_BODY_BYTES', async () => {
-      const response = await post([paddedSale(MAX_BODY_BYTES)])
+      const response = await postRaw(paddedSale(MAX_BODY_BYTES).body)
       expect(response.status).toBe(200)
       expect(response.data.results[0].status).toBe('applied')
     })
 
     it('refuses a body of MAX_BODY_BYTES + 1 as body_too_large', async () => {
-      const sale = paddedSale(MAX_BODY_BYTES + 1)
-      const response = await post([sale])
+      const { sale, body } = paddedSale(MAX_BODY_BYTES + 1)
+      const response = await postRaw(body)
       expect(response.status).toBe(413)
       expect(response.data).toEqual({ code: 'body_too_large', maxBytes: MAX_BODY_BYTES,
         message: `Request body over ${MAX_BODY_BYTES} bytes` })
@@ -1617,9 +1629,8 @@ medusaIntegrationTestRunner({
     })
 
     it('a body over both limits answers body_too_large, not batch_too_large', async () => {
-      const sales = [paddedSale(MAX_BODY_BYTES), ...Array.from({ length: MAX_COMMANDS }, () => command())]
-      expect(Buffer.byteLength(JSON.stringify({ commands: sales }))).toBeGreaterThan(MAX_BODY_BYTES)
-      const response = await post(sales)
+      const sales = Array.from({ length: MAX_COMMANDS + 1 }, () => command())
+      const response = await postRaw(paddedBody(sales, MAX_BODY_BYTES + 1))
       expect(response.status).toBe(413)
       expect(response.data.code).toBe('body_too_large')
     })
