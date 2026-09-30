@@ -152,7 +152,7 @@ async function germanyLands(retry: { resolve: (value: PricingSettings) => void }
 }
 
 describe('tap race when new store settings land (#58 review)', () => {
-  // TallyUI useSale drops the line (medusapos handoff settings-tap-race-2026-09-30); switch to `it` when the fixed @tallyui/pos is pinned.
+  // TallyUI useSale drops the line (TallyUI/tallyui#301, fixed by #303); switch to `it` when the @tallyui/pos carrying #303 is pinned.
   it.fails('window 1: keeps a line tapped right after the new settings commit, before that commit\'s effects run', async () => {
     const retry = await idleWithRetryInFlight();
     let tapped = false;
