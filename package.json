@@ -33,14 +33,14 @@
       "rxdb-premium"
     ],
     "overrides": {
-      "@tallyui/core": "3.0.0-next.1",
-      "@tallyui/components": "3.0.0-next.1",
-      "@tallyui/database": "3.0.0-next.1",
-      "@tallyui/pos": "3.0.0-next.1",
-      "@tallyui/primitives": "3.0.0-next.1",
-      "@tallyui/theme": "3.0.0-next.1",
-      "@tallyui/connector-medusa": "3.0.0-next.1",
-      "@tallyui/storage-sqlite": "3.0.0-next.1"
+      "@tallyui/core": "3.0.0-next.2",
+      "@tallyui/components": "3.0.0-next.2",
+      "@tallyui/database": "3.0.0-next.2",
+      "@tallyui/pos": "3.0.0-next.2",
+      "@tallyui/primitives": "3.0.0-next.2",
+      "@tallyui/theme": "3.0.0-next.2",
+      "@tallyui/connector-medusa": "3.0.0-next.2",
+      "@tallyui/storage-sqlite": "3.0.0-next.2"
     }
   }
 }
