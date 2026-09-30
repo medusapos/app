@@ -53,8 +53,9 @@ npx medusa db:migrate
 
 ### Running more than one Medusa instance
 
-If you run more than one Medusa instance, configure the Redis locking provider
-(`@medusajs/medusa/locking-redis`) first. Medusa's default locking provider
+If you run more than one Medusa instance, configure a shared locking provider
+first: Redis (`@medusajs/medusa/locking-redis`) or Postgres advisory locks
+(`@medusajs/medusa/locking-postgres`). Medusa's default locking provider
 only locks inside one instance, so two instances selling the same item at the
 same time can lose stock updates. The plugin logs a warning at startup while
 the default provider is active; one instance is fine.

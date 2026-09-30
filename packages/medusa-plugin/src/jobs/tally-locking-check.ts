@@ -3,7 +3,7 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 
 // InMemoryLockingProvider.identifier (@medusajs/locking dist/providers/in-memory.js:146).
 const IN_MEMORY_PROVIDER = 'in-memory'
-export const IN_MEMORY_LOCKING_WARNING = 'Medusa POS: the locking module uses its in-memory provider. That is safe for one Medusa instance only; with more than one, concurrent sales can lose stock updates. Configure the Redis locking provider (@medusajs/medusa/locking-redis) before scaling out.'
+export const IN_MEMORY_LOCKING_WARNING = 'Medusa POS: the locking module uses its in-memory provider. That is safe for one Medusa instance only; with more than one, concurrent sales can lose stock updates. Configure a shared locking provider (@medusajs/medusa/locking-redis or @medusajs/medusa/locking-postgres) before scaling out.'
 
 /** Warns when stock locks serialise only inside one process; never stops the app. */
 export default async function tallyLockingCheck(container: MedusaContainer) {
@@ -11,7 +11,7 @@ export default async function tallyLockingCheck(container: MedusaContainer) {
   try {
     // The module keeps the loader's default provider id (@medusajs/locking dist/services/locking-module.js:9).
     const { defaultProviderId } = container.resolve(Modules.LOCKING) as unknown as { defaultProviderId: string }
-    if (defaultProviderId === IN_MEMORY_PROVIDER)logger.warn(IN_MEMORY_LOCKING_WARNING)
+    if (defaultProviderId === IN_MEMORY_PROVIDER) logger.warn(IN_MEMORY_LOCKING_WARNING)
   } catch (error) {
     logger.debug(`Medusa POS: could not detect the locking provider: ${(error as Error).message}`)
   }

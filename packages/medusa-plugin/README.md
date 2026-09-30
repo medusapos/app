@@ -23,7 +23,8 @@ The HTTP test script builds the plugin first so `plugin-app` loads its published
 
 ## Running more than one Medusa instance
 
-More than one Medusa instance requires the Redis locking provider. The plugin serialises stock updates through
+More than one Medusa instance requires a shared locking provider: Redis (`@medusajs/medusa/locking-redis`, below) or
+Postgres advisory locks (`@medusajs/medusa/locking-postgres`, provider id `locking-postgres`). The plugin serialises stock updates through
 Medusa's locking module, and its default in-memory provider only locks inside one process, so concurrent sales on
 two instances can lose stock updates and oversell (`integration-tests/http/stock-lock.spec.ts`). While the in-memory
 provider is active, the `tally-locking-check` job logs a warning once at startup; the plugin still starts.
