@@ -58,7 +58,9 @@ first: Redis (`@medusajs/medusa/locking-redis`) or Postgres advisory locks
 (`@medusajs/medusa/locking-postgres`). Medusa's default locking provider
 only locks inside one instance, so two instances selling the same item at the
 same time can lose stock updates. The plugin logs a warning at startup while
-the default provider is active; one instance is fine.
+the default provider is active; one instance is fine. After switching to
+`locking-postgres`, run `npx medusa db:migrate`: it ships a migration that
+creates its `locking` table.
 
 ## Configure your store
 
