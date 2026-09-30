@@ -21,6 +21,18 @@ and create/drop their own temporary databases; they do not use the dev store.
 For `npm run test:integration:http`, CI uses random ports; outside CI each checkout gets its own block of 4 ports (in 40000–47999, one per jest worker, so at most 4 workers), printed at the start of the run, and setting `PORT` overrides it. A port held on 127.0.0.1, ::1, 0.0.0.0 or :: stops the run before any test, naming the port and each busy address. Running `jest <spec>` directly (without the npm script, so without `TEST_TYPE`) skips the port block and this check.
 The HTTP test script builds the plugin first so `plugin-app` loads its published output.
 
+## Running more than one Medusa instance
+
+More than one Medusa instance requires a shared locking provider: Redis (`@medusajs/medusa/locking-redis`, below) or
+Postgres advisory locks (`@medusajs/medusa/locking-postgres`, provider id `locking-postgres`). The plugin serialises stock updates through
+Medusa's locking module, and its default in-memory provider only locks inside one process, so concurrent sales on
+two instances can lose stock updates and oversell (`integration-tests/http/stock-lock.spec.ts`). While the in-memory
+provider is active, the `tally-locking-check` job logs a warning once at startup; the plugin still starts.
+```ts
+modules: [{ resolve: '@medusajs/medusa/locking', options: { providers: [{ resolve: '@medusajs/medusa/locking-redis',
+  id: 'locking-redis', is_default: true, options: { redisUrl: process.env.LOCKING_REDIS_URL } }] } }]
+```
+
 ## Command endpoint
 
 Register the plugin in the tester's `medusa-config.ts`:
