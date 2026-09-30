@@ -1,12 +1,11 @@
+import type { TaxRounding } from '@tallyui/core' with { 'resolution-mode': 'import' }
+export type { TaxRounding } from '@tallyui/core' with { 'resolution-mode': 'import' }
+
 // The order.create versions this plugin accepts: /info advertises them and processBatch enforces them (one source).
 export const SUPPORTED_ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3]
 // The contract versions shared by all five register commands.
 export const SUPPORTED_REGISTER_VERSIONS: readonly number[] = [1]
 
-// BRIDGE: @tallyui/core 2.0.0 doesn't export TaxRounding (TallyUI #309, main only); swap for it at the 3.0.0 bump.
-export type TaxRounding =
-  | { granularity: 'per_order' | 'per_line_items' | 'per_rate_group_items'; mode: 'half_away_from_zero' | 'half_up' }
-  | { granularity: 'custom' }
 /**
  * How this store rounds tax, advertised on /info as `taxRounding` (TallyUI #309, ADR-071): once per order, half away from zero.
  * - Medusa 2.21 never rounds totals: `@medusajs/utils` `dist/totals/cart/index.js:37-116`, `dist/totals/line-item/index.js:45-92`
