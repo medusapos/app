@@ -413,6 +413,24 @@ medusaIntegrationTestRunner({
       expect(await customersByEmail(email)).toEqual([{ id: stored.id, email, has_account: false }])
     })
 
+    it('a sale whose customerId resolves keeps that customer even when its email matches another customer in a different case', async () => {
+      const customers = container.resolve(Modules.CUSTOMER)
+      const guestAEmail = `a-${randomUUID()}@example.com`
+      const guestBEmail = `B-${randomUUID()}@Example.com`
+      const guestA = await customers.createCustomers({ email: guestAEmail, has_account: false })
+      const guestB = await customers.createCustomers({ email: guestBEmail, has_account: false })
+      const [, beforeCount] = await customers.listAndCountCustomers()
+      const base = command()
+      const payload: OrderCreatePayloadV3 = { ...base.payload, customer: { customerId: guestA.id, email: guestBEmail.toLowerCase() } }
+      const sale = { ...base, version: 3, payload } as unknown as CommandEnvelope<OrderCreatePayloadV3>
+      expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBe(guestA.id)
+      const [, afterCount] = await customers.listAndCountCustomers()
+      expect(afterCount).toBe(beforeCount)
+      expect(await customersByEmail(guestBEmail)).toEqual([{ id: guestB.id, email: guestBEmail, has_account: false }])
+    })
+
     it('an email-only sale prefers an account over a guest with the same email ignoring case', async () => {
       const suffix = randomUUID()
       const email = `a-${suffix}@example.com`
