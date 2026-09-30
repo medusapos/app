@@ -4,7 +4,8 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import {
   convertDraftOrderWorkflow, createOrderFulfillmentWorkflow, createOrderPaymentCollectionWorkflow,
-  createOrderWorkflow, createPaymentSessionsWorkflow, getOrderDetailWorkflow, markPaymentCollectionAsPaid, type CreateOrderWorkflowInput,
+  createOrderWorkflow, createPaymentSessionsWorkflow, getOrderDetailWorkflow, linkSalesChannelsToStockLocationWorkflow, markPaymentCollectionAsPaid,
+  type CreateOrderWorkflowInput,
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
@@ -561,6 +562,28 @@ medusaIntegrationTestRunner({
       await expect(attempt).rejects.toBeInstanceOf(StoreConfigurationError)
       await expect(attempt).rejects.toMatchObject({ code: 'unsupported_currency' })
       expect(await ordersFor(sale.payload.clientOrderId)).toHaveLength(0)
+    })
+
+    // The channel's first stock location, with no payload or option value, is pinned by the first test (Berlin).
+    it('without payload.locationId, uses plugin option locationId, refused unless it exists and is in the channel', async () => {
+      const sale = () => command({ lines: [{ clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000 }] })
+      for (const [locationId, message] of [
+        ['sloc_unknown', 'plugin option locationId: no stock location with this id'],
+        [data.spareId, "plugin option locationId: this stock location is not assigned to the sale's sales channel"],
+      ]) {
+        const refused = sale()
+        const attempt = runOrderCreate(container, refused, { locationId })
+        await expect(attempt).rejects.toBeInstanceOf(StoreConfigurationError)
+        await expect(attempt).rejects.toMatchObject({ code: 'store_configuration', message })
+        expect(await ordersFor(refused.payload.clientOrderId)).toHaveLength(0)
+      }
+      await linkSalesChannelsToStockLocationWorkflow(container).run({ input: { id: data.spareId, add: [data.channelId] } })
+      try {
+        const order = await readOrder(await runOrderCreate(container, sale(), { locationId: data.spareId }))
+        expect(order.fulfillments).toEqual([expect.objectContaining({ location_id: data.spareId, shipping_option_id: data.spareShippingOptionId })])
+      } finally {
+        await linkSalesChannelsToStockLocationWorkflow(container).run({ input: { id: data.spareId, remove: [data.channelId] } })
+      }
     })
 
     it('compensates a fulfillment failure after payment, leaving no live order, reservations, or stock change', async () => {

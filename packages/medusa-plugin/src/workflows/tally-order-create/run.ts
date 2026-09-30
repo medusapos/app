@@ -43,11 +43,21 @@ export async function runOrderCreate(
     if (!channels[0]) {
       throw configurationError('Missing sales channel; set plugin option salesChannelId')
     }
-    const locationId = payload.locationId ?? options.locationId ?? channels[0].stock_locations?.[0]?.id
+    const channelLocations = channels[0].stock_locations ?? []
+    // A location the till or the operator names must exist and belong to the sale's channel (ruling 19).
+    const locationSource = payload.locationId != null ? 'payload.locationId'
+      : options.locationId != null ? 'plugin option locationId' : undefined
+    const locationId = payload.locationId ?? options.locationId ?? channelLocations[0]?.id
     const { data: locations } = await query.graph({
       entity: 'stock_location', fields: ['id', 'address.*'], filters: { id: locationId ?? [] },
     })
     const location = locations[0]
+    if (locationSource && !location) {
+      throw configurationError(`${locationSource}: no stock location with this id`)
+    }
+    if (locationSource && !channelLocations.some(channelLocation => channelLocation?.id === location.id)) {
+      throw configurationError(`${locationSource}: this stock location is not assigned to the sale's sales channel`)
+    }
     if (!location?.address) {
       throw configurationError('Missing stock location or address; set plugin option locationId')
     }

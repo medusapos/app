@@ -52,7 +52,7 @@ Reusing an id with a different payload rejects it with
 `idempotency_mismatch`; a stored rejection replays as rejected.
 A recorded `order.create` id answers its recorded result before version, shape, bounds and fiscal checks; string bounds are email 254 and other strings 255 (customerId 64 and sessionId 36), with no NUL allowed before replay.
 `invalid_payload` rejects a malformed payload shape before claiming, with the validation errors in the message. For a register command, it also rejects what the current state refuses after the claim: an unknown session, a missing or already-voided void target, an id that belongs to another session, or a closure whose `registerId` isn't its session's drawer. Neither kind is stored in the ledger, so a resend is checked again.
-`store_configuration` rejects a sale the store can't take yet, before any write. Examples: no sales channel, no stock location or address, no shipping option at the location for the products' shipping profile, or a sale that mixes shipping profiles. The message names what to fix, it isn't stored, and the same command applies once the store is fixed (ADR 0004). When the sale resumes an order a crashed attempt already started, the same failures are a transient `503` instead, because writes have already happened.
+`store_configuration` rejects a sale the store can't take yet, before any write. Examples: no sales channel, no stock location or address, a `payload.locationId` or plugin option `locationId` that names no stock location or one not assigned to the sale's sales channel, no shipping option at the location for the products' shipping profile, or a sale that mixes shipping profiles. The message names what to fix, it isn't stored, and the same command applies once the store is fixed (ADR 0004). When the sale resumes an order a crashed attempt already started, the same failures are a transient `503` instead, because writes have already happened.
 `unsupported_currency`, like `store_configuration`, isn't stored, so the same command can apply once the store is fixed.
 `unknown_variant` is stored: a line whose variant or product is deleted, whose product isn't published, or whose product isn't in the sale's sales channel stays rejected even if the product is published or added to the channel later.
 An unsupported version is a per-command `unsupported_version` with `error.data` naming the highest supported version (`orderCreate` or `register`).
@@ -154,6 +154,31 @@ uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `n
 run `reject` again, not `apply`: an `apply` would leave the cancelled order unmarked, and it would count next to the new one.
 Cancelling the order by hand is fine: `reject` still takes back the plugin's top-up. See the ADR 0003 amendment of 2026-09-29.
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
+**Backfill for rejects made before the marking.** A store needs it only if an admin ran `tally-ledger-resolve reject`
+before the release that added the `tally_rejected` marker (#121): those cancelled orders still count in register figures.
+The script is manual; nothing runs it automatically. On a real store, plan the run with the store's owner, because it changes
+the figures of sessions that may already be closed. Run the dry run first, from the store's backend directory:
+
+```sh
+npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js
+npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js apply
+npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js undo
+```
+
+It marks only each rejection's own canceled order and warns about one that is not canceled. Without an argument it is a dry run that writes nothing;
+`apply` writes `tally_rejected` and `tally_rejected_by: 'backfill'`, and `undo` removes both from the orders `apply` marked.
+The mode is a plain word, not `--apply`: `medusa exec` refuses a dashed option (`Unknown argument: apply`) and drops one given after `--`.
+Each run logs each order and each affected register session's expected figures and sales count before and after.
+Reading the dry run:
+- one `command …, order …, session …: <method> <amount>` line per order it would mark;
+- one `session … (open|closed): expected … -> …; salesCount … -> …` line per affected session, where a closed session also
+  shows `variance … -> …`, the change an owner will see on that session's report;
+- `skipped: no orderId` lines for rejections it can't tie to an order (never guessed);
+- a final `would mark <n> order(s), skipped <m> (…)`.
+
+`would mark 0` means there's nothing to do. After `apply`, a second dry run says `would mark 0`, and `undo` puts the figures back.
+These commands are the ones `integration-tests/backfill-seed/run.sh` runs in CI against a seeded store (there from the plugin's
+own path rather than `node_modules/…`).
 A new command id for the same live `clientOrderId` copies the original applied result, including its warnings,
 and stores it for duplicate replays; a superseded original copies its applied successor's result.
 A fresh lease or `needs_admin` row answers 503 without storing the new command; a busy sale lock or lost takeover
