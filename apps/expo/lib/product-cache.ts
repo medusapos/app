@@ -191,14 +191,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
+/**
+ * Recognizes a connector 401 by its code, directly or as the plain JSON RxDB's replication
+ * wrapper keeps (`errorToPlainJson`: name, message and code, not the prototype).
+ */
+function isUnauthorized(error: unknown): boolean {
+  if (!isRecord(error)) return false;
+  if (error instanceof ConnectorUnauthorizedError || error.name === 'ConnectorUnauthorizedError') {
+    return error.code === 'unauthorized';
+  }
+  return error.message === 'Medusa API error: 401';
+}
+
 /** Recognizes Medusa's HTTP 401 error, including RxDB's replication wrapper. */
 export function isUnauthorizedError(error: unknown): boolean {
-  if (error instanceof ConnectorUnauthorizedError) return error.code === 'unauthorized';
-  if (!isRecord(error)) return false;
-  if (error.message === 'Medusa API error: 401') return true;
-  const parameters = error.parameters;
-  if (!isRecord(parameters) || !Array.isArray(parameters.errors)) return false;
-  const first: unknown = parameters.errors[0];
-  if (first instanceof ConnectorUnauthorizedError) return first.code === 'unauthorized';
-  return isRecord(first) && first.message === 'Medusa API error: 401';
+  if (isUnauthorized(error)) return true;
+  const parameters = isRecord(error) ? error.parameters : undefined;
+  return isRecord(parameters) && Array.isArray(parameters.errors) && isUnauthorized(parameters.errors[0]);
 }

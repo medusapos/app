@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
+import { errorToPlainJson } from 'rxdb';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, type SyncNotice, type TallyConnector } from '@tallyui/core';
@@ -85,7 +86,8 @@ it.each([
   [new ConnectorUnauthorizedError('Medusa API error: 403', 403), 'http'],
 ] as const)('classifies direct and RxDB-wrapped connector errors by code: %s', (error, expected) => {
   expect(classifyReplicationError(error)).toBe(expected);
-  expect(classifyReplicationError({ parameters: { errors: [error] } })).toBe(expected);
+  // RxDB's replication wraps each error as plain JSON, without the prototype.
+  expect(classifyReplicationError({ parameters: { errors: [errorToPlainJson(error)] } })).toBe(expected);
 });
 
 it('a forbidden notice holds the pull and never signs out', async () => {
