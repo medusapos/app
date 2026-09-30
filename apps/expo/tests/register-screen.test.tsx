@@ -6,7 +6,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import type { CartLineProps, CartTotalProps, SearchInput, ProductGrid } from '@tallyui/components';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import {
-  bindRegister, closeSession, formatClosureDate, openSession, readRegister, recordMovement, saleLogger, startCounting, useStoreSettings,
+  bindRegister, closeSession, formatClosureDate, openSession, readRegister, recordMovement, saleLogger, startCounting, TAX_ROUNDING_MIXED_NOTE, useStoreSettings,
   voidMovement, type LogEntry, type PosOrder,
 } from '@tallyui/pos';
 import { APPROVAL_REQUIRED_TEXT } from '@tallyui/components';
@@ -453,10 +453,31 @@ describe('closing the register', () => {
       expect(movementRows.getByText(value).parentElement!.firstChild!.textContent).toBe(label);
     }
     expect(movementRows.getAllByText(/^€/)).toHaveLength(3);
+    expect(figures.queryByTestId('last-closure-tax-rounding-note')).toBeNull();
     expect(figures.getByTestId('last-closure-unsynced').textContent).toBe('1 sale not sent yet · €15.00');
     expect(figures.queryByTestId('last-closure-approved-by')).toBeNull();
     fireEvent.click(figures.getByTestId('last-closure-done'));
     await waitFor(() => expect(screen.queryByTestId('last-closure')).toBeNull());
+  });
+
+  it("the last closure shows TallyUI's tax-rounding note when the session's sales used more than one rounding method", async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    fireEvent.click(button('Shirt'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
+    await act(async () => { fireEvent.click(button('New sale')); });
+    await closeWith(await startCount(), '100.00');
+    await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
+    const [closure] = await closures();
+    await act(async () => {
+      await (await registerCollections(store.orders).closures.findOne(closure.id).exec())!.incrementalPatch({
+        breakdowns: { ...closure.breakdowns, tax_rounding_mixed: true },
+      });
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+    const figures = within(await screen.findByTestId('last-closure'));
+    expect(figures.getByTestId('last-closure-tax-rounding-note').textContent).toBe(TAX_ROUNDING_MIXED_NOTE);
   });
 
   it('at 360, Close register shows the count in the cart view, even with an empty cart', async () => {

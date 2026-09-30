@@ -160,6 +160,7 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
           {movements.map((movement) => <Row key={movement.id} label={movement.type_label}
             value={`${movement.amount_display}${movement.reason ? ` · ${movement.reason}` : ''}${movement.voided ? ' · undone' : ''}`} />)}
         </View> : null}
+        {z.tax_rounding_note ? <Text testID="last-closure-tax-rounding-note">{z.tax_rounding_note}</Text> : null}
         {unsynced > 0 ? <Text testID="last-closure-unsynced" accessibilityRole="alert" className="text-warning">
           {`${unsynced} ${unsynced === 1 ? 'sale' : 'sales'} not sent yet · ${z.unsynced_total_display}`}</Text> : null}
         {approver ? <Text testID="last-closure-approved-by" className="min-h-11">{`Approved by ${approver}`}</Text> : null}
