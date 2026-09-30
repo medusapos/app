@@ -492,6 +492,7 @@ medusaIntegrationTestRunner({
       } finally {
         release()
         await holding
+        await pending.catch(() => {})
       }
       expect(result(await pending).status).toBe('applied')
     })

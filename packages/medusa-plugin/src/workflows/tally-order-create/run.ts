@@ -112,10 +112,7 @@ export async function runOrderCreate(
         throw configurationError(`No shipping option at stock location ${location.id} uses shipping profile ${profileId}; add one, or set plugin option shippingOptionId`)
       }
     }
-    const customerId = v3.customer?.customerId
-    const byId = customerId === undefined ? null : (await query.graph({
-      entity: 'customer', fields: ['id'], filters: { id: customerId },
-    })).data[0] ?? null
+    let byId: { id: string } | null = null
     const createOrder = async (normalised: string | null): Promise<CommandResult | undefined> => {
       const { data: regions } = await query.graph({ entity: 'region', fields: ['id', 'currency_code', 'countries.iso_2'] })
       const matchingRegions = regions.filter(region => region.currency_code.toLowerCase() === payload.currency.toLowerCase())
@@ -174,6 +171,10 @@ export async function runOrderCreate(
       await resumeOrderCreate(container, orderId, Number(minorToMajor(payload.totalMinor, currencyDecimals(payload.currency))),
         locationId, shippingOptionId)
     } else {
+      const customerId = v3.customer?.customerId
+      byId = customerId === undefined ? null : (await query.graph({
+        entity: 'customer', fields: ['id'], filters: { id: customerId },
+      })).data[0] ?? null
       const normalised = byId === null && typeof payload.customer?.email === 'string' && payload.customer.email !== ''
         ? normaliseCustomerEmail(payload.customer.email) : null
       // Lock order: tally_order advisory lock → tally_customer:<email> → stock locks.
