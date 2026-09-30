@@ -65,6 +65,12 @@ try {
   const variant = products?.products?.flatMap(product => product.variants ?? []).find(item => item.sku === 'E2E-1')
   check(variant?.id, 'expected E2E-1 variant')
   // Version 2 requires a positive order discount equal to the sum of line discounts.
+  // The till's figures for the seeded store: E2E-1 is EUR 2.00 (seed-e2e.ts), EUR prices exclude tax
+  // (seed-e2e.ts sets the EUR price preference), and the sale's location, the channel's European
+  // Warehouse in Copenhagen, falls in the Europe region (dk), whose default VAT is 25% (tax-rates.ts).
+  // Exclusive line, discount in the line's own mode: net 200 − 20 = 180; tax 180 × 0.25 = 45
+  // (rounded once per order, half away from zero: exact); total 180 + 45 = 225.
+  const totalMinor = 225
   const sale = await command('sale', 'order.create', 2, {
     clientOrderId: randomUUID(), createdAt: new Date().toISOString(),
     currency: 'EUR', pricesIncludeTax: false,
@@ -72,13 +78,16 @@ try {
       clientLineId: randomUUID(), variantId: variant.id, quantity: 1,
       unitPriceMinor: 200, discountMinor: 20,
     }],
-    discountMinor: 20, subtotalMinor: 180, taxMinor: 0, totalMinor: 180,
-    payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 180 }],
+    discountMinor: 20, subtotalMinor: 180, taxMinor: 45, totalMinor,
+    payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
   })
   check(sale.serverRefs?.orderId, 'expected serverRefs.orderId')
+  check(!sale.warnings?.length, `expected no warnings, got ${JSON.stringify(sale.warnings)}`)
 
   const { order } = await request('sale-order',
-    `/admin/orders/${sale.serverRefs.orderId}?fields=id,status,payment_status,fulfillment_status`)
+    `/admin/orders/${sale.serverRefs.orderId}?fields=id,status,payment_status,fulfillment_status,total`)
+  check(Math.round(Number(order?.total) * 100) === totalMinor,
+    `expected the order total to be ${totalMinor} minor, got ${order?.total}`)
   check(order?.status === 'completed' && order?.payment_status === 'captured' &&
     ['fulfilled', 'shipped', 'delivered'].includes(order?.fulfillment_status),
     `expected completed/captured/fulfilled, shipped or delivered; got status=${order?.status}, ` +
