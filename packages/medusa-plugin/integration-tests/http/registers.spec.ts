@@ -500,7 +500,21 @@ medusaIntegrationTestRunner({
       expect(response.status).toBe(200)
       expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'rejected'])
       expect(response.data.results[2]).toEqual({ id: submission.id, status: 'rejected', error: {
-        code: 'invalid_payload', message: 'payload.counted.voucher: expected a payment method (cash or external)',
+        code: 'invalid_payload', message: 'counted.voucher: expected a payment method (cash or external)',
+      } })
+      expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
+    })
+
+    it('a closure.submit with envelope.priority is refused unstored as invalid_payload, and no closure is stored (ruling 17)', async () => {
+      const opening = open()
+      const submission = { ...closure(opening.payload), priority: 1 }
+      const response = await post([opening, close(opening.payload.sessionId), submission])
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'rejected'])
+      expect(response.data.results[2]).toEqual({ id: submission.id, status: 'rejected', error: {
+        code: 'invalid_payload', message: 'envelope.priority: unknown field for register.closure.submit version 1',
       } })
       expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)

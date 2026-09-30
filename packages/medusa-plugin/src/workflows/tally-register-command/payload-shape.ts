@@ -21,7 +21,7 @@ const REGISTER_FIELDS = new Map<string, string[]>([
     movementIds: true })],
 ])
 // The only keys of the declared maps counted and tillExpected: PaymentMethodKind (@tallyui/core 2.0.0 src/types/commands.ts:68).
-const PAYMENT_METHODS: PaymentMethodKind[] = ['cash', 'external']
+const PAYMENT_METHODS = Object.keys({ cash: true, external: true } satisfies Record<PaymentMethodKind, true>)
 
 /** Shape errors before a register command claims a ledger row. A field its type's v1 payload doesn't declare is refused. */
 export function registerPayloadErrors(type: string, payload: unknown): string[] {
@@ -33,7 +33,7 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
   }
   if (!object(payload)) return ['payload: expected an object']
   for (const key of Object.keys(payload)) {
-    const known = REGISTER_FIELDS.get(type)?.includes(key) ?? true
+    const known = REGISTER_FIELDS.get(type)?.includes(key) ?? false
     if (!known && errors.length < 10) errors.push(`${key}: unknown field for ${type} version 1`)
   }
   const string = (field: string, optional = false) => {
@@ -51,7 +51,7 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
     const value = payload[field]
     check(object(value), field, 'a record of integers')
     if (object(value)) for (const [key, amount] of Object.entries(value)) {
-      check(PAYMENT_METHODS.includes(key as PaymentMethodKind), `payload.${field}.${key}`, 'a payment method (cash or external)')
+      check(PAYMENT_METHODS.includes(key), `${field}.${key}`,'a payment method (cash or external)')
       check(Number.isSafeInteger(amount), `${field}.${key}`, 'a safe integer')
     }
   }

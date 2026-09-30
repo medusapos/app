@@ -1,4 +1,4 @@
-import type { OrderCreateLine, OrderCreatePayment } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import type { CommandEnvelope, OrderCreateLine, OrderCreatePayment } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 
 // The fields of each order.create version (ruling 17): @tallyui/core 2.0.0 OrderCreatePayload, OrderCreateLine and
@@ -13,11 +13,17 @@ const LINE_FIELDS = since<OrderCreateLine>({ clientLineId: 1, variantId: 1, titl
 const PAYMENT_FIELDS = since<OrderCreatePayment>({ clientPaymentId: 1, method: 1, amountMinor: 1, tenderedMinor: 1,
   changeMinor: 1, reference: 1 })
 const CUSTOMER_FIELDS = since<NonNullable<OrderCreatePayloadV3['customer']>>({ email: 1, customerId: 3 })
+// The envelope's own fields, for every command type; satisfies makes tsc refuse a missing or an extra field.
+const ENVELOPE_FIELDS = Object.keys({ id: true, type: true, version: true, payload: true, createdAt: true, deviceId: true,
+  attempt: true } satisfies Record<keyof CommandEnvelope, true>)
+/** Envelope fields CommandEnvelope doesn't declare, e.g. ['envelope.priority: unknown field for order.create version 1']. */
+export const envelopeErrors = (envelope: CommandEnvelope<unknown>) => Object.keys(envelope).filter(key => !ENVELOPE_FIELDS.includes(key))
+  .map(key => `envelope.${key}: unknown field for ${envelope.type} version ${envelope.version}`)
 
 /** Shape errors of an order.create payload, e.g. ['lines: expected a non-empty array',
  * 'payments[0].method: expected a string']; [] when the shape is valid. Checks presence, types, fields unknown to
  * `version`, string bounds and NUL (numbers are finite numbers; value ranges are the planner's job). `version`
- * defaults to the latest; process.ts passes the envelope's, after its version rules name any later-version field. */
+ * defaults to the latest; a field a later version declares is named with that version ('display: requires version 3'). */
 export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   const errors: string[] = []
   const object = (value: unknown): value is Record<string, unknown> =>
@@ -27,9 +33,9 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   }
   const known = (value: Record<string, unknown>, fields: Map<string, number>, prefix: string) => {
     for (const key of Object.keys(value)) {
-      if ((fields.get(key) ?? Infinity) > version && errors.length < 10) {
-        errors.push(`${prefix}${key}: unknown field for order.create version ${version}`)
-      }
+      const added = fields.get(key) ?? Infinity
+      if (added > version && errors.length < 10) errors.push(`${prefix}${key}: ${added === Infinity
+        ? `unknown field for order.create version ${version}` : `requires version ${added}`}`)
     }
   }
   const number = (value: unknown, path: string) =>

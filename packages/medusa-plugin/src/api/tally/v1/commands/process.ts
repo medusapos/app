@@ -5,7 +5,7 @@ import { executeOrderCreate, replayOrderCreate } from '../../../../workflows/tal
 import { executeRegisterCommand, replayRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
-import { payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
+import { envelopeErrors, payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
 import { SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
@@ -101,25 +101,18 @@ export async function processBatch(
       continue
     }
     // ADR-062 sends version 2 exactly when there is a discount, so version 1 can never create adjustments.
-    const { lines, discountMinor } = command.payload as { lines?: unknown; discountMinor?: unknown }
-    const discounted = discountMinor !== undefined
-      || (Array.isArray(lines) && lines.some(line => (line as { discountMinor?: unknown } | null)?.discountMinor !== undefined))
     const payload = command.payload as OrderCreatePayloadV3
-    const { display, taxByRate, sessionId } = payload
+    const { display, taxByRate, discountMinor } = payload
     const v3 = (command.version as number) === 3
     const versionError = command.version === 2 && discountMinor === undefined ? 'version 2 requires discountMinor'
-      : command.version === 1 && discounted ? 'discountMinor requires version 2'
-      : !v3 && (display !== undefined || taxByRate !== undefined) ? 'display and taxByRate require version 3'
-      : !v3 && sessionId !== undefined ? 'sessionId requires version 3'
-      : !v3 && payload.customer?.customerId !== undefined ? 'customerId requires version 3'
       : v3 && (display !== undefined) !== (taxByRate !== undefined) ? 'display and taxByRate must both be present or both absent'
       : undefined
     if (versionError) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: versionError } })
       continue
     }
-    // Shape rules, with the fields this version doesn't know (ruling 17): after the replay read, unstored, before the claim.
-    const errors = payloadShapeErrors(payload, command.version)
+    // Shape rules, with the fields this version or the envelope doesn't know (ruling 17): after the replay read, unstored, before the claim.
+    const errors = [...envelopeErrors(command), ...payloadShapeErrors(payload, command.version)]
     if (!errors.length && v3 && display !== undefined && taxByRate !== undefined) errors.push(...fiscalFiguresErrors(payload))
     if (errors.length) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })

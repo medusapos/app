@@ -109,8 +109,9 @@ whole batch with HTTP 400 instead; TallyUI must handle both.
 object of every command refuses a field its declared version doesn't know,
 as unstored `invalid_payload` naming the path (`lines[2].discountMinr:
 unknown field for order.create version 1`), after the replay read and
-before the claim. A field a later version declares keeps its version rule's
-message. Keys are free only in the maps the contract declares, `counted` and
+before the claim. A field a later version declares is named with that
+version (`display: requires version 3`); envelope fields are strict too.
+Keys are free only in the maps the contract declares, `counted` and
 `tillExpected`, and those must be a `PaymentMethodKind` (`cash`, `external`).
 The earlier leniency was an accident: ADR 0004 checked only types and
 presence, and #90 kept it out of general caution, for no named client. The

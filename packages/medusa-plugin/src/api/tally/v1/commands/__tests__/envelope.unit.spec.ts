@@ -5,6 +5,7 @@ import mainV3 from '../../../../../workflows/tally-order-create/__fixtures__/ord
 import posV1 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/pos-2.0.0-v1.json'
 import posV2 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/pos-2.0.0-v2.json'
 import batch from '../../../../../workflows/tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-batch.json'
+import closure from '../../../../../workflows/tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.closure.submit.json'
 import { payloadShapeErrors } from '../../../../../workflows/tally-order-create/payload-shape'
 import { processBatch, validateBatch, type BatchOutcome } from '../process'
 
@@ -106,16 +107,17 @@ describe('validateBatch', () => {
   })
 
   it.each([
-    [1, { display: {} }, 'display and taxByRate require version 3'],
-    [2, { display: {}, discountMinor: 1 }, 'display and taxByRate require version 3'],
-    [2, { taxByRate: [], discountMinor: 1 }, 'display and taxByRate require version 3'],
+    [1, { display: {} }, 'display: requires version 3'],
+    [2, { display: {} }, 'display: requires version 3'],
+    [2, { taxByRate: [] }, 'taxByRate: requires version 3'],
     [3, { display: {} }, 'display and taxByRate must both be present or both absent'],
     [3, { taxByRate: [] }, 'display and taxByRate must both be present or both absent'],
-    [1, { sessionId: 'session' }, 'sessionId requires version 3'],
-    [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId requires version 3'],
-    [1, { customer: { customerId: 'customer' } }, 'customerId requires version 3'],
-    [2, { customer: { customerId: 'customer' }, discountMinor: 1 }, 'customerId requires version 3'],
-  ])('rejects version %s fields %j after the replay read', async (version, payload, message) => {
+    [1, { sessionId: 'session' }, 'sessionId: requires version 3'],
+    [2, { sessionId: 'session' }, 'sessionId: requires version 3'],
+    [1, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
+    [2, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
+  ])('rejects version %s fields %j after the replay read', async (version, fields, message) => {
+    const payload = { ...(version === 2 ? mainV2 : mainV1).payload, ...fields }
     const outcome = await processBatch(container, [{ ...command, version, payload } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
       code: 'invalid_payload', message,
@@ -130,12 +132,13 @@ describe('validateBatch', () => {
   })
 
   it.each([
-    ['on a line', { lines: [{ clientLineId: 'line_1' }, { clientLineId: 'line_2', discountMinor: 100 }] }],
-    ['on the payload', { lines: [{ clientLineId: 'line_1' }], discountMinor: 100 }],
-  ])('rejects a version 1 command carrying discountMinor %s after the replay read', async (_where, payload) => {
+    ['on a line', { lines: [mainV1.payload.lines[0], { ...mainV1.payload.lines[1], discountMinor: 100 }] }, 'lines[1].discountMinor'],
+    ['on the payload', { discountMinor: 100 }, 'discountMinor'],
+  ])('rejects a version 1 command carrying discountMinor %s after the replay read', async (_where, fields, path) => {
+    const payload = { ...mainV1.payload, ...fields }
     const outcome = await processBatch(container, [{ ...command, id: 'sale-1', payload } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: 'sale-1', status: 'rejected', error: {
-      code: 'invalid_payload', message: 'discountMinor requires version 2',
+      code: 'invalid_payload', message: `${path}: requires version 2`,
     } }] } })
   })
 
@@ -165,14 +168,28 @@ describe('recorded TallyUI envelopes, 2026-09-30 (ruling 17)', () => {
 
   it.each<[string, Recorded, string]>([
     ['a v2 field in v1', { ...mainV1, payload: { ...mainV1.payload, discountMinor: 1,
-      lines: [{ ...mainV1.payload.lines[0], discountMinor: 1 }, mainV1.payload.lines[1]] } }, 'discountMinor requires version 2'],
-    ['a v3 field in v2', { ...mainV2, payload: { ...mainV2.payload, sessionId: 'session' } }, 'sessionId requires version 3'],
+      lines: [{ ...mainV1.payload.lines[0], discountMinor: 1 }, mainV1.payload.lines[1]] } },
+      'discountMinor: requires version 2; lines[0].discountMinor: requires version 2'],
+    ['a v3 field in v2', { ...mainV2, payload: { ...mainV2.payload, sessionId: 'session' } }, 'sessionId: requires version 3'],
     ['a v3 customer field in v2', { ...mainV2, payload: { ...mainV2.payload, customer: { email: 'buyer@example.com', customerId: 'c' } } },
-      'customerId requires version 3'],
+      'customer.customerId: requires version 3'],
   ])('%s names the version it needs, not an unknown field', async (_name, fixture, message) => {
     const outcome = await processBatch(container, [fixture] as never, {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: {
       code: 'invalid_payload', message,
     } }] } })
   })
+})
+
+describe('envelope fields (ruling 17)', () => {
+  it.each<[string, { id: string }]>([['order.create', mainV1], ['register.closure.submit', closure]])(
+    'refuses priority on a recorded %s envelope as invalid_payload, before the claim', async (type, fixture) => {
+      const claim = jest.fn()
+      const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
+      const outcome = await processBatch(replaying, [{ ...fixture, priority: 1 }] as never, {})
+      expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: {
+        code: 'invalid_payload', message: `envelope.priority: unknown field for ${type} version 1`,
+      } }] } })
+      expect(claim).not.toHaveBeenCalled()
+    })
 })

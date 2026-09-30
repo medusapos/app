@@ -11,6 +11,7 @@ import type { RegisterCommandResult, RegisterOutcome, RegisterSessionOpenPayload
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import type { CommandErrorWithData } from '../tally-order-create/fiscal-figures'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
+import { envelopeErrors } from '../tally-order-create/payload-shape'
 import { registerPayloadErrors } from './payload-shape'
 import { loadSessionFigures } from './figures'
 
@@ -43,7 +44,7 @@ export async function replayRegisterCommand(container: MedusaContainer, command:
 
 export async function executeRegisterCommand(container: MedusaContainer, command: CommandEnvelope<unknown>): Promise<ExecuteOutcome> {
   const { id, payload } = command
-  const errors = registerPayloadErrors(command.type, payload)
+  const errors = [...envelopeErrors(command), ...registerPayloadErrors(command.type, payload)].slice(0, 10)
   if (errors.length) return { kind: 'result', result: { id, status: 'rejected', error: { code: 'invalid_payload', message: errors.join('; ') } } }
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
   try {

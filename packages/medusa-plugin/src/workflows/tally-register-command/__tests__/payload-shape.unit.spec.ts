@@ -1,6 +1,7 @@
 import batchFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-batch.json'
 import closureFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.closure.submit.json'
 import transitionFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.session.transition-closed.json'
+import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { registerPayloadErrors } from '../payload-shape'
 
 const at = '2026-01-01T08:00:00.000Z'
@@ -32,7 +33,18 @@ it.each<[string, string, Record<string, unknown>]>([
 ])('%s %s takes cash and external keys, and refuses card', (type, map, payload) => {
   expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, external: 2 } })).toEqual([])
   expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, card: 2 } }))
-    .toEqual([`payload.${map}.card: expected a payment method (cash or external)`])
+    .toEqual([`${map}.card: expected a payment method (cash or external)`])
+})
+
+it('the payment-method keys are exhaustive: a Record<PaymentMethodKind, true> without external does not compile', () => {
+  // @ts-expect-error external is missing, so the set in payload-shape.ts cannot fall behind the contract
+  const missing: Record<PaymentMethodKind, true> = { cash: true }
+  expect(Object.keys(missing)).toEqual(['cash'])
+})
+
+it('an unknown command type allows no keys', () => {
+  expect(registerPayloadErrors('register.unknown', { sessionId: 's' }))
+    .toEqual(['sessionId: unknown field for register.unknown version 1', 'type: expected a register command type'])
 })
 
 type Recorded = [string, { type: string; payload: unknown }]

@@ -141,10 +141,10 @@ it('knows each field from the version that declares it', () => {
   const v3 = { ...v2, sessionId: 'session', customer: { email: 'buyer@example.com', customerId: 'customer' } }
   expect(payloadShapeErrors(v2, 2)).toEqual([])
   expect(payloadShapeErrors(v3, 3)).toEqual([])
-  expect(payloadShapeErrors(v2, 1)).toEqual(['discountMinor: unknown field for order.create version 1',
-    'lines[0].discountMinor: unknown field for order.create version 1'])
-  expect(payloadShapeErrors(v3, 2)).toEqual(['sessionId: unknown field for order.create version 2',
-    'customer.customerId: unknown field for order.create version 2'])
+  expect(payloadShapeErrors(v2, 1)).toEqual(['discountMinor: requires version 2', 'lines[0].discountMinor: requires version 2'])
+  expect(payloadShapeErrors(v3, 2)).toEqual(['sessionId: requires version 3', 'customer.customerId: requires version 3'])
+  expect(payloadShapeErrors({ ...payload, display: {}, taxByRate: [] }, 1))
+    .toEqual(['display: requires version 3', 'taxByRate: requires version 3'])
 })
 
 it('reports at most ten unknown fields', () => {

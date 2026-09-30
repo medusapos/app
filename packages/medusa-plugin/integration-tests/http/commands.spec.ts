@@ -390,6 +390,27 @@ medusaIntegrationTestRunner({
         expect(await levelA()).toEqual(before)
       })
 
+      it('an envelope.priority between two good sales is refused alone, unstored, with no order (ruling 17)', async () => {
+        const [before, refused, after] = [command(), { ...command(), priority: 1 }, command()]
+        const response = await post([before, refused, after])
+        expect(response.status).toBe(200)
+        expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
+        expect(response.data.results[1]).toEqual({ id: refused.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'envelope.priority: unknown field for order.create version 1',
+        } })
+        expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
+      })
+
+      it('an applied id resent with envelope.priority answers duplicate, because the replay read comes first', async () => {
+        const sale = command()
+        const first = await post([sale])
+        expect(first.data.results[0].status).toBe('applied')
+        const response = await post([{ ...sale, attempt: 2, priority: 1 }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
+      })
+
       it('an applied id resent with an extra unknown field answers duplicate, because the replay read comes first', async () => {
         const first = await post([command()])
         expect(first.data.results[0].status).toBe('applied')
@@ -1710,9 +1731,9 @@ medusaIntegrationTestRunner({
     it.each([
       [3, { sessionId: 'x'.repeat(37) }, 'sessionId: expected a string of at most 36 characters'],
       [3, { sessionId: '' }, 'sessionId: expected a string of at most 36 characters'],
-      [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId requires version 3'],
+      [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId: requires version 3'],
       [3, { customer: { customerId: 'x'.repeat(65) } }, 'customer.customerId: expected a string of at most 64 characters'],
-      [2, { customer: { customerId: 'customer' }, discountMinor: 1 }, 'customerId requires version 3'],
+      [1, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
     ])('rejects invalid v%s bookkeeping fields %j', async (version, fields, message) => {
       const sale = command()
       const response = await post([{ ...sale, version, payload: { ...sale.payload, ...fields } }])
