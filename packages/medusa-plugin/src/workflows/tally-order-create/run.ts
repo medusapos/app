@@ -59,7 +59,8 @@ export async function runOrderCreate(
       throw configurationError(`${locationSource}: this stock location is not assigned to the sale's sales channel`)
     }
     if (!location?.address) {
-      throw configurationError('Missing stock location or address; set plugin option locationId')
+      throw configurationError(locationSource ? `${locationSource}: this stock location has no address`
+        : 'Missing stock location or address; set plugin option locationId')
     }
     const { data: shippingVariants } = await query.graph({
       entity: 'product_variant', fields: ['id', 'product.shipping_profile.id'],

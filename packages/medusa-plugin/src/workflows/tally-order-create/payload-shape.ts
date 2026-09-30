@@ -1,12 +1,36 @@
+import type { OrderCreateLine, OrderCreatePayment } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import type { OrderCreatePayloadV3 } from './fiscal-figures'
+
+// The fields of each order.create version (ruling 17): @tallyui/core 2.0.0 OrderCreatePayload, OrderCreateLine and
+// OrderCreatePayment (src/types/commands.ts, v2) and the v3 bridge OrderCreatePayloadV3 (fiscal-figures.ts). Each value is
+// the version that added the field; Record<keyof T, number> makes tsc refuse a missing or an extra field.
+const since = <T>(fields: Record<keyof T, number>) => new Map<string, number>(Object.entries(fields))
+const TOP_FIELDS = since<OrderCreatePayloadV3>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
+  subtotalMinor: 1, taxMinor: 1, totalMinor: 1, payments: 1, customer: 1, registerId: 1, cashierRef: 1, locationId: 1,
+  discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3 })
+const LINE_FIELDS = since<OrderCreateLine>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
+  taxInclusive: 1, discountMinor: 2 })
+const PAYMENT_FIELDS = since<OrderCreatePayment>({ clientPaymentId: 1, method: 1, amountMinor: 1, tenderedMinor: 1,
+  changeMinor: 1, reference: 1 })
+const CUSTOMER_FIELDS = since<NonNullable<OrderCreatePayloadV3['customer']>>({ email: 1, customerId: 3 })
+
 /** Shape errors of an order.create payload, e.g. ['lines: expected a non-empty array',
- * 'payments[0].method: expected a string']; [] when the shape is valid. Checks presence, types, string
- * bounds and NUL (numbers are finite numbers; value ranges are the planner's job). */
-export function payloadShapeErrors(payload: unknown): string[] {
+ * 'payments[0].method: expected a string']; [] when the shape is valid. Checks presence, types, fields unknown to
+ * `version`, string bounds and NUL (numbers are finite numbers; value ranges are the planner's job). `version`
+ * defaults to the latest; process.ts passes the envelope's, after its version rules name any later-version field. */
+export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   const errors: string[] = []
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
   const check = (valid: boolean, path: string, expected: string) => {
     if (!valid && errors.length < 10) errors.push(`${path}: expected ${expected}`)
+  }
+  const known = (value: Record<string, unknown>, fields: Map<string, number>, prefix: string) => {
+    for (const key of Object.keys(value)) {
+      if ((fields.get(key) ?? Infinity) > version && errors.length < 10) {
+        errors.push(`${prefix}${key}: unknown field for order.create version ${version}`)
+      }
+    }
   }
   const number = (value: unknown, path: string) =>
     check(typeof value === 'number' && Number.isFinite(value), path, 'a finite number')
@@ -17,6 +41,7 @@ export function payloadShapeErrors(payload: unknown): string[] {
     return valid && value !== undefined ? BigInt(value as number) : 0n
   }
   if (!object(payload)) return ['payload: expected an object']
+  known(payload, TOP_FIELDS, '')
   check(typeof payload.clientOrderId === 'string' && payload.clientOrderId.length > 0, 'clientOrderId', 'a non-empty string')
   for (const field of ['createdAt', 'currency']) check(typeof payload[field] === 'string', field, 'a string')
   check(typeof payload.pricesIncludeTax === 'boolean', 'pricesIncludeTax', 'a boolean')
@@ -30,6 +55,7 @@ export function payloadShapeErrors(payload: unknown): string[] {
       const path = `${field}[${index}]`
       check(object(item), path, 'an object')
       if (!object(item)) continue
+      known(item, isLines ? LINE_FIELDS : PAYMENT_FIELDS, `${path}.`)
       for (const key of isLines ? ['clientLineId', 'variantId'] : ['clientPaymentId', 'method']) {
         check(typeof item[key] === 'string', `${path}.${key}`, 'a string')
       }
@@ -55,6 +81,7 @@ export function payloadShapeErrors(payload: unknown): string[] {
   if (errors.length === 0) check(orderDiscount === lineDiscounts, 'discountMinor', 'the sum of lines[].discountMinor')
   if (payload.customer !== undefined && payload.customer !== null) {
     check(object(payload.customer), 'customer', 'an object')
+    if (object(payload.customer)) known(payload.customer, CUSTOMER_FIELDS, 'customer.')
     if (object(payload.customer) && payload.customer.email !== undefined) {
       check(typeof payload.customer.email === 'string', 'customer.email', 'a string')
     }

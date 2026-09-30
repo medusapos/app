@@ -1,4 +1,11 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
+import mainV1 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/main-v1.json'
+import mainV2 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/main-v2.json'
+import mainV3 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/main-v3.json'
+import posV1 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/pos-2.0.0-v1.json'
+import posV2 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/pos-2.0.0-v2.json'
+import batch from '../../../../../workflows/tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-batch.json'
+import { payloadShapeErrors } from '../../../../../workflows/tally-order-create/payload-shape'
 import { processBatch, validateBatch, type BatchOutcome } from '../process'
 
 const command = {
@@ -136,5 +143,36 @@ describe('validateBatch', () => {
     expect(validateBatch({ commands: [null] })).toEqual({
       ok: false, status: 400, message: expect.stringContaining('commands[0]'),
     })
+  })
+})
+
+describe('recorded TallyUI envelopes, 2026-09-30 (ruling 17)', () => {
+  type Recorded = { id: string; version: number; payload: unknown }
+  it.each<[string, Recorded]>([['pos 2.0.0 v1', posV1], ['pos 2.0.0 v2', posV2], ['main v1', mainV1], ['main v2', mainV2], ['main v3', mainV3]])(
+    '%s passes the shape and version rules unchanged and reaches the claim', async (_name, fixture) => {
+      expect(payloadShapeErrors(fixture.payload, fixture.version)).toEqual([])
+      const claim = jest.fn(async () => { throw new Error('reached the claim') })
+      const claiming = { resolve: () => ({ listTallyCommands: async () => [], claim, error: () => undefined }) } as unknown as MedusaContainer
+      const outcome = await processBatch(claiming, [structuredClone(fixture)] as never, {})
+      expect(outcome).toEqual({ status: 503, body: { code: 'transient', id: fixture.id, message: 'Temporary failure, retry later.' } })
+      expect(claim).toHaveBeenCalledTimes(1)
+    })
+
+  it('the recorded register batch passes validateBatch unchanged', () => {
+    const { body } = batch.requests[0]
+    expect(validateBatch(body)).toEqual({ ok: true, commands: body.commands })
+  })
+
+  it.each<[string, Recorded, string]>([
+    ['a v2 field in v1', { ...mainV1, payload: { ...mainV1.payload, discountMinor: 1,
+      lines: [{ ...mainV1.payload.lines[0], discountMinor: 1 }, mainV1.payload.lines[1]] } }, 'discountMinor requires version 2'],
+    ['a v3 field in v2', { ...mainV2, payload: { ...mainV2.payload, sessionId: 'session' } }, 'sessionId requires version 3'],
+    ['a v3 customer field in v2', { ...mainV2, payload: { ...mainV2.payload, customer: { email: 'buyer@example.com', customerId: 'c' } } },
+      'customerId requires version 3'],
+  ])('%s names the version it needs, not an unknown field', async (_name, fixture, message) => {
+    const outcome = await processBatch(container, [fixture] as never, {})
+    expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: {
+      code: 'invalid_payload', message,
+    } }] } })
   })
 })

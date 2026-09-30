@@ -314,7 +314,16 @@ medusaIntegrationTestRunner({
         return order.fulfillments!.map(fulfillment => fulfillment!.location_id)
       }
 
+      async function stockAndReservations() {
+        const inventory = container.resolve(Modules.INVENTORY)
+        const levels = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryA })
+        const reservations = await inventory.listReservationItems({ inventory_item_id: data.inventoryA })
+        return { reservations: reservations.map(item => item.id).sort(),
+          levels: levels.map(level => `${level.location_id} ${level.stocked_quantity} ${level.reserved_quantity}`).sort() }
+      }
+
       async function expectRefused(sale: CommandEnvelope<OrderCreatePayload>, message: string) {
+        const before = await stockAndReservations()
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([expect.objectContaining({
@@ -322,6 +331,7 @@ medusaIntegrationTestRunner({
         })])
         expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
         expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+        expect(await stockAndReservations()).toEqual(before)
       }
 
       it('a location assigned to the channel is honoured: the fulfilment and the stock use it', async () => {
@@ -347,9 +357,11 @@ medusaIntegrationTestRunner({
         await expectRefused(command({ locationId: 'sloc_unknown' }), 'payload.locationId: no stock location with this id')
       })
 
-      it('a location outside the channel is refused unstored, and the same command applies once it is linked', async () => {
+      it('a location outside the channel is refused unstored, again on a retry before the fix, and applies once it is linked', async () => {
         const sale = command({ locationId: data.spareId })
-        await expectRefused(sale, "payload.locationId: this stock location is not assigned to the sale's sales channel")
+        for (const _attempt of [1, 2]) {
+          await expectRefused(sale, "payload.locationId: this stock location is not assigned to the sale's sales channel")
+        }
         await linkSpare('add')
         try {
           const retry = await post([sale])
@@ -363,6 +375,35 @@ medusaIntegrationTestRunner({
     })
 
     describe('step order', () => {
+      it('a v1 sale with lines[0].discountMinr is refused unstored as invalid_payload naming it, with no order (ruling 17)', async () => {
+        const sale = command()
+        Object.assign(sale.payload.lines[0], { discountMinr: 100 })
+        const before = await levelA()
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'lines[0].discountMinr: unknown field for order.create version 1',
+        } }])
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+        expect(await levelA()).toEqual(before)
+      })
+
+      it('an applied id resent with an extra unknown field answers duplicate, because the replay read comes first', async () => {
+        const first = await post([command()])
+        expect(first.data.results[0].status).toBe('applied')
+        // Recorded as applied, as a command carrying an unknown field could be before ruling 17.
+        const extra = command()
+        Object.assign(extra.payload, { note: 'gift wrap' })
+        const claim = await ledger.claim({ id: extra.id, type: extra.type, fingerprint: commandFingerprint(extra) })
+        if (!claim.claimed) throw new Error('Expected a fresh claim')
+        const result = { ...first.data.results[0], id: extra.id }
+        await ledger.complete(extra.id, claim.claimToken, result)
+        const response = await post([extra])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...result, status: 'duplicate' }])
+      })
+
       it('an applied id resent with an over-long title answers duplicate', async () => {
         const first = await post([command()])
         expect(first.status).toBe(200)

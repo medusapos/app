@@ -116,8 +116,9 @@ export async function processBatch(
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: versionError } })
       continue
     }
-    const errors = v3 && display !== undefined && taxByRate !== undefined && payloadShapeErrors(payload).length === 0
-      ? fiscalFiguresErrors(payload) : []
+    // Shape rules, with the fields this version doesn't know (ruling 17): after the replay read, unstored, before the claim.
+    const errors = payloadShapeErrors(payload, command.version)
+    if (!errors.length && v3 && display !== undefined && taxByRate !== undefined) errors.push(...fiscalFiguresErrors(payload))
     if (errors.length) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
       continue

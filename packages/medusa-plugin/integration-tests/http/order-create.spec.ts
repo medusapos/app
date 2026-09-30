@@ -586,6 +586,24 @@ medusaIntegrationTestRunner({
       }
     })
 
+    it('a named stock location without an address is refused with a message naming where the id came from', async () => {
+      const [bare] = await container.resolve(Modules.STOCK_LOCATION).createStockLocations([{ name: 'No address' }])
+      await linkSalesChannelsToStockLocationWorkflow(container).run({ input: { id: bare.id, add: [data.channelId] } })
+      try {
+        for (const [sale, options, message] of [
+          [command({ locationId: bare.id }), {}, 'payload.locationId: this stock location has no address'],
+          [command(), { locationId: bare.id }, 'plugin option locationId: this stock location has no address'],
+        ] as const) {
+          const attempt = runOrderCreate(container, sale, options)
+          await expect(attempt).rejects.toBeInstanceOf(StoreConfigurationError)
+          await expect(attempt).rejects.toMatchObject({ code: 'store_configuration', message })
+          expect(await ordersFor(sale.payload.clientOrderId)).toHaveLength(0)
+        }
+      } finally {
+        await linkSalesChannelsToStockLocationWorkflow(container).run({ input: { id: bare.id, remove: [data.channelId] } })
+      }
+    })
+
     it('compensates a fulfillment failure after payment, leaving no live order, reservations, or stock change', async () => {
       const sale = shortSale()
       await expectStock(data.inventoryC, 1)

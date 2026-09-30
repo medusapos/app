@@ -1,3 +1,6 @@
+import batchFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-batch.json'
+import closureFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.closure.submit.json'
+import transitionFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.session.transition-closed.json'
 import { registerPayloadErrors } from '../payload-shape'
 
 const at = '2026-01-01T08:00:00.000Z'
@@ -17,9 +20,28 @@ it.each<[string, Record<string, unknown>]>([
   ['register.movement.record', movement],
   ['register.movement.void', voidMovement],
   ['register.closure.submit', closure],
-])('accepts a valid %s payload and unknown top-level keys', (type, payload) => {
+])('accepts a valid %s payload and refuses an unknown field, naming it (ruling 17)', (type, payload) => {
   expect(registerPayloadErrors(type, payload)).toEqual([])
-  expect(registerPayloadErrors(type, { ...payload, extra: true })).toEqual([])
+  expect(registerPayloadErrors(type, { ...payload, extra: true })).toEqual([`extra: unknown field for ${type} version 1`])
+})
+
+it.each<[string, string, Record<string, unknown>]>([
+  ['register.session.transition', 'counted', transition],
+  ['register.closure.submit', 'counted', closure],
+  ['register.closure.submit', 'tillExpected', closure],
+])('%s %s takes cash and external keys, and refuses card', (type, map, payload) => {
+  expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, external: 2 } })).toEqual([])
+  expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, card: 2 } }))
+    .toEqual([`payload.${map}.card: expected a payment method (cash or external)`])
+})
+
+type Recorded = [string, { type: string; payload: unknown }]
+it.each<Recorded>([
+  ['main-register.session.transition-closed', transitionFixture],
+  ['main-register.closure.submit', closureFixture],
+  ...batchFixture.requests[0].body.commands.map((command, index): Recorded => [`main-batch commands[${index}] ${command.type}`, command]),
+])('the recorded envelope %s passes unchanged', (_name, envelope) => {
+  expect(registerPayloadErrors(envelope.type, envelope.payload)).toEqual([])
 })
 
 it.each<[string, Record<string, unknown>, string]>([

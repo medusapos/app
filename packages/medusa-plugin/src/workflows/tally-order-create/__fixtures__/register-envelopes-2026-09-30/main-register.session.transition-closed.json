@@ -1,0 +1,19 @@
+{
+  "id": "01a0efef-4c1d-7021-b9a4-dff4c6e0f738",
+  "type": "register.session.transition",
+  "version": 1,
+  "payload": {
+    "sessionId": "8810bb2c-ba40-435e-a8bf-2b86658fa1e1",
+    "status": "closed",
+    "at": "2026-09-30T01:30:32.345Z",
+    "counted": {
+      "cash": 12300,
+      "external": 1700
+    },
+    "closedBy": "cashier_golden",
+    "approvedBy": "manager_golden"
+  },
+  "createdAt": "2026-09-30T01:30:32.349Z",
+  "deviceId": "device-golden",
+  "attempt": 1
+}
