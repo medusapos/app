@@ -1,4 +1,7 @@
-import { addRxPlugin, createRxDatabase, removeRxDatabase, type RxCollection, type RxDatabase, type RxStorage } from 'rxdb';
+import {
+  addRxPlugin, createRxDatabase, getAllCollectionDocuments, prepareQuery, removeRxDatabase, type RxCollection, type RxDatabase, type RxStorage,
+} from 'rxdb';
+import { migrateDocumentData } from 'rxdb/plugins/migration-schema';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
@@ -85,13 +88,42 @@ async function legacyOrdersDatabaseExists(fromName: string): Promise<boolean> {
 }
 
 /**
+ * Every live `pos_orders` document of the legacy database, brought to the current version by the migration strategies
+ * `to` was added with (`posOrderCollection()`'s, the ones the SQLite store's own migration runs). Read only: each stored
+ * version is opened with the schema RxDB stored for it in the database's internal store, as RxDB's own
+ * `removeCollectionStorages` opens it, never with the current one, whose optional `sessionId` index (v3) Dexie refuses
+ * (DXE1). Pre-SQLite builds wrote v0; a v1 or v2 build's in-place migration that stopped short can leave v1 or v2 beside
+ * it, and the copy at the higher version wins.
+ */
+async function readLegacyOrders(legacy: RxDatabase, to: RxCollection<PosOrder>): Promise<PosOrder[]> {
+  const stored = (await getAllCollectionDocuments(legacy.internalStore)).map((meta) => meta.data)
+    .filter((meta) => meta.name === 'pos_orders').sort((a, b) => b.schema.version - a.schema.version);
+  const orders = new Map<string, PosOrder>();
+  for (const { schema } of stored) {
+    const instance = await legacy.storage.createStorageInstance<PosOrder>({
+      databaseName: legacy.name, collectionName: 'pos_orders', schema, options: {}, multiInstance: false,
+      databaseInstanceToken: legacy.token, devMode: false,
+    });
+    try {
+      const { documents } = await instance.query(prepareQuery(schema, { selector: { _deleted: { $eq: false } }, sort: [{ id: 'asc' }], skip: 0 }));
+      for (const doc of documents.filter((doc) => !orders.has(doc.id))) {
+        const { _deleted, _meta, _rev, _attachments, ...order } = await migrateDocumentData(to, schema.version, doc);
+        orders.set(doc.id, order as PosOrder);
+      }
+    } finally { await instance.close(); }
+  }
+  return [...orders.values()];
+}
+
+/**
  * Idempotent, crash-safe copy of any sales in the pre-SQLite Dexie order
  * store into the new one, on every open while a legacy database exists
  * (a tab still on the old build can write one after a first copy).
  * Exported so a unit test can run it directly with memory storages.
  *
  * When `legacyExists()` is false it opens and creates nothing. Otherwise
- * every `pos_orders` document is read from the legacy database, only the
+ * every `pos_orders` document is read from the legacy database and migrated
+ * without writing to it (`readLegacyOrders`), only the
  * ids missing from the new store are inserted (`bulkInsert`, never upsert:
  * a copy already there, possibly synced since, always wins), every legacy
  * id is verified present by a `findByIds` count, the marker is written if
@@ -108,13 +140,9 @@ export async function carryOverOrders({ fromStorage, fromName, to, legacyExists 
   try {
     if (!(await legacyExists())) return;
     let count = 0;
-    const legacy = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
-      name: fromName, storage: fromStorage, multiInstance: false,
-    });
+    const legacy = await createRxDatabase({ name: fromName, storage: fromStorage, multiInstance: false });
     try {
-      // Migrates legacy v0 (or v1) to v2 in place; a DM4 throws here, before any copy or marker, so the source stays.
-      await addOrders(legacy);
-      const docs = (await legacy.pos_orders.find().exec()).map((doc) => doc.toJSON() as PosOrder);
+      const docs = await readLegacyOrders(legacy, to.pos_orders);
       if (docs.length) {
         const present = await to.pos_orders.findByIds(docs.map((order) => order.id)).exec();
         const missing = docs.filter((order) => !present.has(order.id));

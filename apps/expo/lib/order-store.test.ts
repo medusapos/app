@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  addRxPlugin, createRevision, createRxDatabase, fillWithDefaultSettings, now, type RxCollection, type RxCollectionCreator, type RxDatabase, type RxJsonSchema,
+  addRxPlugin, createRevision, createRxDatabase, fillWithDefaultSettings, getAllCollectionDocuments, newRxError, now, type RxCollection,
+  type RxCollectionCreator, type RxDatabase, type RxJsonSchema, type RxStorage,
 } from 'rxdb';
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
@@ -323,6 +324,30 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v6', (from) => {
 // The legacy database "exists" (memory storages have no IndexedDB to list).
 const legacyExists = async () => true;
 
+/**
+ * Memory storage under the check RxDB 17.5's Dexie storage makes before it opens anything
+ * (plugins/storage-dexie/rx-storage-dexie.js, createStorageInstance): an index on a field that is not
+ * required is refused with DXE1, as version 3's `sessionId` index is. Node has no IndexedDB for the
+ * real storage; e2e/storage.spec.ts carries a legacy order over through it in Chromium.
+ */
+function dexieRules(): RxStorage<any, any> {
+  const storage = memoryStorage();
+  return { ...storage, createStorageInstance: async (params) => {
+    const required: readonly string[] = params.schema.required ?? [];
+    const optional = (params.schema.indexes ?? []).flat().find((field) => !field.includes('.') && !required.includes(field));
+    if (optional) throw newRxError('DXE1', { field: optional });
+    return storage.createStorageInstance(params);
+  } };
+}
+
+/** The collections a memory database's internal store still records; RxDB removes the record with the database. */
+async function storedCollections(name: string) {
+  const db = await createRxDatabase({ name, storage: memoryStorage(), multiInstance: false });
+  try {
+    return (await getAllCollectionDocuments(db.internalStore)).map((meta) => meta.key);
+  } finally { await db.remove(); }
+}
+
 describe('carryOverOrders', () => {
   it('copies every document with its syncStatus, writes the marker, then removes the source', async () => {
     const fromName = 'legacy-carry-basic';
@@ -457,7 +482,42 @@ describe('carryOverOrders', () => {
     await to.remove();
   });
 
-  it.each([0, 1] as const)('a DM4 on a version-%i legacy open keeps the source and writes no marker; after a fix, the next carry-over copies all once', async (from) => {
+  it.each([0, 1] as const)('carries a version-%i order over from a store under Dexie\'s index rule, removes the source, and a rerun is a no-op', async (from) => {
+    const fromName = `legacy-carry-dexie-v${from}`;
+    const pending = olderSale(from);
+    const original = structuredClone(pending);
+    await seedOlder(from, fromName, [pending]);
+    const to = await memoryOrdersDb(`target-carry-dexie-v${from}`, true);
+    const warn = vi.spyOn(console, 'warn');
+    const bulkInsert = vi.spyOn(to.pos_orders, 'bulkInsert');
+    const carryOver = () => carryOverOrders({ fromStorage: dexieRules(), fromName, to, legacyExists });
+    try {
+      await carryOver();
+      // First, so a DXE1 (an open at the current schema, M1) shows in the failure.
+      expect(warn).not.toHaveBeenCalled();
+      // Every field it had, plus what TallyUI's v5 and v6 strategies record (M2's catch), and nothing else.
+      const expected = [migrated(original)];
+      expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual(expected);
+      const marker = (await to.getLocal('legacy-orders-migrated'))?.toJSON().data;
+      expect(marker).toMatchObject({ count: 1 });
+      expect(await olderDocuments(from, fromName, [pending.id])).toEqual([]);
+      expect(await storedCollections(fromName)).toEqual([]);
+
+      await carryOver();
+      expect(warn).not.toHaveBeenCalled();
+      expect(bulkInsert).toHaveBeenCalledTimes(1);
+      expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual(expected);
+      expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toEqual(marker);
+      expect(await storedCollections(fromName)).toEqual([]);
+    } finally {
+      warn.mockRestore();
+      await to.remove();
+    }
+  });
+
+  // The legacy store is read, never migrated in place, so no DM4: the new store refuses the order v6 rejects, and the
+  // read-back (M3's catch: a removal before it would lose that order) keeps the source for the next open.
+  it.each([0, 1] as const)('an order v6 refuses keeps the version-%i legacy source and writes no marker; after a fix, the next carry-over copies the rest once', async (from) => {
     const fromName = `legacy-carry-dm4-v${from}`;
     const pending = olderSale(from);
     const invalid = invalidSale(from);
@@ -467,9 +527,10 @@ describe('carryOverOrders', () => {
     const bulkInsert = vi.spyOn(to.pos_orders, 'bulkInsert');
     try {
       await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('carry-over'), expect.objectContaining({ code: 'DM4' }));
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining('carry-over'), expect.objectContaining({
+        message: expect.stringContaining('only 1 of 2 legacy orders verified') }));
       expect(await to.getLocal('legacy-orders-migrated')).toBeNull();
-      expect(await to.pos_orders.find().exec()).toEqual([]);
+      expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toEqual([migrated(pending)]);
       expect((await olderDocuments(from, fromName, [pending.id, invalid.id])).sort(byId)).toEqual([pending, invalid].sort(byId));
 
       const fixed: PosOrder = { ...invalid, syncStatus: 'pending' };
@@ -477,7 +538,9 @@ describe('carryOverOrders', () => {
       warn.mockClear();
       await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
       expect(warn).not.toHaveBeenCalled();
-      expect(bulkInsert).toHaveBeenCalledTimes(1);
+      // The second run inserts only the fixed order: the copy already there wins.
+      expect(bulkInsert).toHaveBeenCalledTimes(2);
+      expect(bulkInsert).toHaveBeenLastCalledWith([migrated(fixed)]);
       expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].map(migrated).sort(byId));
       expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 2 });
       expect(await olderDocuments(from, fromName, [pending.id, invalid.id])).toEqual([]);
