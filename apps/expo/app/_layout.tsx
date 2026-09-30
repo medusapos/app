@@ -1,4 +1,5 @@
 import '../global.css';
+import '../lib/app-store-dump';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PortalHost } from '@tallyui/primitives';

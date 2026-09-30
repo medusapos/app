@@ -2,10 +2,11 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
+const posConnector = createPosConnector();
 const baseUrl = 'https://replication-auth.test';
 const token = 'test-admin-jwt';
 const headers = authHeaders(token);

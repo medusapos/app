@@ -3,8 +3,9 @@ import { readFile, stat } from 'node:fs/promises';
 import { extname, resolve, sep } from 'node:path';
 
 const port = Number(process.env.E2E_APP_PORT ?? 8099);
-const root = resolve('apps/expo/dist');
-const config = JSON.parse(await readFile('apps/expo/vercel.json', 'utf8'));
+const appRoot = process.env.E2E_APP_ROOT ?? 'apps/expo';
+const root = resolve(appRoot, 'dist');
+const config = JSON.parse(await readFile(resolve(appRoot, 'vercel.json'), 'utf8'));
 const headers = config.headers.find(({ source }) => source === '/(.*)').headers;
 const types = {
   '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
@@ -14,6 +15,7 @@ const types = {
 };
 createServer(async (req, res) => {
   for (const { key, value } of headers) res.setHeader(key, value);
+  res.setHeader('Cache-Control', 'no-store');
   try {
     let file = resolve(root, '.' + decodeURIComponent(new URL(req.url, 'http://localhost:8099').pathname));
     if (file !== root && !file.startsWith(root + sep)) {

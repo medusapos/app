@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
-import { Subject } from 'rxjs';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { startIdReconcile, startReplication, type IdReconcileResult } from '@tallyui/database';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
@@ -14,6 +14,7 @@ vi.mock('@tallyui/database', async (importOriginal) => {
     startReplication: vi.fn(), startIdReconcile: vi.fn() };
 });
 
+const posConnector = createPosConnector();
 const baseUrl = 'https://id-reconcile.test';
 const headers = authHeaders('test-admin-jwt');
 const context = { connectorId: posConnector.id, baseUrl, headers };
@@ -21,7 +22,7 @@ const onUnauthorized = vi.fn();
 const enqueue = vi.fn();
 // No stock adapter: this suite is only about the id-reconcile runner.
 const connector = { ...posConnector, reconcile: { ids: { ...posConnector.reconcile!.ids!, enqueue } } };
-const pass = (braked: boolean): IdReconcileResult => ({ pages: 1, queued: 0, truncated: false, braked });
+const pass = (braked: boolean): IdReconcileResult => ({ pages: 1, queued: 0, truncated: false, braked, complete: !braked });
 
 afterEach(async () => {
   await clearProductCache(connector.id, baseUrl);
@@ -38,6 +39,7 @@ async function mount(reconcileImpl: () => Promise<IdReconcileResult>) {
   let finishInitial!: () => void;
   const reSync = vi.fn();
   vi.mocked(startReplication).mockReturnValue({
+    notice$: new BehaviorSubject(undefined), resume: vi.fn(),
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(), reSync,
     awaitInitialReplication: () => new Promise<void>((done) => { finishInitial = done; }),
   } as never);

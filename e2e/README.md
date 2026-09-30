@@ -1,5 +1,17 @@
 # Throwaway end-to-end store
 
+## Carry-over from the released build
+
+`pnpm e2e:carryover` proves that the four app-owned collections and the register local document survive a released-to-current web OPFS upgrade, comparing whole documents and then syncing pending sales exactly once. Prepare a sibling released checkout locally:
+
+```sh
+git worktree add --detach ../released "$(node e2e/carryover/released-tag.mjs)"
+~/.claude/bin/rxdb-premium-install.sh ../released
+E2E_RELEASED_SRC=../released pnpm e2e:carryover
+```
+
+`e2e/.tmp/carryover/released` is reused until the tag, commit, backend URL or RxDB pin changes; delete it to rebuild. Native is not covered: native storage is memory (`apps/expo/lib/product-cache.ts:27-30`).
+
 From the repo root, with dependencies and Playwright Chromium already installed:
 
 ```sh

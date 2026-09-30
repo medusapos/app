@@ -39,7 +39,7 @@ test('two cash sales in quick succession both reach Medusa once, with no reload'
   await Promise.all([page.getByRole('button', { name: 'Complete sale', exact: true }).click(), releaseFirst()]);
   await page.getByRole('button', { name: 'New sale', exact: true }).click();
 
-  await expect(page.getByText('All sales synced', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
   expect(loads).toBe(0);
   expect(sales.size).toBe(2);
   const orders = await ordersByClientId(token);

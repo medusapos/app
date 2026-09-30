@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { isStorageWorkerFailure } from '@tallyui/database';
+import { StorageUnavailableError, StorageWorkerStartError } from '@tallyui/storage-sqlite/web';
 
 const { closeOrderStoresMock, closeProductCachesMock, terminateWebStorageMock } = vi.hoisted(() => ({
   closeOrderStoresMock: vi.fn(),
@@ -26,6 +28,38 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('storageStartFailureOf', () => {
+  it('recognises storage unavailable even though isStorageWorkerFailure does not', async () => {
+    const { storageStartFailureOf } = await importLiveTab();
+    const error = new StorageUnavailableError('StorageUnavailableError: no OPFS');
+    expect(isStorageWorkerFailure(error)).toBe(false);
+    expect(storageStartFailureOf(error)).toBe('unavailable');
+  });
+
+  it.each([
+    [new Error('could not create instance ' + JSON.stringify({
+      name: 'StorageUnavailableError', message: 'StorageUnavailableError: no OPFS',
+    })), 'unavailable'],
+    [new StorageWorkerStartError('StorageWorkerStartError: another tab holds the database (opfs-sahpool): locked'), 'held'],
+    [Object.assign(new Error('RM1'), { code: 'RM1', rxdb: true }), 'stale'],
+    [new StorageWorkerStartError('StorageWorkerStartError: SQLite worker start failed: boom'), 'failed'],
+    [new Error('DM4'), null],
+  ])('classifies %s as %s', async (error, expected) => {
+    const { storageStartFailureOf } = await importLiveTab();
+    expect(storageStartFailureOf(error)).toBe(expected);
+  });
+});
+
+it('keeps the first reported failure', async () => {
+  const { reportStorageStartFailure, storageStartFailed$ } = await importLiveTab();
+  const emitted = vi.fn();
+  const subscription = storageStartFailed$.subscribe(emitted);
+  reportStorageStartFailure('held');
+  reportStorageStartFailure('stale');
+  expect(emitted.mock.calls).toEqual([[null], ['held']]);
+  subscription.unsubscribe();
 });
 
 describe('closeDatabases park order', () => {

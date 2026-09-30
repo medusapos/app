@@ -2,7 +2,7 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PosOrderOpenClosedError, type PosOrder } from '@tallyui/pos';
-import { StorageWorkerStartError } from '@tallyui/storage-sqlite/web';
+import { StorageUnavailableError, StorageWorkerStartError } from '@tallyui/storage-sqlite/web';
 import { reportStorageStartFailure } from '../lib/live-tab';
 import { useSessionOutbox } from '../lib/outbox-context';
 import { StorageHealth } from '../components/storage-health';
@@ -80,6 +80,21 @@ describe('StorageHealth: an order-store open failure other than a storage-worker
     try {
       render(<StorageHealth><Harness session={session} /></StorageHealth>);
       await waitFor(() => expect(reportStorageStartFailure).toHaveBeenCalled());
+      expect(reportStorageStartFailure).toHaveBeenCalledWith('failed');
+      expect(screen.queryByText("Saved sales can't be opened")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+      terminateWebStorage();
+    }
+  });
+
+  it('a private window (StorageUnavailableError) takes the storage-start path, not this prompt', async () => {
+    class FailingWorker { constructor() { throw new StorageUnavailableError('StorageUnavailableError: no OPFS'); } }
+    vi.stubGlobal('Worker', FailingWorker);
+    vi.stubGlobal('navigator', { ...navigator, storage: { getDirectory: async () => ({}) } });
+    try {
+      render(<StorageHealth><Harness session={session} /></StorageHealth>);
+      await waitFor(() => expect(reportStorageStartFailure).toHaveBeenCalledWith('unavailable'));
       expect(screen.queryByText("Saved sales can't be opened")).toBeNull();
     } finally {
       vi.unstubAllGlobals();

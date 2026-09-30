@@ -9,6 +9,7 @@
     "build": "turbo build",
     "test": "vitest run",
     "e2e": "playwright test -c e2e/playwright.config.ts",
+    "e2e:carryover": "playwright test -c e2e/carryover/playwright.config.ts",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"
@@ -32,14 +33,14 @@
       "rxdb-premium"
     ],
     "overrides": {
-      "@tallyui/core": "2.0.0",
-      "@tallyui/components": "2.0.0",
-      "@tallyui/database": "2.0.0",
-      "@tallyui/pos": "2.0.0",
-      "@tallyui/primitives": "2.0.0",
-      "@tallyui/theme": "2.0.0",
-      "@tallyui/connector-medusa": "2.0.0",
-      "@tallyui/storage-sqlite": "2.0.0"
+      "@tallyui/core": "3.0.0-next.1",
+      "@tallyui/components": "3.0.0-next.1",
+      "@tallyui/database": "3.0.0-next.1",
+      "@tallyui/pos": "3.0.0-next.1",
+      "@tallyui/primitives": "3.0.0-next.1",
+      "@tallyui/theme": "3.0.0-next.1",
+      "@tallyui/connector-medusa": "3.0.0-next.1",
+      "@tallyui/storage-sqlite": "3.0.0-next.1"
     }
   }
 }

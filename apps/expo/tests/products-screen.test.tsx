@@ -13,7 +13,7 @@ import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { clearProductCache } from '../lib/product-cache';
 import { saveScannerSettings } from '../lib/scanner-settings';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
 import { watchStorageHealth } from '../lib/storage-health';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
@@ -26,6 +26,7 @@ import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
@@ -113,7 +114,8 @@ vi.mock('@tallyui/components/checkout', () => ({
 type Replicated = ReturnType<typeof useReplicatedProducts>;
 const reconcileStock = vi.fn(async () => {});
 const replicated = (over: Partial<Replicated>): Replicated => ({ products: [], state: 'synced', error: null,
-  lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, unlisted: undefined, ...over });
+  lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, unlisted: undefined,
+  pullNotice: undefined, resumePull: vi.fn(), ...over });
 
 const settings: StoreSettings = {
   storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' },
@@ -131,16 +133,26 @@ beforeEach(() => {
     removeItem: (key: string) => { data.delete(key); },
   });
   saveCachedSettings(localStorage, 'https://store.test', settings);
-  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+  capabilities.mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null by default: the order store is open unless a test says otherwise (#86 review, item 5).
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
 
 describe('ProductsScreen catalogue', () => {
+  it('shows a stopped product pull above the sales line', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
+      pullNotice: { code: 'unauthorized', since: 0, fixedBy: 'till' },
+    }));
+    await mount();
+    const notice = screen.getByText("Products aren't updating: this till needs to sign in to the online store again.");
+    const sales = screen.getByText('Sales are up to date.');
+    expect(notice.compareDocumentPosition(sales) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('keeps search focusable and editable with the authRequired strip in the title slot and header actions present', async () => {
     const { SignInAgain } = await import('../components/sign-in-again');
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 1, sending: false, authRequired: true } });
@@ -216,7 +228,7 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
-    expect(screen.getByLabelText('Sync status').textContent).toBe('All sales synced');
+    expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByRole('button', { name: 'Apple' }));
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText('Search or scan barcode / SKU'), { target: { value: 'zebra' } });
@@ -268,7 +280,8 @@ describe('ProductsScreen catalogue', () => {
         { ...order, id: 'warned', syncStatus: 'applied', warnings: [{ code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }],
     });
     await mount();
-    expect(screen.getByLabelText('Sync status').textContent).toBe('2 sales waiting to sync · sending');
+    expect(screen.getByLabelText('2 sales waiting to sync').textContent).toBe('2 sales waiting to sync');
+    expect(screen.getByText('Sending…')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Orders (2)' }));
     expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders');
     expect(router.replace).not.toHaveBeenCalled();
@@ -334,7 +347,7 @@ describe('Orders screen and sync status', () => {
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Recent']);
-    for (const label of ['invalid: Unknown variant', 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order #42 · 3 items']) {
+    for (const label of ["The online store refused this sale. Ask the store owner to look at the till's sync log.", 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order #42 · 3 items']) {
       expect(screen.getAllByText(label)).toHaveLength(2);
     }
     expect(screen.getAllByText('1 item')).toHaveLength(3);
@@ -359,7 +372,9 @@ describe('Orders screen and sync status', () => {
       expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
       expect(requeue).not.toHaveBeenCalled();
     }
-    expect(screen.queryByText('This sale needs checking against the store before it can be sent again.') !== null).toBe(kind === 'idempotency_mismatch');
+    // In both Needs attention and Recent (#314).
+    expect(screen.queryAllByText("The online store has a different sale under this sale's number. Don't send it again; ask the store owner to compare the two."))
+      .toHaveLength(kind === 'idempotency_mismatch' ? 2 : 0);
   });
 
   it.each([0, 1])('blocks repeat Retry taps until requeue resolves %s or the order leaves rejected', async (result) => {
@@ -402,9 +417,11 @@ describe('Orders screen and sync status', () => {
     vi.useFakeTimers();
     try {
       render(<SyncStatus state={{ pending: 1, sending: false, lastRetryReason: 'network', nextAttemptAt: Date.now() + 3000 }} />);
-      expect(screen.getByLabelText('Sync status').textContent).toBe('1 sale waiting to sync · retrying (network) in 3s');
+      expect(screen.getByLabelText('1 sale waiting to sync').textContent).toBe('1 sale waiting to sync');
+      expect(screen.getByText('Retrying in 3 s.')).toBeTruthy();
       act(() => { vi.advanceTimersByTime(1000); });
-      expect(screen.getByLabelText('Sync status').textContent).toBe('1 sale waiting to sync · retrying (network) in 2s');
+      expect(screen.getByText('Retrying in 2 s.')).toBeTruthy();
+      expect(screen.queryByText('Retrying in 3 s.')).toBeNull();
       cleanup();
     } finally { vi.useRealTimers(); }
   });
@@ -644,7 +661,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOrderOutbox).mockImplementation(function useHungOutbox() {
       const [savesInFlight, setSavesInFlight] = useState(0);
       // Not null: these tests are about the hung-save mechanics, not the order-store-open gate (#86 review, item 5).
-      return { orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight, isStored,
+      return { orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight, stuckCommandIds: [], isStored,
         flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
         async record(order: PosOrder) {
           setSavesInFlight((count) => count + 1);
@@ -871,10 +888,45 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
   afterEach(() => { vi.mocked(refreshSession).mockReset(); vi.mocked(login).mockReset(); });
 
+  it('builds a new connector for each store session and keeps it for the whole session', async () => {
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token: inADay() });
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
+    const a = vi.mocked(useReplicatedProducts).mock.lastCall![0];
+
+    await act(async () => { view.rerender(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
+    expect(vi.mocked(useReplicatedProducts).mock.lastCall![0]).toBe(a);
+    const renewed = jwt(Math.floor(Date.now() / 1000) + 2 * 86400);
+    vi.mocked(login).mockResolvedValue({ baseUrl: 'https://store.test', email: 'admin@store.test', token: renewed });
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    expect(context.session?.token).toBe(renewed);
+    expect(vi.mocked(useReplicatedProducts).mock.lastCall![0]).toBe(a);
+
+    act(() => { context.signOut(); });
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    const b = vi.mocked(useReplicatedProducts).mock.lastCall![0];
+    expect(b).not.toBe(a);
+  });
+
   async function mountTill(token = inADay()) {
     saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token });
     await act(async () => { render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
   }
+  it('resumes a stopped product pull after the session is renewed in place, never on mount', async () => {
+    const resumePull = vi.fn();
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
+      pullNotice: { code: 'unauthorized', since: 0, fixedBy: 'till' }, resumePull,
+    }));
+    await mountTill();
+    expect(resumePull).not.toHaveBeenCalled();
+    const renewed = jwt(Math.floor(Date.now() / 1000) + 2 * 86400);
+    vi.mocked(login).mockResolvedValue({ baseUrl: 'https://store.test', email: 'admin@store.test', token: renewed });
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    expect(context.session?.token).toBe(renewed);
+    expect(resumePull).toHaveBeenCalledTimes(1);
+  });
+
   /** Tenders the shirt by card; the first save fails and isn't stored, the retry stores it. */
   async function failedSave(token?: string) {
     const record = vi.fn().mockRejectedValueOnce(new Error('Storage full')).mockResolvedValue(undefined);
@@ -891,7 +943,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     'the Sign out button': { request: () => { fireEvent.click(button('Sign out')); context.signOut(); } },
     'a product replication 401': { request: () => vi.mocked(useReplicatedProducts).mock.lastCall![2]() },
     'the capabilities check': {
-      arm: () => { vi.mocked(posConnector.capabilities!).mockImplementation(held); },
+      arm: () => { capabilities.mockImplementation(held); },
       request: () => reject(new SignInError('invalid_credentials', 'Token expired', 401)),
     },
     'the store-settings fetch': {

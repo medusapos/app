@@ -1,4 +1,7 @@
-import { addRxPlugin, createRxDatabase, removeRxDatabase, type RxCollection, type RxDatabase, type RxStorage } from 'rxdb';
+import {
+  addRxPlugin, createRxDatabase, getAllCollectionDocuments, prepareQuery, type RxCollection, type RxDatabase, type RxStorage,
+} from 'rxdb';
+import { migrateDocumentData } from 'rxdb/plugins/migration-schema';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
@@ -30,7 +33,7 @@ let e2eInsertHold: { promise: Promise<void>; release(): void; waiting: number } 
 let e2eFailClosureInsert = false;
 
 // Local document id recording that `carryOverOrders` copied a legacy database (count and time).
-// A record only: it never causes a delete, nor skips reading a legacy database that exists.
+// Once present, the legacy database is kept and never read again.
 const LEGACY_ORDERS_MARKER = 'legacy-orders-migrated';
 
 // How long an open waits on the previous store for its backend to close (#85 review). RxDB's close waits, with no
@@ -55,29 +58,8 @@ export function orderDatabaseName(baseUrl: string): string {
 }
 
 /**
- * `removeRxDatabase`, then a broad IndexedDB sweep for any `rxdb-dexie-<fromName>--` database it
- * left behind: the local-documents plugin's removal hook creates, then immediately removes, its
- * own "plugin-local-documents" Dexie database as part of that call, even for a database that
- * never used local documents — and in a real browser, that round trip can itself leave the
- * (still-empty) database behind. Never throws.
- */
-async function removeLegacyOrdersDatabase(fromName: string, fromStorage: RxStorage<any, any>): Promise<void> {
-  await removeRxDatabase(fromName, fromStorage);
-  const databases = await globalThis.indexedDB?.databases?.().catch(() => undefined);
-  if (!databases) return;
-  const prefix = `rxdb-dexie-${fromName}--`;
-  const names = databases.map((db) => db.name).filter((name): name is string => !!name?.startsWith(prefix));
-  await Promise.all(names.map((name) => new Promise<void>((resolve) => {
-    const request = globalThis.indexedDB.deleteDatabase(name);
-    request.onsuccess = () => resolve();
-    request.onerror = () => resolve();
-    request.onblocked = () => resolve();
-  })));
-}
-
-/**
  * True when IndexedDB holds any `rxdb-dexie-<fromName>--…` database. Where the browser cannot
- * list databases, true: an unknown legacy database is read (and only then removed), never skipped.
+ * list databases, true: an unknown legacy database is read until marked, then kept (see `carryOverOrders`).
  */
 async function legacyOrdersDatabaseExists(fromName: string): Promise<boolean> {
   if (!globalThis.indexedDB?.databases) return true;
@@ -85,18 +67,47 @@ async function legacyOrdersDatabaseExists(fromName: string): Promise<boolean> {
 }
 
 /**
+ * Every live `pos_orders` document of the legacy database, brought to the current version by the migration strategies
+ * `to` was added with (`posOrderCollection()`'s, the ones the SQLite store's own migration runs). Read only: each stored
+ * version is opened with the schema RxDB stored for it in the database's internal store, as RxDB's own
+ * `removeCollectionStorages` opens it, never with the current one, whose optional `sessionId` index (v3) Dexie refuses
+ * (DXE1). Pre-SQLite builds wrote v0; a v1 or v2 build's in-place migration that stopped short can leave v1 or v2 beside
+ * it, and the copy at the higher version wins.
+ */
+async function readLegacyOrders(legacy: RxDatabase, to: RxCollection<PosOrder>): Promise<PosOrder[]> {
+  const stored = (await getAllCollectionDocuments(legacy.internalStore)).map((meta) => meta.data)
+    .filter((meta) => meta.name === 'pos_orders').sort((a, b) => b.schema.version - a.schema.version);
+  const orders = new Map<string, PosOrder>();
+  for (const { schema } of stored) {
+    const instance = await legacy.storage.createStorageInstance<PosOrder>({
+      databaseName: legacy.name, collectionName: 'pos_orders', schema, options: {}, multiInstance: false,
+      databaseInstanceToken: legacy.token, devMode: false,
+    });
+    try {
+      const { documents } = await instance.query(prepareQuery(schema, { selector: { _deleted: { $eq: false } }, sort: [{ id: 'asc' }], skip: 0 }));
+      for (const doc of documents.filter((doc) => !orders.has(doc.id))) {
+        const { _deleted, _meta, _rev, _attachments, ...order } = await migrateDocumentData(to, schema.version, doc);
+        orders.set(doc.id, order as PosOrder);
+      }
+    } finally { await instance.close(); }
+  }
+  return [...orders.values()];
+}
+
+/**
  * Idempotent, crash-safe copy of any sales in the pre-SQLite Dexie order
- * store into the new one, on every open while a legacy database exists
- * (a tab still on the old build can write one after a first copy).
+ * store into the new one, on every open until the marker is written, then never again
+ * (later legacy sales from tabs still on pre-SQLite builds are not carried over).
  * Exported so a unit test can run it directly with memory storages.
  *
  * When `legacyExists()` is false it opens and creates nothing. Otherwise
- * every `pos_orders` document is read from the legacy database, only the
+ * every `pos_orders` document is read from the legacy database and migrated
+ * without writing to it (`readLegacyOrders`), only the
  * ids missing from the new store are inserted (`bulkInsert`, never upsert:
  * a copy already there, possibly synced since, always wins), every legacy
  * id is verified present by a `findByIds` count, the marker is written if
- * absent, and only then is the legacy database removed. A failure anywhere
- * before the removal leaves the legacy database in place and only logs a
+ * absent. The legacy database is kept (Front desk ruling, 2026-09-30); deletion awaits a later release. A failure
+ * before the marker leaves it absent and only logs a
  * warning: the store still opens, and the next open repeats the copy.
  */
 export async function carryOverOrders({ fromStorage, fromName, to, legacyExists }: {
@@ -106,15 +117,12 @@ export async function carryOverOrders({ fromStorage, fromName, to, legacyExists 
   legacyExists: () => Promise<boolean>;
 }): Promise<void> {
   try {
+    if (await to.getLocal(LEGACY_ORDERS_MARKER)) return;
     if (!(await legacyExists())) return;
     let count = 0;
-    const legacy = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
-      name: fromName, storage: fromStorage, multiInstance: false,
-    });
+    const legacy = await createRxDatabase({ name: fromName, storage: fromStorage, multiInstance: false });
     try {
-      // Migrates legacy v0 (or v1) to v2 in place; a DM4 throws here, before any copy or marker, so the source stays.
-      await addOrders(legacy);
-      const docs = (await legacy.pos_orders.find().exec()).map((doc) => doc.toJSON() as PosOrder);
+      const docs = await readLegacyOrders(legacy, to.pos_orders);
       if (docs.length) {
         const present = await to.pos_orders.findByIds(docs.map((order) => order.id)).exec();
         const missing = docs.filter((order) => !present.has(order.id));
@@ -131,7 +139,6 @@ export async function carryOverOrders({ fromStorage, fromName, to, legacyExists 
     if (!(await to.getLocal(LEGACY_ORDERS_MARKER))) {
       await to.insertLocal(LEGACY_ORDERS_MARKER, { count, at: new Date().toISOString() });
     }
-    await removeLegacyOrdersDatabase(fromName, fromStorage);
   } catch (error) {
     console.warn('Order carry-over from the legacy store failed; the next open will retry it:', error);
   }
@@ -252,17 +259,22 @@ export async function closeOrderStores(): Promise<void> {
 
 // E2E debug hooks (see e2e-debug.ts): each seeds one order into a store at an older `pos_orders` schema, exactly
 // as the shipped builds wrote it, and resolves to that version. Faithful schemas, like TallyUI's open.test-helper:
-// v1 is the current v2 minus its only additions (`lateSessionId`, `display`, `taxByRate`; TallyUI c1a), and
-// v0 is v1 minus its only addition (`sessionId`; TallyUI #123).
+// v1 is the current v6 minus the additions of v2 to v6 (`lateSessionId`, `display`, `taxByRate`; the `sessionId`
+// index and maxLength, `sentVersion`, `downgradedFrom`; `localWarnings`, `serverFailures`; the required `taxRounding`),
+// and v0 is v1 minus its only addition (`sessionId`; TallyUI #123).
 // - SeedLegacyOrder: v0 into a backend's legacy Dexie order database (the pre-SQLite builds were all v0);
 // - SeedV0Order / SeedV1Order: v0 / v1 into its SQLite order store, then end the worker;
 // - FailNextOrderStoreOpen: arms the check above so the next openOrderStore rejects once with `code`.
 if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
-  const { lateSessionId: _late, display: _display, taxByRate: _taxByRate, ...v1Properties } = posOrderSchema.properties;
-  const { sessionId: _session, ...v0Properties } = v1Properties;
+  const { lateSessionId: _late, display: _display, taxByRate: _taxByRate, sentVersion: _sent, downgradedFrom: _down,
+    localWarnings: _local, serverFailures: _failures, taxRounding: _rounding, ...current } = posOrderSchema.properties;
+  const { sessionId: _session, ...v0Properties } = current;
+  const v1Properties = { ...v0Properties, sessionId: { type: 'string' } };
+  const older = { ...posOrderSchema, required: posOrderSchema.required!.filter((key) => key !== 'taxRounding'),
+    indexes: posOrderSchema.indexes!.filter((index) => index !== 'sessionId') };
   const olderSchemas = {
-    0: { ...posOrderSchema, version: 0, properties: v0Properties as typeof posOrderSchema.properties },
-    1: { ...posOrderSchema, version: 1, properties: v1Properties as typeof posOrderSchema.properties },
+    0: { ...older, version: 0, properties: v0Properties as typeof posOrderSchema.properties },
+    1: { ...older, version: 1, properties: v1Properties as typeof posOrderSchema.properties },
   };
   const seed = async (version: 0 | 1, name: string, storage: RxStorage<any, any>, order: PosOrder) => {
     const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({ name, storage, multiInstance: false });

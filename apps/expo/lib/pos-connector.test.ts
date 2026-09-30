@@ -1,21 +1,28 @@
 import { expect, it } from 'vitest';
-import { medusaConnector } from '@tallyui/connector-medusa';
-import { authHeaders, posConnector } from './pos-connector';
+import { authHeaders, createPosConnector, POS_CONNECTOR_ID } from './pos-connector';
 
 it('declares the admin user Bearer credential type and login fields', () => {
-  expect(posConnector.auth.type).toBe('Medusa admin user (Bearer JWT)');
-  expect(posConnector.auth.fields.map((field) => field.key)).toEqual(['url', 'email', 'password']);
+  const connector = createPosConnector();
+  expect(connector.auth.type).toBe('Medusa admin user (Bearer JWT)');
+  expect(connector.auth.fields.map((field) => field.key)).toEqual(['url', 'email', 'password']);
 });
 
 it('gets Bearer headers from the connector and helper', () => {
-  expect(posConnector.auth.getHeaders({ token: 'jwt' })).toEqual({ Authorization: 'Bearer jwt' });
+  expect(createPosConnector().auth.getHeaders({ token: 'jwt' })).toEqual({ Authorization: 'Bearer jwt' });
   expect(authHeaders('jwt')).toEqual({ Authorization: 'Bearer jwt' });
 });
 
-it('preserves the stock connector identity, schemas, traits, and replication', () => {
-  expect(posConnector.id).toBe(medusaConnector.id);
-  expect(posConnector.name).toBe(medusaConnector.name);
-  expect(posConnector.schemas).toBe(medusaConnector.schemas);
-  expect(posConnector.traits).toBe(medusaConnector.traits);
-  expect(posConnector.replication).toBe(medusaConnector.replication);
+it('builds a connector with its own reconcile feed on every call', () => {
+  const a = createPosConnector();
+  const b = createPosConnector();
+  expect(a).not.toBe(b);
+  expect(a.replication!.products).not.toBe(b.replication!.products);
+  expect(a.reconcile!.ids!.enqueue).not.toBe(b.reconcile!.ids!.enqueue);
+  expect(a.schemas).toBe(b.schemas);
+  expect(a.traits).toBe(b.traits);
+});
+
+it('its id is POS_CONNECTOR_ID', () => {
+  expect(createPosConnector().id).toBe(POS_CONNECTOR_ID);
+  expect(POS_CONNECTOR_ID).toBe('medusa');
 });

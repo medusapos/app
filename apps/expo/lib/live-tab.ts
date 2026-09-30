@@ -1,4 +1,7 @@
 import { BehaviorSubject, type Observable } from 'rxjs';
+import { isRxdbRemoteVersionMismatch } from '@tallyui/core';
+import { isStorageWorkerFailure } from '@tallyui/database';
+import { isStorageHeldError, isStorageUnavailableError } from '@tallyui/storage-sqlite/web';
 import { closeOrderStores } from './order-store';
 import { closeProductCaches } from './product-cache';
 import { terminateWebStorage } from './web-storage';
@@ -55,14 +58,23 @@ export async function closeDatabases(): Promise<void> {
   terminateWebStorage();
 }
 
-// True once a store's open has failed with a StorageWorkerStartError (e.g. the opfs-sahpool pool
-// held by another worker). Sticky: like a dead worker, reload is the only recovery.
-const storageStartFailedSubject = new BehaviorSubject<boolean>(false);
+export type StorageStartFailure = 'unavailable' | 'held' | 'stale' | 'failed';
 
-/** The gate renders the blocked screen while this is true, whatever the coordinator state. */
-export const storageStartFailed$: Observable<boolean> = storageStartFailedSubject.asObservable();
+/** Follows @tallyui/storage-sqlite README's "Recognising a failed start" predicate order. */
+export function storageStartFailureOf(error: unknown): StorageStartFailure | null {
+  if (isStorageUnavailableError(error)) return 'unavailable';
+  if (isStorageHeldError(error)) return 'held';
+  if (isRxdbRemoteVersionMismatch(error)) return 'stale';
+  return isStorageWorkerFailure(error) ? 'failed' : null;
+}
 
-/** Marks that a store's open failed with a StorageWorkerStartError (the outbox's `onOpenError`, `useReplicatedProducts`). */
-export function reportStorageStartFailure(): void {
-  storageStartFailedSubject.next(true);
+// The first storage-start failure wins and stays set until reload, even if another store fails differently.
+const storageStartFailedSubject = new BehaviorSubject<StorageStartFailure | null>(null);
+
+/** The gate shows this failure's screen while set, whatever the coordinator state. */
+export const storageStartFailed$: Observable<StorageStartFailure | null> = storageStartFailedSubject.asObservable();
+
+/** Reports a failed start from the outbox's `onOpenError` or `useReplicatedProducts`. */
+export function reportStorageStartFailure(failure: StorageStartFailure): void {
+  if (storageStartFailedSubject.value === null) storageStartFailedSubject.next(failure);
 }

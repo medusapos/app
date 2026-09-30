@@ -14,7 +14,10 @@ Work through this before tagging a release of the app or the plugin. An item tha
   - A sale that seems to have vanished must never be rung again: it comes back after the update and would count twice.
   - Fixes go forward, never back.
   - The release notes for the store owner say this in plain words (see `release-notes/next.md`).
-- [ ] **Carry-over test:** the bump PR for TallyUI 3.0.0 carries one for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
+- [ ] **Carry-over test** (Front desk rulings, 2026-09-30): the bump PR carries the test and does not merge without it passing. The released build writes documents, the new build opens the same store, and whole documents are compared (issue #128).
+  - Covers exactly the four app-owned collections (`pos_orders`, `register_sessions`, `cash_movements`, `closures`) plus the `register` local document, with an exact collection-set check. There is no parked-sale drafts collection: TallyUI's `draftsCollection` is never supplied.
+  - Web (OPFS) only; native is n/a while its storage is memory (`apps/expo/lib/product-cache.ts:27-30`).
+  - Confirm the tag the carry-over test resolved (logged by the run): `e2e/carryover/released-tag.mjs` resolves the newest `v*` tag on main; no constant is edited as a release step.
 - [ ] **The 3.0.0 bump, the pull notices (TallyUI/tallyui#261) and the connector factory (TallyUI/tallyui#307) ship in one PR, never apart** (Front desk ruling, 2026-09-30).
   - **Why together:** from 3.0.0, a product pull that fails with 401 no longer reaches the replication state's `error$`. Today the app signs the till out from that `error$` path (`apps/expo/lib/use-replicated-products.ts`). A bump without the notice wiring would leave an expired till's products silently stale, and the product pull would no longer sign the till out. That is a regression. A 401 on a sale send is the outbox's, and is unaffected.
   - **The wiring:** the app takes `@tallyui/*` only from published npm pins. The wiring goes in the bump PR itself: a bump PR without it does not merge. It needs three changes:

@@ -7,7 +7,8 @@ import { formatMoney, SignInError, StoreSettingsError, type StoreSettings as Pri
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 import { useOutboxContext } from '../lib/outbox-context';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities, storeSettings } from './pos-connector-mock';
+import { POS_CONNECTOR_ID } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
 import {
   fetchStoreSettings, loadCachedPricing, loadSettingsChoice, saveCachedPricing, saveCachedSettings, saveSettingsChoice, type StoreSettings,
@@ -16,6 +17,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: () => null } }));
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
@@ -77,8 +79,6 @@ const channels = [{ id: 'pk_1', name: 'Shop' }, { id: 'pk_2', name: 'Web' }];
 const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
   variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] };
 const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError('choice_required', 'Choose', choices);
-const storeSettings = vi.spyOn(posConnector, 'storeSettings');
-const capabilities = vi.spyOn(posConnector, 'capabilities');
 const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
   setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
@@ -94,19 +94,34 @@ beforeEach(() => {
   });
   // Each test states the calls it expects; any other call fails instead of reaching the network.
   storeSettings.mockReset().mockRejectedValue(new Error('Unexpected storeSettings call'));
-  capabilities.mockReset().mockResolvedValue(undefined);
+  capabilities.mockReset().mockResolvedValue({ orderCreate: 3, register: 1,
+    taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useSession).mockReturnValue(signedIn());
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null: this file's tender tests aren't about the order store opening (#86 review, item 5; see products-screen.test.tsx).
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0,
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
     record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: null, lastSyncedAt: null,
-    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe('store settings flow', () => {
+  it("shows the retry line while the store's tax rounding is unknown, and the POS once it is known", async () => {
+    capabilities.mockResolvedValue(undefined);
+    storeSettings.mockResolvedValue(pricing);
+    render(<ProductsScreen />);
+    expect(await screen.findByText("Can't reach the store's settings yet. Retrying…")).toBeTruthy();
+    expect(screen.queryByText('Store capabilities unavailable')).toBeNull();
+    expect(screen.queryByPlaceholderText('Search or scan barcode / SKU')).toBeNull();
+    capabilities.mockResolvedValue({ orderCreate: 3, register: 1,
+      taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
+    await act(async () => { fireEvent.click(button('Retry')); });
+    await pos();
+    expect(screen.queryByText("Can't reach the store's settings yet. Retrying…")).toBeNull();
+  });
+
   it('always resolves with the stock location\'s country, with or without a stored choice (D1)', async () => {
     storeSettings.mockResolvedValue(pricing);
     const first = render(<ProductsScreen />);
@@ -124,7 +139,7 @@ describe('store settings flow', () => {
     render(<ProductsScreen />);
     await pos();
     const context = vi.mocked(useReplicatedProducts).mock.lastCall![1];
-    expect(context).toMatchObject({ connectorId: posConnector.id, baseUrl: session.baseUrl, pricingContext: pricing.pricingContext });
+    expect(context).toMatchObject({ connectorId: POS_CONNECTOR_ID, baseUrl: session.baseUrl, pricingContext: pricing.pricingContext });
     expect({ ...context.headers }).toEqual({ Authorization: 'Bearer jwt' });
     expect(loadCachedPricing(localStorage, session.baseUrl)).toEqual(pricing);
   });
@@ -268,7 +283,7 @@ describe('store settings flow', () => {
     // The catalogue follows the replication context's region: Germany's own Shirt price is €20.
     const shirtDe = { ...shirt, variants: [{ ...shirt.variants[0], prices: [{ amount: 20, currency_code: 'eur' }] }] };
     vi.mocked(useReplicatedProducts).mockImplementation((_connector, context) => ({ products: [context.pricingContext?.region_id === 'reg_de' ? shirtDe : shirt],
-      state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined }));
+      state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined }));
     const region = () => vi.mocked(useReplicatedProducts).mock.lastCall![1].pricingContext?.region_id;
     fireEvent.click(button('Shirt'));
     // Germany's settings (19% inclusive, its own prices) arrive mid-sale: the sale, and the catalogue, stay on Europe's.
@@ -353,8 +368,8 @@ describe('store settings flow', () => {
   it.each([
     [{ orderCreate: 2 }, 'mergeCapabilities'], [undefined, 'mergeCapabilities'], [new SignInError('invalid_credentials', '401'), 'reportUnauthorized'],
   ] as const)('passes the restored session\'s capability read %s to %s', async (read, handler) => {
-    if (read instanceof Error) capabilities.mockRejectedValue(read);
-    else capabilities.mockResolvedValue(read);
+    if (read instanceof Error) capabilities.mockRejectedValueOnce(read);
+    else capabilities.mockResolvedValueOnce(read);
     storeSettings.mockResolvedValue(pricing);
     render(<ProductsScreen />);
     await pos();
@@ -362,5 +377,18 @@ describe('store settings flow', () => {
     await vi.waitFor(() => expect(context[handler]).toHaveBeenCalledOnce());
     if (handler === 'mergeCapabilities') expect(context.mergeCapabilities).toHaveBeenCalledWith(read);
     else expect(context.mergeCapabilities).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new SignInError('server_error', 'Store unavailable'), 0],
+    [new SignInError('invalid_credentials', '401'), 1],
+    [undefined, 0],
+  ] as const)('reports unauthorized only for invalid credentials from the capabilities read: %s', async (read, reports) => {
+    if (read instanceof Error) capabilities.mockRejectedValueOnce(read);
+    else capabilities.mockResolvedValueOnce(read);
+    storeSettings.mockResolvedValue(pricing);
+    render(<ProductsScreen />);
+    await pos();
+    expect(useSession().reportUnauthorized).toHaveBeenCalledTimes(reports);
   });
 });

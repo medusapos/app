@@ -6,7 +6,7 @@ import {
 } from './session';
 
 const session = { baseUrl: 'http://localhost:9000', email: 'admin@tally.test', token: 'jwt' };
-const response = (body: unknown, status = 200) => vi.fn<() => Promise<Response>>().mockResolvedValue(
+const response = (body: unknown, status = 200) => vi.fn<() => Promise<Response>>().mockImplementation(async () =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }),
 );
 // The connector's sign-in reads GET /tally/v1/info after the token (TallyUI ADR-062); 404 means an old plugin.
@@ -115,6 +115,7 @@ describe('login', () => {
   });
   it.each([
     [new Response('{"contracts":{"order.create":[1,2]}}'), { orderCreate: 2 }],
+    [new Response('{"contracts":{"order.create":[3]},"taxRounding":"bogus"}'), undefined],
     [new Response('{}', { status: 500 }), undefined],
   ])('stores the capabilities the sign-in read: %s', async (info, capabilities) => {
     const fetchImpl = vi.fn<() => Promise<Response>>()
@@ -161,7 +162,7 @@ describe('login', () => {
       .rejects.toMatchObject({ code: 'unreachable', message: 'Could not reach the backend.' });
   });
   it('maps malformed JSON to server_error', async () => {
-    const fetchImpl = vi.fn<() => Promise<Response>>().mockResolvedValue(new Response('not json'));
+    const fetchImpl = vi.fn<() => Promise<Response>>().mockImplementation(async () => new Response('not json'));
     await expect(login(session.baseUrl, session.email, 'secret', fetchImpl))
       .rejects.toMatchObject({ code: 'server_error' });
   });

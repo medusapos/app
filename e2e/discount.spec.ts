@@ -21,12 +21,14 @@ const appliedResponse = (page: Page) => page.waitForResponse(async (response) =>
 });
 const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medusapos.session') ?? 'null')?.capabilities);
 
-test('a discounted sale is applied as order.create v2, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
+test('a discounted sale is applied as order.create v3, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
   const token = await adminToken();
   const commands = captureCommands(page);
   await signIn(page);
-  // The plugin advertises order.create [1, 2, 3] (ADR 0012 amendment); a discounted sale is still sent as version 2 by the pinned TallyUI.
-  expect(await capabilities(page)).toEqual({ orderCreate: 3 });
+  // The plugin advertises order.create [1, 2, 3] (ADR 0012 amendment), register 1 and its tax rounding (TallyUI #322).
+  // With the server's max unknown to the outbox, TallyUI 3.0 sends a discounted sale at version 3 (#300).
+  expect(await capabilities(page)).toEqual({ orderCreate: 3, register: 1,
+    taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   await addE2E1(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '10');
@@ -63,7 +65,7 @@ test('a discounted sale is applied as order.create v2, with a "POS discount" adj
   expect(results[0].warnings).toBeUndefined();
   expect(commands).toHaveLength(1);
   const [{ version, payload }] = commands;
-  expect(version).toBe(2);
+  expect(version).toBe(3);
   // 2 × €2.00, 10% off (€0.40) plus the whole €0.50 order discount on the one line.
   expect(payload.lines).toEqual([expect.objectContaining({ discountMinor: 90 })]);
   const [order] = (await ordersByClientId(token)).filter((entry) => entry.metadata.tally_client_id === payload.clientOrderId);
@@ -92,7 +94,7 @@ test('below order.create v2 the till refuses a discount when it is applied, and 
   expect(commands).toHaveLength(0);
   await page.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(await sellBySku(page, [], 'exact')).toBe(2.5);
-  await expect(page.getByText('All sales synced', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
   expect(commands.map((command) => command.version)).toEqual([1]);
 });
 
@@ -114,7 +116,7 @@ test('100% off the line completes with cash at €0.00 as one Medusa order', asy
   expect(results[0].warnings).toBeUndefined();
   expect(results[0].serverRefs.totalMinor).toBe(0);
   expect(commands).toHaveLength(1);
-  expect(commands[0].version).toBe(2);
+  expect(commands[0].version).toBe(3);
   const orders = (await ordersByClientId(token)).filter((order) => order.metadata.tally_client_id === commands[0].payload.clientOrderId);
   expect(orders).toHaveLength(1);
   expect(orders[0].total).toBe(0);

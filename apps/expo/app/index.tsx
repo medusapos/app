@@ -4,7 +4,7 @@ import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import { Cart, CartBar, Catalogue, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
-import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
+import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, SALE_SAVING, TaxProvider, taxProviderProps, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
@@ -18,7 +18,7 @@ import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { useOutboxContext } from '../lib/outbox-context';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
@@ -30,9 +30,6 @@ import {
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 
-const connector = posConnector;
-const traits = connector.traits.product;
-
 const STATE_LABEL: Record<SyncState, string> = {
   connecting: 'Connecting',
   syncing: 'Syncing',
@@ -42,6 +39,8 @@ const STATE_LABEL: Record<SyncState, string> = {
 };
 
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
+// TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
+const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
 // Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
@@ -57,12 +56,13 @@ type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: ()
 
 function SettingsScreen(props: SignedInProps) {
   const { session, onUnauthorized, onCapabilities } = props;
+  const [connector] = useState(createPosConnector);
   // Once per store (this screen is keyed by it): re-read the order.create capability a restored session was saved with (ADR-062).
   useEffect(() => {
     let active = true;
     connector.capabilities?.({ connectorId: connector.id, baseUrl: session.baseUrl, headers: authHeaders(session.token) })
       .then((fresh) => { if (active) onCapabilities(fresh); })
-      .catch((error: unknown) => { if (active && error instanceof SignInError) onUnauthorized(); });
+      .catch((error: unknown) => { if (active && error instanceof SignInError && error.code === 'invalid_credentials') onUnauthorized(); });
     return () => { active = false; };
   }, [session.baseUrl, onCapabilities, onUnauthorized]);
   const [settings, setSettings] = useState(() => loadCachedSettings(defaultStorage(), session.baseUrl));
@@ -88,7 +88,7 @@ function SettingsScreen(props: SignedInProps) {
     return () => { active = false; };
   }, [session, onUnauthorized, attempt]);
   if (!settings) return <SettingsMessage text={error ?? 'Loading store settings…'} actions={error ? { Retry: () => setAttempt(attempt + 1) } : {}} />;
-  return <PricingScreen {...props} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
+  return <PricingScreen {...props} connector={connector} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
 }
 
 function SettingsMessage({ text, actions }: { text: string; actions: Record<string, () => void> }) {
@@ -102,11 +102,11 @@ function SettingsMessage({ text, actions }: { text: string; actions: Record<stri
   </>;
 }
 
-type PricingProps = SignedInProps & { settings: StoreSettings; settingsStatus: string | null };
+type PricingProps = SignedInProps & { connector: TallyConnector; settings: StoreSettings; settingsStatus: string | null };
 
 // TallyUI's store settings (TV4) price and tax every sale the way Medusa charges in the till's region.
 function PricingScreen(props: PricingProps) {
-  const { session, settings } = props;
+  const { session, settings, connector } = props;
   const token = useRef(session.token);
   token.current = session.token;
   const [attempt, setAttempt] = useState(0);
@@ -156,7 +156,8 @@ function PricingScreen(props: PricingProps) {
   }
   if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
   const pos = shown.current;
-  if (store.state === 'error' && !pos) return <SettingsMessage text={store.error instanceof Error ? store.error.message : String(store.error)} actions={{ Retry: store.retry }} />;
+  if (store.state === 'error' && !pos) return <SettingsMessage text={store.nextRetryAt !== undefined ? SETTINGS_RETRYING
+    : store.error instanceof Error ? store.error.message : String(store.error)} actions={{ Retry: store.retry }} />;
   if (!pos) return <SettingsMessage text="Loading store settings…" actions={{}} />;
   return <TaxProvider {...taxProviderProps(pos.pricing)}>
     <SignedInProducts {...props} pricing={pos.pricing} syncContext={pos.syncContext} onBusy={setBusy}
@@ -165,12 +166,18 @@ function PricingScreen(props: PricingProps) {
   </TaxProvider>;
 }
 
-function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
+function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
+  const traits = connector.traits.product;
   const { setSaleHold } = useSession();
-  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
+  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
+  const previousToken = useRef(session.token);
+  useEffect(() => {
+    if (previousToken.current !== session.token) resumePull();
+    previousToken.current = session.token;
+  }, [session.token, resumePull]);
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
   const { record, isStored, state: outboxState, recent, savesInFlight, orders } = useOutboxContext();
@@ -271,7 +278,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
-    <SyncStatus state={outboxState} />
+    <SyncStatus state={outboxState} pullNotice={pullNotice} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>

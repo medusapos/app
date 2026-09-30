@@ -145,7 +145,7 @@ test('a stock warning triggers a pass', async ({ page }) => {
     // route handler above still finishing its own fetch()/fulfill(): unroute() would auto-continue
     // a still-pending route, sending a second real request and racing the first one. Wait for the
     // sync to actually settle first, then it's safe to stop intercepting.
-    await expect(page.getByLabel('Sync status', { exact: true })).toHaveText('All sales synced');
+    await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
     await page.unroute('**/tally/v1/commands');
 
     // No visibility change here: the applied order carrying an insufficient_stock warning is

@@ -18,7 +18,8 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
   const sales = captureSales(page);
   const receiptTotals: number[] = [];
   await signIn(page);
-  const sync = page.getByLabel('Sync status', { exact: true });
+  // TallyUI's status line (#271): its label is its text; sending or retrying is a line of its own.
+  const upToDate = page.getByText('Sales are up to date.', { exact: true });
   // Repeated scans add quantity; these baskets have 1–3 lines and 1–3 of each SKU.
   const baskets = [
     ['E2E-1'],
@@ -32,7 +33,7 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
     const basket = baskets[i];
     receiptTotals.push(await sellBySku(page, basket, i % 2 === 0 ? 'exact' : 100));
     for (const sku of basket) sold[sku]++;
-    await expect(sync).toHaveText('All sales synced');
+    await expect(upToDate).toBeVisible();
     expect(sales.size).toBe(i + 1);
     expectEurAmount(receiptTotals[i], [...sales.values()][i].totalMinor, 0);
   }
@@ -43,12 +44,11 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
     const basket = i === 19 ? ['E2E-5', 'E2E-5', 'E2E-5'] : baskets[i % baskets.length];
     receiptTotals.push(await sellBySku(page, basket, i === 19 ? 'external' : i % 2 === 0 ? 'exact' : 100));
     for (const sku of basket) sold[sku]++;
-    // Sending/retry detail may follow the exact waiting count.
     const label = `${i + 1} sale${i === 0 ? '' : 's'} waiting to sync`;
-    await expect(sync).toHaveText(new RegExp(`^${label}(?: · .+)?$`));
+    await expect(page.getByLabel(label, { exact: true })).toHaveText(label);
   }
   await context.setOffline(false);
-  await expect(sync).toHaveText('All sales synced', { timeout: 3 * 60_000 });
+  await expect(upToDate).toBeVisible({ timeout: 3 * 60_000 });
 
   expect(sales.size).toBe(25);
   expect(receiptTotals).toHaveLength(25);

@@ -5,7 +5,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createTallyDatabase, startReplication, startStockReconcile, type StockReconcileResult, type StockReconcileState } from '@tallyui/database';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
@@ -15,6 +15,7 @@ vi.mock('@tallyui/database', async (importOriginal) => {
     startReplication: vi.fn(), startStockReconcile: vi.fn() };
 });
 
+const posConnector = createPosConnector();
 const baseUrl = 'https://stock-reconcile.test';
 const headers = authHeaders('test-admin-jwt');
 const context = { connectorId: posConnector.id, baseUrl, headers };
@@ -42,6 +43,7 @@ async function mount(reconcileImpl: (state$: BehaviorSubject<StockReconcileState
   vi.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => { onAppState = handler; return { remove }; });
   let finishInitial!: () => void;
   vi.mocked(startReplication).mockReturnValue({
+    notice$: new BehaviorSubject(undefined), resume: vi.fn(),
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(),
     awaitInitialReplication: () => new Promise<void>((done) => { finishInitial = done; }),
   } as never);
@@ -113,6 +115,7 @@ it('shows a restart-seeded lastCompletedAt immediately, without any call from th
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   vi.spyOn(AppState, 'addEventListener').mockImplementation(() => ({ remove: vi.fn() }));
   vi.mocked(startReplication).mockReturnValue({
+    notice$: new BehaviorSubject(undefined), resume: vi.fn(),
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(),
     awaitInitialReplication: () => new Promise<void>(() => {}),
   } as never);

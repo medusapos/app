@@ -1,5 +1,6 @@
 import { SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
-import { authHeaders, posConnector } from './pos-connector';
+import { medusaAdminUserAuth } from '@tallyui/connector-medusa';
+import { authHeaders } from './pos-connector';
 
 /** `capabilities`: the store's `order.create` contract (ADR-062), absent until a read was conclusive. */
 export type Session = { baseUrl: string; email: string; token: string; name?: string; tokenExpiresAt?: number; capabilities?: ServerCapabilities };
@@ -48,7 +49,7 @@ export async function login(baseUrl: string, email: string, password: string, fe
   let result: SignInResult;
   try {
     // The connector is configured with signIn; the app owns everything around the exchange itself.
-    result = await posConnector.auth.signIn!(baseUrl, { email, password }, { fetch: fetchImpl });
+    result = await medusaAdminUserAuth.signIn!(baseUrl, { email, password }, { fetch: fetchImpl });
   } catch (error) {
     if (!(error instanceof SignInError)) throw error; // an abort passes through unchanged
     if (error.code === 'invalid_credentials') throw new LoginError('invalid_credentials', 'Incorrect email or password.');

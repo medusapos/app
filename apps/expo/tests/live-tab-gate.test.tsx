@@ -10,25 +10,25 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BehaviorSubject } from 'rxjs';
 import type { LiveTabHandle, LiveTabOptions, LiveTabState } from '@tallyui/database';
 import { LiveTabGate } from '../components/live-tab-gate';
-import { closeDatabases, isBusy, markBusy, reportStorageStartFailure, storageNeedsReload } from '../lib/live-tab';
+import { closeDatabases, isBusy, markBusy, reportStorageStartFailure, storageNeedsReload, type StorageStartFailure } from '../lib/live-tab';
 import { webStorageAvailable } from '../lib/web-storage';
 
 // A hand-rolled mock subject (vi.mock factories cannot close over top-level variables, only
 // vi.hoisted ones), reset in beforeEach rather than the real sticky one: this file's tests share
-// one module instance, and a real reportStorageStartFailure() would leak `true` into every test
+// one module instance, and a real reportStorageStartFailure() would leak its failure into every test
 // after it.
 const { storageStartFailedSubject, reportStorageStartFailureMock } = vi.hoisted(() => {
-  let value = false;
-  const listeners = new Set<(next: boolean) => void>();
+  let value: StorageStartFailure | null = null;
+  const listeners = new Set<(next: StorageStartFailure | null) => void>();
   const subject = {
-    next: (next: boolean) => { value = next; listeners.forEach((listener) => listener(next)); },
-    subscribe: (listener: (next: boolean) => void) => {
+    next: (next: StorageStartFailure | null) => { value = next; listeners.forEach((listener) => listener(next)); },
+    subscribe: (listener: (next: StorageStartFailure | null) => void) => {
       listeners.add(listener);
       listener(value);
       return { unsubscribe: () => listeners.delete(listener) };
     },
   };
-  return { storageStartFailedSubject: subject, reportStorageStartFailureMock: vi.fn(() => subject.next(true)) };
+  return { storageStartFailedSubject: subject, reportStorageStartFailureMock: vi.fn((failure: StorageStartFailure) => subject.next(failure)) };
 });
 
 vi.mock('../lib/live-tab', async (importOriginal) => {
@@ -113,7 +113,7 @@ beforeEach(() => {
   closeDatabasesMock.mockResolvedValue(undefined);
   storageNeedsReloadMock.mockReset();
   storageNeedsReloadMock.mockReturnValue(false);
-  storageStartFailedSubject.next(false);
+  storageStartFailedSubject.next(null);
   vi.mocked(webStorageAvailable).mockReturnValue(true);
 });
 
@@ -211,16 +211,48 @@ describe('LiveTabGate', () => {
     expect(screen.queryByText('children-rendered')).toBeNull();
   });
 
-  it('shows the blocked screen and no children after reportStorageStartFailure(), whatever the coordinator state', () => {
+  it('shows the generic failed-start screen and no children, whatever the coordinator state', () => {
     const { startLiveTab, instances } = fakeStartLiveTab();
     render(<LiveTabGate scope="store-start-failure" startLiveTab={startLiveTab}><Text>children-rendered</Text></LiveTabGate>);
     const instance = instances[0];
     act(() => instance.subject.next('live'));
     expect(screen.getByText('children-rendered')).toBeTruthy();
 
-    act(() => { reportStorageStartFailure(); });
+    act(() => { reportStorageStartFailure('failed'); });
     expect(screen.queryByText('children-rendered')).toBeNull();
-    expect(screen.getByText('MedusaPOS is open in another tab. Close that tab to use it here, or reload this one.')).toBeTruthy();
+    expect(screen.getByText("MedusaPOS couldn't open its local storage. Reload the page; if it happens again, restart the browser.")).toBeTruthy();
+    expect(screen.queryByText(/open in another tab/)).toBeNull();
+    expect(screen.getByText('MedusaPOS needs a reload')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
+  });
+
+  it('shows the unavailable-storage title and detail with no button or children', () => {
+    const { startLiveTab, instances } = fakeStartLiveTab();
+    render(<LiveTabGate scope="store-unavailable" startLiveTab={startLiveTab}><Text>children-rendered</Text></LiveTabGate>);
+    act(() => instances[0].subject.next('live'));
+    act(() => reportStorageStartFailure('unavailable'));
+    expect(screen.getByText("This till can't save sales in a private window.")).toBeTruthy();
+    expect(screen.getByText('Open it in a normal Safari window (or another browser) and sign in again. Nothing has been lost: no sale was taken here.')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
+    expect(screen.queryByText('Reload')).toBeNull();
+    expect(screen.queryByText('children-rendered')).toBeNull();
+  });
+
+  it('shows the held-storage sentence and Reload', () => {
+    const { startLiveTab } = fakeStartLiveTab();
+    render(<LiveTabGate scope="store-held" startLiveTab={startLiveTab}><Text>children-rendered</Text></LiveTabGate>);
+    act(() => reportStorageStartFailure('held'));
+    expect(screen.getByText('MedusaPOS is open in another tab')).toBeTruthy();
+    expect(screen.getByText('This till is already open in another tab. Close the other tab, then reload this one.')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
+  });
+
+  it('shows the stale-worker title, sentence and Reload', () => {
+    const { startLiveTab } = fakeStartLiveTab();
+    render(<LiveTabGate scope="store-stale" startLiveTab={startLiveTab}><Text>children-rendered</Text></LiveTabGate>);
+    act(() => reportStorageStartFailure('stale'));
+    expect(screen.getByText('MedusaPOS needs a reload')).toBeTruthy();
+    expect(screen.getByText('This till needs a quick reload to finish updating. Reload the page.')).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
   });
 

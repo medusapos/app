@@ -29,13 +29,6 @@ the app's tests in one place. Moving the assertions onto the real primitives
 (or TallyUI exporting those subpaths) would drop the aliases (from the TV6b
 review).
 
-## Tap race when new store settings land
-
-A line added at the instant new store settings land can still be dropped from the cart. Nothing is charged, and the cashier taps again (from the #58 review).
-- **The cause is in TallyUI:** `@tallyui/pos` 2.0.0's `useSale` starts a new sale from a passive effect that reads a stale `idle` (`sale/use-sale.ts:99-102`). Tracked as TallyUI/tallyui#301 (fix in #303).
-- **The app's part is fixed:** the app's own settings hold now starts at the tap, so new settings no longer reprice a sale mid-way.
-- **When a fixed `@tallyui/pos` is pinned:** the three `it.fails` windows in `apps/expo/tests/settings-tap-race.test.tsx` turn red. Switch them to `it` and remove this item.
-
 ## Swap the plugin's local order.create v3 types for @tallyui/core
 
 `packages/medusa-plugin/src/workflows/tally-order-create/fiscal-figures.ts` holds local copies of TallyUI's v3 wire types (`OrderCreateDisplay`, `OrderCreateTaxRate`, `OrderCreatePayloadV3`), each marked `BRIDGE`, because `@tallyui/core` doesn't export them yet. TallyUI's order.create v3 ships in `@tallyui/*` 2.1.0. At that bump:

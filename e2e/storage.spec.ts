@@ -143,21 +143,21 @@ test('a pending order left in the legacy Dexie store carries over on sign-in and
   const orders = (await ordersByClientId(token)).filter((o) => o.metadata.tally_client_id === order.id);
   expect(orders).toHaveLength(1);
 
-  // The legacy Dexie order database (pre-SQLite prefix `medusapos_orders_`) is gone: carried
-  // over, verified, marked, then removed (apps/expo/lib/order-store.ts's carryOverOrders).
+  // The legacy Dexie order database (pre-SQLite prefix `medusapos_orders_`) is kept after
+  // carry-over, verification and marking (apps/expo/lib/order-store.ts's carryOverOrders).
   const legacyDatabases = await page.evaluate(async () => {
     const databases = await indexedDB.databases();
     return databases.map((db) => db.name).filter((name) => name?.startsWith('rxdb-dexie-medusapos_orders_'));
   });
-  expect(legacyDatabases).toEqual([]);
+  expect(legacyDatabases).not.toEqual([]);
 
   const after = await stockBySku(token);
   expect(after['E2E-1']).toBe(before['E2E-1'] - 1);
 });
 
 // F1 in miniature: another tab still on the old build writes a legacy sale after this tab's
-// first carry-over already wrote the marker. The next open must carry it over, not delete it.
-test('a legacy sale written after the first carry-over is carried over on reload and syncs once', async ({ page }) => {
+// first carry-over already wrote the marker. The next open keeps it without importing it.
+test('a legacy sale is carried over once and synced once; the legacy database is kept, and a later legacy write is not imported', async ({ page }) => {
   const token = await adminToken();
   const variantId = await variantIdBySku(token, 'E2E-1');
   const sales = captureSales(page);
@@ -173,13 +173,12 @@ test('a legacy sale written after the first carry-over is carried over on reload
   await seedLegacy(first);
   await signIn(page);
   await expect.poll(() => sales.has(first.id), { timeout: 30_000 }).toBe(true);
-  // Landed in Medusa before the reload, so the one sale waiting after it is the late one.
+  // Landed in Medusa before the reload; the later legacy sale will not be imported.
   await expect.poll(async () => (await ordersByClientId(token)).some((o) => o.metadata.tally_client_id === first.id),
     { timeout: 30_000 }).toBe(true);
-  await expect.poll(legacyDatabases).toEqual([]);
+  await expect.poll(legacyDatabases).not.toEqual([]);
 
-  // The old build's tab is its own JS realm: seed from a fresh page, since this one's Dexie
-  // handles for the legacy name were closed when the carry-over deleted that database.
+  // The old build's tab is its own JS realm: seed from a fresh page into the kept legacy database.
   await page.reload();
   await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
   const second = pendingE2E1Order(variantId);
@@ -188,18 +187,18 @@ test('a legacy sale written after the first carry-over is carried over on reload
   await page.route('**/tally/v1/commands', (route) => route.abort());
   await page.reload();
   await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
-  // The late sale is carried over and waits while the send is blocked.
-  await expect(page.getByText('· Waiting to sync', { exact: false }).first()).toBeVisible();
+  // The marker prevents the late sale from being carried over.
+  await expect(page.getByText('· Waiting to sync', { exact: false })).toHaveCount(0);
   await page.unroute('**/tally/v1/commands');
-  await expect(page.getByText('· Synced', { exact: false })).toHaveCount(2, { timeout: 30_000 });
+  await expect(page.getByText('· Synced', { exact: false })).toHaveCount(1, { timeout: 30_000 });
   await expect(page.getByText('· Waiting to sync', { exact: false })).toHaveCount(0);
 
-  expect(sales.has(second.id)).toBe(true);
+  expect(sales.has(second.id)).toBe(false);
   for (const order of [first, second]) {
     const matching = (await ordersByClientId(token)).filter((o) => o.metadata.tally_client_id === order.id);
-    expect(matching).toHaveLength(1);
+    expect(matching).toHaveLength(order.id === first.id ? 1 : 0);
   }
-  expect(await legacyDatabases()).toEqual([]);
+  expect(await legacyDatabases()).not.toEqual([]);
 });
 
 test('a dead storage worker shows the reload prompt, and Reload recovers the app', async ({ page }) => {
@@ -270,7 +269,7 @@ test('the opfs-sahpool pool held by another worker blocks the app with Reload', 
   await holder.waitForTimeout(2000);
 
   await submitSignIn(page);
-  await expect(page.getByText('MedusaPOS is open in another tab. Close that tab to use it here, or reload this one.')).toBeVisible();
+  await expect(page.getByText('This till is already open in another tab. Close the other tab, then reload this one.')).toBeVisible();
   // LiveTabScreen's Pressable renders with no explicit accessibility role (live-tab.spec.ts).
   const reload = page.getByText('Reload', { exact: true });
   await expect(reload).toBeVisible();

@@ -30,7 +30,8 @@ beforeEach(() => {
     setItem: (key: string, value: string) => { data.set(key, value); },
     removeItem: (key: string) => { data.delete(key); },
   });
-  fetchStub.mockReset().mockResolvedValue(new Response(JSON.stringify({ code: 'unsupported_protocol' }), { status: 400 }));
+  // A new Response per call, as a real fetch gives: a body can be read only once.
+  fetchStub.mockReset().mockImplementation(async () => new Response(JSON.stringify({ code: 'unsupported_protocol' }), { status: 400 }));
   vi.stubGlobal('fetch', fetchStub);
 });
 afterEach(async () => {
@@ -49,7 +50,8 @@ it('keeps refused sales pending, explains the refusal, and sends them when Try a
   await waitFor(() => expect(outbox.state.refused).toEqual({ status: 400, reason: 'unsupported_protocol' }));
   expect(fetchStub).toHaveBeenCalledTimes(1);
   expect(String(fetchStub.mock.calls[0][0])).toMatch(COMMANDS_PATH);
-  expect((await outbox.orders!.findOne(order.id).exec())!.toMutableJSON()).toEqual(order);
+  // Unchanged but for the version it first went out at, which the outbox records before sending (TallyUI #300).
+  expect((await outbox.orders!.findOne(order.id).exec())!.toMutableJSON()).toEqual({ ...order, sentVersion: 1 });
   const strip = screen.getByText('1 sale not accepted ·').parentElement!.parentElement!;
   expect(getComputedStyle(strip).position).toBe('absolute');
   expect(getComputedStyle(strip).top).toBe('0px');

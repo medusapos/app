@@ -2,7 +2,7 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { Text } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { medusaConnector } from '@tallyui/connector-medusa';
+import { POS_CONNECTOR_ID } from './pos-connector';
 import { clearProductCache } from './product-cache';
 import { REFRESH_WINDOW_MS, saveSession, type Session } from './session';
 import { SessionProvider, useSession } from './session-context';
@@ -70,7 +70,7 @@ describe('SessionProvider', () => {
     expect(context.session).toBeNull();
     expect(storage.removeItem).toHaveBeenCalledWith('medusapos.session');
     expect(storage.getItem('medusapos.session')).toBeNull();
-    expect(clearProductCache).toHaveBeenCalledWith(medusaConnector.id, stored.baseUrl);
+    expect(clearProductCache).toHaveBeenCalledWith(POS_CONNECTOR_ID, stored.baseUrl);
   });
   it.each(['network', 'server'])('preserves the session on a refresh %s failure', async (failure) => {
     if (failure === 'network') fetchImpl.mockRejectedValue(new TypeError('offline'));
@@ -114,7 +114,7 @@ describe('SessionProvider', () => {
     expect(context.session).toBeNull();
     expect(storage.removeItem).toHaveBeenCalledWith('medusapos.session');
     expect(storage.getItem('medusapos.session')).toBeNull();
-    expect(clearProductCache).toHaveBeenCalledExactlyOnceWith(medusaConnector.id, stored.baseUrl);
+    expect(clearProductCache).toHaveBeenCalledExactlyOnceWith(POS_CONNECTOR_ID, stored.baseUrl);
   });
 });
 

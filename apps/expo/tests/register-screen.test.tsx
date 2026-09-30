@@ -6,7 +6,7 @@ import type { ComponentProps, ReactNode } from 'react';
 import type { CartLineProps, CartTotalProps, SearchInput, ProductGrid } from '@tallyui/components';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import {
-  bindRegister, closeSession, formatClosureDate, openSession, readRegister, recordMovement, saleLogger, startCounting, useStoreSettings,
+  bindRegister, closeSession, formatClosureDate, openSession, readRegister, recordMovement, saleLogger, startCounting, TAX_ROUNDING_MIXED_NOTE, useStoreSettings,
   voidMovement, type LogEntry, type PosOrder,
 } from '@tallyui/pos';
 import { APPROVAL_REQUIRED_TEXT } from '@tallyui/components';
@@ -18,7 +18,7 @@ import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
 import { openOrderStore, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities } from './pos-connector-mock';
 import { RegisterProvider } from '../lib/register-context';
 import { saveSession } from '../lib/session';
 import { SessionProvider, useSession } from '../lib/session-context';
@@ -27,6 +27,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { openTestRegister } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
@@ -100,14 +101,14 @@ beforeEach(async () => {
   saveCachedSettings(localStorage, baseUrl, settings);
   saveSession(localStorage, { baseUrl, email: 'admin@store.test',
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
-  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+  capabilities.mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: null, lastSyncedAt: null,
-    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
   store = await openOrderStore(baseUrl);
   record = vi.fn(async (order: PosOrder) => { await store.orders.insert(order); });
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0,
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
     record, flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
 afterEach(async () => {
@@ -374,7 +375,7 @@ describe('closing the register', () => {
       const fetch = stubMedusa(() => { throw new TypeError('Failed to fetch'); });
       if (why === 'the catalogue is offline') {
         vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'offline', error: null, lastSyncedAt: null,
-          stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+          stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
       }
       const session = await openTestRegister(store.orders, baseUrl);
       await mount();
@@ -453,10 +454,31 @@ describe('closing the register', () => {
       expect(movementRows.getByText(value).parentElement!.firstChild!.textContent).toBe(label);
     }
     expect(movementRows.getAllByText(/^€/)).toHaveLength(3);
+    expect(figures.queryByTestId('last-closure-tax-rounding-note')).toBeNull();
     expect(figures.getByTestId('last-closure-unsynced').textContent).toBe('1 sale not sent yet · €15.00');
     expect(figures.queryByTestId('last-closure-approved-by')).toBeNull();
     fireEvent.click(figures.getByTestId('last-closure-done'));
     await waitFor(() => expect(screen.queryByTestId('last-closure')).toBeNull());
+  });
+
+  it("the last closure shows TallyUI's tax-rounding note when the session's sales used more than one rounding method", async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    fireEvent.click(button('Shirt'));
+    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
+    await act(async () => { fireEvent.click(button('New sale')); });
+    await closeWith(await startCount(), '100.00');
+    await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
+    const [closure] = await closures();
+    await act(async () => {
+      await (await registerCollections(store.orders).closures.findOne(closure.id).exec())!.incrementalPatch({
+        breakdowns: { ...closure.breakdowns, tax_rounding_mixed: true },
+      });
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+    const figures = within(await screen.findByTestId('last-closure'));
+    expect(figures.getByTestId('last-closure-tax-rounding-note').textContent).toBe(TAX_ROUNDING_MIXED_NOTE);
   });
 
   it('at 360, Close register shows the count in the cart view, even with an empty cart', async () => {
@@ -696,7 +718,7 @@ describe('the register control', () => {
   it.each([1280, 360])('at %i, with a session open, tapping the pill ("Offline") opens the panel', async (width) => {
     setWindowWidth(width);
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'offline', error: null, lastSyncedAt: null,
-      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await waitFor(() => expect(pill()).toBe('Offline'));
@@ -733,7 +755,7 @@ describe('the catalogue status line', () => {
   ])('at %i reads %j', async (width, text) => {
     setWindowWidth(width);
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: 'Failed to fetch', lastSyncedAt: null,
-      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: { count: 2, stale: false } });
+      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: { count: 2, stale: false } });
     await mount();
     await waitFor(() => expect(pill()).toBe('Choose a register'));
     expect(within(screen.getByTestId('catalogue-status-row')).getByText(text)).toBeTruthy();

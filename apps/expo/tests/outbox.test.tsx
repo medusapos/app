@@ -16,7 +16,7 @@ import OrdersScreen from '../app/orders';
 import { markBusy, reportStorageStartFailure } from '../lib/live-tab';
 import { installLogSinks } from '../lib/logging';
 import { OutboxProvider, useOutboxContext, useSessionOutbox } from '../lib/outbox-context';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities } from './pos-connector-mock';
 import { saveSession, type Session } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../lib/store-settings';
@@ -24,6 +24,7 @@ import { terminateWebStorage } from '../lib/web-storage';
 import { openTestRegister } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 // The outbox's two live-tab hooks, observed where they live (TV7 review): markBusy still runs for real;
 // reportStorageStartFailure only records, since the real one latches the blocked screen for the whole run.
 vi.mock('../lib/live-tab', async (importOriginal) => {
@@ -55,7 +56,7 @@ const shirt = vi.hoisted(() => ({ id: 'shirt', title: 'Shirt', status: 'publishe
 ] }));
 vi.mock('../lib/use-replicated-products', () => {
   const replicated = { products: [shirt], state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined,
-    lastStockCheckAt: null, reconcileStock: async () => {}, unlisted: undefined };
+    lastStockCheckAt: null, reconcileStock: async () => {}, pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined };
   return { useReplicatedProducts: () => replicated };
 });
 vi.mock('@tallyui/pos', async (importOriginal) => ({
@@ -356,6 +357,7 @@ describe('useSessionOutbox live-tab wiring (TV7 review)', () => {
     try {
       const view = render(<Harness session={session} />);
       await waitFor(() => expect(reportStorageStartFailure).toHaveBeenCalled());
+      expect(reportStorageStartFailure).toHaveBeenCalledWith('failed');
       // A later render of the same store reopens nothing, so nothing reports again.
       view.rerender(<Harness session={{ ...session, token: 'refreshed-token' }} />);
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -609,12 +611,12 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     saveCachedSettings(localStorage, session.baseUrl, storeSettings);
     vi.mocked(fetchStoreSettings).mockResolvedValue(storeSettings);
     vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: screenPricing });
-    vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+    capabilities.mockResolvedValue(undefined);
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     error = vi.spyOn(console, 'error').mockImplementation(() => {});
   });
   afterEach(() => {
-    vi.mocked(posConnector.capabilities!).mockRestore();
+    capabilities.mockRestore();
     warn.mockRestore();
     error.mockRestore();
   });
