@@ -971,6 +971,8 @@ medusaIntegrationTestRunner({
         // The money first: a second order or stock take fails here, whatever the answers were.
         const orders = await liveOrders(sale.payload.clientOrderId)
         expect(orders).toHaveLength(1)
+        expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+          .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(1)
         expect(await levelA()).toEqual([before[0] - sale.payload.lines[0].quantity, before[1]])
         // 409 in_progress is the documented answer while another request holds the claim.
         for (const response of storm) {
@@ -990,11 +992,12 @@ medusaIntegrationTestRunner({
         }
         const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
           entity: 'order', filters: { id: orders[0].id },
-          fields: ['id', 'payment_collections.status', 'payment_collections.payments.id', 'payment_collections.payments.captured_at'],
+          fields: ['id', 'payment_collections.status', 'payment_collections.payments.id', 'payment_collections.payments.captured_at', 'payment_collections.payments.amount'],
         })
         expect(order.id).toBe(applied.serverRefs.orderId)
         const payments = order.payment_collections.flatMap(collection => collection!.payments)
         expect(payments).toEqual([expect.objectContaining({ captured_at: expect.anything() })])
+        expect(Number(payments[0].amount)).toBe(sale.payload.totalMinor / 100)
         expect(await ledger.listTallyCommands({ id: sale.id })).toEqual([expect.objectContaining({ status: 'applied' })])
         expect(await levelA()).toEqual([before[0] - sale.payload.lines[0].quantity, before[1]])
       })
