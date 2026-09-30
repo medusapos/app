@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, renderHook } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
-import { Subject } from 'rxjs';
+import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { startIdReconcile, startReplication, type IdReconcileResult } from '@tallyui/database';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
@@ -39,6 +39,7 @@ async function mount(reconcileImpl: () => Promise<IdReconcileResult>) {
   let finishInitial!: () => void;
   const reSync = vi.fn();
   vi.mocked(startReplication).mockReturnValue({
+    notice$: new BehaviorSubject(undefined), resume: vi.fn(),
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(), reSync,
     awaitInitialReplication: () => new Promise<void>((done) => { finishInitial = done; }),
   } as never);

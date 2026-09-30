@@ -114,7 +114,8 @@ vi.mock('@tallyui/components/checkout', () => ({
 type Replicated = ReturnType<typeof useReplicatedProducts>;
 const reconcileStock = vi.fn(async () => {});
 const replicated = (over: Partial<Replicated>): Replicated => ({ products: [], state: 'synced', error: null,
-  lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, unlisted: undefined, ...over });
+  lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, unlisted: undefined,
+  pullNotice: undefined, resumePull: vi.fn(), ...over });
 
 const settings: StoreSettings = {
   storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' },
@@ -142,6 +143,16 @@ beforeEach(() => {
 });
 
 describe('ProductsScreen catalogue', () => {
+  it('shows a stopped product pull above the sales line', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
+      pullNotice: { code: 'unauthorized', since: 0, fixedBy: 'till' },
+    }));
+    await mount();
+    const notice = screen.getByText("Products aren't updating: this till needs to sign in to the online store again.");
+    const sales = screen.getByText('Sales are up to date.');
+    expect(notice.compareDocumentPosition(sales) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('keeps search focusable and editable with the authRequired strip in the title slot and header actions present', async () => {
     const { SignInAgain } = await import('../components/sign-in-again');
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 1, sending: false, authRequired: true } });
@@ -902,6 +913,20 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token });
     await act(async () => { render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
   }
+  it('resumes a stopped product pull after the session is renewed in place, never on mount', async () => {
+    const resumePull = vi.fn();
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
+      pullNotice: { code: 'unauthorized', since: 0, fixedBy: 'till' }, resumePull,
+    }));
+    await mountTill();
+    expect(resumePull).not.toHaveBeenCalled();
+    const renewed = jwt(Math.floor(Date.now() / 1000) + 2 * 86400);
+    vi.mocked(login).mockResolvedValue({ baseUrl: 'https://store.test', email: 'admin@store.test', token: renewed });
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    expect(context.session?.token).toBe(renewed);
+    expect(resumePull).toHaveBeenCalledTimes(1);
+  });
+
   /** Tenders the shirt by card; the first save fails and isn't stored, the retry stores it. */
   async function failedSave(token?: string) {
     const record = vi.fn().mockRejectedValueOnce(new Error('Storage full')).mockResolvedValue(undefined);

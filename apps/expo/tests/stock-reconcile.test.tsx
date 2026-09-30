@@ -43,6 +43,7 @@ async function mount(reconcileImpl: (state$: BehaviorSubject<StockReconcileState
   vi.spyOn(AppState, 'addEventListener').mockImplementation((_type, handler) => { onAppState = handler; return { remove }; });
   let finishInitial!: () => void;
   vi.mocked(startReplication).mockReturnValue({
+    notice$: new BehaviorSubject(undefined), resume: vi.fn(),
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(),
     awaitInitialReplication: () => new Promise<void>((done) => { finishInitial = done; }),
   } as never);
@@ -114,6 +115,7 @@ it('shows a restart-seeded lastCompletedAt immediately, without any call from th
   vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
   vi.spyOn(AppState, 'addEventListener').mockImplementation(() => ({ remove: vi.fn() }));
   vi.mocked(startReplication).mockReturnValue({
+    notice$: new BehaviorSubject(undefined), resume: vi.fn(),
     error$: new Subject(), active$: new Subject(), cancel: vi.fn(),
     awaitInitialReplication: () => new Promise<void>(() => {}),
   } as never);

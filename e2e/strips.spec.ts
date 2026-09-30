@@ -11,6 +11,16 @@ async function routeCommands(page: Page, status: number, body: unknown) {
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) }));
 }
 
+test('a product pull refused with 401 signs the till out', async ({ page }) => {
+  await signIn(page);
+  for (const endpoint of ['**/admin/products?**', '**/admin/product-variants?**']) {
+    await page.route(endpoint, route =>
+      route.fulfill({ status: 401, contentType: 'application/json', body: JSON.stringify({ message: 'Unauthorized' }) }));
+  }
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible({ timeout: 20_000 });
+});
+
 test('sign-in strip: outbox pauses after three 401s, resumes once signed in again', async ({ page }) => {
   await signIn(page);
   await routeCommands(page, 401, {});

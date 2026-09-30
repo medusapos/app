@@ -56,7 +56,7 @@ const shirt = vi.hoisted(() => ({ id: 'shirt', title: 'Shirt', status: 'publishe
 ] }));
 vi.mock('../lib/use-replicated-products', () => {
   const replicated = { products: [shirt], state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined,
-    lastStockCheckAt: null, reconcileStock: async () => {}, unlisted: undefined };
+    lastStockCheckAt: null, reconcileStock: async () => {}, pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined };
   return { useReplicatedProducts: () => replicated };
 });
 vi.mock('@tallyui/pos', async (importOriginal) => ({

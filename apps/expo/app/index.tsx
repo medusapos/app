@@ -168,8 +168,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
 }) {
   const traits = connector.traits.product;
   const { setSaleHold } = useSession();
-  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
+  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
+  const previousToken = useRef(session.token);
+  useEffect(() => {
+    if (previousToken.current !== session.token) resumePull();
+    previousToken.current = session.token;
+  }, [session.token, resumePull]);
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
   const { record, isStored, state: outboxState, recent, savesInFlight, orders } = useOutboxContext();
@@ -270,7 +275,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
-    <SyncStatus state={outboxState} />
+    <SyncStatus state={outboxState} pullNotice={pullNotice} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>

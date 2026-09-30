@@ -49,6 +49,7 @@ async function mount(calculatedPrices: FingerprintReconcileAdapter, prices = fak
   const active$ = new BehaviorSubject(true);
   const reSync = vi.fn();
   vi.mocked(startReplication).mockReturnValue({
+    notice$: new BehaviorSubject(undefined), resume: vi.fn(),
     error$: new Subject(), active$, cancel: vi.fn(() => active$.complete()), reSync,
     awaitInitialReplication: () => new Promise<void>((done) => { finishInitial = done; }),
   } as never);

@@ -7,7 +7,7 @@ import {
   createTallyDatabase, getStorageHealth, isFingerprintResultCurrent, isStorageWorkerFailure, startFingerprintReconcile,
   startIdReconcile, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION, type IdReconcileResult,
 } from '@tallyui/database';
-import type { SyncContext, TallyConnector } from '@tallyui/core';
+import type { SyncContext, SyncNotice, TallyConnector } from '@tallyui/core';
 import { MEDUSA_CALCULATED_PRICE_RECONCILE_INTERVAL_MS } from '@tallyui/connector-medusa';
 import { stockOverlay$ } from '@tallyui/pos';
 import {
@@ -44,6 +44,14 @@ export function useReplicatedProducts(
   const [state, setState] = useState<SyncState>('connecting');
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pullNotice, setPullNotice] = useState<SyncNotice>();
+  const currentNotice = useRef<SyncNotice>(undefined);
+  const currentReplication = useRef<ReturnType<typeof startReplication>>(undefined);
+  const resumePull = useCallback(() => {
+    if (currentNotice.current?.fixedBy === 'till') {
+      void currentReplication.current?.resume().catch((err) => console.warn('Product pull resume failed:', err));
+    }
+  }, []);
   const [stockOverlay, setStockOverlay] = useState<Map<string, unknown>>();
   const [lastStockCheckAt, setLastStockCheckAt] = useState<Date | null>(null);
   // Products the sales channel does not list (the calculated-price runner's `unreported`); undefined until its first pass.
@@ -119,12 +127,24 @@ export function useReplicatedProducts(
         cleanup.unshift(() => subscription.unsubscribe());
 
         const replication = startReplication({ collection: db.products, adapter, context });
+        currentReplication.current = replication;
         if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') debug.current.replication = replication;
         cleanup.unshift(() => replication.cancel());
+        const notices = replication.notice$.subscribe((notice) => {
+          if (cancelled) return;
+          currentNotice.current = notice;
+          setPullNotice(notice);
+          if (notice) setState('error');
+          if (notice?.code === 'unauthorized' && !unauthorizedReported) {
+            unauthorizedReported = true;
+            onUnauthorized();
+          }
+        });
+        cleanup.unshift(() => notices.unsubscribe());
         replication.error$.subscribe((err) => {
           if (cancelled) return;
           const classification = classifyReplicationError(err);
-          setState(classification === 'offline' ? 'offline' : 'error');
+          if (!currentNotice.current) setState(classification === 'offline' ? 'offline' : 'error');
           setError(String(err?.parameters?.errors?.[0]?.message ?? err?.message ?? err));
           if (!unauthorizedReported && classification === 'unauthorized') {
             unauthorizedReported = true;
@@ -135,7 +155,7 @@ export function useReplicatedProducts(
         let wasActive = false;
         const activity = replication.active$.subscribe((active) => {
           // RxDB stays active during pull retries; idle after activity means the pull completed.
-          if (!cancelled && wasActive && !active) {
+          if (!cancelled && !currentNotice.current && wasActive && !active) {
             setState('synced');
             setLastSyncedAt(new Date());
             setError(null);
@@ -205,12 +225,14 @@ export function useReplicatedProducts(
           cleanup.unshift(() => baseRunner.stop());
         }
 
-        setState('syncing');
+        if (!currentNotice.current) setState('syncing');
         await replication.awaitInitialReplication();
         if (!cancelled) {
-          setState('synced');
-          setLastSyncedAt(new Date());
-          setError(null);
+          if (!currentNotice.current) {
+            setState('synced');
+            setLastSyncedAt(new Date());
+            setError(null);
+          }
           // One-time cleanup of the pre-SQLite Dexie cache, now that this mount's
           // first pull has landed in the new store; never blocks rendering on it.
           void deleteLegacyProductCache(connector.id, baseUrl);
@@ -247,8 +269,11 @@ export function useReplicatedProducts(
     return () => {
       cancelled = true;
       for (const fn of cleanup) fn();
+      currentReplication.current = undefined;
+      currentNotice.current = undefined;
+      setPullNotice(undefined);
     };
   }, [connector, baseUrl, context, onUnauthorized, reconcileStock]);
 
-  return { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted };
+  return { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull };
 }

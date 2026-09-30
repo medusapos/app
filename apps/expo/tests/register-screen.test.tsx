@@ -105,7 +105,7 @@ beforeEach(async () => {
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: null, lastSyncedAt: null,
-    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
   store = await openOrderStore(baseUrl);
   record = vi.fn(async (order: PosOrder) => { await store.orders.insert(order); });
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
@@ -375,7 +375,7 @@ describe('closing the register', () => {
       const fetch = stubMedusa(() => { throw new TypeError('Failed to fetch'); });
       if (why === 'the catalogue is offline') {
         vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'offline', error: null, lastSyncedAt: null,
-          stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+          stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
       }
       const session = await openTestRegister(store.orders, baseUrl);
       await mount();
@@ -718,7 +718,7 @@ describe('the register control', () => {
   it.each([1280, 360])('at %i, with a session open, tapping the pill ("Offline") opens the panel', async (width) => {
     setWindowWidth(width);
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'offline', error: null, lastSyncedAt: null,
-      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
+      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await waitFor(() => expect(pill()).toBe('Offline'));
@@ -755,7 +755,7 @@ describe('the catalogue status line', () => {
   ])('at %i reads %j', async (width, text) => {
     setWindowWidth(width);
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: 'Failed to fetch', lastSyncedAt: null,
-      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: { count: 2, stale: false } });
+      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: { count: 2, stale: false } });
     await mount();
     await waitFor(() => expect(pill()).toBe('Choose a register'));
     expect(within(screen.getByTestId('catalogue-status-row')).getByText(text)).toBeTruthy();
