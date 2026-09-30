@@ -16,6 +16,10 @@ Work through this before tagging a release of the app or the plugin. An item tha
   - The release notes for the store owner say this in plain words (see `release-notes/next.md`).
 - [ ] **Carry-over test:** the bump PR for TallyUI 3.0.0 carries one for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
 - [ ] **Pull notices (TallyUI/tallyui#261):** the app takes `@tallyui/*` only from published npm pins, so this lands after the 3.0.0 bump. It needs two changes. Wire the replication state's `notice$` into SyncStatus's pull notice, and call `resume()` after a successful sign-in, so a pull stopped by an expired session starts again (the notices come from TallyUI/tallyui#259).
+- [ ] **Two price runners share one reconcile state (found in the review of TallyUI/tallyui#284):**
+  - **The problem:** `apps/expo/lib/use-replicated-products.ts` starts two `startFingerprintReconcile` runners on `db.products`, the calculated-price runner (`:188`) and the base-price runner (`:202`). Both use the default `stateId`. With #284's runner, the second one keeps its gate only in memory, so it runs about an hour after every start.
+  - **The fix, at the 3.0.0 bump:** give the second runner its own `stateId: 'calculated-prices'`. Check against #284's docs which runner that is.
+  - **Why it waits:** it isn't buildable before the release.
 
 ## Every release
 
