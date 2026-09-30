@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { resolve } from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, discount, ordersByClientId, sellBySku, signIn, test } from '../helpers';
+import { addE2E1, adminToken, cspViolations, discount, ordersByClientId, sellBySku, signIn, test } from '../helpers';
 import { E2E_RUN } from '../ports';
 
 const root = resolve(__dirname, '../..');
@@ -51,6 +51,12 @@ function serve(dir: string) {
       })).toBe('ECONNREFUSED');
     },
   };
+}
+
+// The CSP gate reads page events only from pages still open at the test's end, so a current-build page is gated as it closes.
+async function closeGated(page: Page) {
+  expect(await cspViolations(page.context()), 'Content-Security-Policy violations').toEqual([]);
+  await page.close();
 }
 
 async function dump(page: Page): Promise<Dump> {
@@ -173,7 +179,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
     await test.step('C: whole documents equal released documents plus known migrations', async () => {
       const page = await context.newPage();
       const NEW = await dump(page);
-      await page.close();
+      await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
       expect(NEW.stored).toStrictEqual(migration.stored.map(entry => entry.name === 'pos_orders'
         ? { name: 'pos_orders', version: migration.orderVersion } : entry));
@@ -202,7 +208,15 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
       await expect(page.getByTestId('open-register-card')).toHaveCount(0);
       // RegisterPanelSheet shows LastClosureSheet only when there is no open session.
-      await page.close();
+      // The poll proves "once" only when it first matches: settle the till, then count every sale again.
+      await page.reload();
+      await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+      await expect(page.getByText('· Synced', { exact: false })).toHaveCount(4);
+      const settled = await ordersByClientId(token);
+      expect(OLD.docs.pos_orders.map(order => settled.filter(sent => sent.metadata.tally_client_id === order.id).length))
+        .toStrictEqual([1, 1, 1, 1]);
+      await closeGated(page);
     });
   } finally {
     await server?.stop();
