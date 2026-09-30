@@ -1560,9 +1560,10 @@ medusaIntegrationTestRunner({
       expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
     })
 
-    it('does not refuse a body of exactly MAX_BODY_BYTES as body_too_large', async () => {
+    it('accepts and applies a body of exactly MAX_BODY_BYTES', async () => {
       const response = await post([paddedSale(MAX_BODY_BYTES)])
-      expect(response.status).not.toBe(413)
+      expect(response.status).toBe(200)
+      expect(response.data.results[0].status).toBe('applied')
     })
 
     it('refuses a body of MAX_BODY_BYTES + 1 as body_too_large', async () => {
