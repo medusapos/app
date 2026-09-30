@@ -13,7 +13,9 @@
     "pos"
   ],
   "files": [
-    ".medusa/server"
+    ".medusa/server",
+    "!.medusa/server/**/__tests__",
+    "!.medusa/server/**/__fixtures__"
   ],
   "exports": {
     "./package.json": "./package.json",
