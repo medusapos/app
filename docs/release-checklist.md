@@ -16,9 +16,10 @@ Work through this before tagging a release of the app or the plugin. An item tha
   - The release notes for the store owner say this in plain words (see `release-notes/next.md`).
 - [ ] **Carry-over test:** the bump PR for TallyUI 3.0.0 carries one for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
 - [ ] **The 3.0.0 bump and the pull notices (TallyUI/tallyui#261) ship in the same release, never apart** (Front desk ruling, 2026-09-30).
-  - **Why together:** from 3.0.0, a product pull that fails with 401 no longer reaches the replication state's `error$`. A bump without the notice wiring would leave an expired till's products silently stale, and the till would never sign out. That is a regression.
-  - **The wiring:** the app takes `@tallyui/*` only from published npm pins, so it lands with or right after the bump PR, and before the release is tagged. It needs two changes:
+  - **Why together:** from 3.0.0, a product pull that fails with 401 no longer reaches the replication state's `error$`. Today the app signs the till out from that `error$` path (`apps/expo/lib/use-replicated-products.ts`). A bump without the notice wiring would leave an expired till's products silently stale, and the product pull would no longer sign the till out. That is a regression. A 401 on a sale send is the outbox's, and is unaffected.
+  - **The wiring:** the app takes `@tallyui/*` only from published npm pins. The wiring goes in the bump PR itself, or right after it; either way, before the release is tagged. It needs three changes:
     - wire the replication state's `notice$` into SyncStatus's pull notice;
+    - on an `unauthorized` notice, call the existing `onUnauthorized()`, so the till signs out the same way the old 401 did (Front desk ruling, 2026-09-30);
     - call `resume()` after a successful sign-in, so a pull stopped by an expired session starts again.
   - **Source:** the notices come from TallyUI/tallyui#259.
 - [ ] **Two price runners on one collection (found in the review of TallyUI/tallyui#284, still open):**
