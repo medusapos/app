@@ -30,12 +30,12 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
   const check = (valid: boolean, field: string, expected: string) => {
-    if (!valid && errors.length < 10) errors.push(`${field}: expected ${expected}`)
+    if (!valid && errors.length < 10) errors.push(`payload.${field}: expected ${expected}`)
   }
   if (!object(payload)) return ['payload: expected an object']
   for (const key of Object.keys(payload)) {
     const known = REGISTER_FIELDS.get(type)?.includes(key) ?? false
-    if (!known && errors.length < 10) errors.push(`${key}: unknown field for ${type} version 1`)
+    if (!known && errors.length < 10) errors.push(`payload.${key}: unknown field for ${type} version 1`)
   }
   const string = (field: string, optional = false) => {
     const value = payload[field]

@@ -34,7 +34,7 @@ it('an unsupported currency adds no exponent error, leaving it to the planner', 
 it('caps its errors at 10', () => {
   const taxByRate = Array.from({ length: 12 }, () => ({ ...payload.taxByRate![0], grossMinor: 999 }))
   expect(fiscalFiguresErrors({ ...payload, taxMinor: 1920, display: { ...payload.display!, taxMinor: 1920 }, taxByRate }))
-    .toEqual(Array.from({ length: 10 }, (_, index) => `taxByRate[${index}].grossMinor: expected netMinor + taxMinor`))
+    .toEqual(Array.from({ length: 10 }, (_, index) => `payload.taxByRate[${index}].grossMinor: expected netMinor + taxMinor`))
 })
 
 it.each([
@@ -42,7 +42,7 @@ it.each([
   ['taxMinor', 159, 'payload.taxMinor'], ['exponent', 3, 'the currency decimals'],
 ])('rejects inconsistent display.%s', (field, value, expected) => {
   expect(fiscalFiguresErrors({ ...payload, display: { ...payload.display!, [field]: value } }))
-    .toEqual([`display.${field}: expected ${expected}`])
+    .toEqual([`payload.display.${field}: expected ${expected}`])
 })
 
 it('rejects a taxByRate tax sum different from payload.taxMinor', () => {
@@ -51,22 +51,22 @@ it('rejects a taxByRate tax sum different from payload.taxMinor', () => {
     { ratePpm: 190000, netMinor: 420, taxMinor: 79, grossMinor: 499 },
   ]
   expect(fiscalFiguresErrors({ ...payload, taxByRate }))
-    .toEqual(['taxByRate: expected the sum of taxMinor to equal payload.taxMinor'])
+    .toEqual(['payload.taxByRate: expected the sum of taxMinor to equal payload.taxMinor'])
 })
 
 it('rejects grossMinor different from netMinor plus taxMinor', () => {
   expect(fiscalFiguresErrors({ ...payload, taxByRate: [{ ...payload.taxByRate![0], grossMinor: 999 }] }))
-    .toEqual(['taxByRate[0].grossMinor: expected netMinor + taxMinor'])
+    .toEqual(['payload.taxByRate[0].grossMinor: expected netMinor + taxMinor'])
 })
 
 it('rejects an unknown clientLineId', () => {
   const display = { ...payload.display!, lines: [{ clientLineId: 'unknown', amountMinor: 1000, discounts: [] }] }
-  expect(fiscalFiguresErrors({ ...payload, display })).toEqual(['display.lines[0].clientLineId: expected a payload.lines[].clientLineId'])
+  expect(fiscalFiguresErrors({ ...payload, display })).toEqual(['payload.display.lines[0].clientLineId: expected a payload.lines[].clientLineId'])
 })
 
 it('rejects a duplicate clientLineId', () => {
   const display = { ...payload.display!, lines: [payload.display!.lines[0], payload.display!.lines[0]] }
-  expect(fiscalFiguresErrors({ ...payload, display })).toEqual(['display.lines[1].clientLineId: expected no duplicate clientLineId'])
+  expect(fiscalFiguresErrors({ ...payload, display })).toEqual(['payload.display.lines[1].clientLineId: expected no duplicate clientLineId'])
 })
 
 it('rejects unknown keys in display, its lines, their discounts, and taxByRate entries', () => {
@@ -76,7 +76,7 @@ it('rejects unknown keys in display, its lines, their discounts, and taxByRate e
     const target = path === 'display' ? input.display! : path === 'display.lines[0]' ? input.display!.lines[0]
       : path === 'taxByRate[0]' ? input.taxByRate![0] : input.display!.lines[0].discounts[0]
     Object.assign(target, { unknown: true })
-    expect(fiscalFiguresErrors(input)).toEqual([`${path}.unknown: expected no unknown key`])
+    expect(fiscalFiguresErrors(input)).toEqual([`payload.${path}.unknown: expected no unknown key`])
   }
 })
 
@@ -87,9 +87,9 @@ it.each([1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, '100', null, undefined
   Object.assign(input.display!.lines[0], { amountMinor: value, discounts: [{ discountId: 'd', amountMinor: value }] })
   Object.assign(input.taxByRate![0], { netMinor: value, taxMinor: value, grossMinor: value })
   expect(fiscalFiguresErrors(input)).toEqual([
-    ...['subtotalMinor', 'discountMinor', 'taxMinor', 'totalMinor', 'orderDiscountMinor'].map(field => `display.${field}: expected a safe integer`),
-    'display.lines[0].amountMinor: expected a safe integer', 'display.lines[0].discounts[0].amountMinor: expected a safe integer',
-    ...['netMinor', 'taxMinor', 'grossMinor'].map(field => `taxByRate[0].${field}: expected a safe integer`),
+    ...['subtotalMinor', 'discountMinor', 'taxMinor', 'totalMinor', 'orderDiscountMinor'].map(field => `payload.display.${field}: expected a safe integer`),
+    'payload.display.lines[0].amountMinor: expected a safe integer', 'payload.display.lines[0].discounts[0].amountMinor: expected a safe integer',
+    ...['netMinor', 'taxMinor', 'grossMinor'].map(field => `payload.taxByRate[0].${field}: expected a safe integer`),
   ])
 })
 
@@ -106,14 +106,14 @@ it.each([
   const keys = (path as string).split('.')
   const target = keys.slice(0, -1).reduce((object, key) => object[key], input as any)
   target[keys[keys.length - 1]] = value
-  expect(fiscalFiguresErrors(input)).toEqual([expect.stringContaining(`${(path as string).replace(/\.(\d+)/g, '[$1]')}: expected`)])
+  expect(fiscalFiguresErrors(input)).toEqual([expect.stringContaining(`payload.${(path as string).replace(/\.(\d+)/g, '[$1]')}: expected`)])
 })
 
 it('allows an empty taxByRate only for zero tax and uses currency-specific decimals', () => {
-  expect(fiscalFiguresErrors({ ...payload, taxByRate: [] })).toContain('taxByRate: expected a non-empty array when payload.taxMinor is nonzero')
+  expect(fiscalFiguresErrors({ ...payload, taxByRate: [] })).toContain('payload.taxByRate: expected a non-empty array when payload.taxMinor is nonzero')
   for (const [currency, exponent] of [['JPY', 0], ['BHD', 3]] as const) {
     const input = { ...payload, currency, taxMinor: 0, taxByRate: [], display: { ...payload.display!, currency, exponent, taxMinor: 0 } }
     expect(fiscalFiguresErrors(input)).toEqual([])
-    expect(fiscalFiguresErrors({ ...input, display: { ...input.display, exponent: 2 } })).toEqual(['display.exponent: expected the currency decimals'])
+    expect(fiscalFiguresErrors({ ...input, display: { ...input.display, exponent: 2 } })).toEqual(['payload.display.exponent: expected the currency decimals'])
   }
 })

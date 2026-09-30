@@ -23,21 +23,21 @@ export const envelopeErrors = (envelope: CommandEnvelope<unknown>) => [...Object
   .map(key => `envelope.${key}: unknown field for ${envelope.type} version ${envelope.version}`),
 ...clientTimeErrors(envelope.createdAt, 'createdAt')]
 
-/** Shape errors of an order.create payload, e.g. ['lines: expected a non-empty array',
- * 'payments[0].method: expected a string']; [] when the shape is valid. Checks presence, types, fields unknown to
+/** Shape errors of an order.create payload, e.g. ['payload.lines: expected a non-empty array',
+ * 'payload.payments[0].method: expected a string']; [] when the shape is valid. Checks presence, types, fields unknown to
  * `version`, string bounds and NUL (numbers are finite numbers; value ranges are the planner's job). `version`
- * defaults to the latest; a field a later version declares is named with that version ('display: requires version 3'). */
+ * defaults to the latest; a field a later version declares is named with that version ('payload.display: requires version 3'). */
 export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   const errors: string[] = []
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
   const check = (valid: boolean, path: string, expected: string) => {
-    if (!valid && errors.length < 10) errors.push(`${path}: expected ${expected}`)
+    if (!valid && errors.length < 10) errors.push(`payload.${path}: expected ${expected}`)
   }
   const known = (value: Record<string, unknown>, fields: Map<string, number>, prefix: string) => {
     for (const key of Object.keys(value)) {
       const added = fields.get(key) ?? Infinity
-      if (added > version && errors.length < 10) errors.push(`${prefix}${key}: ${added === Infinity
+      if (added > version && errors.length < 10) errors.push(`payload.${prefix}${key}: ${added === Infinity
         ? `unknown field for order.create version ${version}` : `requires version ${added}`}`)
     }
   }
@@ -89,14 +89,14 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   for (const [index, line] of (Array.isArray(payload.lines) ? payload.lines : []).entries()) {
     if (!object(line) || typeof line.clientLineId !== 'string') continue
     const first = firstLine.get(line.clientLineId)
-    if (first !== undefined && first >= 0) check(false, `lines[${index}].clientLineId`, `no duplicate of lines[${first}].clientLineId`)
+    if (first !== undefined && first >= 0) check(false, `lines[${index}].clientLineId`, `no duplicate of payload.lines[${first}].clientLineId`)
     firstLine.set(line.clientLineId, first === undefined ? index : -1)
   }
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor']) number(payload[field], field)
   const lineDiscounts = (Array.isArray(payload.lines) ? payload.lines : [])
     .reduce((sum: bigint, line, index) => sum + (object(line) ? discount(line.discountMinor, `lines[${index}].discountMinor`) : 0n), 0n)
   const orderDiscount = discount(payload.discountMinor, 'discountMinor')
-  if (errors.length === 0) check(orderDiscount === lineDiscounts, 'discountMinor', 'the sum of lines[].discountMinor')
+  if (errors.length === 0) check(orderDiscount === lineDiscounts, 'discountMinor', 'the sum of payload.lines[].discountMinor')
   if (payload.customer !== undefined && payload.customer !== null) {
     check(object(payload.customer), 'customer', 'an object')
     if (object(payload.customer)) known(payload.customer, CUSTOMER_FIELDS, 'customer.')
@@ -141,8 +141,8 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
   const errors: string[] = []
   for (const [path, text, max] of fields) {
     if (typeof text !== 'string') continue
-    if (bounds && max && text.length > max) errors.push(`${path}: expected at most ${max} characters`)
-    if (text.includes('\0')) errors.push(`${path}: expected no NUL character`)
+    if (bounds && max && text.length > max) errors.push(`payload.${path}: expected at most ${max} characters`)
+    if (text.includes('\0')) errors.push(`payload.${path}: expected no NUL character`)
   }
   return errors.slice(0, 10)
 }

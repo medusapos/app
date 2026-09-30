@@ -503,7 +503,7 @@ medusaIntegrationTestRunner({
       expect(response.status).toBe(200)
       expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'rejected'])
       expect(response.data.results[2]).toEqual({ id: submission.id, status: 'rejected', error: {
-        code: 'invalid_payload', message: 'counted.voucher: expected a payment method (cash or external)',
+        code: 'invalid_payload', message: 'payload.counted.voucher: expected a payment method (cash or external)',
       } })
       expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)

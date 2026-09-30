@@ -46,8 +46,8 @@ it('a 1-unit change to a taxByRate figure fails validation', () => {
   const input = structuredClone(payload)
   input.taxByRate![0].taxMinor += 1
   expect(fiscalFiguresErrors(input)).toEqual([
-    'taxByRate: expected the sum of taxMinor to equal payload.taxMinor',
-    'taxByRate[0].grossMinor: expected netMinor + taxMinor',
+    'payload.taxByRate: expected the sum of taxMinor to equal payload.taxMinor',
+    'payload.taxByRate[0].grossMinor: expected netMinor + taxMinor',
   ])
 })
 
