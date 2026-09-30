@@ -31,7 +31,7 @@ describe('validateBatch', () => {
   it('rejects NUL before replay and version rules without touching the container', async () => {
     const outcome = await processBatch({} as MedusaContainer, [{ ...command, version: 4, payload: { clientOrderId: '\0' } } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
-      code: 'invalid_payload', message: 'clientOrderId: expected no NUL character',
+      code: 'invalid_payload', message: 'payload.clientOrderId: expected no NUL character',
     } }] } })
   })
 
@@ -94,28 +94,28 @@ describe('validateBatch', () => {
       outcomes.push(await processBatch(container, [{ ...command, version, payload: { ...payload, ...fields } } as never], {}))
     }
     for (const outcome of outcomes) expect(outcome).toEqual({ status: 200, body: { results: [{
-      id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: 'lines: expected a non-empty array' },
+      id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: 'payload.lines: expected a non-empty array' },
     }] } })
   })
 
   it('does not require discountMinor for version 3', async () => {
     const outcome = await processBatch(container, [{ ...command, version: 3 } as never], {})
     expect(outcome).toMatchObject({ status: 200, body: { results: [{ error: {
-      code: 'invalid_payload', message: expect.stringContaining('clientOrderId: expected'),
+      code: 'invalid_payload', message: expect.stringContaining('payload.clientOrderId: expected'),
     } }] } })
     expect(JSON.stringify(outcome)).not.toContain('requires discountMinor')
   })
 
   it.each([
-    [1, { display: {} }, 'display: requires version 3'],
-    [2, { display: {} }, 'display: requires version 3'],
-    [2, { taxByRate: [] }, 'taxByRate: requires version 3'],
+    [1, { display: {} }, 'payload.display: requires version 3'],
+    [2, { display: {} }, 'payload.display: requires version 3'],
+    [2, { taxByRate: [] }, 'payload.taxByRate: requires version 3'],
     [3, { display: {} }, 'display and taxByRate must both be present or both absent'],
     [3, { taxByRate: [] }, 'display and taxByRate must both be present or both absent'],
-    [1, { sessionId: 'session' }, 'sessionId: requires version 3'],
-    [2, { sessionId: 'session' }, 'sessionId: requires version 3'],
-    [1, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
-    [2, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
+    [1, { sessionId: 'session' }, 'payload.sessionId: requires version 3'],
+    [2, { sessionId: 'session' }, 'payload.sessionId: requires version 3'],
+    [1, { customer: { customerId: 'customer' } }, 'payload.customer.customerId: requires version 3'],
+    [2, { customer: { customerId: 'customer' } }, 'payload.customer.customerId: requires version 3'],
   ])('rejects version %s fields %j after the replay read', async (version, fields, message) => {
     const payload = { ...(version === 2 ? mainV2 : mainV1).payload, ...fields }
     const outcome = await processBatch(container, [{ ...command, version, payload } as never], {})
@@ -138,7 +138,7 @@ describe('validateBatch', () => {
     const payload = { ...mainV1.payload, ...fields }
     const outcome = await processBatch(container, [{ ...command, id: 'sale-1', payload } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: 'sale-1', status: 'rejected', error: {
-      code: 'invalid_payload', message: `${path}: requires version 2`,
+      code: 'invalid_payload', message: `payload.${path}: requires version 2`,
     } }] } })
   })
 
@@ -169,10 +169,10 @@ describe('recorded TallyUI envelopes, 2026-09-30 (ruling 17)', () => {
   it.each<[string, Recorded, string]>([
     ['a v2 field in v1', { ...mainV1, payload: { ...mainV1.payload, discountMinor: 1,
       lines: [{ ...mainV1.payload.lines[0], discountMinor: 1 }, mainV1.payload.lines[1]] } },
-      'discountMinor: requires version 2; lines[0].discountMinor: requires version 2'],
-    ['a v3 field in v2', { ...mainV2, payload: { ...mainV2.payload, sessionId: 'session' } }, 'sessionId: requires version 3'],
+      'payload.discountMinor: requires version 2; payload.lines[0].discountMinor: requires version 2'],
+    ['a v3 field in v2', { ...mainV2, payload: { ...mainV2.payload, sessionId: 'session' } }, 'payload.sessionId: requires version 3'],
     ['a v3 customer field in v2', { ...mainV2, payload: { ...mainV2.payload, customer: { email: 'buyer@example.com', customerId: 'c' } } },
-      'customer.customerId: requires version 3'],
+      'payload.customer.customerId: requires version 3'],
   ])('%s names the version it needs, not an unknown field', async (_name, fixture, message) => {
     const outcome = await processBatch(container, [fixture] as never, {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: {

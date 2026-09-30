@@ -394,7 +394,7 @@ medusaIntegrationTestRunner({
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'lines[0].discountMinr: unknown field for order.create version 1',
+          code: 'invalid_payload', message: 'payload.lines[0].discountMinr: unknown field for order.create version 1',
         } }])
         expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
         expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
@@ -464,7 +464,7 @@ medusaIntegrationTestRunner({
         expect(response.status).toBe(200)
         expect(response.data.results.map(result => result.status)).toEqual(['rejected', 'applied'])
         expect(response.data.results[0]).toEqual({ id: refused.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'lines[1].clientLineId: expected no duplicate of lines[0].clientLineId',
+          code: 'invalid_payload', message: 'payload.lines[1].clientLineId: expected no duplicate of payload.lines[0].clientLineId',
         } })
         expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
         expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
@@ -519,7 +519,7 @@ medusaIntegrationTestRunner({
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'lines[0].title: expected at most 255 characters',
+          code: 'invalid_payload', message: 'payload.lines[0].title: expected at most 255 characters',
         } }])
         expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
       })
@@ -529,7 +529,7 @@ medusaIntegrationTestRunner({
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'clientOrderId: expected no NUL character',
+          code: 'invalid_payload', message: 'payload.clientOrderId: expected no NUL character',
         } }])
         expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
       })
@@ -1810,7 +1810,7 @@ medusaIntegrationTestRunner({
       expect((await liveOrders(payload.clientOrderId))[0].metadata).toEqual(order.metadata)
       const invalid = { ...sale, id: randomUUID(), payload: { ...payload, display: { ...payload.display!, totalMinor: totalMinor + 1 } } }
       expect((await post([invalid])).data.results[0]).toMatchObject({ status: 'rejected', error: {
-        code: 'invalid_payload', message: 'display.totalMinor: expected payload.totalMinor',
+        code: 'invalid_payload', message: 'payload.display.totalMinor: expected payload.totalMinor',
       } })
     })
 
@@ -1833,11 +1833,11 @@ medusaIntegrationTestRunner({
     })
 
     it.each([
-      [3, { sessionId: 'x'.repeat(37) }, 'sessionId: expected a string of at most 36 characters'],
-      [3, { sessionId: '' }, 'sessionId: expected a string of at most 36 characters'],
-      [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId: requires version 3'],
-      [3, { customer: { customerId: 'x'.repeat(65) } }, 'customer.customerId: expected a string of at most 64 characters'],
-      [1, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
+      [3, { sessionId: 'x'.repeat(37) }, 'payload.sessionId: expected a string of at most 36 characters'],
+      [3, { sessionId: '' }, 'payload.sessionId: expected a string of at most 36 characters'],
+      [2, { sessionId: 'session', discountMinor: 1 }, 'payload.sessionId: requires version 3'],
+      [3, { customer: { customerId: 'x'.repeat(65) } }, 'payload.customer.customerId: expected a string of at most 64 characters'],
+      [1, { customer: { customerId: 'customer' } }, 'payload.customer.customerId: requires version 3'],
     ])('rejects invalid v%s bookkeeping fields %j', async (version, fields, message) => {
       const sale = command()
       const response = await post([{ ...sale, version, payload: { ...sale.payload, ...fields } }])

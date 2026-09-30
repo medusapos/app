@@ -23,7 +23,7 @@ it.each<[string, Record<string, unknown>]>([
   ['register.closure.submit', closure],
 ])('accepts a valid %s payload and refuses an unknown field, naming it (ruling 17)', (type, payload) => {
   expect(registerPayloadErrors(type, payload)).toEqual([])
-  expect(registerPayloadErrors(type, { ...payload, extra: true })).toEqual([`extra: unknown field for ${type} version 1`])
+  expect(registerPayloadErrors(type, { ...payload, extra: true })).toEqual([`payload.extra: unknown field for ${type} version 1`])
 })
 
 it.each<[string, string, Record<string, unknown>]>([
@@ -33,7 +33,7 @@ it.each<[string, string, Record<string, unknown>]>([
 ])('%s %s takes cash and external keys, and refuses card', (type, map, payload) => {
   expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, external: 2 } })).toEqual([])
   expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, card: 2 } }))
-    .toEqual([`${map}.card: expected a payment method (cash or external)`])
+    .toEqual([`payload.${map}.card: expected a payment method (cash or external)`])
 })
 
 it('the payment-method keys are exhaustive: a Record<PaymentMethodKind, true> without external does not compile', () => {
@@ -44,7 +44,7 @@ it('the payment-method keys are exhaustive: a Record<PaymentMethodKind, true> wi
 
 it('an unknown command type allows no keys', () => {
   expect(registerPayloadErrors('register.unknown', { sessionId: 's' }))
-    .toEqual(['sessionId: unknown field for register.unknown version 1', 'type: expected a register command type'])
+    .toEqual(['payload.sessionId: unknown field for register.unknown version 1', 'type: expected a register command type'])
 })
 
 type Recorded = [string, { type: string; payload: unknown }]
