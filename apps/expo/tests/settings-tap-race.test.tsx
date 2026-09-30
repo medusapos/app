@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-// Backlog "Tap race when new store settings land" (#58 review): a line added at the instant new store settings
-// land must stay in the cart. The real useSale (@tallyui/pos 2.0.0) and the real ProductsScreen, as the app runs them.
+// The tap race when new store settings land (#58 review, TallyUI/tallyui#301): a line added at the instant new store settings
+// land must stay in the cart. The real useSale (@tallyui/pos) and the real ProductsScreen, as the app runs them.
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { useEffect, useLayoutEffect, type ComponentProps, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -103,7 +103,7 @@ beforeEach(() => {
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(),
     mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0,
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
     record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
     isStored: vi.fn().mockResolvedValue(false) });
   vi.mocked(useReplicatedProducts).mockImplementation((_connector, context) => {
@@ -152,8 +152,7 @@ async function germanyLands(retry: { resolve: (value: PricingSettings) => void }
 }
 
 describe('tap race when new store settings land (#58 review)', () => {
-  // TallyUI useSale drops the line (TallyUI/tallyui#301, fixed by #303); switch to `it` when the @tallyui/pos carrying #303 is pinned.
-  it.fails('window 1: keeps a line tapped right after the new settings commit, before that commit\'s effects run', async () => {
+  it('window 1: keeps a line tapped right after the new settings commit, before that commit\'s effects run', async () => {
     const retry = await idleWithRetryInFlight();
     let tapped = false;
     // The tap is queued behind the commit task (a microtask here), ahead of React's passive-effects task.
@@ -162,7 +161,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     expect(button('Remove Shirt')).toBeTruthy();
   });
 
-  it.fails('window 2: keeps a line tapped after useSale\'s new-sale effect ran, before the new builder renders', async () => {
+  it('window 2: keeps a line tapped after useSale\'s new-sale effect ran, before the new builder renders', async () => {
     const retry = await idleWithRetryInFlight();
     let tapped = false;
     // Queued during the passive-effects flush, so it runs once useSale's effect has called newSale() (setBuilder
@@ -172,7 +171,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     expect(button('Remove Shirt')).toBeTruthy();
   });
 
-  it.fails('window 1, synchronous: keeps a line tapped from inside the new settings\' commit (a layout effect)', async () => {
+  it('window 1, synchronous: keeps a line tapped from inside the new settings\' commit (a layout effect)', async () => {
     const retry = await idleWithRetryInFlight();
     let tapped = false;
     onGermanyCommit = () => { if (!tapped) { tapped = true; tap('Shirt'); } };

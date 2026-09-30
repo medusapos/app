@@ -107,7 +107,7 @@ beforeEach(async () => {
     stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), unlisted: undefined });
   store = await openOrderStore(baseUrl);
   record = vi.fn(async (order: PosOrder) => { await store.orders.insert(order); });
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0,
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
     record, flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
 afterEach(async () => {

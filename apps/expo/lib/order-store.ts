@@ -252,17 +252,22 @@ export async function closeOrderStores(): Promise<void> {
 
 // E2E debug hooks (see e2e-debug.ts): each seeds one order into a store at an older `pos_orders` schema, exactly
 // as the shipped builds wrote it, and resolves to that version. Faithful schemas, like TallyUI's open.test-helper:
-// v1 is the current v2 minus its only additions (`lateSessionId`, `display`, `taxByRate`; TallyUI c1a), and
-// v0 is v1 minus its only addition (`sessionId`; TallyUI #123).
+// v1 is the current v6 minus the additions of v2 to v6 (`lateSessionId`, `display`, `taxByRate`; the `sessionId`
+// index and maxLength, `sentVersion`, `downgradedFrom`; `localWarnings`, `serverFailures`; the required `taxRounding`),
+// and v0 is v1 minus its only addition (`sessionId`; TallyUI #123).
 // - SeedLegacyOrder: v0 into a backend's legacy Dexie order database (the pre-SQLite builds were all v0);
 // - SeedV0Order / SeedV1Order: v0 / v1 into its SQLite order store, then end the worker;
 // - FailNextOrderStoreOpen: arms the check above so the next openOrderStore rejects once with `code`.
 if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') {
-  const { lateSessionId: _late, display: _display, taxByRate: _taxByRate, ...v1Properties } = posOrderSchema.properties;
-  const { sessionId: _session, ...v0Properties } = v1Properties;
+  const { lateSessionId: _late, display: _display, taxByRate: _taxByRate, sentVersion: _sent, downgradedFrom: _down,
+    localWarnings: _local, serverFailures: _failures, taxRounding: _rounding, ...current } = posOrderSchema.properties;
+  const { sessionId: _session, ...v0Properties } = current;
+  const v1Properties = { ...v0Properties, sessionId: { type: 'string' } };
+  const older = { ...posOrderSchema, required: posOrderSchema.required!.filter((key) => key !== 'taxRounding'),
+    indexes: posOrderSchema.indexes!.filter((index) => index !== 'sessionId') };
   const olderSchemas = {
-    0: { ...posOrderSchema, version: 0, properties: v0Properties as typeof posOrderSchema.properties },
-    1: { ...posOrderSchema, version: 1, properties: v1Properties as typeof posOrderSchema.properties },
+    0: { ...older, version: 0, properties: v0Properties as typeof posOrderSchema.properties },
+    1: { ...older, version: 1, properties: v1Properties as typeof posOrderSchema.properties },
   };
   const seed = async (version: 0 | 1, name: string, storage: RxStorage<any, any>, order: PosOrder) => {
     const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({ name, storage, multiInstance: false });

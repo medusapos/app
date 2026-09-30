@@ -137,7 +137,7 @@ beforeEach(() => {
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null by default: the order store is open unless a test says otherwise (#86 review, item 5).
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -216,7 +216,7 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
-    expect(screen.getByLabelText('Sync status').textContent).toBe('All sales synced');
+    expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByRole('button', { name: 'Apple' }));
     expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
     fireEvent.change(screen.getByPlaceholderText('Search or scan barcode / SKU'), { target: { value: 'zebra' } });
@@ -268,7 +268,8 @@ describe('ProductsScreen catalogue', () => {
         { ...order, id: 'warned', syncStatus: 'applied', warnings: [{ code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }],
     });
     await mount();
-    expect(screen.getByLabelText('Sync status').textContent).toBe('2 sales waiting to sync · sending');
+    expect(screen.getByLabelText('2 sales waiting to sync').textContent).toBe('2 sales waiting to sync');
+    expect(screen.getByText('Sending…')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Orders (2)' }));
     expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders');
     expect(router.replace).not.toHaveBeenCalled();
@@ -334,7 +335,7 @@ describe('Orders screen and sync status', () => {
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Recent']);
-    for (const label of ['invalid: Unknown variant', 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order #42 · 3 items']) {
+    for (const label of ["The online store refused this sale. Ask the store owner to look at the till's sync log.", 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order #42 · 3 items']) {
       expect(screen.getAllByText(label)).toHaveLength(2);
     }
     expect(screen.getAllByText('1 item')).toHaveLength(3);
@@ -359,7 +360,9 @@ describe('Orders screen and sync status', () => {
       expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
       expect(requeue).not.toHaveBeenCalled();
     }
-    expect(screen.queryByText('This sale needs checking against the store before it can be sent again.') !== null).toBe(kind === 'idempotency_mismatch');
+    // In both Needs attention and Recent (#314).
+    expect(screen.queryAllByText("The online store has a different sale under this sale's number. Don't send it again; ask the store owner to compare the two."))
+      .toHaveLength(kind === 'idempotency_mismatch' ? 2 : 0);
   });
 
   it.each([0, 1])('blocks repeat Retry taps until requeue resolves %s or the order leaves rejected', async (result) => {
@@ -402,9 +405,11 @@ describe('Orders screen and sync status', () => {
     vi.useFakeTimers();
     try {
       render(<SyncStatus state={{ pending: 1, sending: false, lastRetryReason: 'network', nextAttemptAt: Date.now() + 3000 }} />);
-      expect(screen.getByLabelText('Sync status').textContent).toBe('1 sale waiting to sync · retrying (network) in 3s');
+      expect(screen.getByLabelText('1 sale waiting to sync').textContent).toBe('1 sale waiting to sync');
+      expect(screen.getByText('Retrying in 3 s.')).toBeTruthy();
       act(() => { vi.advanceTimersByTime(1000); });
-      expect(screen.getByLabelText('Sync status').textContent).toBe('1 sale waiting to sync · retrying (network) in 2s');
+      expect(screen.getByText('Retrying in 2 s.')).toBeTruthy();
+      expect(screen.queryByText('Retrying in 3 s.')).toBeNull();
       cleanup();
     } finally { vi.useRealTimers(); }
   });
@@ -644,7 +649,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOrderOutbox).mockImplementation(function useHungOutbox() {
       const [savesInFlight, setSavesInFlight] = useState(0);
       // Not null: these tests are about the hung-save mechanics, not the order-store-open gate (#86 review, item 5).
-      return { orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight, isStored,
+      return { orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight, stuckCommandIds: [], isStored,
         flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
         async record(order: PosOrder) {
           setSavesInFlight((count) => count + 1);

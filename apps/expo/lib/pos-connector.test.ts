@@ -17,5 +17,7 @@ it('preserves the stock connector identity, schemas, traits, and replication', (
   expect(posConnector.name).toBe(medusaConnector.name);
   expect(posConnector.schemas).toBe(medusaConnector.schemas);
   expect(posConnector.traits).toBe(medusaConnector.traits);
-  expect(posConnector.replication).toBe(medusaConnector.replication);
+  // The same collections, each instance with its own reconcile feed (TallyUI #315, #307).
+  expect(Object.keys(posConnector.replication!)).toEqual(Object.keys(medusaConnector.replication!));
+  expect(posConnector.replication).not.toBe(medusaConnector.replication);
 });

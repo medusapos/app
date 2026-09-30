@@ -8,7 +8,7 @@ test('cash sale is completed, captured and deducted from stock', async ({ page }
   await signIn(page);
   const receiptTotal = await sellBySku(page, ['E2E-1', 'E2E-4'], 'exact');
   expect(receiptTotal).toBe(15);
-  await expect(page.getByText('All sales synced', { exact: true })).toBeVisible();
+  await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
   expect(sales.size).toBe(1);
   const orders = (await ordersByClientId(token)).filter(order => sales.has(order.metadata.tally_client_id!));
   expect(orders).toHaveLength(1);

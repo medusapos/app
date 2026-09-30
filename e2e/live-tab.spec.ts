@@ -90,5 +90,5 @@ test('pageshow after pagehide re-opens both databases', async ({ page }) => {
   });
   await sellBySku(page, ['E2E-1'], 'exact');
   await saleApplied;
-  await expect(page.getByLabel('Sync status', { exact: true })).toHaveText('All sales synced');
+  await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
 });

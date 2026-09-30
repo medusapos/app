@@ -19,7 +19,7 @@ describe('OutboxProvider savesInFlight', () => {
     let outbox!: UseOrderOutboxResult;
     const next = (savesInFlight: number) => {
       outbox = { orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn(),
-        isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), savesInFlight };
+        isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), savesInFlight, stuckCommandIds: [] };
     };
     vi.mocked(useOrderOutbox).mockImplementation(() => outbox);
     let seen!: UseOrderOutboxResult;

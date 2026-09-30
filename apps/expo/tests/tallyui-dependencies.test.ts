@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { URL } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { medusaConnector } from '@tallyui/connector-medusa';
+import { createMedusaConnector } from '@tallyui/connector-medusa';
 
 // medusapos takes @tallyui/* only from npm, pinned to one exact version (README "TallyUI").
 // The root pnpm.overrides carry the same pins so they reach transitive deps; they stay pinned too.
@@ -72,8 +72,17 @@ describe('TallyUI dependencies', () => {
     expect(blocks.filter((block) => /resolution: \{integrity:/.test(block)).length).toBeGreaterThanOrEqual(8);
   });
 
+  it('the plugin lockfile resolves @tallyui/core from the registry, at the pinned version', () => {
+    const version = allPins[0][1];
+    const core = readJson('packages/medusa-plugin/package-lock.json').packages?.['node_modules/@tallyui/core'];
+    expect(core?.version).toBe(version);
+    expect(core?.link).toBeUndefined();
+    expect(core?.resolved).toBe(`https://registry.npmjs.org/@tallyui/core/-/core-${version}.tgz`);
+    expect(core?.integrity).toMatch(/^sha512-/);
+  });
+
   it('the published Medusa connector resolves', () => {
-    // 'medusa' is the id @tallyui/connector-medusa@2.0.0 declares in src/index.ts.
-    expect(medusaConnector.id).toBe('medusa');
+    // 'medusa' is the id @tallyui/connector-medusa declares in src/index.ts; each store session builds its own (#307).
+    expect(createMedusaConnector().id).toBe('medusa');
   });
 });

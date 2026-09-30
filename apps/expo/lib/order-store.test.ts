@@ -188,17 +188,24 @@ const memoryStorage = () => wrappedValidateAjvStorage({ storage: getRxStorageMem
 
 /** A stored older `pos_orders` version, which the store's open migrates to the current one. */
 type Origin = 0 | 1;
+/** The optional fields versions 2 to 6 added, which no older app wrote (taxRounding: the one they made required). */
+const ADDED_SINCE_V1 = ['lateSessionId', 'display', 'taxByRate', 'sentVersion', 'downgradedFrom', 'localWarnings',
+  'serverFailures', 'taxRounding'];
 
 /**
- * The shipped older schemas, as TallyUI's open.test-helper builds them: version 1 is version 2
- * minus its only additions (`lateSessionId`, `display`, `taxByRate`; TallyUI c1a), and version 0
- * is version 1 minus its only addition (`sessionId`; TallyUI #123).
+ * The shipped older schemas, as TallyUI's open.test-helper builds them: version 1 is version 6
+ * minus the additions of versions 2 to 6 (`lateSessionId`, `display`, `taxByRate`; the `sessionId`
+ * index and its `maxLength`, `sentVersion`, `downgradedFrom`; `localWarnings`, `serverFailures`;
+ * the required `taxRounding`), and version 0 is version 1 minus its only addition (`sessionId`; TallyUI #123).
  */
 function olderSchema(from: Origin): RxJsonSchema<PosOrder> {
   const schema = structuredClone(posOrderSchema);
   const properties = schema.properties as Record<string, unknown>;
-  for (const key of ['lateSessionId', 'display', 'taxByRate', ...(from === 0 ? ['sessionId'] : [])]) delete properties[key];
-  return { ...schema, version: from };
+  for (const key of ADDED_SINCE_V1) delete properties[key];
+  if (from === 0) delete properties.sessionId;
+  else properties.sessionId = { type: 'string' };
+  return { ...schema, version: from, required: schema.required!.filter((key) => key !== 'taxRounding'),
+    indexes: schema.indexes!.filter((index) => index !== 'sessionId') };
 }
 
 /** `pos_orders` as the shipped app at `from` added it: version 1 came with its identity strategy. */
@@ -215,7 +222,7 @@ const rawOlder = (databaseName: string, from: Origin) => getRxStorageMemory().cr
 
 /**
  * A database written at version `from` holding `orders`, plus `invalid` written beneath RxDB (as
- * an unvalidated production build could have): it fails version 2's validation, so a validating
+ * an unvalidated production build could have): it fails version 6's validation, so a validating
  * open's migration stops with DM4.
  */
 async function seedOlder(from: Origin, name: string, orders: PosOrder[], invalid?: PosOrder) {
@@ -246,13 +253,22 @@ async function olderDocuments(from: Origin, name: string, ids: string[]) {
 }
 
 /** A pending sale as the version-`from` app took it: a version-1 one carries its session (ADR-032). */
-const olderSale = (from: Origin): PosOrder => ({ ...sale(), ...(from === 1 ? { sessionId: 'session-1' } : {}) });
-// Valid at the older version when it was written, but not at version 2 (an unknown syncStatus).
+const olderSale = (from: Origin): PosOrder => {
+  const { taxRounding: _taxRounding, ...order } = sale();
+  return { ...order, ...(from === 1 ? { sessionId: 'session-1' } : {}) } as PosOrder;
+};
+/**
+ * An older order as the version-6 open leaves it: TallyUI's version-5 and version-6 migrations record
+ * its `sentVersion` (its content version, 1 for these sales; #300) and the default `taxRounding` (#318).
+ */
+const migrated = (order: PosOrder): PosOrder =>
+  ({ ...order, sentVersion: 1, taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
+// Valid at the older version when it was written, but not at version 6 (an unknown syncStatus).
 const invalidSale = (from: Origin = 0) => ({ ...olderSale(from), syncStatus: 'queued' }) as unknown as PosOrder;
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
 
-describe.each([0, 1] as const)('pos_orders schema v%i to v2', (from) => {
-  it(`reopens a version-${from} order store through openOrderStore: the pending order is there, unchanged`, async () => {
+describe.each([0, 1] as const)('pos_orders schema v%i to v6', (from) => {
+  it(`reopens a version-${from} order store through openOrderStore: the pending order is there, as TallyUI migrates it`, async () => {
     const url = `https://v${from}-store.test`;
     const name = orderDatabaseName(url);
     const pending = olderSale(from);
@@ -261,11 +277,11 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v2', (from) => {
     expect(await olderDocuments(from, name, [pending.id])).toEqual([original]);
     const store = await openOrderStore(url);
     try {
-      expect(store.orders.schema.version).toBe(2);
+      expect(store.orders.schema.version).toBe(6);
       const found = (await store.orders.findOne(pending.id).exec())?.toJSON();
-      // Identity migrations: byte for byte the order that was stored, and none of version 2's fields added.
-      expect(found).toStrictEqual(original);
-      for (const added of ['lateSessionId', 'display', 'taxByRate']) expect(found).not.toHaveProperty(added);
+      // Byte for byte the order that was stored plus what versions 5 and 6 record, and no other field added.
+      expect(found).toStrictEqual(migrated(original));
+      for (const added of ADDED_SINCE_V1.filter((key) => !(key in migrated(original)))) expect(found).not.toHaveProperty(added);
       // The outbox's own query still finds it.
       expect((await store.orders.find({ selector: { syncStatus: 'pending' } }).exec()).map((doc) => doc.id)).toEqual([pending.id]);
     } finally { await store.close(); }
@@ -285,7 +301,7 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v2', (from) => {
     }
   });
 
-  it(`after a DM4 and a fix to the v${from} data, the very next open migrates every order unchanged`, async () => {
+  it(`after a DM4 and a fix to the v${from} data, the very next open migrates every order`, async () => {
     const url = `https://v${from}-store-dm4-fix.test`;
     const name = orderDatabaseName(url);
     const pending = olderSale(from);
@@ -298,8 +314,8 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v2', (from) => {
     await writeRawOlder(from, name, fixed);
     const store = await openOrderStore(url);
     try {
-      expect(store.orders.schema.version).toBe(2);
-      expect((await store.orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].sort(byId));
+      expect(store.orders.schema.version).toBe(6);
+      expect((await store.orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].map(migrated).sort(byId));
     } finally { await store.close(); }
     expect(await olderDocuments(from, name, [pending.id, invalid.id])).toEqual([]);
   });
@@ -427,15 +443,15 @@ describe('carryOverOrders', () => {
     await to.remove();
   });
 
-  it.each([0, 1] as const)('carries over a pending order from a version-%i legacy source through the version-2 open', async (from) => {
+  it.each([0, 1] as const)('carries over a pending order from a version-%i legacy source through the version-6 open', async (from) => {
     const fromName = `legacy-carry-v${from}`;
     const pending = olderSale(from);
     const original = structuredClone(pending);
     await seedOlder(from, fromName, [pending]);
     const to = await memoryOrdersDb(`target-carry-v${from}`, true);
-    expect(to.pos_orders.schema.version).toBe(2);
+    expect(to.pos_orders.schema.version).toBe(6);
     await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
-    expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual([original]);
+    expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual([migrated(original)]);
     expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 1 });
     expect(await olderDocuments(from, fromName, [pending.id])).toEqual([]);
     await to.remove();
@@ -462,7 +478,7 @@ describe('carryOverOrders', () => {
       await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
       expect(warn).not.toHaveBeenCalled();
       expect(bulkInsert).toHaveBeenCalledTimes(1);
-      expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].sort(byId));
+      expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].map(migrated).sort(byId));
       expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 2 });
       expect(await olderDocuments(from, fromName, [pending.id, invalid.id])).toEqual([]);
     } finally {
