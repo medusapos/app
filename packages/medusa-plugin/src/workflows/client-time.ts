@@ -7,7 +7,7 @@ export const CLIENT_TIME_MAX_AHEAD_MS = 24 * 60 * 60 * 1000
 export const clientTimeUpperBound = (now = Date.now()): number => now + CLIENT_TIME_MAX_AHEAD_MS
 
 export function parseClientTime(value: string): number | null {
-  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value)
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)$/.exec(value)
   if (!match || match[0] !== value) return null
   const [year, month, day, hour, minute, second] = match.slice(1, 7).map(Number)
   const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
