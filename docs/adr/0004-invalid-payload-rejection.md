@@ -31,6 +31,7 @@ The TallyUI contract docs should list `invalid_payload`.
 **Decision.** Add the rejection code `store_configuration`:
 - **When it applies:** the plugin's own checks that run before any write throw a dedicated `StoreConfigurationError`, and `executeOrderCreate` turns that class, and only that class, into a per-command rejection whose message is the reason.
   - Those checks are the missing sales channel, the missing stock location or address, the missing shipping option, and the shipping-profile checks (next amendment).
+  - A stock location named by `payload.locationId` or plugin option `locationId` must also exist and be assigned to the sale's sales channel; otherwise the refusal names its source (ruling 19, 2026-09-30).
   - When the sale resumes an existing order (a retry after a crash left a draft or a paid order), the same failures stay transient, because writes have already happened.
 - **It isn't stored in the ledger:** the claim is released, as for `invalid_payload`. So the same command applies once the store is fixed, and the till's Retry works without a new command id.
 - **Everything else stays `transient`,** including every error Medusa throws inside its workflows.

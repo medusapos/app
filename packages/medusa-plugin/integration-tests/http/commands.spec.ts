@@ -5,7 +5,8 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { WorkflowManager } from '@medusajs/framework/orchestration'
 import { ContainerRegistrationKeys, Modules, ProductStatus } from '@medusajs/framework/utils'
 import {
-  cancelOrderWorkflow, convertDraftOrderWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, createProductsWorkflow, markPaymentCollectionAsPaid,
+  cancelOrderWorkflow, convertDraftOrderWorkflow, createInventoryLevelsWorkflow, createOrderPaymentCollectionWorkflow, createOrderWorkflow, createProductsWorkflow,
+  linkSalesChannelsToStockLocationWorkflow, markPaymentCollectionAsPaid,
   type CreateOrderWorkflowInput,
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
@@ -299,6 +300,65 @@ medusaIntegrationTestRunner({
         expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
         expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
           .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(0)
+      })
+    })
+
+    describe('payload.locationId', () => {
+      const linkSpare = (change: 'add' | 'remove') =>
+        linkSalesChannelsToStockLocationWorkflow(container).run({ input: { id: data.spareId, [change]: [data.channelId] } })
+
+      async function saleAt(orderId: string) {
+        const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'order', fields: ['fulfillments.location_id'], filters: { id: orderId },
+        })
+        return order.fulfillments!.map(fulfillment => fulfillment!.location_id)
+      }
+
+      async function expectRefused(sale: CommandEnvelope<OrderCreatePayload>, message: string) {
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([expect.objectContaining({
+          id: sale.id, status: 'rejected', error: expect.objectContaining({ code: 'store_configuration', message }),
+        })])
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      }
+
+      it('a location assigned to the channel is honoured: the fulfilment and the stock use it', async () => {
+        await linkSpare('add')
+        try {
+          await createInventoryLevelsWorkflow(container).run({ input: { inventory_levels: [
+            { inventory_item_id: data.inventoryA, location_id: data.spareId, stocked_quantity: 5 },
+          ] } })
+          const berlin = await levelA()
+          const sale = command({ locationId: data.spareId })
+          const response = await post([sale])
+          expect(response.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'applied' })])
+          expect(await saleAt(response.data.results[0].serverRefs.orderId)).toEqual([data.spareId])
+          const [spare] = await container.resolve(Modules.INVENTORY).listInventoryLevels({ inventory_item_id: data.inventoryA, location_id: data.spareId })
+          expect(Number(spare.stocked_quantity)).toBe(4)
+          expect(await levelA()).toEqual(berlin)
+        } finally {
+          await linkSpare('remove')
+        }
+      })
+
+      it('an unknown location is refused as unstored store_configuration with no order', async () => {
+        await expectRefused(command({ locationId: 'sloc_unknown' }), 'payload.locationId: no stock location with this id')
+      })
+
+      it('a location outside the channel is refused unstored, and the same command applies once it is linked', async () => {
+        const sale = command({ locationId: data.spareId })
+        await expectRefused(sale, "payload.locationId: this stock location is not assigned to the sale's sales channel")
+        await linkSpare('add')
+        try {
+          const retry = await post([sale])
+          expect(retry.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'applied' })])
+          expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(1)
+          expect(await saleAt(retry.data.results[0].serverRefs.orderId)).toEqual([data.spareId])
+        } finally {
+          await linkSpare('remove')
+        }
       })
     })
 
