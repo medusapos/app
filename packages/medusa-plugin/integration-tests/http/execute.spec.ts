@@ -397,20 +397,81 @@ medusaIntegrationTestRunner({
       expect(orders[1].customer_id).toBe(orders[0].customer_id)
     })
 
-    it('KNOWN: an email-only sale whose email matches a stored customer in a different case creates a second customer', async () => {
+    it('an email-only sale whose email matches a stored guest in a different case links to that guest, and no customer is created', async () => {
       const email = `Buyer-${randomUUID()}@Example.com`
-      const stored = await container.resolve(Modules.CUSTOMER).createCustomers({ email, has_account: false })
+      const customers = container.resolve(Modules.CUSTOMER)
+      const stored = await customers.createCustomers({ email, has_account: false })
+      const [, beforeCount] = await customers.listAndCountCustomers()
       const sale = emailSale(email.toLowerCase())
       expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
       const [order] = await liveOrders(sale.payload.clientOrderId)
-      // Medusa lowercases the sale's email, then matches customer.email exactly, so the stored mixed-case row is missed.
+      expect(order).toMatchObject({ customer_id: stored.id, email })
+      expect(await customersByEmail(email)).toEqual([{ id: stored.id, email, has_account: false }])
+      const [, afterCount] = await customers.listAndCountCustomers()
+      expect(afterCount).toBe(beforeCount)
+    })
+
+    it('an email-only sale prefers an account over a guest with the same email ignoring case', async () => {
+      const suffix = randomUUID()
+      const email = `a-${suffix}@example.com`
+      const customers = container.resolve(Modules.CUSTOMER)
+      await customers.createCustomers({ email, has_account: false })
+      const account = await customers.createCustomers({ email: `A-${suffix}@Example.com`, has_account: true })
+      const sale = emailSale(email)
+      expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
+      const [order] = await liveOrders(sale.payload.clientOrderId)
+      expect(order.customer_id).toBe(account.id)
+    })
+
+    it.each([['x_y', 'xzy'], ['p%q', 'pAq']])('an email-only sale does not wildcard-match %s to %s', async (storedPrefix, salePrefix) => {
+      const suffix = randomUUID()
+      const storedEmail = `${storedPrefix}-${suffix}@example.com`
+      const email = `${salePrefix}-${suffix}@example.com`
+      const stored = await container.resolve(Modules.CUSTOMER).createCustomers({ email: storedEmail, has_account: false })
+      const sale = emailSale(email)
+      expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
+      const [order] = await liveOrders(sale.payload.clientOrderId)
+      expect(order.customer_id).not.toBe(stored.id)
+      expect(await customersByEmail(email)).toEqual([{ id: order.customer_id, email: email.toLowerCase(), has_account: false }])
+      expect(await customersByEmail(storedEmail)).toEqual([{ id: stored.id, email: storedEmail, has_account: false }])
+    })
+
+    it('two concurrent first sales carrying case-differing emails both apply with one customer', async () => {
+      const email = `New-${randomUUID()}@Example.com`
+      const sales = [emailSale(email), emailSale(email.toLowerCase())]
+      const outcomes = await Promise.all(sales.map(sale => executeOrderCreate(container, sale)))
+      for (const outcome of outcomes) expect(outcome).toMatchObject({ kind: 'result', result: { status: 'applied' } })
       const rows = await customersByEmail(email)
-      expect(rows).toEqual(expect.arrayContaining([
-        { id: stored.id, email, has_account: false },
-        { id: order.customer_id, email: email.toLowerCase(), has_account: false },
-      ]))
-      expect({ linkedToStored: order.customer_id === stored.id, customerCount: rows.length })
-        .toEqual({ linkedToStored: false, customerCount: 2 })
+      expect(rows).toHaveLength(1)
+      expect(rows[0]).toMatchObject({ email: email.toLowerCase(), has_account: false })
+      for (const sale of sales) {
+        const orders = await liveOrders(sale.payload.clientOrderId)
+        expect(orders).toHaveLength(1)
+        expect(orders[0].customer_id).toBe(rows[0].id)
+      }
+    })
+
+    it('an email-only sale waits while its normalised customer email lock is held', async () => {
+      const email = `Locked-${randomUUID()}@Example.com`
+      let release!: () => void
+      let acquired!: () => void
+      const gate = new Promise<void>(resolve => { release = resolve })
+      const ready = new Promise<void>(resolve => { acquired = resolve })
+      const holding = container.resolve(Modules.LOCKING).execute(`tally_customer:${email.toLowerCase()}`, () => {
+        acquired()
+        return gate
+      })
+      await ready
+      const sale = emailSale(email)
+      const pending = executeOrderCreate(container, sale)
+      try {
+        await new Promise(resolve => setTimeout(resolve, 300))
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+      } finally {
+        release()
+        await holding
+      }
+      expect(result(await pending).status).toBe('applied')
     })
 
     it('fingerprints every v3 field and replays identical bytes without rewriting metadata', async () => {
