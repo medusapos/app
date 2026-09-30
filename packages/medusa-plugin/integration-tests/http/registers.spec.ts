@@ -564,7 +564,8 @@ medusaIntegrationTestRunner({
           closedAt: value, unknown: true } }])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([{ id: submission.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'payload.unknown: unknown field for register.closure.submit version 1',
+          code: 'invalid_payload', message: 'payload.unknown: unknown field for register.closure.submit version 1' +
+            (value === 'invalid' ? '; payload.closedAt: expected a valid date' : ''),
         } }])
         expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
       })

@@ -41,6 +41,7 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
     if (optional && value === undefined) return
     check(typeof value === 'string' && (optional || value.length > 0), field, optional ? 'a string' : 'a non-empty string')
     if (typeof value === 'string' && (field.endsWith('Id') || field === 'voids')) check(value.length <= 64, field, 'at most 64 characters')
+    if (typeof value === 'string' && ['openedAt', 'at', 'createdAt', 'closedAt'].includes(field)) check(!Number.isNaN(Date.parse(value)), field, 'a valid date')
   }
   const integer = (field: string, min = -Infinity) =>
     check(Number.isSafeInteger(payload[field]) && (payload[field] as number) >= min, field, `a safe integer >= ${min}`)
