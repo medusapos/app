@@ -6,6 +6,7 @@ import { executeRegisterCommand, replayRegisterCommand } from '../../../../workf
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 import { envelopeErrors, payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
+import { clientTimeStageErrors, clientTimeUpperBound } from '../../../../workflows/client-time'
 import { SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
@@ -54,6 +55,7 @@ export async function processBatch(
   commands: CommandEnvelope<unknown>[],
   options: TallyPluginOptions
 ): Promise<BatchOutcome> {
+  const upperBound = clientTimeUpperBound()
   const results: CommandResult[] = []
   for (const envelope of commands) {
     if (envelope.type !== 'order.create') {
@@ -66,7 +68,7 @@ export async function processBatch(
         } as CommandErrorWithData })
         continue
       }
-      const outcome = replay ?? await executeRegisterCommand(container, envelope)
+      const outcome = replay ?? await executeRegisterCommand(container, envelope, upperBound)
       if (outcome.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: outcome.id } }
       if (outcome.kind === 'transient') {
         const { id, message } = outcome
@@ -116,6 +118,11 @@ export async function processBatch(
     if (!errors.length && v3 && display !== undefined && taxByRate !== undefined) errors.push(...fiscalFiguresErrors(payload))
     if (errors.length) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
+      continue
+    }
+    const timeErrors = clientTimeStageErrors(command, upperBound)
+    if (timeErrors.length) {
+      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: timeErrors.join('; ') } })
       continue
     }
     const outcome = await executeOrderCreate(container, command, options)

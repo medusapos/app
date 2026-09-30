@@ -6,7 +6,7 @@ import posV1 from '../../../../../workflows/tally-order-create/__fixtures__/orde
 import posV2 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/pos-2.0.0-v2.json'
 import batch from '../../../../../workflows/tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-batch.json'
 import closure from '../../../../../workflows/tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.closure.submit.json'
-import { payloadShapeErrors } from '../../../../../workflows/tally-order-create/payload-shape'
+import { envelopeErrors, payloadShapeErrors } from '../../../../../workflows/tally-order-create/payload-shape'
 import { processBatch, validateBatch, type BatchOutcome } from '../process'
 
 const command = {
@@ -31,7 +31,7 @@ describe('validateBatch', () => {
   it('rejects NUL before replay and version rules without touching the container', async () => {
     const outcome = await processBatch({} as MedusaContainer, [{ ...command, version: 4, payload: { clientOrderId: '\0' } } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
-      code: 'invalid_payload', message: 'clientOrderId: expected no NUL character',
+      code: 'invalid_payload', message: 'payload.clientOrderId: expected no NUL character',
     } }] } })
   })
 
@@ -94,28 +94,28 @@ describe('validateBatch', () => {
       outcomes.push(await processBatch(container, [{ ...command, version, payload: { ...payload, ...fields } } as never], {}))
     }
     for (const outcome of outcomes) expect(outcome).toEqual({ status: 200, body: { results: [{
-      id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: 'lines: expected a non-empty array' },
+      id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: 'payload.lines: expected a non-empty array' },
     }] } })
   })
 
   it('does not require discountMinor for version 3', async () => {
     const outcome = await processBatch(container, [{ ...command, version: 3 } as never], {})
     expect(outcome).toMatchObject({ status: 200, body: { results: [{ error: {
-      code: 'invalid_payload', message: expect.stringContaining('clientOrderId: expected'),
+      code: 'invalid_payload', message: expect.stringContaining('payload.clientOrderId: expected'),
     } }] } })
     expect(JSON.stringify(outcome)).not.toContain('requires discountMinor')
   })
 
   it.each([
-    [1, { display: {} }, 'display: requires version 3'],
-    [2, { display: {} }, 'display: requires version 3'],
-    [2, { taxByRate: [] }, 'taxByRate: requires version 3'],
+    [1, { display: {} }, 'payload.display: requires version 3'],
+    [2, { display: {} }, 'payload.display: requires version 3'],
+    [2, { taxByRate: [] }, 'payload.taxByRate: requires version 3'],
     [3, { display: {} }, 'display and taxByRate must both be present or both absent'],
     [3, { taxByRate: [] }, 'display and taxByRate must both be present or both absent'],
-    [1, { sessionId: 'session' }, 'sessionId: requires version 3'],
-    [2, { sessionId: 'session' }, 'sessionId: requires version 3'],
-    [1, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
-    [2, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
+    [1, { sessionId: 'session' }, 'payload.sessionId: requires version 3'],
+    [2, { sessionId: 'session' }, 'payload.sessionId: requires version 3'],
+    [1, { customer: { customerId: 'customer' } }, 'payload.customer.customerId: requires version 3'],
+    [2, { customer: { customerId: 'customer' } }, 'payload.customer.customerId: requires version 3'],
   ])('rejects version %s fields %j after the replay read', async (version, fields, message) => {
     const payload = { ...(version === 2 ? mainV2 : mainV1).payload, ...fields }
     const outcome = await processBatch(container, [{ ...command, version, payload } as never], {})
@@ -138,7 +138,7 @@ describe('validateBatch', () => {
     const payload = { ...mainV1.payload, ...fields }
     const outcome = await processBatch(container, [{ ...command, id: 'sale-1', payload } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: 'sale-1', status: 'rejected', error: {
-      code: 'invalid_payload', message: `${path}: requires version 2`,
+      code: 'invalid_payload', message: `payload.${path}: requires version 2`,
     } }] } })
   })
 
@@ -169,10 +169,10 @@ describe('recorded TallyUI envelopes, 2026-09-30 (ruling 17)', () => {
   it.each<[string, Recorded, string]>([
     ['a v2 field in v1', { ...mainV1, payload: { ...mainV1.payload, discountMinor: 1,
       lines: [{ ...mainV1.payload.lines[0], discountMinor: 1 }, mainV1.payload.lines[1]] } },
-      'discountMinor: requires version 2; lines[0].discountMinor: requires version 2'],
-    ['a v3 field in v2', { ...mainV2, payload: { ...mainV2.payload, sessionId: 'session' } }, 'sessionId: requires version 3'],
+      'payload.discountMinor: requires version 2; payload.lines[0].discountMinor: requires version 2'],
+    ['a v3 field in v2', { ...mainV2, payload: { ...mainV2.payload, sessionId: 'session' } }, 'payload.sessionId: requires version 3'],
     ['a v3 customer field in v2', { ...mainV2, payload: { ...mainV2.payload, customer: { email: 'buyer@example.com', customerId: 'c' } } },
-      'customer.customerId: requires version 3'],
+      'payload.customer.customerId: requires version 3'],
   ])('%s names the version it needs, not an unknown field', async (_name, fixture, message) => {
     const outcome = await processBatch(container, [fixture] as never, {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: {
@@ -182,14 +182,51 @@ describe('recorded TallyUI envelopes, 2026-09-30 (ruling 17)', () => {
 })
 
 describe('envelope fields (ruling 17)', () => {
+  it('leaves createdAt format and bounds to the client-time stage', async () => {
+    expect(envelopeErrors({ ...mainV1, createdAt: 'invalid' } as never)).toEqual([])
+    expect(envelopeErrors({ ...mainV1, createdAt: '2019-12-31T23:59:59.999Z' } as never)).toEqual([])
+    const claim = jest.fn()
+    const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
+    const outcome = await processBatch(replaying, [{ ...mainV1, createdAt: 'invalid' }] as never, {})
+    expect(outcome).toEqual({ status: 200, body: { results: [{ id: mainV1.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: 'createdAt must be an RFC 3339 time with Z or an offset',
+    } }] } })
+    expect(claim).not.toHaveBeenCalled()
+  })
+
   it.each<[string, { id: string }]>([['order.create', mainV1], ['register.closure.submit', closure]])(
-    'refuses priority on a recorded %s envelope as invalid_payload, before the claim', async (type, fixture) => {
+    'refuses priority on a recorded %s envelope before an invalid client time and the claim', async (type, fixture) => {
       const claim = jest.fn()
       const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
-      const outcome = await processBatch(replaying, [{ ...fixture, priority: 1 }] as never, {})
+      const outcome = await processBatch(replaying, [{ ...fixture, createdAt: 'invalid', priority: 1 }] as never, {})
       expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: {
         code: 'invalid_payload', message: `envelope.priority: unknown field for ${type} version 1`,
       } }] } })
       expect(claim).not.toHaveBeenCalled()
     })
+
+  it.each<[string, { id: string }]>([['order.create', mainV1], ['register.closure.submit', closure]])(
+    'refuses a %s createdAt before 2020 as invalid_payload, before the claim (TallyUI #325)', async (_type, fixture) => {
+      const claim = jest.fn()
+      const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
+      const outcome = await processBatch(replaying, [{ ...fixture, createdAt: '2019-12-31T23:59:59.999Z' }] as never, {})
+      expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: { code: 'invalid_payload',
+        message: expect.stringMatching(/^createdAt must be a time from 2020-01-01T00:00:00Z to \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/) } }] } })
+      expect(claim).not.toHaveBeenCalled()
+    })
+
+  it('one batch uses one client-time bound even when the clock advances between commands', async () => {
+    let now = Date.parse('2026-09-30T14:05:00.789Z')
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now)
+    const claim = jest.fn()
+    const replaying = { resolve: () => ({ claim, listTallyCommands: async () => { now += 2000; return [] } }) } as unknown as MedusaContainer
+    try {
+      const commands = [mainV1, closure].map(fixture => ({ ...fixture, createdAt: '2019-12-31T23:59:59.999Z' }))
+      const outcome = await processBatch(replaying, commands as never, {})
+      expect(outcome).toEqual({ status: 200, body: { results: commands.map(({ id }) => ({ id, status: 'rejected', error: {
+        code: 'invalid_payload', message: 'createdAt must be a time from 2020-01-01T00:00:00Z to 2026-10-01T14:05:00Z',
+      } })) } })
+      expect(claim).not.toHaveBeenCalled()
+    } finally { clock.mockRestore() }
+  })
 })

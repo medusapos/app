@@ -29,21 +29,19 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
   const check = (valid: boolean, field: string, expected: string) => {
-    if (!valid && errors.length < 10) errors.push(`${field}: expected ${expected}`)
+    if (!valid && errors.length < 10) errors.push(`payload.${field}: expected ${expected}`)
   }
   if (!object(payload)) return ['payload: expected an object']
   for (const key of Object.keys(payload)) {
     const known = REGISTER_FIELDS.get(type)?.includes(key) ?? false
-    if (!known && errors.length < 10) errors.push(`${key}: unknown field for ${type} version 1`)
+    if (!known && errors.length < 10) errors.push(`payload.${key}: unknown field for ${type} version 1`)
   }
   const string = (field: string, optional = false) => {
     const value = payload[field]
     if (optional && value === undefined) return
     check(typeof value === 'string' && (optional || value.length > 0), field, optional ? 'a string' : 'a non-empty string')
     if (typeof value === 'string' && (field.endsWith('Id') || field === 'voids')) check(value.length <= 64, field, 'at most 64 characters')
-    if (typeof value === 'string' && ['openedAt', 'at', 'createdAt', 'closedAt'].includes(field)) {
-      check(!Number.isNaN(Date.parse(value)), field, 'a valid date')
-    }
+    if (typeof value === 'string' && ['openedAt', 'at', 'createdAt', 'closedAt'].includes(field)) check(!Number.isNaN(Date.parse(value)), field, 'a valid date')
   }
   const integer = (field: string, min = -Infinity) =>
     check(Number.isSafeInteger(payload[field]) && (payload[field] as number) >= min, field, `a safe integer >= ${min}`)
@@ -102,7 +100,7 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
       }
       break
     default:
-      check(false, 'type', 'a register command type')
+      if (errors.length < 10) errors.push('type: expected a register command type')
   }
   return errors
 }

@@ -1,5 +1,6 @@
 import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { payloadNulErrors, payloadShapeErrors } from '../payload-shape'
+import { clientTimeStageErrors } from '../../client-time'
 
 const payload: OrderCreatePayload = {
   clientOrderId: 'order_1', createdAt: '2026-09-23T10:00:00Z', currency: 'EUR', pricesIncludeTax: true,
@@ -31,7 +32,7 @@ it.each([undefined, null, {}, { email: '' }])('accepts optional customer %j', cu
 
 it('leaves value rules to the planner and accepts absent optional fields and empty payments', () => {
   expect(payloadShapeErrors({
-    ...payload, createdAt: '', currency: '', subtotalMinor: -1, taxMinor: 0.5, totalMinor: Number.MAX_VALUE,
+    ...payload, currency: '', subtotalMinor: -1, taxMinor: 0.5, totalMinor: Number.MAX_VALUE,
     lines: [{ clientLineId: '', variantId: '', quantity: -0.5, unitPriceMinor: -1 }], payments: [],
   })).toEqual([])
   expect(payloadShapeErrors({ ...payload, payments: [{ clientPaymentId: '', method: 'custom', amountMinor: -1 }] })).toEqual([])
@@ -51,7 +52,7 @@ it.each([
   ['totalMinor', -Infinity, 'a finite number'], ['registerId', 1, 'a string'],
   ['cashierRef', null, 'a string'], ['locationId', false, 'a string'],
 ])('rejects invalid %s (%j)', (field, value, expected) => {
-  expect(payloadShapeErrors({ ...payload, [field as string]: value })).toEqual([`${field}: expected ${expected}`])
+  expect(payloadShapeErrors({ ...payload, [field as string]: value })).toEqual([`payload.${field}: expected ${expected}`])
 })
 
 it.each([
@@ -65,17 +66,24 @@ it.each([
   ['payments', 'changeMinor', null, 'a finite number'], ['payments', 'reference', 1, 'a string'],
 ])('rejects invalid %s[0].%s', (field: string, key: string, value, expected: string) => {
   const item = { ...payload[field][0], [key]: value }
-  expect(payloadShapeErrors({ ...payload, [field]: [item] })).toEqual([`${field}[0].${key}: expected ${expected}`])
+  expect(payloadShapeErrors({ ...payload, [field]: [item] })).toEqual([`payload.${field}[0].${key}: expected ${expected}`])
 })
 
 it.each(['lines', 'payments'])('rejects non-object entries in %s', field => {
   for (const item of [null, [], 'item']) {
-    expect(payloadShapeErrors({ ...payload, [field]: [item] })).toEqual([`${field}[0]: expected an object`])
+    expect(payloadShapeErrors({ ...payload, [field]: [item] })).toEqual([`payload.${field}[0]: expected an object`])
   }
 })
 
+it.each(['2019-12-31T23:59:59.999Z', 'late', 'invalid', ''])('leaves payload.createdAt %p format and bounds to the client-time stage', value => {
+  const createdAt = value === 'late' ? new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString() : value
+  expect(payloadShapeErrors({ ...payload, createdAt })).toEqual([])
+  if (value === 'invalid' || value === '') expect(clientTimeStageErrors({ type: 'order.create',
+    payload: { ...payload, createdAt } } as never, Date.now())).toEqual(['payload.createdAt must be an RFC 3339 time with Z or an offset'])
+})
+
 it('rejects a non-string customer email', () => {
-  expect(payloadShapeErrors({ ...payload, customer: { email: 1 } })).toEqual(['customer.email: expected a string'])
+  expect(payloadShapeErrors({ ...payload, customer: { email: 1 } })).toEqual(['payload.customer.email: expected a string'])
 })
 
 describe('discountMinor (ADR-062)', () => {
@@ -87,18 +95,18 @@ describe('discountMinor (ADR-062)', () => {
   })
 
   it.each([[124], [126], [undefined]])('rejects a payload discount of %j for lines summing to 125', discountMinor => {
-    expect(payloadShapeErrors({ ...payload, lines, discountMinor })).toEqual(['discountMinor: expected the sum of lines[].discountMinor'])
+    expect(payloadShapeErrors({ ...payload, lines, discountMinor })).toEqual(['payload.discountMinor: expected the sum of payload.lines[].discountMinor'])
   })
 
   it('rejects a payload discount without line discounts', () => {
-    expect(payloadShapeErrors({ ...payload, discountMinor: 1 })).toEqual(['discountMinor: expected the sum of lines[].discountMinor'])
+    expect(payloadShapeErrors({ ...payload, discountMinor: 1 })).toEqual(['payload.discountMinor: expected the sum of payload.lines[].discountMinor'])
   })
 
   it.each([0, -1, 1.5, NaN, '100', null, Number.MAX_SAFE_INTEGER + 1])('rejects discountMinor %j on a line and on the payload', value => {
     expect(payloadShapeErrors({ ...payload, lines: [{ ...line, discountMinor: value }], discountMinor: 1 }))
-      .toEqual(['lines[0].discountMinor: expected a positive safe integer'])
+      .toEqual(['payload.lines[0].discountMinor: expected a positive safe integer'])
     expect(payloadShapeErrors({ ...payload, lines: [{ ...line, discountMinor: 1 }], discountMinor: value }))
-      .toEqual(['discountMinor: expected a positive safe integer'])
+      .toEqual(['payload.discountMinor: expected a positive safe integer'])
   })
 })
 
@@ -106,9 +114,9 @@ describe('lines[].clientLineId', () => {
   const lines = (...ids: string[]) => ids.map(clientLineId => ({ ...payload.lines[0], clientLineId }))
 
   it('refuses a repeated id once, at its second occurrence, naming both indexes', () => {
-    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'A') })).toEqual(['lines[1].clientLineId: expected no duplicate of lines[0].clientLineId'])
-    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'B', 'A') })).toEqual(['lines[2].clientLineId: expected no duplicate of lines[0].clientLineId'])
-    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'B', 'A', 'A') })).toEqual(['lines[2].clientLineId: expected no duplicate of lines[0].clientLineId'])
+    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'A') })).toEqual(['payload.lines[1].clientLineId: expected no duplicate of payload.lines[0].clientLineId'])
+    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'B', 'A') })).toEqual(['payload.lines[2].clientLineId: expected no duplicate of payload.lines[0].clientLineId'])
+    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'B', 'A', 'A') })).toEqual(['payload.lines[2].clientLineId: expected no duplicate of payload.lines[0].clientLineId'])
   })
 
   it('accepts unique ids', () => {
@@ -118,7 +126,7 @@ describe('lines[].clientLineId', () => {
   it('reports at most ten duplicates', () => {
     const errors = payloadShapeErrors({ ...payload, lines: lines(...Array.from({ length: 12 }, (_, index) => [`${index}`, `${index}`]).flat()) })
     expect(errors).toHaveLength(10)
-    expect(errors[9]).toBe('lines[19].clientLineId: expected no duplicate of lines[18].clientLineId')
+    expect(errors[9]).toBe('payload.lines[19].clientLineId: expected no duplicate of payload.lines[18].clientLineId')
   })
 })
 
@@ -133,7 +141,7 @@ it.each(['session-unknown', '12345678-1234-1234-1234-123456789012'])('accepts se
 })
 
 it.each(['x'.repeat(37), '', null, 1])('rejects invalid sessionId %p', sessionId => {
-  expect(payloadShapeErrors({ ...payload, sessionId })).toEqual(['sessionId: expected a string of at most 36 characters'])
+  expect(payloadShapeErrors({ ...payload, sessionId })).toEqual(['payload.sessionId: expected a string of at most 36 characters'])
 })
 
 it.each([{ customerId: 'customer' }, { customerId: 'x'.repeat(64), email: 'buyer@example.com' }])('accepts customerId with optional email %j', customer => {
@@ -142,7 +150,7 @@ it.each([{ customerId: 'customer' }, { customerId: 'x'.repeat(64), email: 'buyer
 
 it.each(['x'.repeat(65), '', null, 1])('rejects invalid customerId %p', customerId => {
   expect(payloadShapeErrors({ ...payload, customer: { customerId } }))
-    .toEqual(['customer.customerId: expected a string of at most 64 characters'])
+    .toEqual(['payload.customer.customerId: expected a string of at most 64 characters'])
 })
 
 it.each([
@@ -152,7 +160,7 @@ it.each([
   ['payments[0].extra', { payments: [{ ...payload.payments[0], extra: true }] }],
   ['customer.extra', { customer: { email: 'buyer@example.com', extra: true } }],
 ])('refuses the unknown field %s, naming its path (ruling 17)', (path, fields) => {
-  expect(payloadShapeErrors({ ...payload, ...fields }, 1)).toEqual([`${path}: unknown field for order.create version 1`])
+  expect(payloadShapeErrors({ ...payload, ...fields }, 1)).toEqual([`payload.${path}: unknown field for order.create version 1`])
 })
 
 it('knows each field from the version that declares it', () => {
@@ -161,10 +169,10 @@ it('knows each field from the version that declares it', () => {
   const v3 = { ...v2, sessionId: 'session', customer: { email: 'buyer@example.com', customerId: 'customer' } }
   expect(payloadShapeErrors(v2, 2)).toEqual([])
   expect(payloadShapeErrors(v3, 3)).toEqual([])
-  expect(payloadShapeErrors(v2, 1)).toEqual(['discountMinor: requires version 2', 'lines[0].discountMinor: requires version 2'])
-  expect(payloadShapeErrors(v3, 2)).toEqual(['sessionId: requires version 3', 'customer.customerId: requires version 3'])
+  expect(payloadShapeErrors(v2, 1)).toEqual(['payload.discountMinor: requires version 2', 'payload.lines[0].discountMinor: requires version 2'])
+  expect(payloadShapeErrors(v3, 2)).toEqual(['payload.sessionId: requires version 3', 'payload.customer.customerId: requires version 3'])
   expect(payloadShapeErrors({ ...payload, display: {}, taxByRate: [] }, 1))
-    .toEqual(['display: requires version 3', 'taxByRate: requires version 3'])
+    .toEqual(['payload.display: requires version 3', 'payload.taxByRate: requires version 3'])
 })
 
 it('reports at most ten unknown fields', () => {
@@ -187,7 +195,7 @@ it.each([
   expect(payloadShapeErrors(value)).toEqual([])
   target[key] += 'x'
   const expected = max === 64 || max === 36 ? `a string of at most ${max} characters` : `at most ${max} characters`
-  expect(payloadShapeErrors(value)).toEqual([`${field.replace('.0.', '[0].')}: expected ${expected}`])
+  expect(payloadShapeErrors(value)).toEqual([`payload.${field.replace('.0.', '[0].')}: expected ${expected}`])
 })
 
 it.each([
@@ -197,14 +205,14 @@ it.each([
   ['sessionId', { sessionId: 'session\0id' }],
 ])('rejects NUL in %s', (field, fields) => {
   const value = { ...payload, ...fields as object }
-  expect(payloadShapeErrors(value)).toEqual([`${field}: expected no NUL character`])
-  expect(payloadNulErrors(value)).toEqual([`${field}: expected no NUL character`])
+  expect(payloadShapeErrors(value)).toEqual([`payload.${field}: expected no NUL character`])
+  expect(payloadNulErrors(value)).toEqual([`payload.${field}: expected no NUL character`])
 })
 
 it('reports only NUL errors independently of shape and bounds', () => {
   expect(payloadNulErrors({ lines: [{ title: 'x'.repeat(256) }] })).toEqual([])
   expect(payloadNulErrors({ lines: [{ title: 'x'.repeat(256) + '\0' }] }))
-    .toEqual(['lines[0].title: expected no NUL character'])
+    .toEqual(['payload.lines[0].title: expected no NUL character'])
   const value = { ...payload, lines: Array.from({ length: 12 }, (_, index) => ({ ...payload.lines[0], clientLineId: `line_${index}`, title: '\0' })) }
   expect(payloadNulErrors(value)).toHaveLength(10)
   expect(payloadShapeErrors(value)).toEqual(payloadNulErrors(value))

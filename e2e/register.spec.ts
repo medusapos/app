@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
-import { addE2E1, credentials, sellBySku, signIn } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { addE2E1, credentials, sellBySku, signIn, test } from './helpers';
 
 // Registers, part A (ADR 0017): a fresh till binds Register 1, opens it with a float of 100.00, takes a cash sale
 // the register counts, records a paid in and undoes it. Part B (ADR 0018): Close register counts the drawer with

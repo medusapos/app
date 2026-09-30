@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { addE2E1, signIn } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { addE2E1, signIn, test } from './helpers';
 
 // Settings → Scanner (ADR 0016): minChars gates the phone-cart wedge listener, and the test-scan
 // field judges a scan the same way, against the currently saved settings.

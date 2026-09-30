@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 // TallyUI store settings (TV4) and priced replication (D2b) against the seeded store: regions

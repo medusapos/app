@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { sellBySku, signIn } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { sellBySku, signIn, test } from './helpers';
 
 // The password used by the e2e fixture account (mirrors the fallback in helpers.ts's `signIn`).
 const password = process.env.E2E_PASSWORD ?? 'e2e-password';

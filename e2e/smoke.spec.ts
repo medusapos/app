@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku } from './helpers';
+import { expect } from '@playwright/test';
+import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, test } from './helpers';
 
 test('cash sale is completed, captured and deducted from stock', async ({ page }) => {
   const token = await adminToken();

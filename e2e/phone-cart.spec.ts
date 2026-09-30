@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { addE2E1, discount, sellBySku, signIn } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { addE2E1, discount, sellBySku, signIn, test } from './helpers';
 
 // The sale screen on a phone (ADR 0009): below 600 px a cart bar opens the cart at full height, its lines and
 // order discount scroll, and the totals and pay buttons stay pinned. Sells only E2E-1 and E2E-2.

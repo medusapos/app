@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { sellBySku, signIn } from './helpers';
+import { expect } from '@playwright/test';
+import { sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 const SEARCH_PLACEHOLDER = 'Search or scan barcode / SKU';

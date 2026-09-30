@@ -394,7 +394,7 @@ medusaIntegrationTestRunner({
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'lines[0].discountMinr: unknown field for order.create version 1',
+          code: 'invalid_payload', message: 'payload.lines[0].discountMinr: unknown field for order.create version 1',
         } }])
         expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
         expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
@@ -422,6 +422,32 @@ medusaIntegrationTestRunner({
         expect(response.data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
       })
 
+      it('a createdAt before 2020 between two good sales is refused alone, unstored, with no order (TallyUI #325)', async () => {
+        const [before, refused, after] = [command(), { ...command(), createdAt: '2019-12-31T23:59:59.999Z' }, command()]
+        const beforeRequest = Date.now()
+        const response = await post([before, refused, after])
+        const afterRequest = Date.now()
+        expect(response.status).toBe(200)
+        expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
+        const pattern = /^createdAt must be a time from 2020-01-01T00:00:00Z to (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)$/
+        expect(response.data.results[1]).toEqual({ id: refused.id, status: 'rejected', error: { code: 'invalid_payload',
+          message: expect.stringMatching(pattern) } })
+        const upperBound = Date.parse(pattern.exec(response.data.results[1].error.message)![1])
+        expect(upperBound).toBeGreaterThanOrEqual(Math.floor((beforeRequest + 24 * 60 * 60 * 1000) / 1000) * 1000)
+        expect(upperBound).toBeLessThanOrEqual(Math.floor((afterRequest + 24 * 60 * 60 * 1000) / 1000) * 1000)
+        expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
+      })
+
+      it('an applied id resent with an envelope.createdAt before 2020 answers duplicate, because the replay read comes first', async () => {
+        const sale = command()
+        const first = await post([sale])
+        expect(first.data.results[0].status).toBe('applied')
+        const response = await post([{ ...sale, attempt: 2, createdAt: '2019-12-31T23:59:59.999Z' }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
+      })
+
       it('an applied id resent with an extra unknown field answers duplicate, because the replay read comes first', async () => {
         const first = await post([command()])
         expect(first.data.results[0].status).toBe('applied')
@@ -444,7 +470,7 @@ medusaIntegrationTestRunner({
         expect(response.status).toBe(200)
         expect(response.data.results.map(result => result.status)).toEqual(['rejected', 'applied'])
         expect(response.data.results[0]).toEqual({ id: refused.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'lines[1].clientLineId: expected no duplicate of lines[0].clientLineId',
+          code: 'invalid_payload', message: 'payload.lines[1].clientLineId: expected no duplicate of payload.lines[0].clientLineId',
         } })
         expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
         expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
@@ -499,7 +525,7 @@ medusaIntegrationTestRunner({
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'lines[0].title: expected at most 255 characters',
+          code: 'invalid_payload', message: 'payload.lines[0].title: expected at most 255 characters',
         } }])
         expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
       })
@@ -509,7 +535,7 @@ medusaIntegrationTestRunner({
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-          code: 'invalid_payload', message: 'clientOrderId: expected no NUL character',
+          code: 'invalid_payload', message: 'payload.clientOrderId: expected no NUL character',
         } }])
         expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
       })
@@ -932,6 +958,49 @@ medusaIntegrationTestRunner({
       expect(retry.data.results.map(result => [result.id, result.status])).toEqual([
         [sales[0].id, 'duplicate'], [sales[1].id, 'applied'], [sales[2].id, 'applied'],
       ])
+    })
+
+    describe('storm', () => {
+      // One device resending the same sale over flaky wifi: every copy is its own request, all in flight at once.
+      const STORM = 50
+
+      it(`one order.create posted ${STORM} times at once makes one order, one captured payment, one ledger row and one stock take`, async () => {
+        const sale = command()
+        const before = await levelA()
+        const storm = await Promise.all(Array.from({ length: STORM }, () => post([sale])))
+        // The money first: a second order or stock take fails here, whatever the answers were.
+        const orders = await liveOrders(sale.payload.clientOrderId)
+        expect(orders).toHaveLength(1)
+        expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+          .whereRaw("metadata->>'tally_client_id' = ?", [sale.payload.clientOrderId])).toHaveLength(1)
+        expect(await levelA()).toEqual([before[0] - sale.payload.lines[0].quantity, before[1]])
+        // 409 in_progress is the documented answer while another request holds the claim.
+        for (const response of storm) {
+          if (response.status === 409) expect(response.data).toEqual({ code: 'in_progress', id: sale.id })
+          else expect([response.status, response.data.results]).toEqual([200, [expect.objectContaining({ id: sale.id })]])
+        }
+        const answers = storm.map(response => response.status === 409 ? 'in_progress' : response.data.results[0].status)
+        expect(answers.filter(answer => answer === 'applied')).toHaveLength(1)
+        expect(answers.filter(answer => answer !== 'applied' && answer !== 'duplicate' && answer !== 'in_progress')).toEqual([])
+        const applied = storm.find(response => response.status === 200 && response.data.results[0].status === 'applied')!.data.results[0]
+        // Every other copy answers duplicate with the applied result, at once or on a retry after its 409.
+        for (const [index, answer] of answers.entries()) {
+          if (answer === 'applied') continue
+          let response = storm[index]
+          for (let attempt = 0; response.status === 409 && attempt < 10; attempt++) response = await post([sale])
+          expect([response.status, response.data.results]).toEqual([200, [{ ...applied, status: 'duplicate' }]])
+        }
+        const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'order', filters: { id: orders[0].id },
+          fields: ['id', 'payment_collections.status', 'payment_collections.payments.id', 'payment_collections.payments.captured_at', 'payment_collections.payments.amount'],
+        })
+        expect(order.id).toBe(applied.serverRefs.orderId)
+        const payments = order.payment_collections.flatMap(collection => collection!.payments)
+        expect(payments).toEqual([expect.objectContaining({ captured_at: expect.anything() })])
+        expect(Number(payments[0].amount)).toBe(sale.payload.totalMinor / 100)
+        expect(await ledger.listTallyCommands({ id: sale.id })).toEqual([expect.objectContaining({ status: 'applied' })])
+        expect(await levelA()).toEqual([before[0] - sale.payload.lines[0].quantity, before[1]])
+      })
     })
 
     describe('clientOrderId collision', () => {
@@ -1750,7 +1819,7 @@ medusaIntegrationTestRunner({
       expect((await liveOrders(payload.clientOrderId))[0].metadata).toEqual(order.metadata)
       const invalid = { ...sale, id: randomUUID(), payload: { ...payload, display: { ...payload.display!, totalMinor: totalMinor + 1 } } }
       expect((await post([invalid])).data.results[0]).toMatchObject({ status: 'rejected', error: {
-        code: 'invalid_payload', message: 'display.totalMinor: expected payload.totalMinor',
+        code: 'invalid_payload', message: 'payload.display.totalMinor: expected payload.totalMinor',
       } })
     })
 
@@ -1773,11 +1842,11 @@ medusaIntegrationTestRunner({
     })
 
     it.each([
-      [3, { sessionId: 'x'.repeat(37) }, 'sessionId: expected a string of at most 36 characters'],
-      [3, { sessionId: '' }, 'sessionId: expected a string of at most 36 characters'],
-      [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId: requires version 3'],
-      [3, { customer: { customerId: 'x'.repeat(65) } }, 'customer.customerId: expected a string of at most 64 characters'],
-      [1, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
+      [3, { sessionId: 'x'.repeat(37) }, 'payload.sessionId: expected a string of at most 36 characters'],
+      [3, { sessionId: '' }, 'payload.sessionId: expected a string of at most 36 characters'],
+      [2, { sessionId: 'session', discountMinor: 1 }, 'payload.sessionId: requires version 3'],
+      [3, { customer: { customerId: 'x'.repeat(65) } }, 'payload.customer.customerId: expected a string of at most 64 characters'],
+      [1, { customer: { customerId: 'customer' } }, 'payload.customer.customerId: requires version 3'],
     ])('rejects invalid v%s bookkeeping fields %j', async (version, fields, message) => {
       const sale = command()
       const response = await post([{ ...sale, version, payload: { ...sale.payload, ...fields } }])

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku } from './helpers';
+import { expect } from '@playwright/test';
+import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, test } from './helpers';
 
 // TallyUI #146: RxDB 16.21.1's query cache could leave a sale inserted while the outbox's pending read was
 // in flight out of that read for good, so it sat "Waiting to sync" until the app restarted. Here the

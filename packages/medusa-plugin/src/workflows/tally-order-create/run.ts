@@ -1,6 +1,7 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import { escapeLike, normaliseCustomerEmail, pickCustomer } from './customer-email'
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
 import { planOrderCreate, totalWarnings } from './plan'
@@ -111,10 +112,8 @@ export async function runOrderCreate(
         throw configurationError(`No shipping option at stock location ${location.id} uses shipping profile ${profileId}; add one, or set plugin option shippingOptionId`)
       }
     }
-    if (orderId) {
-      await resumeOrderCreate(container, orderId, Number(minorToMajor(payload.totalMinor, currencyDecimals(payload.currency))),
-        locationId, shippingOptionId)
-    } else {
+    let byId: { id: string } | null = null
+    const createOrder = async (normalised: string | null): Promise<CommandResult | undefined> => {
       const { data: regions } = await query.graph({ entity: 'region', fields: ['id', 'currency_code', 'countries.iso_2'] })
       const matchingRegions = regions.filter(region => region.currency_code.toLowerCase() === payload.currency.toLowerCase())
       const region = matchingRegions.find(region => region.countries?.some(
@@ -127,10 +126,9 @@ export async function runOrderCreate(
         filters: { id: payload.lines.map(line => line.variantId) },
       })
       const { address_1, address_2, city, country_code, province, postal_code, phone } = location.address
-      const customerId = v3.customer?.customerId
-      const customer = customerId === undefined ? null : (await query.graph({
-        entity: 'customer', fields: ['id'], filters: { id: customerId },
-      })).data[0] ?? null
+      const customer = normalised !== null ? pickCustomer(await container.resolve(Modules.CUSTOMER).listCustomers({
+        email: { $ilike: escapeLike(normalised) },
+      }, { take: null }), normalised) : byId
       const planned = planOrderCreate(payload, {
         customer,
         commandId: command.id, salesChannelId: channels[0].id,
@@ -168,6 +166,21 @@ export async function runOrderCreate(
       } catch (error) {
         throw error
       }
+    }
+    if (orderId) {
+      await resumeOrderCreate(container, orderId, Number(minorToMajor(payload.totalMinor, currencyDecimals(payload.currency))),
+        locationId, shippingOptionId)
+    } else {
+      const customerId = v3.customer?.customerId
+      byId = customerId === undefined ? null : (await query.graph({
+        entity: 'customer', fields: ['id'], filters: { id: customerId },
+      })).data[0] ?? null
+      const normalised = byId === null && typeof payload.customer?.email === 'string' && payload.customer.email !== ''
+        ? normaliseCustomerEmail(payload.customer.email) : null
+      // Lock order: tally_order advisory lock → tally_customer:<email> → stock locks.
+      const rejected = normalised === null ? await createOrder(null)
+        : await container.resolve(Modules.LOCKING).execute(`tally_customer:${normalised}`, () => createOrder(normalised))
+      if (rejected) return rejected
     }
   }
   const { data: [order] } = await query.graph({

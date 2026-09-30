@@ -27,7 +27,10 @@ More than one Medusa instance requires a shared locking provider: Redis (`@medus
 Postgres advisory locks (`@medusajs/medusa/locking-postgres`, provider id `locking-postgres`). The plugin serialises stock updates through
 Medusa's locking module, and its default in-memory provider only locks inside one process, so concurrent sales on
 two instances can lose stock updates and oversell (`integration-tests/http/stock-lock.spec.ts`). While the in-memory
-provider is active, the `tally-locking-check` job logs a warning once at startup; the plugin still starts.
+provider is active, the `tally-locking-check` job logs a warning once at startup; the plugin still starts. After
+switching to `locking-postgres`, run `npx medusa db:migrate`: it ships a migration that creates its `locking` table
+(`@medusajs/locking-postgres/dist/migrations/Migration20241009222919_InitialSetupMigration.js`).
+
 ```ts
 modules: [{ resolve: '@medusajs/medusa/locking', options: { providers: [{ resolve: '@medusajs/medusa/locking-redis',
   id: 'locking-redis', is_default: true, options: { redisUrl: process.env.LOCKING_REDIS_URL } }] } }]

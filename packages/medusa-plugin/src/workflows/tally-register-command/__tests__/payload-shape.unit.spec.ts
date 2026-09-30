@@ -3,6 +3,7 @@ import closureFixture from '../../tally-order-create/__fixtures__/register-envel
 import transitionFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.session.transition-closed.json'
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { registerPayloadErrors } from '../payload-shape'
+import { clientTimeStageErrors } from '../../client-time'
 
 const at = '2026-01-01T08:00:00.000Z'
 const open = { sessionId: 's', registerId: 'r', openedAt: at, countedFloatMinor: 100 }
@@ -23,7 +24,7 @@ it.each<[string, Record<string, unknown>]>([
   ['register.closure.submit', closure],
 ])('accepts a valid %s payload and refuses an unknown field, naming it (ruling 17)', (type, payload) => {
   expect(registerPayloadErrors(type, payload)).toEqual([])
-  expect(registerPayloadErrors(type, { ...payload, extra: true })).toEqual([`extra: unknown field for ${type} version 1`])
+  expect(registerPayloadErrors(type, { ...payload, extra: true })).toEqual([`payload.extra: unknown field for ${type} version 1`])
 })
 
 it.each<[string, string, Record<string, unknown>]>([
@@ -33,7 +34,7 @@ it.each<[string, string, Record<string, unknown>]>([
 ])('%s %s takes cash and external keys, and refuses card', (type, map, payload) => {
   expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, external: 2 } })).toEqual([])
   expect(registerPayloadErrors(type, { ...payload, [map]: { cash: 1, card: 2 } }))
-    .toEqual([`${map}.card: expected a payment method (cash or external)`])
+    .toEqual([`payload.${map}.card: expected a payment method (cash or external)`])
 })
 
 it('the payment-method keys are exhaustive: a Record<PaymentMethodKind, true> without external does not compile', () => {
@@ -44,7 +45,7 @@ it('the payment-method keys are exhaustive: a Record<PaymentMethodKind, true> wi
 
 it('an unknown command type allows no keys', () => {
   expect(registerPayloadErrors('register.unknown', { sessionId: 's' }))
-    .toEqual(['sessionId: unknown field for register.unknown version 1', 'type: expected a register command type'])
+    .toEqual(['payload.sessionId: unknown field for register.unknown version 1', 'type: expected a register command type'])
 })
 
 type Recorded = [string, { type: string; payload: unknown }]
@@ -89,6 +90,27 @@ it.each<[string, Record<string, unknown>, string]>([
   ['register.closure.submit', { ...closure, movementIds: ['m'.repeat(65)] }, 'movementIds'],
 ])('rejects %s with invalid %s naming %s', (type, payload, field) => {
   expect(registerPayloadErrors(type as string, payload)).toEqual(expect.arrayContaining([expect.stringContaining(field as string)]))
+})
+
+it.each<[string, string, Record<string, unknown>]>([
+  ['register.session.open', 'openedAt', open],
+  ['register.session.transition', 'at', transition],
+  ['register.movement.record', 'createdAt', movement],
+  ['register.movement.void', 'createdAt', voidMovement],
+  ['register.closure.submit', 'openedAt', closure],
+  ['register.closure.submit', 'closedAt', closure],
+])('%s checks payload.%s parsing, leaving RFC format and bounds to the client-time stage', (type, field, payload) => {
+  const late = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString()
+  for (const value of ['2019-12-31T23:59:59.999Z', late]) expect(registerPayloadErrors(type, { ...payload, [field]: value }))
+    .toEqual([])
+  for (const value of ['invalid', 'not a date']) {
+    const invalid = { ...payload, [field]: value }
+    expect(registerPayloadErrors(type, invalid)).toEqual([`payload.${field}: expected a valid date`])
+  }
+  const zoneLess = { ...payload, [field]: '2026-09-30T12:00:00' }
+  expect(registerPayloadErrors(type, zoneLess)).toEqual([])
+  expect(clientTimeStageErrors({ type, payload: zoneLess } as never, Date.now()))
+    .toEqual([`payload.${field} must be an RFC 3339 time with Z or an offset`])
 })
 
 it('accepts positive paid_out amounts, zero no_sale amounts and signed safe integer records', () => {
