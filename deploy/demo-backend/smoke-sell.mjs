@@ -70,7 +70,7 @@ try {
   // Warehouse in Copenhagen, falls in the Europe region (dk), whose default VAT is 25% (tax-rates.ts).
   // Exclusive line, discount in the line's own mode: net 200 − 20 = 180; tax 180 × 0.25 = 45
   // (rounded once per order, half away from zero: exact); total 180 + 45 = 225.
-  const totalMinor = 180
+  const totalMinor = 225
   const sale = await command('sale', 'order.create', 2, {
     clientOrderId: randomUUID(), createdAt: new Date().toISOString(),
     currency: 'EUR', pricesIncludeTax: false,
@@ -78,7 +78,7 @@ try {
       clientLineId: randomUUID(), variantId: variant.id, quantity: 1,
       unitPriceMinor: 200, discountMinor: 20,
     }],
-    discountMinor: 20, subtotalMinor: 180, taxMinor: 0, totalMinor,
+    discountMinor: 20, subtotalMinor: 180, taxMinor: 45, totalMinor,
     payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
   })
   check(sale.serverRefs?.orderId, 'expected serverRefs.orderId')
