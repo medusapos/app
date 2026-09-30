@@ -365,6 +365,54 @@ medusaIntegrationTestRunner({
       expect(order.email).toBe('Mixed@Example.com')
     })
 
+    function emailSale(email: string) {
+      const base = command()
+      const payload: OrderCreatePayloadV3 = { ...base.payload, customer: { email } }
+      return { ...base, version: 3, payload } as unknown as CommandEnvelope<OrderCreatePayloadV3>
+    }
+
+    function customersByEmail(email: string) {
+      return container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('customer')
+        .whereRaw('lower(email) = lower(?)', [email]).whereNull('deleted_at').select('id', 'email', 'has_account')
+    }
+
+    it('two concurrent first sales carrying the same new email create one customer, and the loser applies on retry', async () => {
+      const email = `first-${randomUUID()}@example.com`
+      const sales = [emailSale(email), emailSale(email)]
+      const outcomes = await Promise.all(sales.map(sale => executeOrderCreate(container, sale)))
+      // Medusa's findOrCreateCustomerStep reads then inserts; the unique (email, has_account) index stops the second
+      // insert, and the loser's workflow compensates and comes back transient. Sometimes the second read wins the race.
+      for (const [i, outcome] of outcomes.entries()) {
+        if (outcome.kind === 'result') {
+          expect(outcome.result.status).toBe('applied')
+          continue
+        }
+        expect(outcome).toEqual({ kind: 'transient', id: sales[i].id,
+          message: `Customer with email: ${email}, has_account: false, already exists.` })
+        expect(await liveOrders(sales[i].payload.clientOrderId)).toHaveLength(0)
+        expect(result(await executeOrderCreate(container, sales[i])).status).toBe('applied')
+      }
+      const orders = await Promise.all(sales.map(async sale => (await liveOrders(sale.payload.clientOrderId))[0]))
+      expect(await customersByEmail(email)).toEqual([{ id: orders[0].customer_id, email, has_account: false }])
+      expect(orders[1].customer_id).toBe(orders[0].customer_id)
+    })
+
+    it('KNOWN: an email-only sale whose email matches a stored customer in a different case creates a second customer', async () => {
+      const email = `Buyer-${randomUUID()}@Example.com`
+      const stored = await container.resolve(Modules.CUSTOMER).createCustomers({ email, has_account: false })
+      const sale = emailSale(email.toLowerCase())
+      expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
+      const [order] = await liveOrders(sale.payload.clientOrderId)
+      // Medusa lowercases the sale's email, then matches customer.email exactly, so the stored mixed-case row is missed.
+      const rows = await customersByEmail(email)
+      expect(rows).toEqual(expect.arrayContaining([
+        { id: stored.id, email, has_account: false },
+        { id: order.customer_id, email: email.toLowerCase(), has_account: false },
+      ]))
+      expect({ linkedToStored: order.customer_id === stored.id, customerCount: rows.length })
+        .toEqual({ linkedToStored: false, customerCount: 2 })
+    })
+
     it('fingerprints every v3 field and replays identical bytes without rewriting metadata', async () => {
       const base = command()
       const payload: OrderCreatePayloadV3 = { ...base.payload, sessionId: randomUUID(), customer: { customerId: 'unknown' },
