@@ -29,13 +29,6 @@ the app's tests in one place. Moving the assertions onto the real primitives
 (or TallyUI exporting those subpaths) would drop the aliases (from the TV6b
 review).
 
-## Swap the plugin's local order.create v3 types for @tallyui/core
-
-`packages/medusa-plugin/src/workflows/tally-order-create/fiscal-figures.ts` holds local copies of TallyUI's v3 wire types (`OrderCreateDisplay`, `OrderCreateTaxRate`, `OrderCreatePayloadV3`), each marked `BRIDGE`, because `@tallyui/core` doesn't export them yet. TallyUI's order.create v3 ships in `@tallyui/*` 2.1.0. At that bump:
-- import the types from `@tallyui/core`;
-- delete the local copies;
-- check that `__fixtures__/order-create-v3.json` (the golden envelope TallyUI also pins) still passes unchanged.
-
 ## Hosted catalogue sync and search are too slow at 1,956 products
 
 A Playwright trace of the hosted smoke (app.medusapos.com against the demo backend, both at 4a60da6, 2026-09-28) shows:

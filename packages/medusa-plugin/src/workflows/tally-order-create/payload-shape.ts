@@ -2,7 +2,8 @@ import type { CommandEnvelope, OrderCreateLine, OrderCreatePayment } from '@tall
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 
 // The fields of each order.create version (ruling 17): @tallyui/core 2.0.0 OrderCreatePayload, OrderCreateLine and
-// OrderCreatePayment (src/types/commands.ts, v2) and the v3 bridge OrderCreatePayloadV3 (fiscal-figures.ts). Each value is
+// OrderCreatePayment (src/types/commands.ts, v2) and OrderCreatePayloadV3 (@tallyui/core's OrderCreatePayload, aliased in
+// fiscal-figures.ts). Each value is
 // the version that added the field; Record<keyof T, number> makes tsc refuse a missing or an extra field.
 const since = <T>(fields: Record<keyof T, number>) => new Map<string, number>(Object.entries(fields))
 const TOP_FIELDS = since<OrderCreatePayloadV3>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
