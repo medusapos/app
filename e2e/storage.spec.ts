@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { expect, test, type Page } from '@playwright/test';
-import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, variantIdBySku } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, test, variantIdBySku } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;

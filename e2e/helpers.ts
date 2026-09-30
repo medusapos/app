@@ -1,13 +1,52 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test as base, type BrowserContext, type Page } from '@playwright/test';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 export const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 
+// CSP gate (#154, ADR 0002): this auto fixture collects CSP violations in the test's context from its first navigation
+// (page events and Chromium console reports) and, taking `page` to read them before it closes, fails the test with any
+// at its end. Page events live in each document and are lost on navigation; the console channel keeps those too.
+// Specs take `test` from here: a top-level afterEach in this module would bind only to the first spec file loading it.
+type CspViolation = { violatedDirective: string; blockedURI: string; sourceFile: string } | { console: string };
+type CspWindow = Window & { __cspViolations?: CspViolation[] };
+const cspConsole = new Map<BrowserContext, string[]>();
+let cspArmedFor: string | undefined;
+export const test = base.extend<{ cspGate: void }>({ cspGate: [async ({ page }, use, testInfo) => {
+  cspArmedFor = testInfo.testId;
+  await watchCsp(page.context());
+  await use();
+  const violations = (await Promise.all([...cspConsole.keys()].map(cspViolations))).flat();
+  cspConsole.clear();
+  expect(violations, 'Content-Security-Policy violations').toEqual([]);
+}, { auto: true }] });
+
+async function watchCsp(context: BrowserContext) {
+  if (cspConsole.has(context)) return;
+  const reports = cspConsole.set(context, []).get(context)!;
+  context.on('console', message => { if (/Content[- ]Security[- ]Policy/.test(message.text())) reports.push(message.text()); });
+  await context.addInitScript(() => {
+    const found: CspViolation[] = (window as CspWindow).__cspViolations = [];
+    addEventListener('securitypolicyviolation', ({ violatedDirective, blockedURI, sourceFile }) => found.push({ violatedDirective, blockedURI, sourceFile }));
+  });
+}
+
+export async function cspViolations(context: BrowserContext): Promise<CspViolation[]> {
+  const events = await Promise.all(context.pages().map(page => page.evaluate(() => (window as CspWindow).__cspViolations ?? []).catch(() => [])));
+  return [...events.flat(), ...(cspConsole.get(context) ?? []).map(text => ({ console: text }))];
+}
+
+export async function resetCspViolations(context: BrowserContext) {
+  cspConsole.get(context)?.splice(0);
+  await Promise.all(context.pages().map(page => page.evaluate(() => (window as CspWindow).__cspViolations?.splice(0)).catch(() => {})));
+}
+
 // The e2e store has two regions and no default one, so a fresh till shows "Set up this till";
 // the existing specs keep Europe (dk, 25% exclusive). Returns whether the choice screen showed;
 // with `region` null it returns there, without choosing. Then opens the register, unless `register` is false.
 export async function signIn(page: Page, region: string | null = 'Europe', register = true): Promise<boolean> {
+  expect(cspArmedFor, "CSP gate is off: take `test` from './helpers'").toBe(test.info().testId);
+  await watchCsp(page.context());
   await page.goto('/login');
   await page.waitForLoadState('networkidle');
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();

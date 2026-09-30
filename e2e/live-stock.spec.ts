@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { adminToken, inventoryLevel, sellBySku, setInventoryLevel, signIn, variantIdBySku } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { adminToken, inventoryLevel, sellBySku, setInventoryLevel, signIn, test, variantIdBySku } from './helpers';
 
 const PRODUCT_4 = 'E2E product 4';
 // Single-variant, so the product-level status the tile badge shows is that one variant's own

@@ -1,5 +1,5 @@
-import { expect, test } from '@playwright/test';
-import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku } from './helpers';
+import { expect } from '@playwright/test';
+import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, test } from './helpers';
 
 // Compare exact EUR minor units at the API decimal's scale, preserving sub-cent precision.
 function expectEurAmount(major: number, minor: number, toleranceMinor: number) {
