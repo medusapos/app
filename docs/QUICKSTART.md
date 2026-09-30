@@ -51,6 +51,14 @@ Then apply the plugin's database migrations and restart your Medusa backend:
 npx medusa db:migrate
 ```
 
+### Running more than one Medusa instance
+
+If you run more than one Medusa instance, configure the Redis locking provider
+(`@medusajs/medusa/locking-redis`) first. Medusa's default locking provider
+only locks inside one instance, so two instances selling the same item at the
+same time can lose stock updates. The plugin logs a warning at startup while
+the default provider is active; one instance is fine.
+
 ## Configure your store
 
 1. Add the POS origin `https://app.medusapos.com` to both `ADMIN_CORS` and

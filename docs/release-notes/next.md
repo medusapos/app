@@ -33,3 +33,4 @@ Plugin changes since 0.1.0 (merged):
 - **413 answers:** `batch_too_large` / `body_too_large` (#134).
 - **Experimental sync:** the `tally_sync` change journal, `/changes` routes and the rescan script, behind `experimentalSync`, off by default (#110, #112, #114).
 - **Security:** the `majorToMinor` ReDoS fix (#111).
+- **More than one Medusa instance needs the Redis locking provider:** the plugin warns once at startup while Medusa's in-memory locking provider is active (#154).
