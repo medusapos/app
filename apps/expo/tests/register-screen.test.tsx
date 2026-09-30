@@ -18,7 +18,7 @@ import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
 import { openOrderStore, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities } from './pos-connector-mock';
 import { RegisterProvider } from '../lib/register-context';
 import { saveSession } from '../lib/session';
 import { SessionProvider, useSession } from '../lib/session-context';
@@ -27,6 +27,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { openTestRegister } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
@@ -100,7 +101,7 @@ beforeEach(async () => {
   saveCachedSettings(localStorage, baseUrl, settings);
   saveSession(localStorage, { baseUrl, email: 'admin@store.test',
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
-  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+  capabilities.mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: null, lastSyncedAt: null,

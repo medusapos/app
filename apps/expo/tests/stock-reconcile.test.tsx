@@ -5,7 +5,7 @@ import { AppState, type AppStateStatus } from 'react-native';
 import { BehaviorSubject, Subject } from 'rxjs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { createTallyDatabase, startReplication, startStockReconcile, type StockReconcileResult, type StockReconcileState } from '@tallyui/database';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
@@ -15,6 +15,7 @@ vi.mock('@tallyui/database', async (importOriginal) => {
     startReplication: vi.fn(), startStockReconcile: vi.fn() };
 });
 
+const posConnector = createPosConnector();
 const baseUrl = 'https://stock-reconcile.test';
 const headers = authHeaders('test-admin-jwt');
 const context = { connectorId: posConnector.id, baseUrl, headers };

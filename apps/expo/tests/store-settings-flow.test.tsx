@@ -7,7 +7,8 @@ import { formatMoney, SignInError, StoreSettingsError, type StoreSettings as Pri
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 import { useOutboxContext } from '../lib/outbox-context';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities, storeSettings } from './pos-connector-mock';
+import { POS_CONNECTOR_ID } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
 import {
   fetchStoreSettings, loadCachedPricing, loadSettingsChoice, saveCachedPricing, saveCachedSettings, saveSettingsChoice, type StoreSettings,
@@ -16,6 +17,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: () => null } }));
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
@@ -77,8 +79,6 @@ const channels = [{ id: 'pk_1', name: 'Shop' }, { id: 'pk_2', name: 'Web' }];
 const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
   variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] };
 const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError('choice_required', 'Choose', choices);
-const storeSettings = vi.spyOn(posConnector, 'storeSettings');
-const capabilities = vi.spyOn(posConnector, 'capabilities');
 const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
   setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
@@ -124,7 +124,7 @@ describe('store settings flow', () => {
     render(<ProductsScreen />);
     await pos();
     const context = vi.mocked(useReplicatedProducts).mock.lastCall![1];
-    expect(context).toMatchObject({ connectorId: posConnector.id, baseUrl: session.baseUrl, pricingContext: pricing.pricingContext });
+    expect(context).toMatchObject({ connectorId: POS_CONNECTOR_ID, baseUrl: session.baseUrl, pricingContext: pricing.pricingContext });
     expect({ ...context.headers }).toEqual({ Authorization: 'Bearer jwt' });
     expect(loadCachedPricing(localStorage, session.baseUrl)).toEqual(pricing);
   });

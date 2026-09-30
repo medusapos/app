@@ -13,7 +13,7 @@ import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { clearProductCache } from '../lib/product-cache';
 import { saveScannerSettings } from '../lib/scanner-settings';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
 import { watchStorageHealth } from '../lib/storage-health';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
@@ -26,6 +26,7 @@ import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
@@ -131,7 +132,7 @@ beforeEach(() => {
     removeItem: (key: string) => { data.delete(key); },
   });
   saveCachedSettings(localStorage, 'https://store.test', settings);
-  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+  capabilities.mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
@@ -876,6 +877,27 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
   afterEach(() => { vi.mocked(refreshSession).mockReset(); vi.mocked(login).mockReset(); });
 
+  it('builds a new connector for each store session and keeps it for the whole session', async () => {
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token: inADay() });
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
+    const a = vi.mocked(useReplicatedProducts).mock.lastCall![0];
+
+    await act(async () => { view.rerender(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
+    expect(vi.mocked(useReplicatedProducts).mock.lastCall![0]).toBe(a);
+    const renewed = jwt(Math.floor(Date.now() / 1000) + 2 * 86400);
+    vi.mocked(login).mockResolvedValue({ baseUrl: 'https://store.test', email: 'admin@store.test', token: renewed });
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    expect(context.session?.token).toBe(renewed);
+    expect(vi.mocked(useReplicatedProducts).mock.lastCall![0]).toBe(a);
+
+    act(() => { context.signOut(); });
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    const b = vi.mocked(useReplicatedProducts).mock.lastCall![0];
+    expect(b).not.toBe(a);
+  });
+
   async function mountTill(token = inADay()) {
     saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token });
     await act(async () => { render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
@@ -896,7 +918,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     'the Sign out button': { request: () => { fireEvent.click(button('Sign out')); context.signOut(); } },
     'a product replication 401': { request: () => vi.mocked(useReplicatedProducts).mock.lastCall![2]() },
     'the capabilities check': {
-      arm: () => { vi.mocked(posConnector.capabilities!).mockImplementation(held); },
+      arm: () => { capabilities.mockImplementation(held); },
       request: () => reject(new SignInError('invalid_credentials', 'Token expired', 401)),
     },
     'the store-settings fetch': {

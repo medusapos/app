@@ -9,13 +9,14 @@ import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/cor
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 import { useOutboxContext } from '../lib/outbox-context';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities, storeSettings } from './pos-connector-mock';
 import { useSession } from '../lib/session-context';
 import { fetchStoreSettings, saveCachedPricing, type StoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: () => null } }));
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
@@ -69,7 +70,6 @@ const product = (id: string, title: string, amount: number) => ({ id, title, sta
   variants: [{ id: `${id}-1`, title: 'One', sku: id.toUpperCase(), prices: [{ amount, currency_code: 'eur' }] }] });
 const catalogue = (region?: string) => region === 'reg_de'
   ? [product('shirt', 'Shirt', 20), product('hat', 'Hat', 30)] : [product('shirt', 'Shirt', 12), product('hat', 'Hat', 10)];
-const storeSettings = vi.spyOn(posConnector, 'storeSettings');
 const button = (name: string) => screen.getByRole('button', { name });
 const pos = () => screen.findByPlaceholderText('Search or scan barcode / SKU');
 const region = () => vi.mocked(useReplicatedProducts).mock.lastCall![1].pricingContext?.region_id;
@@ -98,7 +98,7 @@ beforeEach(() => {
   });
   onGermanyCommit = null;
   onGermanyEffect = null;
-  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+  capabilities.mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(),
     mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });

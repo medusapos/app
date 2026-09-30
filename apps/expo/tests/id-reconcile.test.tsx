@@ -4,7 +4,7 @@ import { webcrypto } from 'node:crypto';
 import { Subject } from 'rxjs';
 import { afterEach, expect, it, vi } from 'vitest';
 import { startIdReconcile, startReplication, type IdReconcileResult } from '@tallyui/database';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
@@ -14,6 +14,7 @@ vi.mock('@tallyui/database', async (importOriginal) => {
     startReplication: vi.fn(), startIdReconcile: vi.fn() };
 });
 
+const posConnector = createPosConnector();
 const baseUrl = 'https://id-reconcile.test';
 const headers = authHeaders('test-admin-jwt');
 const context = { connectorId: posConnector.id, baseUrl, headers };

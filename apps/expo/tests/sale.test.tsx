@@ -13,12 +13,13 @@ import { formatDate } from '../lib/format-date';
 import { useOutboxContext } from '../lib/outbox-context';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
-import { posConnector } from '../lib/pos-connector';
+import { capabilities } from './pos-connector-mock';
 import ProductsScreen from '../app/index';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
+vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 // Cart, Tender, Receipt etc. live in @tallyui/components (TallyUI TV6a/TV6b) and are imported above,
 // real and unmocked. The primitives they compose internally (from `../cart`, `../checkout`,
 // `../product`, `../input`, not the barrel) are mocked below at those module ids (aliased to their
@@ -127,7 +128,7 @@ beforeEach(() => {
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
     setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
-  vi.spyOn(posConnector, 'capabilities').mockResolvedValue(undefined);
+  capabilities.mockResolvedValue(undefined);
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
 });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.clearAllMocks(); });

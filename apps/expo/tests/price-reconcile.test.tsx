@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { FingerprintReconcileAdapter } from '@tallyui/core';
 import { MEDUSA_CALCULATED_PRICE_RECONCILE_INTERVAL_MS } from '@tallyui/connector-medusa';
 import { startFingerprintReconcile, startReplication } from '@tallyui/database';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
@@ -15,6 +15,7 @@ vi.mock('@tallyui/database', async (importOriginal) => {
   return { ...original, startReplication: vi.fn(), startFingerprintReconcile: vi.fn(original.startFingerprintReconcile) };
 });
 
+const posConnector = createPosConnector();
 const baseUrl = 'https://price-reconcile.test';
 const context = { connectorId: posConnector.id, baseUrl, headers: authHeaders('test-admin-jwt'),
   pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' } };

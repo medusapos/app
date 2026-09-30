@@ -4,7 +4,7 @@ import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import { Cart, CartBar, Catalogue, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
-import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext } from '@tallyui/core';
+import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, SALE_SAVING, TaxProvider, taxProviderProps, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
@@ -18,7 +18,7 @@ import { StripHeightContext } from '../components/store-refused';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { useOutboxContext } from '../lib/outbox-context';
-import { authHeaders, posConnector } from '../lib/pos-connector';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
@@ -29,9 +29,6 @@ import {
 } from '../lib/store-settings';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 import { useWedgeScan } from '../lib/use-wedge-scan';
-
-const connector = posConnector;
-const traits = connector.traits.product;
 
 const STATE_LABEL: Record<SyncState, string> = {
   connecting: 'Connecting',
@@ -57,6 +54,7 @@ type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: ()
 
 function SettingsScreen(props: SignedInProps) {
   const { session, onUnauthorized, onCapabilities } = props;
+  const [connector] = useState(createPosConnector);
   // Once per store (this screen is keyed by it): re-read the order.create capability a restored session was saved with (ADR-062).
   useEffect(() => {
     let active = true;
@@ -88,7 +86,7 @@ function SettingsScreen(props: SignedInProps) {
     return () => { active = false; };
   }, [session, onUnauthorized, attempt]);
   if (!settings) return <SettingsMessage text={error ?? 'Loading store settings…'} actions={error ? { Retry: () => setAttempt(attempt + 1) } : {}} />;
-  return <PricingScreen {...props} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
+  return <PricingScreen {...props} connector={connector} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
 }
 
 function SettingsMessage({ text, actions }: { text: string; actions: Record<string, () => void> }) {
@@ -102,11 +100,11 @@ function SettingsMessage({ text, actions }: { text: string; actions: Record<stri
   </>;
 }
 
-type PricingProps = SignedInProps & { settings: StoreSettings; settingsStatus: string | null };
+type PricingProps = SignedInProps & { connector: TallyConnector; settings: StoreSettings; settingsStatus: string | null };
 
 // TallyUI's store settings (TV4) price and tax every sale the way Medusa charges in the till's region.
 function PricingScreen(props: PricingProps) {
-  const { session, settings } = props;
+  const { session, settings, connector } = props;
   const token = useRef(session.token);
   token.current = session.token;
   const [attempt, setAttempt] = useState(0);
@@ -165,9 +163,10 @@ function PricingScreen(props: PricingProps) {
   </TaxProvider>;
 }
 
-function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy }: PricingProps & {
+function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
+  const traits = connector.traits.product;
   const { setSaleHold } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);

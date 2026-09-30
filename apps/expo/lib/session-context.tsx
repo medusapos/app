@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { medusaConnector } from '@tallyui/connector-medusa';
+import { POS_CONNECTOR_ID } from './pos-connector';
 import { resolveCapabilities, type ServerCapabilities } from '@tallyui/core';
 import { exposeE2eHook } from './e2e-debug';
 import { clearProductCache } from './product-cache';
@@ -39,7 +39,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     clearSession(defaultStorage());
     currentSession.current = null;
     setSession(null);
-    if (ended) void clearProductCache(medusaConnector.id, ended.baseUrl);
+    if (ended) void clearProductCache(POS_CONNECTOR_ID, ended.baseUrl);
   }, []);
   // Interim (ADR 0015): signing out unmounts the sale and closes the outbox, so a request while a sale or a save is held
   // is kept (one, with the token it was made under) and runs on release, unless the session was renewed meanwhile.
