@@ -7,7 +7,7 @@ import { loadSessionFigures } from '../workflows/tally-register-command/figures'
 // before that script marked the order itself. No other order is touched (see the plugin README).
 // A manual script: no migration, job, subscriber or loader runs it. Without an argument it is a dry run that writes nothing;
 // --apply also writes tally_rejected_by: 'backfill', the undo record, and --undo removes both keys. Each run logs the sessions' figures.
-type Order = { id: string; session: string | null; payments: unknown; command?: string }
+type Order = { id: string; session: string | null; client: string | null; payments: unknown; command?: string; sessions: string[] }
 type Figures = Awaited<ReturnType<typeof loadSessionFigures>>
 const PREFIX = 'tally_ledger_backfill_rejected'
 
@@ -17,11 +17,19 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const service = container.resolve(Modules.ORDER)
-  const columns = ['id', knex.raw("metadata->>'tally_session_id' as session"), knex.raw("metadata->'tally_payments' as payments")]
+  const columns = ['id', knex.raw("metadata->>'tally_session_id' as session"), knex.raw("metadata->'tally_payments' as payments"),
+    knex.raw("metadata->>'tally_client_id' as client")]
+  // The sessions whose figures count an order, as loadSessionFigures decides: a closed session exactly the orders its closure lists
+  // (whatever their tally_session_id), an open one the orders sent with its id.
+  const closures: { session_id: string; order_ids: unknown[] }[] = await knex('tally_register_closure').select('session_id', 'order_ids')
+  const sessionsOf = (order: { session: string | null; client: string | null }) => [
+    ...order.session === null || closures.some(closure => closure.session_id === order.session) ? [] : [order.session],
+    ...closures.filter(closure => order.client !== null && closure.order_ids.includes(order.client)).map(closure => closure.session_id)]
   if (mode === '--undo') {
     // Only orders --apply marked: an order tally-ledger-resolve marked itself has no tally_rejected_by.
     const orders: Order[] = await knex('order').select(columns).whereNull('deleted_at')
       .whereRaw("metadata->>'tally_rejected_by' = 'backfill'").orderBy('id')
+    for (const order of orders) order.sessions = sessionsOf(order)
     const before = await figuresOf(container, orders)
     for (const { id } of orders) await service.updateOrders(id, { metadata: { tally_rejected: '', tally_rejected_by: '' } })
     report(logger, orders, before, await figuresOf(container, orders))
@@ -48,7 +56,7 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
     }
     // The same test register figures use to skip a marked order.
     if (order.rejected === 'true' || marks.has(orderId)) { already++; continue }
-    marks.set(orderId, { id: orderId, session: order.session, payments: order.payments, command: id })
+    marks.set(orderId, { id: orderId, session: order.session, client: order.client, payments: order.payments, command: id, sessions: sessionsOf(order) })
   }
   const orders = [...marks.values()]
   const before = await figuresOf(container, orders)
@@ -58,10 +66,9 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
     for (const { id } of orders) await service.updateOrders(id, { metadata: { tally_rejected: true, tally_rejected_by: 'backfill' } })
     after = await figuresOf(container, orders)
   } else {
-    // As if the marks were written: each marked order's payments and sale leave its session's figures.
+    // As if the marks were written: each marked order's payments and sale leave the figures of each session that counts it.
     after = new Map([...before].map(([session, figures]) => [session, figures && { ...figures, expected: { ...figures.expected } }]))
-    for (const order of orders) {
-      const figures = order.session === null ? null : after.get(order.session)
+    for (const order of orders) for (const figures of order.sessions.map(id => after.get(id))) {
       if (!figures) continue
       figures.salesCount--
       for (const [method, amount] of Object.entries(amounts(order.payments))) figures.expected[method] = (figures.expected[method] ?? 0) - amount
@@ -83,7 +90,7 @@ function amounts(payments: unknown) {
 }
 
 async function figuresOf(container: ExecArgs['container'], orders: Order[]) {
-  const sessions = [...new Set(orders.flatMap(order => order.session === null ? [] : [order.session]))]
+  const sessions = [...new Set(orders.flatMap(order => order.sessions))]
   return new Map(await Promise.all(sessions.map(async id => [id, await loadSessionFigures(container, id)] as const)))
 }
 
@@ -93,7 +100,7 @@ function report(logger: { info(line: string): void }, orders: Order[], before: M
     logger.info(`${PREFIX}: command ${order.command}, order ${order.id}, session ${order.session ?? 'none'}: ${paid || 'no payments'}`)
   }
   for (const id of [...before.keys()].sort()) {
-    const ids = orders.filter(order => order.session === id).map(order => order.id).join(', ')
+    const ids = orders.filter(order => order.sessions.includes(id)).map(order => order.id).join(', ')
     const [b, a] = [before.get(id), after.get(id)]
     if (!b || !a) { logger.info(`${PREFIX}: session ${id} (not found): orders ${ids}`); continue }
     const methods = [...new Set(['cash', ...Object.keys(b.expected).sort(), ...Object.keys(a.expected).sort()])]
@@ -101,6 +108,6 @@ function report(logger: { info(line: string): void }, orders: Order[], before: M
     logger.info(`${PREFIX}: session ${id} (${b.variance ? 'closed' : 'open'}): expected ${expected}; ` +
       `salesCount ${b.salesCount} -> ${a.salesCount}; orders ${ids}`)
   }
-  const loose = orders.filter(order => order.session === null).map(order => order.id)
+  const loose = orders.filter(order => !order.sessions.length).map(order => order.id)
   if (loose.length) logger.info(`${PREFIX}: no session: orders ${loose.join(', ')}`)
 }

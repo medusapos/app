@@ -1295,6 +1295,18 @@ medusaIntegrationTestRunner({
         // @tallyui/core's envelope type stops at version 2.
         return { ...base, version: 3, payload: { ...base.payload, sessionId } } as unknown as CommandEnvelope<OrderCreatePayload>
       }
+      // Closes an openSession session through the endpoint with a closure that lists these orders' clientOrderIds.
+      async function closeSession(sessionId: string, ...sales: CommandEnvelope<OrderCreatePayload>[]) {
+        const session = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_register_session').where({ id: sessionId }).first()
+        const at = new Date().toISOString()
+        const envelope = (type: string, payload: object) => ({ ...command(), type, payload })
+        const response = await post([envelope('register.session.transition', { sessionId, status: 'closed', at, counted: { cash: 100 } }),
+          envelope('register.closure.submit', { closureId: randomUUID(), sessionId, registerId: session.register_id, number: 1,
+            openedAt: session.opened_at, closedAt: at, tillExpected: { cash: 100 }, counted: { cash: 100 }, periodSalesTotalMinor: 0,
+            periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 0, perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0,
+            softwareVersion: '1.0', orderIds: sales.map(sale => sale.payload.clientOrderId), movementIds: [] })])
+        expect([response.status, ...response.data.results.map(result => result.status)]).toEqual([200, 'applied', 'applied'])
+      }
       const summary = (counts: string, skipped = '0 (already marked 0, not canceled 0, missing 0, no orderId 0)') =>
         `tally_ledger_backfill_rejected${counts} order(s), skipped ${skipped}`
 
@@ -1328,6 +1340,34 @@ medusaIntegrationTestRunner({
         expect(dry).toEqual([
           `tally_ledger_backfill_rejected: session ${sessionId} (open): expected cash 1100 -> 100; salesCount 1 -> 0; orders ${orderId}`])
         expect(sessionLines(await backfill('--apply'))).toEqual(dry)
+      })
+
+      it('tally-ledger-backfill-rejected: a closed session whose closure lists the order reports what --apply shows', async () => {
+        const sessionId = await openSession()
+        const { sale, orderId } = await rejectUnmarked(sessionSale(sessionId))
+        await closeSession(sessionId, sale)
+        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; orders ${orderId}`
+        expect((await backfill()).slice(1, -1)).toEqual([line])
+        expect((await backfill('--apply')).slice(1, -1)).toEqual([line])
+      })
+
+      it('tally-ledger-backfill-rejected: a closed session whose closure does not list the order is unchanged', async () => {
+        const sessionId = await openSession()
+        const { orderId } = await rejectUnmarked(sessionSale(sessionId))
+        await closeSession(sessionId)
+        const lines = [`tally_ledger_backfill_rejected: no session: orders ${orderId}`]
+        expect((await backfill()).slice(1, -1)).toEqual(lines)
+        expect((await backfill('--apply')).slice(1, -1)).toEqual(lines)
+      })
+
+      it('tally-ledger-backfill-rejected: an order sent without sessionId that a closure lists changes that closed session', async () => {
+        const sessionId = await openSession()
+        const { sale, orderId } = await rejectUnmarked()
+        await closeSession(sessionId, sale)
+        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; orders ${orderId}`
+        expect(await backfill()).toEqual([`tally_ledger_backfill_rejected: command ${sale.id}, order ${orderId}, session none: cash 1000`,
+          line, summary(' (dry run): would mark 1')])
+        expect((await backfill('--apply')).slice(1, -1)).toEqual([line])
       })
 
       it('tally-ledger-backfill-rejected --undo unmarks only what --apply marked, and the session figures go back', async () => {
