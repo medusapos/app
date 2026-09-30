@@ -74,10 +74,9 @@ A1 → A5 → A2 → A3 → A4; in parallel, A6 → A7 → A8 → A9 → A10 →
 | A10 | Offline e2e (Playwright, web, against medusa-dev); assertions below |
 | A11 | Expo web static export on Vercel (a `*.vercel.app` URL first; app.medusapos.com once Paul adds DNS) plus a quick-start doc: plugin install, CORS, login |
 
-TallyUI packages are consumed through `file:` overrides until they are
-published (TallyUI T9/T10). Bump the TallyUI pin to current `main` when you
-need newer packages, and add `react-native-svg` to the app at the same
-time.
+TallyUI packages come from npm, all at one exact version, and are bumped
+together in a deliberate PR (see the README's TallyUI section).
+`apps/expo/tests/tallyui-dependencies.test.ts` enforces this.
 
 ## Verified Medusa recipe for A3 (TallyUI ADR-036, medusa-dev order #301)
 
