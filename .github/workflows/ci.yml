@@ -169,7 +169,8 @@ jobs:
           SETUP_NODE_CACHE_HIT: ${{ steps.setup-node.outputs.cache-hit }}
         run: |
           bash scripts/pnpm-install-filtered.sh --frozen-lockfile
-          (cd ../released && bash ../app/scripts/pnpm-install-filtered.sh --frozen-lockfile)
+          # The released tag predates the workspace sideEffectsCache setting.
+          (cd ../released && bash ../app/scripts/pnpm-install-filtered.sh --frozen-lockfile --config.side-effects-cache=false)
           python3 scripts/assert-no-premium-side-effects.py
       - name: Prepare and run carry-over
         if: steps.release.outputs.tag != ''
