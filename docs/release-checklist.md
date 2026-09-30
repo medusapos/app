@@ -15,7 +15,13 @@ Work through this before tagging a release of the app or the plugin. An item tha
   - Fixes go forward, never back.
   - The release notes for the store owner say this in plain words (see `release-notes/next.md`).
 - [ ] **Carry-over test:** the bump PR for TallyUI 3.0.0 carries one for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
-- [ ] **Pull notices (TallyUI/tallyui#261):** the app takes `@tallyui/*` only from published npm pins, so this lands after the 3.0.0 bump. It needs two changes. Wire the replication state's `notice$` into SyncStatus's pull notice, and call `resume()` after a successful sign-in, so a pull stopped by an expired session starts again (the notices come from TallyUI/tallyui#259).
+- [ ] **The 3.0.0 bump and the pull notices (TallyUI/tallyui#261) ship in one PR, never apart** (Front desk ruling, 2026-09-30).
+  - **Why together:** from 3.0.0, a product pull that fails with 401 no longer reaches the replication state's `error$`. Today the app signs the till out from that `error$` path (`apps/expo/lib/use-replicated-products.ts`). A bump without the notice wiring would leave an expired till's products silently stale, and the product pull would no longer sign the till out. That is a regression. A 401 on a sale send is the outbox's, and is unaffected.
+  - **The wiring:** the app takes `@tallyui/*` only from published npm pins. The wiring goes in the bump PR itself: a bump PR without it does not merge. It needs three changes:
+    - wire the replication state's `notice$` into SyncStatus's pull notice;
+    - on an `unauthorized` notice, call the existing `onUnauthorized()`, so the till signs out the same way the old 401 did (Front desk ruling, 2026-09-30);
+    - call `resume()` after a successful sign-in, so a pull stopped by an expired session starts again.
+  - **Source:** the notices come from TallyUI/tallyui#259.
 - [ ] **Two price runners on one collection (found in the review of TallyUI/tallyui#284, still open):**
   - **The problem:** `apps/expo/lib/use-replicated-products.ts` starts two `startFingerprintReconcile` runners on `db.products`: the calculated-price runner (`:188`), then the base-price runner (`:202`). Both use the default `stateId`. **If #284 ships as reviewed**, they share one persisted gate, and the second keeps its gate in memory and runs about an hour after every start.
   - **The fix lands in the bump PR for the first `@tallyui/*` version that carries #284:** pass `stateId: 'calculated-prices'` to the calculated-price runner (`:188`), as #284's docs example does. The base-price runner keeps the default. Re-check #284's final docs then.
