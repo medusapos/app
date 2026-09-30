@@ -7,7 +7,7 @@ import { ConnectorUnauthorizedError, type SyncNotice, type TallyConnector } from
 import { startReplication } from '@tallyui/database';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { clearProductCache } from '../lib/product-cache';
-import { useReplicatedProducts } from '../lib/use-replicated-products';
+import { classifyReplicationError, useReplicatedProducts } from '../lib/use-replicated-products';
 
 vi.mock('@tallyui/database', async (importOriginal) => {
   const original = await importOriginal<typeof import('@tallyui/database')>();
@@ -72,13 +72,20 @@ it('a store notice shows but never signs out', async () => {
   expect(onUnauthorized).not.toHaveBeenCalled();
 });
 
-// TallyUI 3.0.0-next.1 adds the forbidden code for 403; A3's re-pin flips this to it and updates the error if needed.
-it.fails('a pull refused with 403 holds with a forbidden notice and never signs out (fails until TallyUI 3.0.0-next.1 adds the `forbidden` code)', async () => {
+it('a pull refused with 403 holds with a forbidden notice and never signs out', async () => {
   handler.mockRejectedValue(new ConnectorUnauthorizedError('Medusa API error: 403', 403));
   const { result } = renderHook(() => useReplicatedProducts(connector, context, onUnauthorized));
   await waitFor(() => expect(result.current.pullNotice).toBeDefined());
   expect(result.current.pullNotice).toMatchObject({ code: 'forbidden', fixedBy: 'store' });
   expect(onUnauthorized).not.toHaveBeenCalled();
+});
+
+it.each([
+  [new ConnectorUnauthorizedError('Medusa API error: 401: Token expired', 401), 'unauthorized'],
+  [new ConnectorUnauthorizedError('Medusa API error: 403', 403), 'http'],
+] as const)('classifies direct and RxDB-wrapped connector errors by code: %s', (error, expected) => {
+  expect(classifyReplicationError(error)).toBe(expected);
+  expect(classifyReplicationError({ parameters: { errors: [error] } })).toBe(expected);
 });
 
 it('a forbidden notice holds the pull and never signs out', async () => {

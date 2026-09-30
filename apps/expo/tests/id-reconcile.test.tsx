@@ -22,7 +22,7 @@ const onUnauthorized = vi.fn();
 const enqueue = vi.fn();
 // No stock adapter: this suite is only about the id-reconcile runner.
 const connector = { ...posConnector, reconcile: { ids: { ...posConnector.reconcile!.ids!, enqueue } } };
-const pass = (braked: boolean): IdReconcileResult => ({ pages: 1, queued: 0, truncated: false, braked });
+const pass = (braked: boolean): IdReconcileResult => ({ pages: 1, queued: 0, truncated: false, braked, complete: !braked });
 
 afterEach(async () => {
   await clearProductCache(connector.id, baseUrl);

@@ -39,6 +39,8 @@ const STATE_LABEL: Record<SyncState, string> = {
 };
 
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
+// TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
+const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
 // Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
@@ -60,7 +62,7 @@ function SettingsScreen(props: SignedInProps) {
     let active = true;
     connector.capabilities?.({ connectorId: connector.id, baseUrl: session.baseUrl, headers: authHeaders(session.token) })
       .then((fresh) => { if (active) onCapabilities(fresh); })
-      .catch((error: unknown) => { if (active && error instanceof SignInError) onUnauthorized(); });
+      .catch((error: unknown) => { if (active && error instanceof SignInError && error.code === 'invalid_credentials') onUnauthorized(); });
     return () => { active = false; };
   }, [session.baseUrl, onCapabilities, onUnauthorized]);
   const [settings, setSettings] = useState(() => loadCachedSettings(defaultStorage(), session.baseUrl));
@@ -154,7 +156,8 @@ function PricingScreen(props: PricingProps) {
   }
   if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
   const pos = shown.current;
-  if (store.state === 'error' && !pos) return <SettingsMessage text={store.error instanceof Error ? store.error.message : String(store.error)} actions={{ Retry: store.retry }} />;
+  if (store.state === 'error' && !pos) return <SettingsMessage text={store.nextRetryAt !== undefined ? SETTINGS_RETRYING
+    : store.error instanceof Error ? store.error.message : String(store.error)} actions={{ Retry: store.retry }} />;
   if (!pos) return <SettingsMessage text="Loading store settings…" actions={{}} />;
   return <TaxProvider {...taxProviderProps(pos.pricing)}>
     <SignedInProducts {...props} pricing={pos.pricing} syncContext={pos.syncContext} onBusy={setBusy}

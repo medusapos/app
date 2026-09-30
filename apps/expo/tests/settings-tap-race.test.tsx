@@ -98,7 +98,8 @@ beforeEach(() => {
   });
   onGermanyCommit = null;
   onGermanyEffect = null;
-  capabilities.mockResolvedValue(undefined);
+  capabilities.mockResolvedValue({ orderCreate: 3, register: 1,
+    taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(),
     mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });

@@ -1,6 +1,7 @@
 import { removeRxDatabase, type RxStorage } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { Platform } from 'react-native';
+import { ConnectorUnauthorizedError } from '@tallyui/core';
 import { defaultStorage } from './session';
 import { getWebStorage, UnsupportedStorageError, usingMemoryStorageForTests, webStorageAvailable } from './web-storage';
 
@@ -192,10 +193,12 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 /** Recognizes Medusa's HTTP 401 error, including RxDB's replication wrapper. */
 export function isUnauthorizedError(error: unknown): boolean {
+  if (error instanceof ConnectorUnauthorizedError) return error.code === 'unauthorized';
   if (!isRecord(error)) return false;
   if (error.message === 'Medusa API error: 401') return true;
   const parameters = error.parameters;
   if (!isRecord(parameters) || !Array.isArray(parameters.errors)) return false;
   const first: unknown = parameters.errors[0];
+  if (first instanceof ConnectorUnauthorizedError) return first.code === 'unauthorized';
   return isRecord(first) && first.message === 'Medusa API error: 401';
 }

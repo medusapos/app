@@ -94,7 +94,8 @@ beforeEach(() => {
   });
   // Each test states the calls it expects; any other call fails instead of reaching the network.
   storeSettings.mockReset().mockRejectedValue(new Error('Unexpected storeSettings call'));
-  capabilities.mockReset().mockResolvedValue(undefined);
+  capabilities.mockReset().mockResolvedValue({ orderCreate: 3, register: 1,
+    taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useSession).mockReturnValue(signedIn());
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
@@ -107,6 +108,20 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 describe('store settings flow', () => {
+  it("shows the retry line while the store's tax rounding is unknown, and the POS once it is known", async () => {
+    capabilities.mockResolvedValue(undefined);
+    storeSettings.mockResolvedValue(pricing);
+    render(<ProductsScreen />);
+    expect(await screen.findByText("Can't reach the store's settings yet. Retrying…")).toBeTruthy();
+    expect(screen.queryByText('Store capabilities unavailable')).toBeNull();
+    expect(screen.queryByPlaceholderText('Search or scan barcode / SKU')).toBeNull();
+    capabilities.mockResolvedValue({ orderCreate: 3, register: 1,
+      taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
+    await act(async () => { fireEvent.click(button('Retry')); });
+    await pos();
+    expect(screen.queryByText("Can't reach the store's settings yet. Retrying…")).toBeNull();
+  });
+
   it('always resolves with the stock location\'s country, with or without a stored choice (D1)', async () => {
     storeSettings.mockResolvedValue(pricing);
     const first = render(<ProductsScreen />);
@@ -353,8 +368,8 @@ describe('store settings flow', () => {
   it.each([
     [{ orderCreate: 2 }, 'mergeCapabilities'], [undefined, 'mergeCapabilities'], [new SignInError('invalid_credentials', '401'), 'reportUnauthorized'],
   ] as const)('passes the restored session\'s capability read %s to %s', async (read, handler) => {
-    if (read instanceof Error) capabilities.mockRejectedValue(read);
-    else capabilities.mockResolvedValue(read);
+    if (read instanceof Error) capabilities.mockRejectedValueOnce(read);
+    else capabilities.mockResolvedValueOnce(read);
     storeSettings.mockResolvedValue(pricing);
     render(<ProductsScreen />);
     await pos();
@@ -362,5 +377,18 @@ describe('store settings flow', () => {
     await vi.waitFor(() => expect(context[handler]).toHaveBeenCalledOnce());
     if (handler === 'mergeCapabilities') expect(context.mergeCapabilities).toHaveBeenCalledWith(read);
     else expect(context.mergeCapabilities).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [new SignInError('server_error', 'Store unavailable'), 0],
+    [new SignInError('invalid_credentials', '401'), 1],
+    [undefined, 0],
+  ] as const)('reports unauthorized only for invalid credentials from the capabilities read: %s', async (read, reports) => {
+    if (read instanceof Error) capabilities.mockRejectedValueOnce(read);
+    else capabilities.mockResolvedValueOnce(read);
+    storeSettings.mockResolvedValue(pricing);
+    render(<ProductsScreen />);
+    await pos();
+    expect(useSession().reportUnauthorized).toHaveBeenCalledTimes(reports);
   });
 });
