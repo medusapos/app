@@ -2,18 +2,18 @@ import type { ExecArgs } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import { loadSessionFigures } from '../workflows/tally-register-command/figures'
 
-// npx medusa exec <built path>/tally-ledger-backfill-rejected.js [--apply | --undo]
+// npx medusa exec <built path>/tally-ledger-backfill-rejected.js [apply | undo]
 // One-off and idempotent: marks tally_rejected on the order each tally-ledger-resolve reject parked, for rejects made
 // before that script marked the order itself. No other order is touched (see the plugin README).
 // A manual script: no migration, job, subscriber or loader runs it. Without an argument it is a dry run that writes nothing;
-// --apply also writes tally_rejected_by: 'backfill', the undo record, and --undo removes both keys. Each run logs the sessions' figures.
+// apply also writes tally_rejected_by: 'backfill', the undo record, and undo removes both keys. Each run logs the sessions' figures.
 type Order = { id: string; session: string | null; client: string | null; payments: unknown; command?: string; sessions: string[] }
 type Figures = Awaited<ReturnType<typeof loadSessionFigures>>
 const PREFIX = 'tally_ledger_backfill_rejected'
 
 export default async function tallyLedgerBackfillRejected({ container, args }: ExecArgs) {
-  const mode = args.length === 0 ? 'dry run' : args.length === 1 && ['--apply', '--undo'].includes(args[0]) ? args[0] : null
-  if (!mode) throw new Error('Usage: medusa exec tally-ledger-backfill-rejected.js [--apply | --undo] (no argument: a dry run)')
+  const mode = args.length === 0 ? 'dry run' : args.length === 1 && ['apply', 'undo'].includes(args[0]) ? args[0] : null
+  if (!mode) throw new Error('Usage: medusa exec tally-ledger-backfill-rejected.js [apply | undo] (no argument: a dry run)')
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const service = container.resolve(Modules.ORDER)
@@ -25,8 +25,8 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
   const sessionsOf = (order: { session: string | null; client: string | null }) => [
     ...order.session === null || closures.some(closure => closure.session_id === order.session) ? [] : [order.session],
     ...closures.filter(closure => order.client !== null && closure.order_ids.includes(order.client)).map(closure => closure.session_id)]
-  if (mode === '--undo') {
-    // Only orders --apply marked: an order tally-ledger-resolve marked itself has no tally_rejected_by.
+  if (mode === 'undo') {
+    // Only orders apply marked: an order tally-ledger-resolve marked itself has no tally_rejected_by.
     const orders: Order[] = await knex('order').select(columns).whereNull('deleted_at')
       .whereRaw("metadata->>'tally_rejected_by' = 'backfill'").orderBy('id')
     const commands: { id: string; order_id: string }[] = await knex('tally_command').where({ status: 'rejected' }).whereNull('deleted_at')
@@ -64,7 +64,7 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
   const orders = [...marks.values()]
   const before = await figuresOf(container, orders)
   let after: Map<string, Figures>
-  if (mode === '--apply') {
+  if (mode === 'apply') {
     // Only the marker keys, which the order module merges: this script does not hold the sale lock.
     for (const { id } of orders) await service.updateOrders(id, { metadata: { tally_rejected: true, tally_rejected_by: 'backfill' } })
     after = await figuresOf(container, orders)
@@ -83,7 +83,7 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
     }
   }
   report(logger, orders, before, after)
-  logger.info(`${mode === '--apply' ? `${PREFIX}: marked` : `${PREFIX} (dry run): would mark`} ${orders.length} order(s), ` +
+  logger.info(`${mode === 'apply' ? `${PREFIX}: marked` : `${PREFIX} (dry run): would mark`} ${orders.length} order(s), ` +
     `skipped ${already + live + missing + unnamed} (already marked ${already}, not canceled ${live}, missing ${missing}, no orderId ${unnamed})`)
 }
 

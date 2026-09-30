@@ -87,6 +87,6 @@ Rows are never deleted or rewritten. The exceptions are a session's status field
 
 ## Never-placed orders (2026-09-29)
 
-A canceled order counts because an admin cancel is a later correction. An order canceled by `tally-ledger-resolve reject` was never placed: it carries `tally_rejected` and never counts, so the new order a retry creates is counted once. Only the order the rejected command parked is marked; an earlier order of the same sale that an admin canceled by hand keeps counting. Sessions closed after a reject made before this marking show a lower `expected` and a higher variance once `tally-ledger-backfill-rejected --apply` marks that order, and the backfill's per-session report is how an owner explains the change.
+A canceled order counts because an admin cancel is a later correction. An order canceled by `tally-ledger-resolve reject` was never placed: it carries `tally_rejected` and never counts, so the new order a retry creates is counted once. Only the order the rejected command parked is marked; an earlier order of the same sale that an admin canceled by hand keeps counting. Sessions closed after a reject made before this marking show a lower `expected` and a higher variance once `tally-ledger-backfill-rejected apply` marks that order, and the backfill's per-session report is how an owner explains the change.
 
 A failed `order.create` leaves no order row: Medusa's `createOrdersStep` compensation deletes it. The session figures integration test pins that deletion and counts the sale once after its retry.

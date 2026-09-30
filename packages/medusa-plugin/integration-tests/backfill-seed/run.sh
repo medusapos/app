@@ -9,10 +9,12 @@ fail() { echo "run.sh: $*" >&2; exit 1; }
 # Letters, digits and _ only, so nothing in the URL can name another host.
 [[ "$name" =~ ^medusapos_backfill_seed[A-Za-z0-9_]*$ ]] || fail "refusing database '$name': the name must start with medusapos_backfill_seed"
 [[ "$user" =~ ^[A-Za-z0-9_]+$ && "$port" =~ ^[0-9]+$ ]] || fail 'DB_USERNAME must be letters, digits or _, and DB_PORT digits'
+# URL-unreserved characters only, so the password cannot end the URL's user part and name another host.
+[[ "${DB_PASSWORD:-}" =~ ^[A-Za-z0-9._~-]*$ ]] || fail 'DB_PASSWORD must be letters, digits or ._~-'
 # Nothing else may redirect a connection: libpq's host overrides, and the Redis modules defineConfig adds for these.
 unset PGHOSTADDR PGSERVICE PGSERVICEFILE REDIS_URL CACHE_REDIS_URL EXECUTION_CONTEXT
 if [[ -n "${DB_PASSWORD:-}" ]]; then export PGPASSWORD="$DB_PASSWORD"; fi
-export DATABASE_URL="postgres://$user@$host:$port/$name"
+export DATABASE_URL="postgres://$user${DB_PASSWORD:+:$DB_PASSWORD}@$host:$port/$name"
 logs="/tmp/medusapos-backfill-seed-$$"
 mkdir -p "$logs"
 log="$logs/run.log"
@@ -43,17 +45,23 @@ figures() { grep -E '^tally_ledger_backfill_rejected: (command .*, order |sessio
 script=medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js
 runs=()
 n=0
-# The medusa CLI refuses an unknown option such as --apply ("Unknown argument: apply"), so it goes after --.
-for args in '' --apply '' --undo ''; do
+# The medusa CLI refuses a dashed option ("Unknown argument: apply") and drops one after --, so the mode is a plain word.
+for args in '' apply '' undo ''; do
   n=$((n + 1))
-  echo "=== $n. npx medusa exec $script${args:+ -- $args}"
-  out="$(npx medusa exec "$script" ${args:+-- "$args"} 2>&1)" || { printf '%s\n' "$out" >>"$log"; fail "run $n failed; see $log"; }
+  echo "=== $n. npx medusa exec $script${args:+ $args}"
+  out="$(npx medusa exec "$script" ${args:+"$args"} 2>&1)" || { printf '%s\n' "$out" >>"$log"; fail "run $n failed; see $log"; }
   printf '=== %s\n%s\n' "$n" "$out" >>"$log"
   runs+=("$(own <<<"$out")")
   printf '%s\n' "${runs[n - 1]}"
 done
 
-grep -q '(dry run): would mark 0 order(s)' <<<"${runs[2]}" || fail 'assertion failed: the second dry run (run 3) does not say would mark 0'
+# Every run is checked here, so no step is checked by eye.
+says() { grep -qF "$2" <<<"${runs[$1 - 1]}" || fail "assertion failed: run $1 does not say '$2'"; }
+says 1 '(dry run): would mark 2 order(s), '
+says 1 ': skipped: no orderId (command '
+says 2 ': marked 2 order(s), '
+says 3 '(dry run): would mark 0 order(s), '
+says 4 '(undo): unmarked 2 order(s)'
 [[ -n "$(figures "${runs[0]}")" ]] || fail 'assertion failed: the first dry run (run 1) reports no order or session lines'
 [[ "$(figures "${runs[4]}")" == "$(figures "${runs[0]}")" ]] ||
   fail 'assertion failed: the third dry run (run 5) order and session lines differ from the first (run 1)'

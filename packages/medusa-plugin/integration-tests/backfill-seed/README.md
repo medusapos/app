@@ -14,12 +14,14 @@ real database, with the real output. It:
    - closed session S2 (the #121 review case): c0 applied then canceled by hand, c1 for the same `clientOrderId`
      parked, rejected and unmarked, and a closure whose `orderIds` lists that sale;
    - a `TALLY_ADMIN_REJECTED` ledger row with no `orderId`;
-5. runs the backfill five times (dry run, `--apply`, dry run, `--undo`, dry run), printing a `=== <n>. <command>`
-   header and the backfill's own lines to stdout;
+5. runs the backfill five times (dry run, `apply`, dry run, `undo`, dry run), printing a `=== <n>. <command>`
+   header and the backfill's own lines to stdout. These are the three commands the plugin README gives an operator,
+   with this project's path. The mode is a plain word: `medusa exec` refuses `--apply` and drops `-- --apply`;
 6. drops the database, unless `KEEP_DB=1`.
 
-It fails unless the second dry run says `would mark 0` and the third dry run's order and session lines equal the
-first's. Everything else goes to `/tmp/medusapos-backfill-seed-<pid>/run.log`.
+It fails unless run 1 says `would mark 2` and skips the rejection with no `orderId`, run 2 says `marked 2`, run 3
+`would mark 0`, run 4 `unmarked 2`, and run 5's order and session lines equal run 1's. CI runs it in the
+`medusa-plugin` job. Everything else goes to `/tmp/medusapos-backfill-seed-<pid>/run.log`.
 
 ## Run
 
