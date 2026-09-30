@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, MedusaError, Modules, ProductStatus } from '@medusajs/framework/utils'
-import { createProductsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow } from '@medusajs/medusa/core-flows'
+import {
+  createInventoryLevelsWorkflow, createProductsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow, updateProductsWorkflow,
+} from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
@@ -118,9 +120,15 @@ medusaIntegrationTestRunner({
     it('releases a failed run after real payment and leaves no live order', async () => {
       const sale = shortSale()
       const capture = jest.spyOn(container.resolve(Modules.PAYMENT), 'capturePayment')
-      expect(await executeOrderCreate(container, sale, { shippingOptionId: 'so_missing' })).toEqual({
-        kind: 'transient', id: sale.id, message: "Cannot read properties of undefined (reading 'shipping_profile_id')",
-      })
+      const fulfil = jest.spyOn(container.resolve(Modules.FULFILLMENT), 'createFulfillment')
+        .mockRejectedValueOnce(Object.assign(new Error('Fulfillment probe failed'), { name: 'FulfillmentProbeError' }))
+      try {
+        expect(await executeOrderCreate(container, sale)).toEqual({
+          kind: 'transient', id: sale.id, message: 'Fulfillment probe failed',
+        })
+      } finally {
+        fulfil.mockRestore()
+      }
       expect(capture).toHaveBeenCalledTimes(1)
       expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
       expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
@@ -147,6 +155,87 @@ medusaIntegrationTestRunner({
       expect(orders).toHaveLength(1)
       expect(orders[0]).toMatchObject({ id: retried.serverRefs!.orderId, status: 'completed' })
       expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result: retried })
+    })
+
+    /** Refused twice before the fix, identically: unstored, no live order, stock and reservations unchanged. */
+    async function expectRefusedUnstored(sale: CommandEnvelope<OrderCreatePayload>, options: object, message: string, inventoryItemId: string) {
+      const inventory = container.resolve(Modules.INVENTORY)
+      const stock = async () => ({
+        levels: (await inventory.listInventoryLevels({ inventory_item_id: inventoryItemId }))
+          .map(level => [level.location_id, Number(level.stocked_quantity), Number(level.reserved_quantity)]),
+        reservations: (await inventory.listReservationItems({ inventory_item_id: inventoryItemId })).map(item => item.id),
+      })
+      const before = await stock()
+      for (let attempt = 0; attempt < 2; attempt++) {
+        expect(await executeOrderCreate(container, sale, options)).toEqual({
+          kind: 'result', result: { id: sale.id, status: 'rejected', error: { code: 'store_configuration', message } },
+        })
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+        expect(await stock()).toEqual(before)
+      }
+    }
+
+    it('an unknown plugin option shippingOptionId is refused unstored before payment, and the same command applies once fixed', async () => {
+      const sale = command()
+      const capture = jest.spyOn(container.resolve(Modules.PAYMENT), 'capturePayment')
+      await expectRefusedUnstored(sale, { shippingOptionId: 'so_missing' },
+        'plugin option shippingOptionId: no shipping option with this id', data.inventoryA)
+      expect(capture).not.toHaveBeenCalled()
+      const retried = result(await executeOrderCreate(container, sale, { shippingOptionId: data.berlinShippingOptionId }))
+      expect(retried).toMatchObject({ id: sale.id, status: 'applied' })
+      expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result: retried })
+    })
+
+    describe('a product without a shipping profile', () => {
+      let productId: string
+      let managedVariant: string
+      let unmanagedVariant: string
+      let inventoryItemId: string
+      // The runner restores the DB snapshot before every test, so the fixture is created per test.
+      beforeEach(async () => {
+        const { result: [product] } = await createProductsWorkflow(container).run({ input: { products: [{
+          title: 'POS unprofiled product', handle: 'pos-unprofiled', status: ProductStatus.PUBLISHED,
+          sales_channels: [{ id: data.channelId }], options: [{ title: 'Variant', values: ['Managed', 'Unmanaged'] }],
+          variants: ['Managed', 'Unmanaged'].map(title => ({ title, manage_inventory: title === 'Managed',
+            options: { Variant: title }, prices: [{ currency_code: 'eur', amount: 10 }] })),
+        }] } })
+        productId = product.id
+        managedVariant = product.variants.find(variant => variant.title === 'Managed')!.id
+        unmanagedVariant = product.variants.find(variant => variant.title === 'Unmanaged')!.id
+        const { data: [variant] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'product_variant', fields: ['inventory_items.inventory_item_id'], filters: { id: managedVariant },
+        })
+        inventoryItemId = variant.inventory_items[0].inventory_item_id
+        await createInventoryLevelsWorkflow(container).run({ input: { inventory_levels: [
+          { inventory_item_id: inventoryItemId, location_id: data.berlinId, stocked_quantity: 5 },
+        ] } })
+      })
+
+      it('with shipping inventory is refused unstored before payment, and the same command applies once on a profile', async () => {
+        const sale = command({ lines: [{ clientLineId: randomUUID(), variantId: managedVariant, quantity: 1, unitPriceMinor: 1000 }] })
+        const capture = jest.spyOn(container.resolve(Modules.PAYMENT), 'capturePayment')
+        await expectRefusedUnstored(sale, {}, `Product ${productId} (variant ${managedVariant}) requires shipping but has no shipping profile; put it on a shipping profile`, inventoryItemId)
+        expect(capture).not.toHaveBeenCalled()
+        const { data: [option] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'shipping_option', fields: ['shipping_profile_id'], filters: { id: data.berlinShippingOptionId },
+        })
+        await updateProductsWorkflow(container).run({ input: { selector: { id: productId }, update: { shipping_profile_id: option.shipping_profile_id } } })
+        const retried = result(await executeOrderCreate(container, sale))
+        expect(retried).toMatchObject({ id: sale.id, status: 'applied' })
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(1)
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result: retried })
+      })
+
+      it('with no shipping inventory still sells', async () => {
+        await container.resolve(Modules.INVENTORY).updateInventoryItems({ id: inventoryItemId, requires_shipping: false })
+        const sale = command({
+          lines: [managedVariant, unmanagedVariant].map(variantId => ({ clientLineId: randomUUID(), variantId, quantity: 1, unitPriceMinor: 1000 })),
+          subtotalMinor: 1680, taxMinor: 320, totalMinor: 2000,
+          payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+        })
+        expect(result(await executeOrderCreate(container, sale))).toMatchObject({ id: sale.id, status: 'applied' })
+      })
     })
 
     it('a Medusa INVALID_DATA inside the workflow stays transient', async () => {

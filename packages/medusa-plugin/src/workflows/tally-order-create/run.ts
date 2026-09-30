@@ -63,7 +63,7 @@ export async function runOrderCreate(
         : 'Missing stock location or address; set plugin option locationId')
     }
     const { data: shippingVariants } = await query.graph({
-      entity: 'product_variant', fields: ['id', 'product.shipping_profile.id'],
+      entity: 'product_variant', fields: ['id', 'product.id', 'product.shipping_profile.id', 'inventory_items.inventory.requires_shipping'],
       filters: { id: payload.lines.map(line => line.variantId) },
     })
     const profileIds = [...new Set(shippingVariants.flatMap(variant =>
@@ -72,14 +72,24 @@ export async function runOrderCreate(
     if (profileIds.length > 1) {
       throw configurationError(`This sale's products use several shipping profiles (${profileIds.join(', ')}); POS sales need one profile per sale, so put these products on one shipping profile`)
     }
+    // Medusa 2.21 ships a line whose product has a profile or whose inventory requires shipping (prepare-line-item-data.js:23-29).
+    const unprofiled = shippingVariants.find(variant => !variant.product?.shipping_profile?.id &&
+      variant.inventory_items?.some(item => item?.inventory?.requires_shipping))
+    if (unprofiled) {
+      throw configurationError(`Product ${unprofiled.product?.id} (variant ${unprofiled.id}) requires shipping but has no shipping profile; put it on a shipping profile`)
+    }
     const profileId = profileIds[0]
     const { data: shippingOptions } = await query.graph({
       entity: 'shipping_option', fields: ['id', 'created_at', 'shipping_profile_id', 'service_zone.fulfillment_set.location.id'],
+      ...(options.shippingOptionId ? { filters: { id: options.shippingOptionId } } : {}),
     })
     let shippingOptionId = options.shippingOptionId
     if (shippingOptionId) {
       const option = shippingOptions.find(option => option.id === shippingOptionId)
-      if (option && profileId && option.shipping_profile_id !== profileId) {
+      if (!option) {
+        throw configurationError('plugin option shippingOptionId: no shipping option with this id')
+      }
+      if (profileId && option.shipping_profile_id !== profileId) {
         throw configurationError(`Shipping option ${shippingOptionId} (plugin option shippingOptionId) uses shipping profile ${option.shipping_profile_id}, but the sale's products use ${profileId}`)
       }
     } else {

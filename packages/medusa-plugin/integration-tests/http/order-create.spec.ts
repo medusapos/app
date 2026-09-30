@@ -609,13 +609,16 @@ medusaIntegrationTestRunner({
       await expectStock(data.inventoryC, 1)
       // A call-through spy observes the real system payment capture; no boundary is mocked.
       const capture = jest.spyOn(container.resolve(Modules.PAYMENT), 'capturePayment')
+      const fulfil = jest.spyOn(container.resolve(Modules.FULFILLMENT), 'createFulfillment')
+        .mockRejectedValueOnce(Object.assign(new Error('Fulfillment probe failed'), { name: 'FulfillmentProbeError' }))
       try {
-        await expect(runOrderCreate(container, sale, { shippingOptionId: 'so_missing' })).rejects.toMatchObject({
-          name: 'TypeError', message: "Cannot read properties of undefined (reading 'shipping_profile_id')",
+        await expect(runOrderCreate(container, sale)).rejects.toMatchObject({
+          name: 'FulfillmentProbeError', message: 'Fulfillment probe failed',
         })
         expect(capture).toHaveBeenCalledTimes(1)
       } finally {
         capture.mockRestore()
+        fulfil.mockRestore()
       }
       expect(await ordersFor(sale.payload.clientOrderId).whereNull('deleted_at').whereNot('status', 'canceled')).toHaveLength(0)
       await expectStock(data.inventoryC, 1)

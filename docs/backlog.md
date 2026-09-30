@@ -75,12 +75,6 @@ It needs:
 - post one `order.create` for an E2E product to `/tally/v1/commands`;
 - assert `applied`.
 
-## Two shipping failures still retry forever
-
-Both come from the #96 review. They're raised before any write, so they can become `store_configuration` rejections (ADR 0004):
-- **A shipped product without a shipping profile.** Medusa 2.21 sets a line's `requires_shipping` when its product has a profile *or* any of its inventory items requires shipping (`core-flows` `cart/utils/prepare-line-item-data.js:23-29`). So a profile-less product with shipping inventory fails every shipping option in fulfilment, and is retried as transient. Reject it before the workflow, naming the product: "put it on a shipping profile".
-- **An explicit `shippingOptionId` that doesn't exist.** It fails inside the workflow with a `TypeError`. Reject it before the workflow. The test "releases a failed run after real payment" uses `so_missing` to force a workflow failure, so give that test another way to fail. When the id is explicit, also filter the `shipping_option` query by it.
-
 ## The plugin tarball ships compiled tests
 
 `npm pack` for `@medusapos/medusa-plugin` 0.1.0 includes `.medusa/server/src/**/__tests__/*.js` and the `__fixtures__` JSON. Exclude them through the package's `files` field, or in the build.
