@@ -6,7 +6,7 @@ import posV1 from '../../../../../workflows/tally-order-create/__fixtures__/orde
 import posV2 from '../../../../../workflows/tally-order-create/__fixtures__/order-create-envelopes-2026-09-30/pos-2.0.0-v2.json'
 import batch from '../../../../../workflows/tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-batch.json'
 import closure from '../../../../../workflows/tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.closure.submit.json'
-import { payloadShapeErrors } from '../../../../../workflows/tally-order-create/payload-shape'
+import { envelopeErrors, payloadShapeErrors } from '../../../../../workflows/tally-order-create/payload-shape'
 import { processBatch, validateBatch, type BatchOutcome } from '../process'
 
 const command = {
@@ -182,6 +182,11 @@ describe('recorded TallyUI envelopes, 2026-09-30 (ruling 17)', () => {
 })
 
 describe('envelope fields (ruling 17)', () => {
+  it('checks createdAt parsing in the shape stage without checking bounds', () => {
+    expect(envelopeErrors({ ...mainV1, createdAt: 'invalid' } as never)).toEqual(['createdAt: expected a valid date'])
+    expect(envelopeErrors({ ...mainV1, createdAt: '2019-12-31T23:59:59.999Z' } as never)).toEqual([])
+  })
+
   it.each<[string, { id: string }]>([['order.create', mainV1], ['register.closure.submit', closure]])(
     'refuses priority on a recorded %s envelope as invalid_payload, before the claim', async (type, fixture) => {
       const claim = jest.fn()
@@ -199,7 +204,22 @@ describe('envelope fields (ruling 17)', () => {
       const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
       const outcome = await processBatch(replaying, [{ ...fixture, createdAt: '2019-12-31T23:59:59.999Z' }] as never, {})
       expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: { code: 'invalid_payload',
-        message: "createdAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } }] } })
+        message: expect.stringMatching(/^createdAt must be a time from 2020-01-01T00:00:00Z to \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/) } }] } })
       expect(claim).not.toHaveBeenCalled()
     })
+
+  it('one batch uses one client-time bound even when the clock advances between commands', async () => {
+    let now = Date.parse('2026-09-30T14:05:00.789Z')
+    const clock = jest.spyOn(Date, 'now').mockImplementation(() => now)
+    const claim = jest.fn()
+    const replaying = { resolve: () => ({ claim, listTallyCommands: async () => { now += 2000; return [] } }) } as unknown as MedusaContainer
+    try {
+      const commands = [mainV1, closure].map(fixture => ({ ...fixture, createdAt: '2019-12-31T23:59:59.999Z' }))
+      const outcome = await processBatch(replaying, commands as never, {})
+      expect(outcome).toEqual({ status: 200, body: { results: commands.map(({ id }) => ({ id, status: 'rejected', error: {
+        code: 'invalid_payload', message: 'createdAt must be a time from 2020-01-01T00:00:00Z to 2026-10-01T14:05:00Z',
+      } })) } })
+      expect(claim).not.toHaveBeenCalled()
+    } finally { clock.mockRestore() }
+  })
 })

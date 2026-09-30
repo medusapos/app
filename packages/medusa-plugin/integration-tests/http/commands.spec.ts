@@ -424,11 +424,17 @@ medusaIntegrationTestRunner({
 
       it('a createdAt before 2020 between two good sales is refused alone, unstored, with no order (TallyUI #325)', async () => {
         const [before, refused, after] = [command(), { ...command(), createdAt: '2019-12-31T23:59:59.999Z' }, command()]
+        const beforeRequest = Date.now()
         const response = await post([before, refused, after])
+        const afterRequest = Date.now()
         expect(response.status).toBe(200)
         expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
+        const pattern = /^createdAt must be a time from 2020-01-01T00:00:00Z to (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)$/
         expect(response.data.results[1]).toEqual({ id: refused.id, status: 'rejected', error: { code: 'invalid_payload',
-          message: "createdAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } })
+          message: expect.stringMatching(pattern) } })
+        const upperBound = Date.parse(pattern.exec(response.data.results[1].error.message)![1])
+        expect(upperBound).toBeGreaterThanOrEqual(Math.floor((beforeRequest + 24 * 60 * 60 * 1000) / 1000) * 1000)
+        expect(upperBound).toBeLessThanOrEqual(Math.floor((afterRequest + 24 * 60 * 60 * 1000) / 1000) * 1000)
         expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
         expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
       })
