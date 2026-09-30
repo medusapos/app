@@ -119,7 +119,7 @@ Auth is unchanged for every route: `authenticate('user', ['bearer', 'session'])`
 
 | Route | Shape (sketch) | Role for the driver |
 |---|---|---|
-| `POST /tally/v1/commands` | `X-Tally-Protocol: 1`; `{ commands: CommandEnvelope[] }`, at most 50 and 1 MB → `{ results: [{ id, status: applied\|duplicate\|rejected, error?, serverRefs?, register? }] }`; 409 `in_progress`; 503 `transient` (`commands/route.ts`, `process.ts:17-116`, the `/tally/v1/commands` POST entry in `middlewares.ts`) | The push side. The envelope `id` is the `Idempotency-Key`. `order.create` v1–3 and the five `register.*` v1 commands. |
+| `POST /tally/v1/commands` | `X-Tally-Protocol: 1`; `{ commands: CommandEnvelope[] }`, at most `MAX_COMMANDS` commands and `MAX_BODY_BYTES` bytes → `{ results: [{ id, status: applied\|duplicate\|rejected, error?, serverRefs?, register? }] }`; 409 `in_progress`; 503 `transient` (`commands/route.ts`, `process.ts:17-116`, the `/tally/v1/commands` POST entry in `middlewares.ts`) | The push side. The envelope `id` is the `Idempotency-Key`. `order.create` v1–3 and the five `register.*` v1 commands. |
 | `GET /tally/v1/info` | `{ contracts: { 'order.create': [1,2,3], register: [1] } }` (measured on the demo; `info/route.ts:5-7`) | Capabilities. Gains `sync: [1]`, experimental (above). |
 | `GET /tally/v1/registers/{id}` | Register state, with the open session's `expected` and `salesCount` (`registers/[id]/route.ts`) | Register reads (ADR 0019, P2). Not a replicated collection. |
 
