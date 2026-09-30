@@ -33,6 +33,7 @@ function fakeAdapter(listed: string[], fail?: () => boolean) {
 }
 
 afterEach(async () => {
+  vi.useRealTimers();
   await clearProductCache(posConnector.id, baseUrl);
   vi.restoreAllMocks();
   vi.clearAllMocks();
@@ -64,11 +65,12 @@ it('starts both runners with their options and stops them on unmount', async () 
   const { connector, calculated, base, calculatedRunner, baseRunner, reSync, finishInitial, settle, unmount } =
     await mount(fakeAdapter(['listed']));
   expect(calculated).toEqual(expect.objectContaining({ adapter: connector.reconcile.calculatedPrices, context,
+    stateId: 'calculated-prices',
     intervalMs: MEDUSA_CALCULATED_PRICE_RECONCILE_INTERVAL_MS, maxPages: 1000, startDelayMs: null }));
   expect(base).toEqual(expect.objectContaining({ adapter: connector.reconcile.prices, context }));
   expect(base.collection).toBe(calculated.collection);
   // The base-price runner keeps its defaults: 24 h, 100 pages, no start pass.
-  for (const key of ['intervalMs', 'maxPages', 'startDelayMs']) expect(base).not.toHaveProperty(key);
+  for (const key of ['intervalMs', 'maxPages', 'startDelayMs', 'stateId']) expect(base).not.toHaveProperty(key);
   calculated.reSync();
   base.reSync();
   expect(reSync).toHaveBeenCalledTimes(2);
@@ -77,6 +79,36 @@ it('starts both runners with their options and stops them on unmount', async () 
   const stops = [vi.spyOn(calculatedRunner, 'stop'), vi.spyOn(baseRunner, 'stop')];
   unmount();
   for (const stop of stops) expect(stop).toHaveBeenCalledTimes(1);
+});
+
+it('gives each price runner its own gate: no shared-state warning, and the calculated-price gate is persisted under its own id', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  const { result, calculated, finishInitial, settle, unmount } = await mount(fakeAdapter(['listed']));
+  await finishInitial();
+  await settle();
+  await waitFor(() => expect(result.current.unlisted).toEqual({ count: 1, stale: false }));
+  expect(warn.mock.calls.some(([message]) => String(message).includes('is in use on'))).toBe(false);
+  const gate = await calculated.collection.getLocal('calculated-prices');
+  expect(gate?.get('lastCompletedAt')).toEqual(expect.any(Number));
+  unmount();
+});
+
+it('re-checks calculated prices within 45 minutes of the last pass, and not before 30', async () => {
+  vi.useFakeTimers({
+    toFake: ['Date', 'setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'], shouldAdvanceTime: true,
+  });
+  const calculatedPrices = fakeAdapter(['listed']);
+  const { result, finishInitial, settle, unmount } = await mount(calculatedPrices);
+  await finishInitial();
+  await settle();
+  await waitFor(() => expect(result.current.unlisted).toEqual({ count: 1, stale: false }));
+  const startCalls = calculatedPrices.fetchPages.mock.calls.length;
+  expect(startCalls).toBe(1);
+  await act(async () => { await vi.advanceTimersByTimeAsync(29 * 60 * 1000); });
+  expect(calculatedPrices.fetchPages).toHaveBeenCalledTimes(startCalls);
+  await act(async () => { await vi.advanceTimersByTimeAsync(16 * 60 * 1000); });
+  expect(calculatedPrices.fetchPages).toHaveBeenCalledTimes(startCalls + 1);
+  unmount();
 });
 
 it('runs one calculated-price pass once the first sync has settled, and none of the base-price runner', async () => {

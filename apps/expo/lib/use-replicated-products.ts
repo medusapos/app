@@ -187,6 +187,8 @@ export function useReplicatedProducts(
         if (calculatedAdapter) {
           priceRunner = startFingerprintReconcile({
             collection: db.products, adapter: calculatedAdapter, context, reSync,
+            // Two runners on one collection each need their own gate.
+            stateId: 'calculated-prices',
             intervalMs: MEDUSA_CALCULATED_PRICE_RECONCILE_INTERVAL_MS, maxPages: 1000, startDelayMs: null,
           });
           const runnerState = priceRunner.state$.subscribe((state) => {
