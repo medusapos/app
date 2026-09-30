@@ -524,6 +524,30 @@ medusaIntegrationTestRunner({
       expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
     })
 
+    it('a closure.submit whose closedAt is over 24 hours ahead, between two good commands, is refused alone, unstored (TallyUI #325)', async () => {
+      const opening = open()
+      const submission = closure(opening.payload)
+      submission.payload.closedAt = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString()
+      const response = await post([opening, submission, close(opening.payload.sessionId)])
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
+      expect(response.data.results[1]).toEqual({ id: submission.id, status: 'rejected', error: { code: 'invalid_payload',
+        message: "closedAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } })
+      expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
+    })
+
+    it('an applied closure resent with an envelope.createdAt before 2020 answers duplicate, because the replay read comes first', async () => {
+      const opening = open()
+      const submission = closure(opening.payload)
+      const applied = await post([opening, close(opening.payload.sessionId), submission])
+      expect(applied.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'applied'])
+      const response = await post([{ ...submission, attempt: 2, createdAt: '2019-12-31T23:59:59.999Z' }])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([{ ...applied.data.results[2], status: 'duplicate' }])
+    })
+
     it('an orderId the server has not received is missing from the closure figure, and no extra field appears', async () => {
       const data = await seed(container)
       const opening = open()

@@ -91,6 +91,19 @@ it.each<[string, Record<string, unknown>, string]>([
   expect(registerPayloadErrors(type as string, payload)).toEqual(expect.arrayContaining([expect.stringContaining(field as string)]))
 })
 
+it.each<[string, string, Record<string, unknown>]>([
+  ['register.session.open', 'openedAt', open],
+  ['register.session.transition', 'at', transition],
+  ['register.movement.record', 'createdAt', movement],
+  ['register.movement.void', 'createdAt', voidMovement],
+  ['register.closure.submit', 'openedAt', closure],
+  ['register.closure.submit', 'closedAt', closure],
+])('%s refuses a %s before 2020 or over 24 hours ahead, naming it (TallyUI #325)', (type, field, payload) => {
+  const late = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString()
+  for (const value of ['2019-12-31T23:59:59.999Z', late]) expect(registerPayloadErrors(type, { ...payload, [field]: value }))
+    .toEqual([`${field}: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock`])
+})
+
 it('accepts positive paid_out amounts, zero no_sale amounts and signed safe integer records', () => {
   expect(registerPayloadErrors('register.movement.record', { ...movement, type: 'paid_out' })).toEqual([])
   expect(registerPayloadErrors('register.movement.record', { ...movement, type: 'no_sale', amountMinor: 0 })).toEqual([])
