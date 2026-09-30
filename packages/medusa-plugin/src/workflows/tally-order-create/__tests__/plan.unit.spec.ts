@@ -1,5 +1,5 @@
 import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
-import { fulfillmentGroups, planOrderCreate, totalWarnings } from '../plan'
+import { customerWarnings, fulfillmentGroups, planOrderCreate, totalWarnings } from '../plan'
 import type { PlanContext } from '../plan'
 import type { OrderCreatePayloadV3 } from '../fiscal-figures'
 
@@ -25,6 +25,26 @@ const ctx: PlanContext = {
   },
   variants: { variant_1: { id: 'variant_1' }, variant_2: { id: 'variant_2' } },
 }
+
+describe('customer_ignored (#136)', () => {
+  it('warns customer_ignored with the till\'s id when the order has no customer', () => {
+    for (const orderCustomerId of [null, undefined, '']) {
+      expect(customerWarnings('cus_unknown', orderCustomerId)).toEqual([{ code: 'customer_ignored', customerId: 'cus_unknown' }])
+    }
+  })
+
+  it('warns customer_ignored when the order is linked to a different customer', () => {
+    expect(customerWarnings('cus_unknown', 'cus_guest')).toEqual([{ code: 'customer_ignored', customerId: 'cus_unknown' }])
+  })
+
+  it('has no warning when the order is linked to the till\'s customer', () => {
+    expect(customerWarnings('cus_live', 'cus_live')).toEqual([])
+  })
+
+  it('has no warning when the till sent no customerId', () => {
+    expect(customerWarnings(undefined, 'cus_guest')).toEqual([])
+  })
+})
 
 it('produces the exact EUR tax-inclusive draft plan without mutating its inputs', () => {
   const before = JSON.stringify({ payload, ctx })

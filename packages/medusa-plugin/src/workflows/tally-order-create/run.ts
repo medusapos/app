@@ -4,7 +4,7 @@ import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyu
 import { escapeLike, normaliseCustomerEmail, pickCustomer } from './customer-email'
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
-import { planOrderCreate, totalWarnings } from './plan'
+import { customerWarnings, planOrderCreate, totalWarnings } from './plan'
 import { resumeOrderCreate } from './resume'
 import { mergeStockTopUps, planStockTopUp } from './stock'
 import { StoreConfigurationError } from './store-configuration-error'
@@ -184,7 +184,7 @@ export async function runOrderCreate(
     }
   }
   const { data: [order] } = await query.graph({
-    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'metadata'], filters: { id: orderId },
+    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'metadata', 'customer_id'], filters: { id: orderId },
   })
   if (order.metadata?.tally_stock_topups) {
     const topUps = order.metadata.tally_stock_topups as StockTopUp[]
@@ -200,7 +200,8 @@ export async function runOrderCreate(
     })
   }
   const serverMinor = majorToMinor(order.raw_total.value, currencyDecimals(payload.currency))
-  const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...stockWarnings]
+  const tillCustomerId = typeof order.metadata?.tally_customer_id === 'string' ? order.metadata.tally_customer_id : undefined
+  const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings]
   return {
     id: command.id, status: 'applied',
     serverRefs: { orderId: order.id, displayId: String(order.display_id), totalMinor: serverMinor },

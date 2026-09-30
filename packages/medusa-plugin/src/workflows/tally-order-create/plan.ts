@@ -179,3 +179,8 @@ export function fulfillmentGroups<T extends { id: string; quantity: number; requ
 export function totalWarnings(expectedMinor: number, serverMinor: number): CommandWarning[] {
   return serverMinor === expectedMinor ? [] : [{ code: 'total_mismatch', expectedMinor, serverMinor }]
 }
+
+export function customerWarnings(tillCustomerId: string | undefined, orderCustomerId: string | null | undefined): CommandWarning[] {
+  return tillCustomerId === undefined || orderCustomerId === tillCustomerId
+    ? [] : [{ code: 'customer_ignored', customerId: tillCustomerId }]
+}

@@ -9,6 +9,17 @@ const warnings = [
 const applied = { id: 'command_123', status: 'applied', serverRefs, warnings }
 const rejected = { id: 'command_123', status: 'rejected', error: { code: 'invalid', message: '' } }
 
+it('keeps a stored customer_ignored warning and drops its unknown keys', () => {
+  const warning = { code: 'customer_ignored', customerId: 'cus_unknown' }
+  expect(parseCommandResult({ ...applied, warnings: [{ ...warning, extra: true }] }))
+    .toEqual({ ...applied, warnings: [warning] })
+})
+
+it.each(['', 'x'.repeat(65), 7, undefined])('refuses a stored customer_ignored with customerId %j', customerId => {
+  expect(() => parseCommandResult({ ...applied, warnings: [{ code: 'customer_ignored', customerId }] })).toThrow(
+    expect.objectContaining({ type: MedusaError.Types.INVALID_DATA, message: 'Invalid warnings[0].customerId' }))
+})
+
 it.each([applied, rejected, { id: 'command_123', status: 'duplicate', serverRefs }])(
   'parses a valid $status result', value => {
     expect(parseCommandResult(value)).toEqual(value)

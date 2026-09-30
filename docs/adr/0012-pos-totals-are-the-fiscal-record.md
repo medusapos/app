@@ -93,6 +93,11 @@ optional fields, each validated by the plugin:
   `tally_customer_id`, and an unknown or deleted customer never fails the
   sale.
 
+  Such a sale's result carries `customer_ignored` (TallyUI #266). The warning
+  compares the order's `customer_id` with `tally_customer_id`, so resumed or
+  re-run orders warn too. Medusa 2.21 has no link between customers and sales
+  channels, so only unknown and deleted customers are warned about.
+
 **Version rules** (all rejected as `invalid_payload`):
 - `display`, `taxByRate`, `sessionId` or `customerId` on version 1 or 2;
 - a v3 carrying only one of `display` and `taxByRate`;
