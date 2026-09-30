@@ -4,7 +4,7 @@ import { AppState } from 'react-native';
 import { filter, firstValueFrom } from 'rxjs';
 
 import {
-  createTallyDatabase, getStorageHealth, isFingerprintResultCurrent, isStorageWorkerFailure, startFingerprintReconcile,
+  createTallyDatabase, getStorageHealth, isFingerprintResultCurrent, startFingerprintReconcile,
   startIdReconcile, startReplication, startStockReconcile, STOCK_LEVELS_COLLECTION, type IdReconcileResult,
 } from '@tallyui/database';
 import type { SyncContext, SyncNotice, TallyConnector } from '@tallyui/core';
@@ -14,7 +14,7 @@ import {
   deleteLegacyProductCache, isUnauthorizedError, openProductCache, pricedCacheName, productCacheStorage, recordProductCache,
   sweepProductCaches,
 } from './product-cache';
-import { reportStorageStartFailure } from './live-tab';
+import { reportStorageStartFailure, storageStartFailureOf } from './live-tab';
 import { watchStorageHealth } from './storage-health';
 import { exposeE2eHook } from './e2e-debug';
 
@@ -262,7 +262,8 @@ export function useReplicatedProducts(
           setState('error');
           setError(err instanceof Error ? err.message : String(err));
         }
-        if (isStorageWorkerFailure(err)) reportStorageStartFailure();
+        const failure = storageStartFailureOf(err);
+        if (failure) reportStorageStartFailure(failure);
       }
     })();
 

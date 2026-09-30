@@ -5,8 +5,20 @@ import {
   type LiveTabHandle, type LiveTabOptions, type LiveTabState,
 } from '@tallyui/database';
 import { LiveTabScreen } from '@tallyui/components';
-import { closeDatabases, isBusy, storageNeedsReload, storageStartFailed$ } from '../lib/live-tab';
+import { closeDatabases, isBusy, storageNeedsReload, storageStartFailed$, type StorageStartFailure } from '../lib/live-tab';
 import { UnsupportedStorageError, webStorageAvailable } from '../lib/web-storage';
+
+// docs/release-checklist.md, "Storage start failures"; @tallyui/storage-sqlite README, "Recognising a failed start".
+const STORAGE_UNAVAILABLE = {
+  title: "This till can't save sales in a private window.",
+  body: 'Open it in a normal Safari window (or another browser) and sign in again. Nothing has been lost: no sale was taken here.',
+};
+// docs/release-checklist.md, "Storage start failures"; @tallyui/storage-sqlite README, "Recognising a failed start".
+const STORAGE_HELD = 'This till is already open in another tab. Close the other tab, then reload this one.';
+// docs/release-checklist.md, "Storage start failures"; @tallyui/storage-sqlite README, "Recognising a failed start".
+const STORAGE_STALE = 'This till needs a quick reload to finish updating. Reload the page.';
+// Front desk ruling, 2026-09-30: an unknown start failure must not diagnose another tab.
+const STORAGE_FAILED = "MedusaPOS couldn't open its local storage. Reload the page; if it happens again, restart the browser.";
 
 export interface LiveTabGateProps {
   /** Store scope for the coordinator; no scope (signed out) starts nothing. */
@@ -24,8 +36,8 @@ export interface LiveTabGateProps {
 export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefault }: LiveTabGateProps) {
   const [state, setState] = useState<LiveTabState>('acquiring');
   const [showChildren, setShowChildren] = useState(false);
-  // A StorageWorkerStartError at open (e.g. the opfs-sahpool pool held elsewhere): see below.
-  const [storageStartFailed, setStorageStartFailed] = useState(false);
+  // The first storage-start failure determines the screen until reload.
+  const [storageStartFailed, setStorageStartFailed] = useState<StorageStartFailure | null>(null);
   const showChildrenRef = useRef(false);
   // Last-committed `showChildren`, updated by the effect below (after a real
   // commit) — unlike `showChildrenRef`, immune to a same-batch true+false no-op.
@@ -141,7 +153,7 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
     };
   }, [scope, startLiveTab, unsupported]);
 
-  // Shared by the coordinator's own parked/blocked screen and the storage-start-failure override.
+  // The coordinator's own parked/blocked screen.
   const renderParkedOrBlocked = (s: 'parked' | 'blocked', title = 'MedusaPOS is open in another tab') => {
     // A prior park's closes outran PARK_CLOSE_LIMIT_MS (live-tab.ts): this tab's
     // database names are stuck taken, so "Use here" would only hang; reload instead.
@@ -175,9 +187,23 @@ export function LiveTabGate({ scope, children, startLiveTab = startLiveTabDefaul
       />
     );
   }
-  // ADR-061: shows the blocked screen whatever the coordinator state; the lock stays held, and
-  // reload (below) is the recovery, same as a genuinely blocked coordinator.
-  if (storageStartFailed) return renderParkedOrBlocked('blocked');
+  // Storage-start failures hide children whatever the coordinator state; the lock stays held.
+  if (storageStartFailed === 'unavailable') return (
+    <View className="flex-1 items-center justify-center gap-4 bg-bg p-6">
+      <Text className="text-center text-lg font-bold text-foreground">{STORAGE_UNAVAILABLE.title}</Text>
+      <Text className="text-center text-sm text-muted-foreground">{STORAGE_UNAVAILABLE.body}</Text>
+    </View>
+  );
+  if (storageStartFailed) return (
+    <LiveTabScreen
+      state="blocked"
+      onUseHere={() => window.location.reload()}
+      onReload={() => window.location.reload()}
+      parkedTitle={storageStartFailed === 'held' ? 'MedusaPOS is open in another tab' : 'MedusaPOS needs a reload'}
+      blockedBody={storageStartFailed === 'held' ? STORAGE_HELD : storageStartFailed === 'stale' ? STORAGE_STALE : STORAGE_FAILED}
+      reloadLabel="Reload"
+    />
+  );
   const owned = ownerScopeRef.current === scope;
   // Live again (e.g. `pageshow` after a `pagehide` park) with names a park's closes left stuck:
   // opening the POS would hang on them, so the parked screen's Reload shows instead.

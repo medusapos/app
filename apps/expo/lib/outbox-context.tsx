@@ -1,9 +1,8 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { isStorageWorkerFailure } from '@tallyui/database';
 import {
   createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type UseOrderOutboxResult,
 } from '@tallyui/pos';
-import { markBusy, reportStorageStartFailure } from './live-tab';
+import { markBusy, reportStorageStartFailure, storageStartFailureOf } from './live-tab';
 import { openOrderStore } from './order-store';
 import { authHeaders } from './pos-connector';
 import { RegisterProvider } from './register-context';
@@ -23,7 +22,8 @@ export function useSessionOutbox(session: Session | null, registerId: string): U
     deviceId: registerId,
     onBusy: (busy) => markBusy('outbox', busy),
     onOpenError: (error) => {
-      if (isStorageWorkerFailure(error)) reportStorageStartFailure();
+      const failure = storageStartFailureOf(error);
+      if (failure) reportStorageStartFailure(failure);
       // Defensive: a close during the open, or (TallyUI #155) a close that gives up waiting on a stuck
       // migration. Either way no order is lost; the outbox has no store until the store key changes or the
       // app reloads, and that open retries. This app doesn't do that today:

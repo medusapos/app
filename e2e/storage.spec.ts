@@ -270,7 +270,7 @@ test('the opfs-sahpool pool held by another worker blocks the app with Reload', 
   await holder.waitForTimeout(2000);
 
   await submitSignIn(page);
-  await expect(page.getByText('MedusaPOS is open in another tab. Close that tab to use it here, or reload this one.')).toBeVisible();
+  await expect(page.getByText('This till is already open in another tab. Close the other tab, then reload this one.')).toBeVisible();
   // LiveTabScreen's Pressable renders with no explicit accessibility role (live-tab.spec.ts).
   const reload = page.getByText('Reload', { exact: true });
   await expect(reload).toBeVisible();

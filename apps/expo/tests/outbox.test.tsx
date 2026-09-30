@@ -357,6 +357,7 @@ describe('useSessionOutbox live-tab wiring (TV7 review)', () => {
     try {
       const view = render(<Harness session={session} />);
       await waitFor(() => expect(reportStorageStartFailure).toHaveBeenCalled());
+      expect(reportStorageStartFailure).toHaveBeenCalledWith('failed');
       // A later render of the same store reopens nothing, so nothing reports again.
       view.rerender(<Harness session={{ ...session, token: 'refreshed-token' }} />);
       await new Promise((resolve) => setTimeout(resolve, 100));
