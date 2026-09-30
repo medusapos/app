@@ -205,7 +205,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const saleHold = sale.saving ? 'saving' : sale.stage.kind === 'receipt' ? 'receipt' : null;
   useEffect(() => setSaleHold(saleHold), [saleHold, setSaleHold]);
   useEffect(() => () => setSaleHold(null, false), [setSaleHold]);
-  useEffect(() => onBusy(!sale.idle), [sale.idle, onBusy]);
+  // After every render, so a refused add (a locked sale, a cart error) never leaves the hold on.
+  // setBusy bails out on an unchanged value, so this can't loop.
+  useEffect(() => onBusy(!sale.idle));
+  // The settings hold starts with the tap, in the same render pass as any settings landing with it (a money rule).
+  const add = (entry: Parameters<typeof sale.add>[0]) => { onBusy(true); sale.add(entry, traits); };
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
     return () => markBusy('payment', false);
@@ -231,7 +235,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   useWedgeScan(wedgeActive, scannerSettings, (code) => {
     const entry = findEntryByCode(entries, code);
-    if (entry) { sale.add(entry, traits); setScanMiss(null); } else setScanMiss(code);
+    if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
   });
   const sellableCount = sorted.length;
   // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the connector name and
@@ -266,7 +270,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={(entry) => sale.add(entry, traits)} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
+      onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
     <SyncStatus state={outboxState} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
