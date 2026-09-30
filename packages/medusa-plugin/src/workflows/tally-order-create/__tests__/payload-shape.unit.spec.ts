@@ -102,6 +102,26 @@ describe('discountMinor (ADR-062)', () => {
   })
 })
 
+describe('lines[].clientLineId', () => {
+  const lines = (...ids: string[]) => ids.map(clientLineId => ({ ...payload.lines[0], clientLineId }))
+
+  it('refuses a repeated id once, at its second occurrence, naming both indexes', () => {
+    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'A') })).toEqual(['lines[1].clientLineId: expected no duplicate of lines[0].clientLineId'])
+    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'B', 'A') })).toEqual(['lines[2].clientLineId: expected no duplicate of lines[0].clientLineId'])
+    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'B', 'A', 'A') })).toEqual(['lines[2].clientLineId: expected no duplicate of lines[0].clientLineId'])
+  })
+
+  it('accepts unique ids', () => {
+    expect(payloadShapeErrors({ ...payload, lines: lines('A', 'B', 'C') })).toEqual([])
+  })
+
+  it('reports at most ten duplicates', () => {
+    const errors = payloadShapeErrors({ ...payload, lines: lines(...Array.from({ length: 12 }, (_, index) => [`${index}`, `${index}`]).flat()) })
+    expect(errors).toHaveLength(10)
+    expect(errors[9]).toBe('lines[19].clientLineId: expected no duplicate of lines[18].clientLineId')
+  })
+})
+
 it('reports at most ten errors', () => {
   const errors = payloadShapeErrors({ lines: [{}, {}, {}], payments: [{}] })
   expect(errors).toHaveLength(10)
@@ -185,7 +205,7 @@ it('reports only NUL errors independently of shape and bounds', () => {
   expect(payloadNulErrors({ lines: [{ title: 'x'.repeat(256) }] })).toEqual([])
   expect(payloadNulErrors({ lines: [{ title: 'x'.repeat(256) + '\0' }] }))
     .toEqual(['lines[0].title: expected no NUL character'])
-  const value = { ...payload, lines: Array.from({ length: 12 }, () => ({ ...payload.lines[0], title: '\0' })) }
+  const value = { ...payload, lines: Array.from({ length: 12 }, (_, index) => ({ ...payload.lines[0], clientLineId: `line_${index}`, title: '\0' })) }
   expect(payloadNulErrors(value)).toHaveLength(10)
   expect(payloadShapeErrors(value)).toEqual(payloadNulErrors(value))
 })
