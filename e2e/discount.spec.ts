@@ -1,20 +1,12 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 // Discounts in the cart (TallyUI ADR-062): the plugin reports order.create [1, 2] at GET /tally/v1/info,
 // and a discounted sale goes out as order.create version 2, with one "POS discount" adjustment per line.
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
-type Command = { version: number; payload: { clientOrderId: string; lines: { discountMinor?: number }[] } };
-
-function captureCommands(page: Page): Command[] {
-  const commands: Command[] = [];
-  page.on('request', (request) => {
-    if (request.method() === 'POST' && request.url() === `${backend}/tally/v1/commands`) commands.push(...request.postDataJSON().commands);
-  });
-  return commands;
-}
+type Sale = { clientOrderId: string; lines: { discountMinor?: number }[] };
 const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
   if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
   return ((await response.json()).results ?? []).some((result: { status: string }) => result.status === 'applied');
@@ -23,7 +15,7 @@ const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage
 
 test('a discounted sale is applied as order.create v3, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
   const token = await adminToken();
-  const commands = captureCommands(page);
+  const commands = captureCommands<Sale>(page);
   await signIn(page);
   // The plugin advertises order.create [1, 2, 3] (ADR 0012 amendment), register 1 and its tax rounding (TallyUI #322).
   // With the server's max unknown to the outbox, TallyUI 3.0 sends a discounted sale at version 3 (#300).
@@ -84,7 +76,7 @@ test('a discounted sale is applied as order.create v3, with a "POS discount" adj
 test('below order.create v2 the till refuses a discount when it is applied, and the sale completes without it', async ({ page }) => {
   // An old plugin: GET /tally/v1/info is a 404 (the real response's CORS headers kept).
   await page.route(`${backend}/tally/v1/info`, async (route) => route.fulfill({ response: await route.fetch(), status: 404, body: '{}' }));
-  const commands = captureCommands(page);
+  const commands = captureCommands<Sale>(page);
   await signIn(page);
   expect(await capabilities(page)).toEqual({ orderCreate: 1 });
   await addE2E1(page);
@@ -101,7 +93,7 @@ test('below order.create v2 the till refuses a discount when it is applied, and 
 // The plugin completes a zero-total sale without a payment collection (#62).
 test('100% off the line completes with cash at €0.00 as one Medusa order', async ({ page }) => {
   const token = await adminToken();
-  const commands = captureCommands(page);
+  const commands = captureCommands<Sale>(page);
   await signIn(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '100');
