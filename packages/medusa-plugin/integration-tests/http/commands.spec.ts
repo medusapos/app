@@ -437,6 +437,33 @@ medusaIntegrationTestRunner({
         expect(response.data.results).toEqual([{ ...result, status: 'duplicate' }])
       })
 
+      it('a v1 sale repeating a clientLineId is refused unstored as invalid_payload with no order, and the next command applies', async () => {
+        const [refused, next] = [command(), command()]
+        refused.payload.lines.push({ ...refused.payload.lines[0] })
+        const response = await post([refused, next])
+        expect(response.status).toBe(200)
+        expect(response.data.results.map(result => result.status)).toEqual(['rejected', 'applied'])
+        expect(response.data.results[0]).toEqual({ id: refused.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'lines[1].clientLineId: expected no duplicate of lines[0].clientLineId',
+        } })
+        expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
+      })
+
+      it('an applied id resent with a repeated clientLineId answers duplicate, because the replay read comes first', async () => {
+        const first = await post([command()])
+        expect(first.data.results[0].status).toBe('applied')
+        const repeated = command()
+        repeated.payload.lines.push({ ...repeated.payload.lines[0] })
+        const claim = await ledger.claim({ id: repeated.id, type: repeated.type, fingerprint: commandFingerprint(repeated) })
+        if (!claim.claimed) throw new Error('Expected a fresh claim')
+        const result = { ...first.data.results[0], id: repeated.id }
+        await ledger.complete(repeated.id, claim.claimToken, result)
+        const response = await post([repeated])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...result, status: 'duplicate' }])
+      })
+
       it('an applied id resent with an over-long title answers duplicate', async () => {
         const first = await post([command()])
         expect(first.status).toBe(200)

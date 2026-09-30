@@ -80,6 +80,14 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
       }
     }
   }
+  // One error per repeated clientLineId, at its second occurrence; -1 marks an id already reported.
+  const firstLine = new Map<string, number>()
+  for (const [index, line] of (Array.isArray(payload.lines) ? payload.lines : []).entries()) {
+    if (!object(line) || typeof line.clientLineId !== 'string') continue
+    const first = firstLine.get(line.clientLineId)
+    if (first !== undefined && first >= 0) check(false, `lines[${index}].clientLineId`, `no duplicate of lines[${first}].clientLineId`)
+    firstLine.set(line.clientLineId, first === undefined ? index : -1)
+  }
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor']) number(payload[field], field)
   const lineDiscounts = (Array.isArray(payload.lines) ? payload.lines : [])
     .reduce((sum: bigint, line, index) => sum + (object(line) ? discount(line.discountMinor, `lines[${index}].discountMinor`) : 0n), 0n)
