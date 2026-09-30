@@ -3,13 +3,15 @@ import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, MedusaError, Modules, ProductStatus } from '@medusajs/framework/utils'
 import {
-  createInventoryLevelsWorkflow, createProductsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow, updateProductsWorkflow,
+  createInventoryLevelsWorkflow, createOrderWorkflow, createProductsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow, updateProductsWorkflow,
+  type CreateOrderWorkflowInput,
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { executeOrderCreate, type ExecuteOutcome } from '../../src/workflows/tally-order-create'
+import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
 import { seed } from './seed'
 import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
 
@@ -184,6 +186,7 @@ medusaIntegrationTestRunner({
       expect(capture).not.toHaveBeenCalled()
       const retried = result(await executeOrderCreate(container, sale, { shippingOptionId: data.berlinShippingOptionId }))
       expect(retried).toMatchObject({ id: sale.id, status: 'applied' })
+      expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(1)
       expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result: retried })
     })
 
@@ -235,6 +238,23 @@ medusaIntegrationTestRunner({
           payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
         })
         expect(result(await executeOrderCreate(container, sale))).toMatchObject({ id: sale.id, status: 'applied' })
+      })
+
+      // An unsellable variant is the planner's stored unknown_variant, never a store_configuration refusal.
+      it.each([
+        ['draft', () => container.resolve(Modules.PRODUCT).updateProducts(productId, { status: ProductStatus.DRAFT })],
+        ["not in the sale's channel", () => container.resolve(ContainerRegistrationKeys.LINK).dismiss({
+          [Modules.PRODUCT]: { product_id: productId }, [Modules.SALES_CHANNEL]: { sales_channel_id: data.channelId },
+        })],
+      ])('with shipping inventory but %s, is stored as unknown_variant', async (_, unsell) => {
+        await unsell()
+        const sale = command({ lines: [{ clientLineId: randomUUID(), variantId: managedVariant, quantity: 1, unitPriceMinor: 1000 }] })
+        const rejected = result(await executeOrderCreate(container, sale))
+        expect(rejected).toEqual({ id: sale.id, status: 'rejected', error: {
+          code: 'unknown_variant', message: `Unknown variants: ${managedVariant}`,
+        } })
+        expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'rejected', result: rejected })
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
       })
     })
 
@@ -414,6 +434,24 @@ medusaIntegrationTestRunner({
           })
           expect(order.fulfillments).toEqual([expect.objectContaining({ shipping_option_id: shippingOptionId })])
         }
+      })
+
+      it("a resumed order whose product became draft keeps its product's profile for the automatic pick", async () => {
+        const sale = command({ locationId: data.berlinId, lines: [{ clientLineId: randomUUID(), variantId: variantP2, quantity: 1, unitPriceMinor: 1000 }] })
+        const planned = planOrderCreate(sale.payload, { customer: null, commandId: sale.id, salesChannelId: data.channelId,
+          region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+          location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+          variants: { [variantP2]: { id: variantP2 } },
+        })
+        if (!planned.ok) throw new Error('Expected draft plan')
+        const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+        const products = container.resolve(Modules.PRODUCT)
+        await products.updateProducts((await products.retrieveProductVariant(variantP2)).product_id!, { status: ProductStatus.DRAFT })
+        expect(result(await executeOrderCreate(container, sale))).toMatchObject({ status: 'applied', serverRefs: { orderId: draft.id } })
+        const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+          entity: 'order', fields: ['fulfillments.shipping_option_id'], filters: { id: draft.id },
+        })
+        expect(order.fulfillments).toEqual([expect.objectContaining({ shipping_option_id: optionP2 })])
       })
 
       it('a sale spanning two shipping profiles is rejected as store_configuration', async () => {

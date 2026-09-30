@@ -43,6 +43,10 @@ export async function runOrderCreate(
     if (!channels[0]) {
       throw configurationError('Missing sales channel; set plugin option salesChannelId')
     }
+    // Only a live, published product in the sale's channel sells; any other variant is the planner's stored unknown_variant.
+    const sellable = (variant: { product?: { status?: string; deleted_at?: unknown; sales_channels?: ({ id: string } | null)[] | null } | null }) =>
+      !!variant.product && !variant.product.deleted_at && variant.product.status === 'published' &&
+      !!variant.product.sales_channels?.some(channel => channel?.id === channels[0].id)
     const channelLocations = channels[0].stock_locations ?? []
     // A location the till or the operator names must exist and belong to the sale's channel (ruling 19).
     const locationSource = payload.locationId != null ? 'payload.locationId'
@@ -63,17 +67,20 @@ export async function runOrderCreate(
         : 'Missing stock location or address; set plugin option locationId')
     }
     const { data: shippingVariants } = await query.graph({
-      entity: 'product_variant', fields: ['id', 'product.id', 'product.shipping_profile.id', 'inventory_items.inventory.requires_shipping'],
+      entity: 'product_variant', fields: ['id', 'product.id', 'product.shipping_profile.id', 'inventory_items.inventory.requires_shipping',
+        'product.status', 'product.deleted_at', 'product.sales_channels.id'],
       filters: { id: payload.lines.map(line => line.variantId) },
     })
-    const profileIds = [...new Set(shippingVariants.flatMap(variant =>
+    // A resumed order's items are fixed, so every line keeps its profile even if its product is no longer sellable.
+    const considered = existing ? shippingVariants : shippingVariants.filter(sellable)
+    const profileIds = [...new Set(considered.flatMap(variant =>
       variant.product?.shipping_profile?.id ? [variant.product.shipping_profile.id] : []
     ))]
     if (profileIds.length > 1) {
       throw configurationError(`This sale's products use several shipping profiles (${profileIds.join(', ')}); POS sales need one profile per sale, so put these products on one shipping profile`)
     }
     // Medusa 2.21 ships a line whose product has a profile or whose inventory requires shipping (prepare-line-item-data.js:23-29).
-    const unprofiled = shippingVariants.find(variant => !variant.product?.shipping_profile?.id &&
+    const unprofiled = considered.find(variant => !variant.product?.shipping_profile?.id &&
       variant.inventory_items?.some(item => item?.inventory?.requires_shipping))
     if (unprofiled) {
       throw configurationError(`Product ${unprofiled.product?.id} (variant ${unprofiled.id}) requires shipping but has no shipping profile; put it on a shipping profile`)
@@ -131,10 +138,7 @@ export async function runOrderCreate(
         region: region ? {
           id: region.id, currency_code: region.currency_code, country_codes: region.countries.map(country => country.iso_2),
         } : { id: '', currency_code: '', country_codes: [] },
-        variants: Object.fromEntries(variants.filter(variant =>
-          variant.product && !variant.product.deleted_at && variant.product.status === 'published' &&
-          variant.product.sales_channels?.some(channel => channel.id === channels[0].id)
-        ).map(variant => [variant.id, { id: variant.id }])),
+        variants: Object.fromEntries(variants.filter(sellable).map(variant => [variant.id, { id: variant.id }])),
       })
       if (planned.ok === false) {
         if (planned.rejection.code === 'unsupported_currency') {
