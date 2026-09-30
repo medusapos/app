@@ -635,5 +635,46 @@ medusaIntegrationTestRunner({
       const [row] = await ordersFor(sale.payload.clientOrderId)
       expect(row.customer_id).toBeNull()
     })
+
+    it('v3 mixed modes with a 10% order discount: Medusa\'s figures equal the till\'s, so no figures_mismatch', async () => {
+      const sale = command({
+        discountMinor: 200,
+        lines: [
+          { clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000, discountMinor: 100 },
+          { clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, taxInclusive: false, discountMinor: 100 },
+        ],
+        subtotalMinor: 1656, taxMinor: 315, totalMinor: 1971,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+      })
+      const result = await runOrderCreate(container, { ...sale, version: 3 })
+      await readOrder(result)
+      expect(result.warnings).toBeUndefined()
+    })
+
+    it('a v3 sale whose tax differs is applied with one figures_mismatch naming subtotalMinor and taxMinor, charged the till\'s total, with the till\'s figures kept', async () => {
+      const sale = { ...command({ subtotalMinor: 841, taxMinor: 159 }), version: 3 as const }
+      const result = await runOrderCreate(container, sale)
+      expect(result.status).toBe('applied')
+      expect(result.warnings).toEqual([{ code: 'figures_mismatch', fields: [
+        { field: 'subtotalMinor', tillMinor: 841, serverMinor: 840 },
+        { field: 'taxMinor', tillMinor: 159, serverMinor: 160 },
+      ] }])
+      expect(result.warnings?.some(warning => warning.code === 'total_mismatch')).toBe(false)
+      const order = await readOrder(result)
+      expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([10.00])
+      expect(order.metadata.tally_pos_totals.settlement).toEqual({
+        subtotalMinor: 841, discountMinor: 0, taxMinor: 159, totalMinor: 1000,
+      })
+    })
+
+    it.each([1, 2] as const)('a v%i sale never carries figures_mismatch, even when its tax differs', async version => {
+      const sale = command({ subtotalMinor: 841, taxMinor: 159, ...(version === 2 ? {
+        discountMinor: 100,
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1100, discountMinor: 100 }],
+      } : {}) })
+      const result = await runOrderCreate(container, { ...sale, version })
+      await readOrder(result)
+      expect(result.warnings).toBeUndefined()
+    })
   },
 })

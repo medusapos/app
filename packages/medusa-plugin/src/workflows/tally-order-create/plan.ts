@@ -180,6 +180,16 @@ export function totalWarnings(expectedMinor: number, serverMinor: number): Comma
   return serverMinor === expectedMinor ? [] : [{ code: 'total_mismatch', expectedMinor, serverMinor }]
 }
 
+export function figuresWarnings(
+  till: { subtotalMinor: number; taxMinor: number; discountMinor: number },
+  server: { subtotalMinor: number; taxMinor: number; discountMinor?: number }
+): CommandWarning[] {
+  const fields = (['subtotalMinor', 'taxMinor', 'discountMinor'] as const).flatMap(field =>
+    server[field] !== undefined && till[field] !== server[field]
+      ? [{ field, tillMinor: till[field], serverMinor: server[field]! }] : [])
+  return fields.length ? [{ code: 'figures_mismatch', fields }] : []
+}
+
 export function customerWarnings(tillCustomerId: string | undefined, orderCustomerId: string | null | undefined): CommandWarning[] {
   return tillCustomerId === undefined || orderCustomerId === tillCustomerId
     ? [] : [{ code: 'customer_ignored', customerId: tillCustomerId }]

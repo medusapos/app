@@ -62,6 +62,22 @@ export function parseCommandResult(value: unknown): CommandResult {
         }
         return { code: item.code, expectedMinor: item.expectedMinor as number, serverMinor: item.serverMinor as number }
       }
+      if (item.code === 'figures_mismatch') {
+        if (!Array.isArray(item.fields) || item.fields.length === 0) throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${field}.fields`)
+        const seen: string[] = []
+        return { code: item.code, fields: item.fields.map((value: unknown, i) => {
+          const path = `${field}.fields[${i}]`
+          if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${path}`)
+          const entry = value as Record<string, unknown>
+          if (!['subtotalMinor', 'taxMinor', 'discountMinor'].includes(entry.field as string) || seen.includes(entry.field as string)) {
+            throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${path}.field`)
+          }
+          seen.push(entry.field as string)
+          if (!Number.isSafeInteger(entry.tillMinor)) throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${path}.tillMinor`)
+          if (!Number.isSafeInteger(entry.serverMinor) || entry.serverMinor === entry.tillMinor) throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${path}.serverMinor`)
+          return { field: entry.field as string, tillMinor: entry.tillMinor as number, serverMinor: entry.serverMinor as number }
+        }) }
+      }
       if (item.code === 'customer_ignored') {
         if (typeof item.customerId !== 'string' || item.customerId.length < 1 || item.customerId.length > 64) {
           throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${field}.customerId`)

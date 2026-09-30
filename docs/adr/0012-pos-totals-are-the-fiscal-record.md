@@ -140,3 +140,14 @@ register commands) passes unchanged, as the plugin's regression fixtures.
 - The plugin can land before TallyUI's half: a till sends v3 only once it
   carries the new fields, which needs capability 3 and TallyUI's v3 release
   pinned by the app.
+
+## Amendment: figures_mismatch (#133)
+
+`subtotalMinor` is `totalMinor − taxMinor`: after discounts, without tax.
+`taxMinor` sums every line's exact tax, rounded once for the order, half away from zero.
+In v3, `discountMinor` sums line discounts in each line's own tax mode (gross for inclusive lines), absent when zero.
+For v1–v3 the compared figures are subtotal and tax only; discount is compared only from v4, as net (#147).
+Only v3+ commands receive `figures_mismatch`, listing exact minor-unit differences in subtotal, tax, then discount order.
+Medusa's subtotal is rounded `raw_total` minus rounded `raw_tax_total`, never its before-discount subtotal.
+The warning is recorded only in the command result and replayed from the ledger; it never refuses a sale.
+`tally_pos_totals` stays the till's fiscal record, and payment stays exactly the till's total; `total_mismatch` is unchanged.

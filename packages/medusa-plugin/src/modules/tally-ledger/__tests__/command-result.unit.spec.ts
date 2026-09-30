@@ -20,6 +20,29 @@ it.each(['', 'x'.repeat(65), 7, undefined])('refuses a stored customer_ignored w
     expect.objectContaining({ type: MedusaError.Types.INVALID_DATA, message: 'Invalid warnings[0].customerId' }))
 })
 
+it('keeps a stored figures_mismatch warning with its fields in order and drops unknown keys', () => {
+  const fields = [
+    { field: 'subtotalMinor', tillMinor: 841, serverMinor: 840 },
+    { field: 'taxMinor', tillMinor: 159, serverMinor: 160 },
+    { field: 'discountMinor', tillMinor: 100, serverMinor: 99 },
+  ]
+  const warning = { code: 'figures_mismatch', fields }
+  const stored = { ...warning, extra: true, fields: fields.map(entry => ({ ...entry, extra: true })) }
+  expect(parseCommandResult({ ...applied, warnings: [stored] })).toEqual({ ...applied, warnings: [warning] })
+  expect(stored.fields.every(entry => entry.extra)).toBe(true)
+})
+
+it.each([
+  ['empty fields', [], 'fields'],
+  ['an unknown field name', [{ field: 'totalMinor', tillMinor: 1, serverMinor: 2 }], 'fields[0].field'],
+  ['a repeated field', [{ field: 'taxMinor', tillMinor: 1, serverMinor: 2 }, { field: 'taxMinor', tillMinor: 3, serverMinor: 4 }], 'fields[1].field'],
+  ['a non-integer tillMinor', [{ field: 'taxMinor', tillMinor: 1.5, serverMinor: 2 }], 'fields[0].tillMinor'],
+  ['equal values', [{ field: 'taxMinor', tillMinor: 1, serverMinor: 1 }], 'fields[0].serverMinor'],
+])('refuses a stored figures_mismatch with %s', (_name, fields, path) => {
+  expect(() => parseCommandResult({ ...applied, warnings: [{ code: 'figures_mismatch', fields }] })).toThrow(
+    expect.objectContaining({ type: MedusaError.Types.INVALID_DATA, message: `Invalid warnings[0].${path}` }))
+})
+
 it.each([applied, rejected, { id: 'command_123', status: 'duplicate', serverRefs }])(
   'parses a valid $status result', value => {
     expect(parseCommandResult(value)).toEqual(value)
