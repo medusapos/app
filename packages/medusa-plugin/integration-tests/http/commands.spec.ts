@@ -127,6 +127,11 @@ medusaIntegrationTestRunner({
       }
     })
 
+    it('GET /tally/v1/commands without auth gets 404 (no GET handler), not 401: the POST-only authenticate does not run for GET', async () => {
+      const response = await api.get('/tally/v1/commands', { headers: { 'X-Tally-Protocol': '1' }, validateStatus: () => true })
+      expect(response.status).toBe(404)
+    })
+
     it('serves GET /tally/v1/info to bearer and session users, 401 otherwise, with CORS for adminCors origins (ADR-062)', async () => {
       const info = (requestHeaders: Record<string, string>) =>
         api.get('/tally/v1/info', { headers: requestHeaders, validateStatus: () => true })
