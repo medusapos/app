@@ -51,7 +51,7 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   useEffect(() => () => setSavesHold(false, false), [setSavesHold]);
   // The register (ADR 0017) lives in this outbox's order store, so its one useRegisterSession sits here too.
   return <OutboxContext.Provider value={outbox}>
-    <RegisterProvider orders={outbox.orders}>{children}</RegisterProvider>
+    <RegisterProvider orders={outbox.orders} deviceId={registerId}>{children}</RegisterProvider>
   </OutboxContext.Provider>;
 }
 

@@ -107,6 +107,20 @@ describe('SessionProvider', () => {
     // An unchanged value keeps the session object, so nothing keyed on it re-runs.
     if (kept?.orderCreate === merged.orderCreate) expect(context.session).toBe(before);
   });
+  it.each([
+    { orderCreate: 3, register: 1 },
+    { orderCreate: 3, taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } },
+  ] as const)('merges newly advertised capabilities %j and preserves identity on the same value', async (fresh) => {
+    await mount({ ...stored, capabilities: { orderCreate: 3 } });
+    const before = context.session;
+    act(() => context.mergeCapabilities(fresh));
+    expect(context.session).not.toBe(before);
+    expect(context.session?.capabilities).toEqual(fresh);
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(fresh);
+    const updated = context.session;
+    act(() => context.mergeCapabilities({ ...fresh }));
+    expect(context.session).toBe(updated);
+  });
   it.each(['signOut', 'reportUnauthorized'] as const)('%s clears state, storage and this backend cache', async (action) => {
     await mount();
     act(() => context[action]());

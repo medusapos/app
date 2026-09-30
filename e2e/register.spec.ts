@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, credentials, sellBySku, signIn, test } from './helpers';
+import { addE2E1, captureCommands, closeStoreRegister, credentials, sellBySku, signIn, test } from './helpers';
 
 // Registers, part A (ADR 0017): a fresh till binds Register 1, opens it with a float of 100.00, takes a cash sale
 // the register counts, records a paid in and undoes it. Part B (ADR 0018): Close register counts the drawer with
@@ -31,6 +31,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     const openCart = async (page: Page) => { if (phone) await page.getByRole('button', { name: /^Open cart, / }).click(); };
 
     test('bind, open with a float, a cash sale, a paid in and its Undo, and Close register', async ({ page }) => {
+      const opens = captureCommands<{ sessionId: string }>(page, 'register.session.open');
+      const sales = captureCommands<{ sessionId: string }>(page);
+      await closeStoreRegister();
       await signIn(page, 'Europe', false);
       await expect(page.getByTestId('register-bar-pill')).toHaveText('Choose a register');
       // On a phone the bar ends Catalogue's status line.
@@ -73,6 +76,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
 
       const total = await sellBySku(page, [], 'exact');
       expect(total).toBeGreaterThan(0);
+      // Spec-42: the register sync reaches the store; the open is applied, for the session the sale was taken in.
+      await expect.poll(() => [opens.map(({ status }) => status), sales.map(({ status }) => status)]).toEqual([['applied'], ['applied']]);
+      expect(opens[0].payload.sessionId).toBe(sales[0].payload.sessionId);
       if (phone) {
         // Products with the register open: the short status line and "Register ›" share one row.
         await expect(page.getByTestId('catalogue-status-row').getByText(/^Up to date · 5 products$/)).toBeVisible();
@@ -144,6 +150,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await shot(page, 'last-closure-under');
       await figures.getByTestId('last-closure-done').click();
       await expect(figures).toHaveCount(0);
+      // Over the whole session, its movements and close included, the open went out exactly once.
+      expect(opens.map(({ status }) => status)).toEqual(['applied']);
     });
 
     test('a close whose closure write failed shows TallyUI\'s Finish closing card, which completes it with the stored count', async ({ page }) => {

@@ -1,11 +1,12 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { RxCollection } from 'rxdb';
 import {
-  bindRegister, getBoundRegisterId, observeRegister$, useRegisterSession, type PosOrder,
+  bindRegister, createHttpCommandTransport, getBoundRegisterId, observeRegister$, useRegisterOutbox, useRegisterSession, type PosOrder, type UseRegisterOutboxResult,
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { registerCollections, type RegisterCollections } from './order-store';
+import { authHeaders } from './pos-connector';
 import { defaultStorage } from './session';
 import { useSession } from './session-context';
 
@@ -18,6 +19,8 @@ export const DEFAULT_REGISTERS = [{ id: 'register-1', name: 'Register 1' }];
 export type RegisterContextValue = {
   /** The one `useRegisterSession` for the signed-in backend: the sale screen and Job B's count screen share it. */
   register: ReturnType<typeof useRegisterSession>;
+  /** The one register outbox for the signed-in backend, including pending till updates. */
+  registerOutbox: UseRegisterOutboxResult;
   /** The TallyUI register (drawer) this till is bound to, read from its `register` document: `null` when unbound,
    *  `undefined` until the store is open and read. Not `registerId`, which is this till's own device id. */
   boundRegisterId: string | null | undefined;
@@ -47,10 +50,17 @@ type Bound = { collections: RegisterCollections; storeKey: string; id: string | 
 const RegisterContext = createContext<RegisterContextValue | null>(null);
 
 /** Under OutboxProvider, over its open order store, whose database holds the register collections. */
-export function RegisterProvider({ orders, children }: { orders: RxCollection<PosOrder> | null; children: ReactNode }) {
+export function RegisterProvider({ orders, deviceId, children }: { orders: RxCollection<PosOrder> | null; deviceId: string; children: ReactNode }) {
   const { session } = useSession();
   const storeKey = session?.baseUrl ?? '';
+  const tokenRef = useRef(session?.token);
+  tokenRef.current = session?.token;
   const collections = useMemo(() => orders ? registerCollections(orders) : null, [orders]);
+  const registerOutbox = useRegisterOutbox({
+    commands: collections && (session?.capabilities?.register ?? 0) >= 1 ? collections.commands : null,
+    transport: () => createHttpCommandTransport({ baseUrl: storeKey, getHeaders: () => authHeaders(tokenRef.current ?? '') }),
+    deviceId,
+  });
   const [bound, setBound] = useState<Bound | null>(null);
   useEffect(() => {
     if (!collections) return;
@@ -63,6 +73,7 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
   const [tenderInProgress, setTenderInProgress] = useState(false);
   const register = useRegisterSession({
     sessions: collections?.sessions ?? null, movements: collections?.movements ?? null, closures: collections?.closures ?? null,
+    commands: collections?.commands ?? null, capabilities: session?.capabilities,
     orders,
     register: collections?.sessions ?? null,
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
@@ -109,7 +120,7 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
     error: closeError.storeKey === storeKey ? closeError.message : '',
   };
   const value: RegisterContextValue = {
-    register, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,
+    register, registerOutbox, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,
     async bind(id) {
       const choice = DEFAULT_REGISTERS.find((entry) => entry.id === id);
       if (collections && choice) await bindRegister(collections.sessions, storeKey, choice);

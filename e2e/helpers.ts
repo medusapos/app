@@ -1,4 +1,4 @@
-import { expect, test as base, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test as base, type BrowserContext, type Page, type Request } from '@playwright/test';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -147,12 +147,31 @@ type SalePayload = {
   payments: { method: string }[];
 };
 
+export type PostedCommand<P> = { id: string; type: string; version: number; payload: P; status?: string };
+const isCommandPost = (request: Request) => request.method() === 'POST' && request.url() === `${backend}/tally/v1/commands`;
+
+// Every `type` command the till POSTs to /tally/v1/commands, once per attempt, each with the status the store last
+// answered for its id. The till sends its register facts there too (register >= 1), so sale tests take order.create.
+export function captureCommands<P>(page: Page, type = 'order.create'): PostedCommand<P>[] {
+  const commands: PostedCommand<P>[] = [];
+  page.on('request', request => {
+    if (isCommandPost(request)) commands.push(...(request.postDataJSON().commands as PostedCommand<P>[]).filter(command => command.type === type));
+  });
+  page.on('response', async response => {
+    if (!isCommandPost(response.request())) return;
+    const { results = [] } = await response.json().catch(() => ({})) as { results?: { id: string; status: string }[] };
+    for (const { id, status } of results) for (const command of commands) if (command.id === id) command.status = status;
+  });
+  return commands;
+}
+
+// The sales POSTed to /tally/v1/commands (order.create only), one per clientOrderId however often it was sent.
 export function captureSales(page: Page) {
   const sales = new Map<string, SalePayload>();
   page.on('request', request => {
-    if (request.method() !== 'POST' || request.url() !== `${backend}/tally/v1/commands`) return;
-    for (const { payload } of request.postDataJSON().commands as { payload: SalePayload }[]) {
-      sales.set(payload.clientOrderId, payload);
+    if (!isCommandPost(request)) return;
+    for (const { type, payload } of request.postDataJSON().commands as PostedCommand<SalePayload>[]) {
+      if (type === 'order.create') sales.set(payload.clientOrderId, payload);
     }
   });
   return sales;
@@ -164,6 +183,21 @@ export async function adminToken(): Promise<string> {
   });
   expect(response.ok, await response.clone().text()).toBeTruthy();
   return (await response.json()).token;
+}
+
+// The store keeps one open session per register (spec-42), and every till before this test opened register-1 there
+// and left it open, so a test that asserts its own open is applied first closes the store's session, as a till would.
+export async function closeStoreRegister(registerId = 'register-1') {
+  const headers = { Authorization: `Bearer ${await adminToken()}`, 'Content-Type': 'application/json' };
+  const state = await fetch(`${backend}/tally/v1/registers/${registerId}`, { headers });
+  const { session } = state.status === 404 ? {} : await state.json() as { session?: { id: string; status: string } };
+  if (!session || session.status === 'closed') return;
+  const at = new Date().toISOString();
+  const response = await fetch(`${backend}/tally/v1/commands`, { method: 'POST', headers: { ...headers, 'X-Tally-Protocol': '1' }, body: JSON.stringify({ commands: [{
+    id: crypto.randomUUID(), type: 'register.session.transition', version: 1, createdAt: at, deviceId: 'e2e', attempt: 1,
+    payload: { sessionId: session.id, status: 'closed', at },
+  }] }) });
+  expect((await response.json()).results).toEqual([expect.objectContaining({ status: 'applied' })]);
 }
 
 export type AdminOrder = {

@@ -181,8 +181,9 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       const NEW = await dump(page);
       await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
-      expect(NEW.stored).toStrictEqual(migration.stored.map(entry => entry.name === 'pos_orders'
-        ? { name: 'pos_orders', version: migration.orderVersion } : entry));
+      expect(NEW.stored).toStrictEqual([...migration.stored.map(entry => entry.name === 'pos_orders'
+        ? { name: 'pos_orders', version: migration.orderVersion } : entry), { name: 'register_commands', version: 0 }]
+        .sort((a, b) => a.name.localeCompare(b.name) || a.version - b.version));
       expect(NEW.docs.pos_orders).toStrictEqual(OLD.docs.pos_orders.map(order => ({
         ...order,
         taxRounding: migration.taxRounding,
