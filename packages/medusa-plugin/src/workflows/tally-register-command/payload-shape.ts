@@ -42,7 +42,7 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
     if (optional && value === undefined) return
     check(typeof value === 'string' && (optional || value.length > 0), field, optional ? 'a string' : 'a non-empty string')
     if (typeof value === 'string' && (field.endsWith('Id') || field === 'voids')) check(value.length <= 64, field, 'at most 64 characters')
-    if (['openedAt', 'at', 'createdAt', 'closedAt'].includes(field) && errors.length < 10) errors.push(...clientTimeErrors(value, field))
+    if (['openedAt', 'at', 'createdAt', 'closedAt'].includes(field) && errors.length < 10) errors.push(...clientTimeErrors(value, `payload.${field}`))
   }
   const integer = (field: string, min = -Infinity) =>
     check(Number.isSafeInteger(payload[field]) && (payload[field] as number) >= min, field, `a safe integer >= ${min}`)

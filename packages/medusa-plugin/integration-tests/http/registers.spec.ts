@@ -524,7 +524,7 @@ medusaIntegrationTestRunner({
       expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
     })
 
-    it('a closure.submit whose closedAt is over 24 hours ahead, between two good commands, is refused alone, unstored (TallyUI #325)', async () => {
+    it('a closure.submit whose payload.closedAt is over 24 hours ahead, between two good commands, is refused alone, unstored (TallyUI #325)', async () => {
       const opening = open()
       const submission = closure(opening.payload)
       submission.payload.closedAt = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString()
@@ -532,7 +532,7 @@ medusaIntegrationTestRunner({
       expect(response.status).toBe(200)
       expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
       expect(response.data.results[1]).toEqual({ id: submission.id, status: 'rejected', error: { code: 'invalid_payload',
-        message: "closedAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } })
+        message: "payload.closedAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } })
       expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
