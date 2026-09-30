@@ -4,8 +4,9 @@ import { E2E_RUN } from './ports';
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 export const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 
-// CSP gate (#154, ADR 0002): signIn collects CSP violations in its page's context (page events and Chromium console
-// reports); this auto fixture, which takes `page` to read them before it closes, fails the test with any at its end.
+// CSP gate (#154, ADR 0002): this auto fixture collects CSP violations in the test's context from its first navigation
+// (page events and Chromium console reports) and, taking `page` to read them before it closes, fails the test with any
+// at its end. Page events live in each document and are lost on navigation; the console channel keeps those too.
 // Specs take `test` from here: a top-level afterEach in this module would bind only to the first spec file loading it.
 type CspViolation = { violatedDirective: string; blockedURI: string; sourceFile: string } | { console: string };
 type CspWindow = Window & { __cspViolations?: CspViolation[] };
@@ -13,6 +14,7 @@ const cspConsole = new Map<BrowserContext, string[]>();
 let cspArmedFor: string | undefined;
 export const test = base.extend<{ cspGate: void }>({ cspGate: [async ({ page }, use, testInfo) => {
   cspArmedFor = testInfo.testId;
+  await watchCsp(page.context());
   await use();
   const violations = (await Promise.all([...cspConsole.keys()].map(cspViolations))).flat();
   cspConsole.clear();
