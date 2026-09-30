@@ -15,6 +15,7 @@ Work through this before tagging a release of the app or the plugin. An item tha
   - Fixes go forward, never back.
   - The release notes for the store owner say this in plain words (see `release-notes/next.md`).
 - [ ] **Carry-over test:** the bump PR for TallyUI 3.0.0 carries one for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
+- [ ] **Pull notices (TallyUI/tallyui#261):** the app takes `@tallyui/*` only from published npm pins, so this lands after the 3.0.0 bump. It needs two changes. Wire the replication state's `notice$` into SyncStatus's pull notice, and call `resume()` after a successful sign-in, so a pull stopped by an expired session starts again (the notices come from TallyUI/tallyui#259).
 
 ## Every release
 
