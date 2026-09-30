@@ -9,6 +9,7 @@ export async function POST(req: MedusaRequest<CommandBatchRequest>, res: MedusaR
     return res.status(400).json({ code: 'unsupported_protocol' })
   }
   const batch = validateBatch(req.body)
+  if (batch.ok === false && batch.status === 413) return res.status(413).json({ code: batch.code, maxCommands: batch.maxCommands, message: batch.message })
   if (batch.ok === false) return res.status(batch.status).json({ message: batch.message })
   const ledger = req.scope.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
   const outcome = await processBatch(req.scope, batch.commands, ledger.getPluginOptions())

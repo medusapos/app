@@ -59,7 +59,7 @@ An unsupported version is a per-command `unsupported_version` with `error.data` 
 
 - `400`: unsupported protocol (`{ code: 'unsupported_protocol' }`) or invalid envelope.
 - `401`: no valid admin authentication.
-- `413`: more than 50 commands (or the JSON body exceeds the 1 MB request limit).
+- `413 { code: 'batch_too_large', maxCommands: 50, message }`: more than 50 commands; `413 { code: 'body_too_large', maxBytes: 1048576, message }`: a JSON body over 1 MB. Nothing is claimed; split the batch and resend.
 - `409 { code: 'in_progress', id }`: this command is already being processed.
 - `503 { code: 'transient', id, message }`: execution failed; its claim is released for retry.
 

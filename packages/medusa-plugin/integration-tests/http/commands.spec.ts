@@ -1289,13 +1289,17 @@ medusaIntegrationTestRunner({
     it('rejects a JSON body over 1 MB with 413', async () => {
       const sale = command()
       const oversized = { ...sale, payload: { ...sale.payload, padding: 'x'.repeat(1024 * 1024) } }
-      expect((await post([oversized])).status).toBe(413)
+      const response = await post([oversized])
+      expect(response.status).toBe(413)
+      expect(response.data).toEqual({ code: 'body_too_large', maxBytes: 1048576, message: expect.any(String) })
       expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
     })
 
     it('rejects 51 commands with 413 without claiming any command', async () => {
       const sales = Array.from({ length: 51 }, () => command())
-      expect((await post(sales)).status).toBe(413)
+      const response = await post(sales)
+      expect(response.status).toBe(413)
+      expect(response.data).toEqual({ code: 'batch_too_large', maxCommands: 50, message: expect.any(String) })
       expect(await ledger.listTallyCommands({ id: sales.map(sale => sale.id) })).toHaveLength(0)
     })
 
