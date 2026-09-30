@@ -604,11 +604,17 @@ medusaIntegrationTestRunner({
         }
         return written
       })
-      await expect(run.runOrderCreate(container, sale, { shippingOptionId: 'so_missing' }, {
-        claimToken: claim.claimToken, carriedTopUps: [],
-      })).rejects.toMatchObject({
-        name: 'TypeError', message: "Cannot read properties of undefined (reading 'shipping_profile_id')",
-      })
+      const fulfil = jest.spyOn(container.resolve(Modules.FULFILLMENT), 'createFulfillment')
+        .mockRejectedValueOnce(Object.assign(new Error('Fulfillment probe failed'), { name: 'FulfillmentProbeError' }))
+      try {
+        await expect(run.runOrderCreate(container, sale, {}, {
+          claimToken: claim.claimToken, carriedTopUps: [],
+        })).rejects.toMatchObject({
+          name: 'FulfillmentProbeError', message: 'Fulfillment probe failed',
+        })
+      } finally {
+        fulfil.mockRestore()
+      }
       expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({
         status: 'in_progress', claim_token: nextToken, stock_topups_applied: null, stock_topups_pending: null,
       })
