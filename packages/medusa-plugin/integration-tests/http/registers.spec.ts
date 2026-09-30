@@ -528,15 +528,47 @@ medusaIntegrationTestRunner({
       const opening = open()
       const submission = closure(opening.payload)
       submission.payload.closedAt = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString()
+      const beforeRequest = Date.now()
       const response = await post([opening, submission, close(opening.payload.sessionId)])
+      const afterRequest = Date.now()
       expect(response.status).toBe(200)
       expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
+      const pattern = /^payload\.closedAt must be a time from 2020-01-01T00:00:00Z to (\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)$/
       expect(response.data.results[1]).toEqual({ id: submission.id, status: 'rejected', error: { code: 'invalid_payload',
-        message: "payload.closedAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } })
+        message: expect.stringMatching(pattern) } })
+      const upperBound = Date.parse(pattern.exec(response.data.results[1].error.message)![1])
+      expect(upperBound).toBeGreaterThanOrEqual(Math.floor((beforeRequest + 24 * 60 * 60 * 1000) / 1000) * 1000)
+      expect(upperBound).toBeLessThanOrEqual(Math.floor((afterRequest + 24 * 60 * 60 * 1000) / 1000) * 1000)
       expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
     })
+
+    it('refuses a zone-less payload.closedAt before writing a ledger row', async () => {
+      const submission = closure(open().payload)
+      submission.payload.closedAt = '2026-09-30T12:00:00'
+      const response = await post([submission])
+      expect(response.status).toBe(200)
+      expect(response.data.results).toEqual([{ id: submission.id, status: 'rejected', error: {
+        code: 'invalid_payload', message: 'payload.closedAt must be an RFC 3339 time with Z or an offset',
+      } }])
+      expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
+    })
+
+    it.each(['2019-12-31T23:59:59.999Z', 'invalid', '2026-09-30T12:00:00'])(
+      'shape wins over client-time format and bounds (%s) for a closure with an unknown payload field', async value => {
+        const submission = closure(open().payload)
+        const response = await post([{ ...submission, payload: { ...submission.payload,
+          closedAt: value, unknown: true } }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: submission.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'payload.unknown: unknown field for register.closure.submit version 1' +
+            (value === 'invalid' ? '; payload.closedAt: expected a valid date' : ''),
+        } }])
+        expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      })
 
     it('an applied closure resent with an envelope.createdAt before 2020 answers duplicate, because the replay read comes first', async () => {
       const opening = open()

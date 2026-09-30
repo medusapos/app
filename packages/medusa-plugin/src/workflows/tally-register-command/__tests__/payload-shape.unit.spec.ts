@@ -3,6 +3,7 @@ import closureFixture from '../../tally-order-create/__fixtures__/register-envel
 import transitionFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.session.transition-closed.json'
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { registerPayloadErrors } from '../payload-shape'
+import { clientTimeStageErrors } from '../../client-time'
 
 const at = '2026-01-01T08:00:00.000Z'
 const open = { sessionId: 's', registerId: 'r', openedAt: at, countedFloatMinor: 100 }
@@ -98,11 +99,18 @@ it.each<[string, string, Record<string, unknown>]>([
   ['register.movement.void', 'createdAt', voidMovement],
   ['register.closure.submit', 'openedAt', closure],
   ['register.closure.submit', 'closedAt', closure],
-])('%s refuses payload.%s before 2020 or over 24 hours ahead, naming it (TallyUI #325)', (type, field, payload) => {
+])('%s checks payload.%s parsing, leaving RFC format and bounds to the client-time stage', (type, field, payload) => {
   const late = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString()
   for (const value of ['2019-12-31T23:59:59.999Z', late]) expect(registerPayloadErrors(type, { ...payload, [field]: value }))
-    .toEqual([`payload.${field}: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock`])
-  expect(registerPayloadErrors(type, { ...payload, [field]: 'invalid' })).toEqual([`payload.${field}: expected a valid date`])
+    .toEqual([])
+  for (const value of ['invalid', 'not a date']) {
+    const invalid = { ...payload, [field]: value }
+    expect(registerPayloadErrors(type, invalid)).toEqual([`payload.${field}: expected a valid date`])
+  }
+  const zoneLess = { ...payload, [field]: '2026-09-30T12:00:00' }
+  expect(registerPayloadErrors(type, zoneLess)).toEqual([])
+  expect(clientTimeStageErrors({ type, payload: zoneLess } as never, Date.now()))
+    .toEqual([`payload.${field} must be an RFC 3339 time with Z or an offset`])
 })
 
 it('accepts positive paid_out amounts, zero no_sale amounts and signed safe integer records', () => {
