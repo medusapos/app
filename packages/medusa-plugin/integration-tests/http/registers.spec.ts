@@ -12,6 +12,7 @@ import type TallyLedgerModuleService from '../../src/modules/tally-ledger/servic
 import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
 import type TallyRegisterModuleService from '../../src/modules/tally-register/service'
 import type { RegisterClosureSubmitPayload, RegisterSessionOpenPayload } from '../../src/modules/tally-register/types'
+import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
 import { seed } from './seed'
@@ -491,6 +492,35 @@ medusaIntegrationTestRunner({
       expect(await knex('tally_register_closure').where('id', submission.payload.closureId).first()).toEqual(stored)
     })
 
+    it('a closure.submit counting a voucher is refused unstored as invalid_payload, and no closure is stored (ruling 17)', async () => {
+      const opening = open()
+      const submission = closure(opening.payload)
+      submission.payload.counted = { cash: 1100, voucher: 0 }
+      const response = await post([opening, close(opening.payload.sessionId), submission])
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'rejected'])
+      expect(response.data.results[2]).toEqual({ id: submission.id, status: 'rejected', error: {
+        code: 'invalid_payload', message: 'counted.voucher: expected a payment method (cash or external)',
+      } })
+      expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
+    })
+
+    it('a closure.submit with envelope.priority is refused unstored as invalid_payload, and no closure is stored (ruling 17)', async () => {
+      const opening = open()
+      const submission = { ...closure(opening.payload), priority: 1 }
+      const response = await post([opening, close(opening.payload.sessionId), submission])
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'rejected'])
+      expect(response.data.results[2]).toEqual({ id: submission.id, status: 'rejected', error: {
+        code: 'invalid_payload', message: 'envelope.priority: unknown field for register.closure.submit version 1',
+      } })
+      expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
+    })
+
     it('an orderId the server has not received is missing from the closure figure, and no extra field appears', async () => {
       const data = await seed(container)
       const opening = open()
@@ -593,6 +623,49 @@ medusaIntegrationTestRunner({
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       expect(await knex('tally_register_session').where('id', opening.payload.sessionId)).toHaveLength(0)
       expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
+    })
+
+    describe('step order: a recorded id answers its recorded result before the version and shape rules', () => {
+      // Records `result` for `envelope` directly, as a command the server accepted before ruling 17 could be.
+      async function record(envelope: { id: string; type: string; version: number; payload: unknown },
+        result: Parameters<TallyLedgerModuleService['complete']>[2]) {
+        const fingerprint = commandFingerprint(envelope as unknown as Parameters<typeof commandFingerprint>[0])
+        const claim = await ledger.claim({ id: envelope.id, type: envelope.type, fingerprint })
+        if (!claim.claimed) throw new Error('Expected a fresh claim')
+        await ledger.complete(envelope.id, claim.claimToken, { ...result, id: envelope.id })
+      }
+      async function closeDay() {
+        const opening = open()
+        const submission = closure(opening.payload)
+        const response = await post([opening, close(opening.payload.sessionId), submission])
+        expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'applied'])
+        return { opening, submission, applied: response.data.results[2] }
+      }
+
+      it.each([
+        { label: 'an unknown field', change: (payload: RegisterClosureSubmitPayload) => ({ ...payload, note: 'end of day' }), version: 1 },
+        { label: 'an unknown counted key', change: (payload: RegisterClosureSubmitPayload) => ({ ...payload, counted: { cash: 1100, card: 0 } }), version: 1 },
+        { label: 'an unsupported version', change: (payload: RegisterClosureSubmitPayload) => payload, version: 2 },
+      ])('a close recorded as applied, resent with $label, answers duplicate with its recorded result', async ({ change, version }) => {
+        const { submission, applied } = await closeDay()
+        const resend = { ...submission, id: randomUUID(), version, payload: change(submission.payload) }
+        await record(resend, applied)
+        const response = await post([resend])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...applied, id: resend.id, status: 'duplicate' }])
+      })
+
+      it('a close recorded as rejected, resent with an unknown field, answers its recorded rejection', async () => {
+        const { opening } = await closeDay()
+        const second = closure(opening.payload, 2)
+        const rejected = (await post([second])).data.results[0]
+        expect(rejected).toMatchObject({ status: 'rejected', error: { code: 'register_closure_exists' } })
+        const resend = { ...second, id: randomUUID(), payload: { ...second.payload, note: 'end of day' } }
+        await record(resend, rejected)
+        const response = await post([resend])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...rejected, id: resend.id }])
+      })
     })
   },
 })

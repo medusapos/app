@@ -1,4 +1,29 @@
-/** Shape errors before a register command claims a ledger row. Unknown top-level keys are allowed. */
+import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import type { RegisterClosureSubmitPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
+  RegisterSessionOpenPayload, RegisterSessionTransitionPayload } from '../../modules/tally-register/types'
+
+// Register v1 fields (ruling 17): exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
+// makes tsc refuse a missing or an extra field. Register version 1 is the only one (versions.ts); process.ts refuses others.
+const fields = <T>(record: Record<keyof T, true>) => Object.keys(record)
+const REGISTER_FIELDS = new Map<string, string[]>([
+  ['register.session.open', fields<RegisterSessionOpenPayload>({ sessionId: true, registerId: true, storeKey: true,
+    businessDay: true, openedAt: true, openedBy: true, expectedFloatMinor: true, countedFloatMinor: true, openingVarianceMinor: true })],
+  ['register.session.transition', fields<RegisterSessionTransitionPayload>({ sessionId: true, status: true, at: true,
+    counted: true, closedBy: true, approvedBy: true })],
+  ['register.movement.record', fields<RegisterMovementRecordPayload>({ movementId: true, sessionId: true, type: true,
+    amountMinor: true, reason: true, createdAt: true, createdBy: true })],
+  ['register.movement.void', fields<RegisterMovementVoidPayload>({ movementId: true, sessionId: true, voids: true,
+    createdAt: true, createdBy: true })],
+  ['register.closure.submit', fields<RegisterClosureSubmitPayload>({ closureId: true, sessionId: true, registerId: true,
+    number: true, businessDay: true, openedAt: true, closedAt: true, closedBy: true, approvedBy: true, tillExpected: true,
+    counted: true, periodSalesTotalMinor: true, periodRefundsTotalMinor: true, perpetualSalesTotalMinor: true,
+    perpetualRefundsTotalMinor: true, unsyncedCount: true, unsyncedTotalMinor: true, softwareVersion: true, orderIds: true,
+    movementIds: true })],
+])
+// The only keys of the declared maps counted and tillExpected: PaymentMethodKind (@tallyui/core 2.0.0 src/types/commands.ts:68).
+const PAYMENT_METHODS = Object.keys({ cash: true, external: true } satisfies Record<PaymentMethodKind, true>)
+
+/** Shape errors before a register command claims a ledger row. A field its type's v1 payload doesn't declare is refused. */
 export function registerPayloadErrors(type: string, payload: unknown): string[] {
   const errors: string[] = []
   const object = (value: unknown): value is Record<string, unknown> =>
@@ -7,6 +32,10 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
     if (!valid && errors.length < 10) errors.push(`${field}: expected ${expected}`)
   }
   if (!object(payload)) return ['payload: expected an object']
+  for (const key of Object.keys(payload)) {
+    const known = REGISTER_FIELDS.get(type)?.includes(key) ?? false
+    if (!known && errors.length < 10) errors.push(`${key}: unknown field for ${type} version 1`)
+  }
   const string = (field: string, optional = false) => {
     const value = payload[field]
     if (optional && value === undefined) return
@@ -22,7 +51,8 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
     const value = payload[field]
     check(object(value), field, 'a record of integers')
     if (object(value)) for (const [key, amount] of Object.entries(value)) {
-      check(key.length > 0 && Number.isSafeInteger(amount), `${field}.${key}`, 'a non-empty key with a safe integer')
+      check(PAYMENT_METHODS.includes(key), `${field}.${key}`,'a payment method (cash or external)')
+      check(Number.isSafeInteger(amount), `${field}.${key}`, 'a safe integer')
     }
   }
   string('sessionId')

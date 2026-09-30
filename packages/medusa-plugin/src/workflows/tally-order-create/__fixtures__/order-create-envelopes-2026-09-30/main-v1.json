@@ -1,0 +1,55 @@
+{
+  "id": "01a0efe5-c9c6-71da-b7de-348d47b16425",
+  "type": "order.create",
+  "version": 1,
+  "createdAt": "2026-09-30T10:00:00.000Z",
+  "deviceId": "device-golden",
+  "attempt": 1,
+  "payload": {
+    "clientOrderId": "01a0efe5-c9c6-71da-b7de-348d47b16420",
+    "createdAt": "2026-09-30T10:00:00.000Z",
+    "currency": "EUR",
+    "pricesIncludeTax": true,
+    "lines": [
+      {
+        "clientLineId": "01a0efe5-c9c6-71da-b7de-348d47b16421",
+        "variantId": "variant_inclusive",
+        "title": "Inclusive item",
+        "quantity": 2,
+        "unitPriceMinor": 1200
+      },
+      {
+        "clientLineId": "01a0efe5-c9c6-71da-b7de-348d47b16422",
+        "variantId": "prod_exclusive",
+        "title": "Exclusive item",
+        "quantity": 1,
+        "unitPriceMinor": 1000,
+        "taxInclusive": false
+      }
+    ],
+    "payments": [
+      {
+        "clientPaymentId": "01a0efe5-c9c6-71da-b7de-348d47b16423",
+        "method": "external",
+        "amountMinor": 1000,
+        "reference": "ext_ref_1"
+      },
+      {
+        "clientPaymentId": "01a0efe5-c9c6-71da-b7de-348d47b16424",
+        "method": "cash",
+        "amountMinor": 2500,
+        "tenderedMinor": 3000,
+        "changeMinor": 500,
+        "reference": "cash_receipt_1"
+      }
+    ],
+    "subtotalMinor": 3000,
+    "taxMinor": 500,
+    "totalMinor": 3500,
+    "customer": {
+      "email": "buyer@example.com"
+    },
+    "registerId": "register_golden",
+    "cashierRef": "cashier_golden"
+  }
+}

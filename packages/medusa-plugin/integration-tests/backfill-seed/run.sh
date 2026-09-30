@@ -37,6 +37,9 @@ export TS_NODE_PROJECT="$plugin/tsconfig.json"
 cd "$app"
 npx medusa db:migrate >>"$log" 2>&1
 npx medusa exec medusa-plugin/integration-tests/backfill-seed/seed.ts >>"$log" 2>&1
+# S2's order c0, canceled by hand: no run may name it (the #121 review case).
+canceled="$(grep -oE 'hand-canceled order [A-Za-z0-9_]+' "$log" | cut -d' ' -f3 || true)"
+[[ -n "$canceled" ]] || fail "the seed logged no hand-canceled order; see $log"
 
 # The backfill's own lines, without colours or the logger's level and timestamp prefix.
 own() { sed -E $'s/\x1b\\[[0-9;]*m//g' | grep 'tally_ledger_backfill_rejected' | sed -E 's/^.*(tally_ledger_backfill_rejected)/\1/'; }
@@ -51,6 +54,7 @@ for args in '' apply '' undo ''; do
   echo "=== $n. npx medusa exec $script${args:+ $args}"
   out="$(npx medusa exec "$script" ${args:+"$args"} 2>&1)" || { printf '%s\n' "$out" >>"$log"; fail "run $n failed; see $log"; }
   printf '=== %s\n%s\n' "$n" "$out" >>"$log"
+  ! grep -qF "$canceled" <<<"$out" || fail "assertion failed: run $n names the hand-canceled order $canceled"
   runs+=("$(own <<<"$out")")
   printf '%s\n' "${runs[n - 1]}"
 done
@@ -63,6 +67,8 @@ says 2 ': marked 2 order(s), '
 says 3 '(dry run): would mark 0 order(s), '
 says 4 '(undo): unmarked 2 order(s)'
 [[ -n "$(figures "${runs[0]}")" ]] || fail 'assertion failed: the first dry run (run 1) reports no order or session lines'
+[[ "$(figures "${runs[1]}")" == "$(figures "${runs[0]}")" ]] ||
+  fail 'assertion failed: the apply run (run 2) order and session lines differ from the first dry run (run 1)'
 [[ "$(figures "${runs[4]}")" == "$(figures "${runs[0]}")" ]] ||
   fail 'assertion failed: the third dry run (run 5) order and session lines differ from the first (run 1)'
 echo "run.sh: assertions passed; logs in $log" >&2

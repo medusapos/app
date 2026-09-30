@@ -1,0 +1,125 @@
+{
+  "requests": [
+    {
+      "url": "https://store.example/tally/v1/commands",
+      "headers": {
+        "Content-Type": "application/json",
+        "X-Tally-Protocol": "1"
+      },
+      "body": {
+        "commands": [
+          {
+            "id": "01a0efef-4be6-7828-9deb-5a0866b87b1e",
+            "type": "register.session.open",
+            "version": 1,
+            "payload": {
+              "sessionId": "8810bb2c-ba40-435e-a8bf-2b86658fa1e1",
+              "registerId": "register_golden",
+              "openedAt": "2026-09-30T01:30:32.289Z",
+              "countedFloatMinor": 10000,
+              "storeKey": "store_golden",
+              "businessDay": "2026-09-30",
+              "openedBy": "cashier_golden",
+              "expectedFloatMinor": 10000,
+              "openingVarianceMinor": 0
+            },
+            "createdAt": "2026-09-30T01:30:32.294Z",
+            "deviceId": "device-golden",
+            "attempt": 1
+          },
+          {
+            "id": "01a0efef-4beb-70ca-b179-e2fc0b04f1b2",
+            "type": "register.movement.record",
+            "version": 1,
+            "payload": {
+              "movementId": "e804afa3-b8e6-4b0a-adb3-45a78e6b977d",
+              "sessionId": "8810bb2c-ba40-435e-a8bf-2b86658fa1e1",
+              "createdAt": "2026-09-30T01:30:32.297Z",
+              "createdBy": "cashier_golden",
+              "type": "paid_in",
+              "amountMinor": 500,
+              "reason": "Change top-up"
+            },
+            "createdAt": "2026-09-30T01:30:32.299Z",
+            "deviceId": "device-golden",
+            "attempt": 1
+          },
+          {
+            "id": "01a0efef-4c02-72d6-8259-124a70518888",
+            "type": "register.session.transition",
+            "version": 1,
+            "payload": {
+              "sessionId": "8810bb2c-ba40-435e-a8bf-2b86658fa1e1",
+              "status": "counting",
+              "at": "2026-09-30T01:30:32.322Z"
+            },
+            "createdAt": "2026-09-30T01:30:32.322Z",
+            "deviceId": "device-golden",
+            "attempt": 1
+          },
+          {
+            "id": "01a0efef-4c1d-7021-b9a4-dff4c6e0f738",
+            "type": "register.session.transition",
+            "version": 1,
+            "payload": {
+              "sessionId": "8810bb2c-ba40-435e-a8bf-2b86658fa1e1",
+              "status": "closed",
+              "at": "2026-09-30T01:30:32.345Z",
+              "counted": {
+                "cash": 12300,
+                "external": 1700
+              },
+              "closedBy": "cashier_golden",
+              "approvedBy": "manager_golden"
+            },
+            "createdAt": "2026-09-30T01:30:32.349Z",
+            "deviceId": "device-golden",
+            "attempt": 1
+          },
+          {
+            "id": "01a0efef-4c1d-7021-b9a4-dff4c6e0f739",
+            "type": "register.closure.submit",
+            "version": 1,
+            "payload": {
+              "closureId": "8810bb2c-ba40-435e-a8bf-2b86658fa1e1",
+              "sessionId": "8810bb2c-ba40-435e-a8bf-2b86658fa1e1",
+              "registerId": "register_golden",
+              "number": 1,
+              "openedAt": "2026-09-30T01:30:32.289Z",
+              "closedAt": "2026-09-30T01:30:32.345Z",
+              "businessDay": "2026-09-30",
+              "closedBy": "cashier_golden",
+              "approvedBy": "manager_golden",
+              "tillExpected": {
+                "cash": 12400,
+                "external": 1700
+              },
+              "counted": {
+                "cash": 12300,
+                "external": 1700
+              },
+              "periodSalesTotalMinor": 3600,
+              "periodRefundsTotalMinor": 0,
+              "perpetualSalesTotalMinor": 3600,
+              "perpetualRefundsTotalMinor": 0,
+              "unsyncedCount": 3,
+              "unsyncedTotalMinor": 3600,
+              "softwareVersion": "golden-1.0.0",
+              "orderIds": [
+                "01a0efef-4be8-7d1d-acbc-dd6dcdbced57",
+                "01a0efef-4be9-71e5-9cbe-da570957138c",
+                "01a0efef-4be9-71e5-9cbe-da5709571390"
+              ],
+              "movementIds": [
+                "e804afa3-b8e6-4b0a-adb3-45a78e6b977d"
+              ]
+            },
+            "createdAt": "2026-09-30T01:30:32.349Z",
+            "deviceId": "device-golden",
+            "attempt": 1
+          }
+        ]
+      }
+    }
+  ]
+}

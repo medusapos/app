@@ -9,8 +9,8 @@ import { planOrderCreate } from '../plan'
 // entire payload shape checked by this assignment to the local bridge type.
 // This catches missing or mistyped fields at tsc, but not extra keys: excess-property
 // checks do not apply to JSON imports, and Jest (swc) does not type-check.
-// Extra keys inside display and taxByRate are caught at runtime by fiscalFiguresErrors;
-// the top level and its other objects stay lenient by design.
+// Extra keys are caught at runtime: inside display and taxByRate by fiscalFiguresErrors,
+// everywhere else by payloadShapeErrors (ruling 17).
 const payload: OrderCreatePayloadV3 = {
   ...fixture.payload,
   payments: fixture.payload.payments.map(payment => {
@@ -38,7 +38,7 @@ it('the golden v3 envelope passes validation unchanged', () => {
   expect(validateBatch({ commands: [fixture] })).toStrictEqual({ ok: true, commands: [fixture] })
   expect(SUPPORTED_ORDER_CREATE_VERSIONS).toContain(fixture.version)
   expect(payload).toStrictEqual(fixture.payload)
-  expect(payloadShapeErrors(payload)).toStrictEqual([])
+  expect(payloadShapeErrors(payload, 3)).toStrictEqual([])
   expect(fiscalFiguresErrors(payload)).toStrictEqual([])
 })
 

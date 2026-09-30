@@ -320,7 +320,16 @@ medusaIntegrationTestRunner({
         return order.fulfillments!.map(fulfillment => fulfillment!.location_id)
       }
 
+      async function stockAndReservations() {
+        const inventory = container.resolve(Modules.INVENTORY)
+        const levels = await inventory.listInventoryLevels({ inventory_item_id: data.inventoryA })
+        const reservations = await inventory.listReservationItems({ inventory_item_id: data.inventoryA })
+        return { reservations: reservations.map(item => item.id).sort(),
+          levels: levels.map(level => `${level.location_id} ${level.stocked_quantity} ${level.reserved_quantity}`).sort() }
+      }
+
       async function expectRefused(sale: CommandEnvelope<OrderCreatePayload>, message: string) {
+        const before = await stockAndReservations()
         const response = await post([sale])
         expect(response.status).toBe(200)
         expect(response.data.results).toEqual([expect.objectContaining({
@@ -328,6 +337,7 @@ medusaIntegrationTestRunner({
         })])
         expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
         expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+        expect(await stockAndReservations()).toEqual(before)
       }
 
       it('a location assigned to the channel is honoured: the fulfilment and the stock use it', async () => {
@@ -353,9 +363,11 @@ medusaIntegrationTestRunner({
         await expectRefused(command({ locationId: 'sloc_unknown' }), 'payload.locationId: no stock location with this id')
       })
 
-      it('a location outside the channel is refused unstored, and the same command applies once it is linked', async () => {
+      it('a location outside the channel is refused unstored, again on a retry before the fix, and applies once it is linked', async () => {
         const sale = command({ locationId: data.spareId })
-        await expectRefused(sale, "payload.locationId: this stock location is not assigned to the sale's sales channel")
+        for (const _attempt of [1, 2]) {
+          await expectRefused(sale, "payload.locationId: this stock location is not assigned to the sale's sales channel")
+        }
         await linkSpare('add')
         try {
           const retry = await post([sale])
@@ -369,6 +381,56 @@ medusaIntegrationTestRunner({
     })
 
     describe('step order', () => {
+      it('a v1 sale with lines[0].discountMinr is refused unstored as invalid_payload naming it, with no order (ruling 17)', async () => {
+        const sale = command()
+        Object.assign(sale.payload.lines[0], { discountMinr: 100 })
+        const before = await levelA()
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'lines[0].discountMinr: unknown field for order.create version 1',
+        } }])
+        expect(await ledger.listTallyCommands({ id: sale.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
+        expect(await levelA()).toEqual(before)
+      })
+
+      it('an envelope.priority between two good sales is refused alone, unstored, with no order (ruling 17)', async () => {
+        const [before, refused, after] = [command(), { ...command(), priority: 1 }, command()]
+        const response = await post([before, refused, after])
+        expect(response.status).toBe(200)
+        expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
+        expect(response.data.results[1]).toEqual({ id: refused.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'envelope.priority: unknown field for order.create version 1',
+        } })
+        expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
+      })
+
+      it('an applied id resent with envelope.priority answers duplicate, because the replay read comes first', async () => {
+        const sale = command()
+        const first = await post([sale])
+        expect(first.data.results[0].status).toBe('applied')
+        const response = await post([{ ...sale, attempt: 2, priority: 1 }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
+      })
+
+      it('an applied id resent with an extra unknown field answers duplicate, because the replay read comes first', async () => {
+        const first = await post([command()])
+        expect(first.data.results[0].status).toBe('applied')
+        // Recorded as applied, as a command carrying an unknown field could be before ruling 17.
+        const extra = command()
+        Object.assign(extra.payload, { note: 'gift wrap' })
+        const claim = await ledger.claim({ id: extra.id, type: extra.type, fingerprint: commandFingerprint(extra) })
+        if (!claim.claimed) throw new Error('Expected a fresh claim')
+        const result = { ...first.data.results[0], id: extra.id }
+        await ledger.complete(extra.id, claim.claimToken, result)
+        const response = await post([extra])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...result, status: 'duplicate' }])
+      })
+
       it('an applied id resent with an over-long title answers duplicate', async () => {
         const first = await post([command()])
         expect(first.status).toBe(200)
@@ -1546,13 +1608,25 @@ medusaIntegrationTestRunner({
       })))
     })
 
-    // A sale padded so that the JSON body `post` sends for it alone is exactly `bytes` long.
+    // The exact request body for `commands`, padded with insignificant whitespace after the opening
+    // brace to exactly `bytes` bytes. Strict fields refuse an extra field, and string fields are capped.
+    function paddedBody(commands: unknown[], bytes: number) {
+      const json = JSON.stringify({ commands })
+      const body = `{${' '.repeat(bytes - Buffer.byteLength(json))}${json.slice(1)}`
+      expect(Buffer.byteLength(body)).toBe(bytes)
+      return body
+    }
+
+    // A body holding one sale, exactly `bytes` long.
     function paddedSale(bytes: number) {
       const sale = command()
-      const padded = (padding: string) => ({ ...sale, payload: { ...sale.payload, padding } })
-      const sized = padded('x'.repeat(bytes - Buffer.byteLength(JSON.stringify({ commands: [padded('')] }))))
-      expect(Buffer.byteLength(JSON.stringify({ commands: [sized] }))).toBe(bytes)
-      return sized
+      return { sale, body: paddedBody([sale], bytes) }
+    }
+
+    // Sends `body` unchanged (no axios JSON transform).
+    function postRaw(body: string) {
+      return api.post('/tally/v1/commands', body, { headers: { ...headers, 'Content-Type': 'application/json' },
+        transformRequest: [(data: string) => data], validateStatus: () => true })
     }
 
     it('rejects a JSON body over MAX_BODY_BYTES with 413', async () => {
@@ -1566,14 +1640,14 @@ medusaIntegrationTestRunner({
     })
 
     it('accepts and applies a body of exactly MAX_BODY_BYTES', async () => {
-      const response = await post([paddedSale(MAX_BODY_BYTES)])
+      const response = await postRaw(paddedSale(MAX_BODY_BYTES).body)
       expect(response.status).toBe(200)
       expect(response.data.results[0].status).toBe('applied')
     })
 
     it('refuses a body of MAX_BODY_BYTES + 1 as body_too_large', async () => {
-      const sale = paddedSale(MAX_BODY_BYTES + 1)
-      const response = await post([sale])
+      const { sale, body } = paddedSale(MAX_BODY_BYTES + 1)
+      const response = await postRaw(body)
       expect(response.status).toBe(413)
       expect(response.data).toEqual({ code: 'body_too_large', maxBytes: MAX_BODY_BYTES,
         message: `Request body over ${MAX_BODY_BYTES} bytes` })
@@ -1581,9 +1655,8 @@ medusaIntegrationTestRunner({
     })
 
     it('a body over both limits answers body_too_large, not batch_too_large', async () => {
-      const sales = [paddedSale(MAX_BODY_BYTES), ...Array.from({ length: MAX_COMMANDS }, () => command())]
-      expect(Buffer.byteLength(JSON.stringify({ commands: sales }))).toBeGreaterThan(MAX_BODY_BYTES)
-      const response = await post(sales)
+      const sales = Array.from({ length: MAX_COMMANDS + 1 }, () => command())
+      const response = await postRaw(paddedBody(sales, MAX_BODY_BYTES + 1))
       expect(response.status).toBe(413)
       expect(response.data.code).toBe('body_too_large')
     })
@@ -1663,9 +1736,9 @@ medusaIntegrationTestRunner({
     it.each([
       [3, { sessionId: 'x'.repeat(37) }, 'sessionId: expected a string of at most 36 characters'],
       [3, { sessionId: '' }, 'sessionId: expected a string of at most 36 characters'],
-      [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId requires version 3'],
+      [2, { sessionId: 'session', discountMinor: 1 }, 'sessionId: requires version 3'],
       [3, { customer: { customerId: 'x'.repeat(65) } }, 'customer.customerId: expected a string of at most 64 characters'],
-      [2, { customer: { customerId: 'customer' }, discountMinor: 1 }, 'customerId requires version 3'],
+      [1, { customer: { customerId: 'customer' } }, 'customer.customerId: requires version 3'],
     ])('rejects invalid v%s bookkeeping fields %j', async (version, fields, message) => {
       const sale = command()
       const response = await post([{ ...sale, version, payload: { ...sale.payload, ...fields } }])

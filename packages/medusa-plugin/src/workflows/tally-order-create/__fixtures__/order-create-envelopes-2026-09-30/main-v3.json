@@ -1,0 +1,104 @@
+{
+  "id": "01a0efe5-c9cf-72fe-9d57-e5a544380c51",
+  "type": "order.create",
+  "version": 3,
+  "createdAt": "2026-09-30T10:00:00.000Z",
+  "deviceId": "device-golden",
+  "attempt": 1,
+  "payload": {
+    "clientOrderId": "01a0efe5-c9c8-70d6-ad53-17b25edb8187",
+    "createdAt": "2026-09-30T10:00:00.000Z",
+    "currency": "EUR",
+    "pricesIncludeTax": true,
+    "lines": [
+      {
+        "clientLineId": "01a0efe5-c9c8-70d6-ad53-17b25edb8188",
+        "variantId": "variant_inclusive",
+        "title": "Inclusive item",
+        "quantity": 2,
+        "unitPriceMinor": 1200,
+        "discountMinor": 203
+      },
+      {
+        "clientLineId": "01a0efe5-c9c8-70d6-ad53-17b25edb8189",
+        "variantId": "prod_exclusive",
+        "title": "Exclusive item",
+        "quantity": 1,
+        "unitPriceMinor": 1000,
+        "taxInclusive": false,
+        "discountMinor": 37
+      }
+    ],
+    "payments": [
+      {
+        "clientPaymentId": "01a0efe5-c9c8-70d6-ad53-17b25edb818a",
+        "method": "external",
+        "amountMinor": 1000,
+        "reference": "ext_ref_1"
+      },
+      {
+        "clientPaymentId": "01a0efe5-c9c8-70d6-ad53-17b25edb818b",
+        "method": "cash",
+        "amountMinor": 2256,
+        "tenderedMinor": 2756,
+        "changeMinor": 500,
+        "reference": "cash_receipt_1"
+      }
+    ],
+    "subtotalMinor": 2794,
+    "discountMinor": 240,
+    "taxMinor": 462,
+    "totalMinor": 3256,
+    "display": {
+      "currency": "EUR",
+      "exponent": 2,
+      "taxInclusive": true,
+      "subtotalMinor": 3500,
+      "discountMinor": 244,
+      "taxMinor": 462,
+      "totalMinor": 3256,
+      "lines": [
+        {
+          "clientLineId": "01a0efe5-c9c8-70d6-ad53-17b25edb8188",
+          "amountMinor": 2400,
+          "discounts": [
+            {
+              "discountId": "1790731209160-16",
+              "label": "Line discount",
+              "amountMinor": 120
+            }
+          ]
+        },
+        {
+          "clientLineId": "01a0efe5-c9c8-70d6-ad53-17b25edb8189",
+          "amountMinor": 1100,
+          "discounts": []
+        }
+      ],
+      "orderDiscountMinor": 124
+    },
+    "taxByRate": [
+      {
+        "ratePpm": 200000,
+        "code": "VAT20",
+        "netMinor": 1831,
+        "taxMinor": 366,
+        "grossMinor": 2197
+      },
+      {
+        "ratePpm": 100000,
+        "code": "VAT10",
+        "netMinor": 963,
+        "taxMinor": 96,
+        "grossMinor": 1059
+      }
+    ],
+    "customer": {
+      "email": "buyer@example.com",
+      "customerId": "cus_golden"
+    },
+    "registerId": "register_golden",
+    "cashierRef": "cashier_golden",
+    "sessionId": "01a0f1c1-b900-75dc-96e0-b169973852ca"
+  }
+}

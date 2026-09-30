@@ -125,8 +125,31 @@ it.each(['x'.repeat(65), '', null, 1])('rejects invalid customerId %p', customer
     .toEqual(['customer.customerId: expected a string of at most 64 characters'])
 })
 
-it('keeps unknown top-level and customer fields lenient', () => {
-  expect(payloadShapeErrors({ ...payload, extra: true, customer: { extra: true } })).toEqual([])
+it.each([
+  ['extra', { extra: true }],
+  ['constructor', { constructor: 1 }],
+  ['lines[0].discountMinr', { lines: [{ ...payload.lines[0], discountMinr: 100 }] }],
+  ['payments[0].extra', { payments: [{ ...payload.payments[0], extra: true }] }],
+  ['customer.extra', { customer: { email: 'buyer@example.com', extra: true } }],
+])('refuses the unknown field %s, naming its path (ruling 17)', (path, fields) => {
+  expect(payloadShapeErrors({ ...payload, ...fields }, 1)).toEqual([`${path}: unknown field for order.create version 1`])
+})
+
+it('knows each field from the version that declares it', () => {
+  const line = { ...payload.lines[0], discountMinor: 1 }
+  const v2 = { ...payload, lines: [line], discountMinor: 1 }
+  const v3 = { ...v2, sessionId: 'session', customer: { email: 'buyer@example.com', customerId: 'customer' } }
+  expect(payloadShapeErrors(v2, 2)).toEqual([])
+  expect(payloadShapeErrors(v3, 3)).toEqual([])
+  expect(payloadShapeErrors(v2, 1)).toEqual(['discountMinor: requires version 2', 'lines[0].discountMinor: requires version 2'])
+  expect(payloadShapeErrors(v3, 2)).toEqual(['sessionId: requires version 3', 'customer.customerId: requires version 3'])
+  expect(payloadShapeErrors({ ...payload, display: {}, taxByRate: [] }, 1))
+    .toEqual(['display: requires version 3', 'taxByRate: requires version 3'])
+})
+
+it('reports at most ten unknown fields', () => {
+  const extra = Object.fromEntries(Array.from({ length: 12 }, (_, index) => [`extra${index}`, index]))
+  expect(payloadShapeErrors({ ...payload, ...extra }, 1)).toHaveLength(10)
 })
 
 it.each([

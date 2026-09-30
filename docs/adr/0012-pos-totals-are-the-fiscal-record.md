@@ -105,9 +105,20 @@ so a rejected id can be resent at a supported version without
 `idempotency_mismatch`. Plugins released before this amendment answer the
 whole batch with HTTP 400 instead; TallyUI must handle both.
 
-**Strictness scope:** only the new v3 objects reject unknown keys. The
-payload's top level stays as lenient as before, because tightening it could
-reject tills already in the field.
+**Strictness scope** (amended by ruling 17, 2026-09-30, issue #132): every
+object of every command refuses a field its declared version doesn't know,
+as unstored `invalid_payload` naming the path (`lines[2].discountMinr:
+unknown field for order.create version 1`), after the replay read and
+before the claim. A field a later version declares is named with that
+version (`display: requires version 3`); envelope fields are strict too.
+Keys are free only in the maps the contract declares, `counted` and
+`tillExpected`, and those must be a `PaymentMethodKind` (`cash`, `external`).
+The earlier leniency was an accident: ADR 0004 checked only types and
+presence, and #90 kept it out of general caution, for no named client. The
+contract types are closed. Under leniency a misspelled optional money field
+is ignored silently; under strictness it is refused in plain sight. Every
+recorded TallyUI envelope (`@tallyui/pos` 2.0.0 and main, v1 to v3, and the
+register commands) passes unchanged, as the plugin's regression fixtures.
 
 **Consequences:**
 - The command fingerprint covers the whole payload, so idempotency is
