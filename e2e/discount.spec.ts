@@ -1,5 +1,5 @@
-import { expect, test, type Page } from '@playwright/test';
-import { addE2E1, adminToken, discount, ordersByClientId, sellBySku, signIn } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { addE2E1, adminToken, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 // Discounts in the cart (TallyUI ADR-062): the plugin reports order.create [1, 2] at GET /tally/v1/info,
