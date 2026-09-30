@@ -423,7 +423,7 @@ medusaIntegrationTestRunner({
       expect(order.customer_id).toBe(account.id)
     })
 
-    it.each([['x_y', 'xzy'], ['p%q', 'pAq']])('an email-only sale does not wildcard-match %s to %s', async (storedPrefix, salePrefix) => {
+    it.each([['x_y', 'xzy'], ['p%q', 'pAq'], ['xzy', 'x_y'], ['pAq', 'p%q']])('an email-only sale does not wildcard-match %s to %s', async (storedPrefix, salePrefix) => {
       const suffix = randomUUID()
       const storedEmail = `${storedPrefix}-${suffix}@example.com`
       const email = `${salePrefix}-${suffix}@example.com`
