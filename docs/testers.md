@@ -31,7 +31,7 @@ setup detail rather than repeating it.
   suggests a generated "strong password" in that field, dismiss it and type
   the manager's own.
 - If the till stopped in the middle of a close, the register shows "Close
-  not finished"; tap it for "The last close didn't finish" and **Finish
+  not finished"; tap it for "The last close didn't finish." and **Finish
   closing**, which completes it with the count you already entered.
 - If saving a sale fails but the order did reach the till's storage, the
   pay screen says "This sale is stored and will be sent" and offers

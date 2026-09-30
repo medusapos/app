@@ -703,8 +703,8 @@ describe('the register control', () => {
 // The Front desk (2026-09-28): on a phone the status line shares its row with the register pill, so it is short.
 describe('the catalogue status line', () => {
   it.each([
-    [1280, 'MedusaJS · Up to date · 1 products · 2 not sold in this channel · Failed to fetch'],
-    [360, 'Up to date · Failed to fetch · 1 products'],
+    [1280, 'MedusaJS · Up to date · 1 product · 2 not sold in this channel · Failed to fetch'],
+    [360, 'Up to date · Failed to fetch · 1 product'],
   ])('at %i reads %j', async (width, text) => {
     setWindowWidth(width);
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: 'Failed to fetch', lastSyncedAt: null,
