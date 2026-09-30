@@ -35,8 +35,6 @@ Tap race: a line added at the instant new store settings land is dropped from th
 
 ## Register part B follow-ups (from the #89 re-review)
 
-- **Register close state isn't reset per store:** `RegisterProvider`'s shown closure and `closeError` aren't reset when the store key changes or on sign-out. On native (on web, LiveTabGate remounts the provider), store A's close error could show above store B's Finish closing card. Reset them on `storeKey`, or key the provider by it.
-- **A test hold leaks on failure:** the register-screen no-card test holds a closure write, and doesn't release it in `finally` when the test fails. TallyUI's module-level in-flight close then makes later tests in the file join the stuck close, which gives misleading failures.
 - **The "Finish closing" wording:** "Close not finished" is the "The last close didn't finish" state. Keep the tester guide's wording in step with TallyUI's pill and card copy.
 - **Also "1 products":** the catalogue status reads "1 products" for a single product (pre-existing).
 
