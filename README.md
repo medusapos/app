@@ -25,6 +25,7 @@ in the root `package.json`'s `pnpm.overrides` and `apps/expo/package.json`.
 The app compiles TallyUI from each npm package's shipped `src/`, using the
 `source` export condition, tsconfig `paths` and the Metro resolver.
 To bump TallyUI, change all eight versions in both files and run `pnpm install`.
+`apps/expo/tests/tallyui-dependencies.test.ts` enforces this rule.
 
 ## Getting Started
 
