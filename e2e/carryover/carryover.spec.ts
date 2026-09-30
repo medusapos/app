@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { resolve } from 'node:path';
-import { expect, test, type Page } from '@playwright/test';
-import { addE2E1, adminToken, discount, ordersByClientId, sellBySku, signIn } from '../helpers';
+import { expect, type Page } from '@playwright/test';
+import { addE2E1, adminToken, discount, ordersByClientId, sellBySku, signIn, test } from '../helpers';
 import { E2E_RUN } from '../ports';
 
 const root = resolve(__dirname, '../..');
