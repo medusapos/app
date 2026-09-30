@@ -20,7 +20,7 @@ Open source, modular point of sale for [MedusaJS](https://medusajs.com). Built o
 ## TallyUI
 
 TallyUI stays platform-agnostic, and this repo holds the Medusa POS built on
-it. All eight `@tallyui/*` packages come from npm, pinned at exactly `3.0.0-next.0`
+it. All eight `@tallyui/*` packages come from npm, pinned at exactly `3.0.0-next.1`
 in the root `package.json`'s `pnpm.overrides` and `apps/expo/package.json`.
 The app compiles TallyUI from each npm package's shipped `src/`, using the
 `source` export condition, tsconfig `paths` and the Metro resolver.
