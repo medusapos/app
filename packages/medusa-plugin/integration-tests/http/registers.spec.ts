@@ -544,16 +544,30 @@ medusaIntegrationTestRunner({
       expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
     })
 
-    it('shape wins over client-time bounds for a closure with an unknown payload field', async () => {
+    it('refuses a zone-less payload.closedAt before writing a ledger row', async () => {
       const submission = closure(open().payload)
-      const response = await post([{ ...submission, payload: { ...submission.payload,
-        closedAt: '2019-12-31T23:59:59.999Z', unknown: true } }])
+      submission.payload.closedAt = '2026-09-30T12:00:00'
+      const response = await post([submission])
       expect(response.status).toBe(200)
       expect(response.data.results).toEqual([{ id: submission.id, status: 'rejected', error: {
-        code: 'invalid_payload', message: 'payload.unknown: unknown field for register.closure.submit version 1',
+        code: 'invalid_payload', message: 'payload.closedAt must be an RFC 3339 time with Z or an offset',
       } }])
       expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_closure').where('id', submission.payload.closureId)).toHaveLength(0)
     })
+
+    it.each(['2019-12-31T23:59:59.999Z', 'invalid', '2026-09-30T12:00:00'])(
+      'shape wins over client-time format and bounds (%s) for a closure with an unknown payload field', async value => {
+        const submission = closure(open().payload)
+        const response = await post([{ ...submission, payload: { ...submission.payload,
+          closedAt: value, unknown: true } }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: submission.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'payload.unknown: unknown field for register.closure.submit version 1',
+        } }])
+        expect(await ledger.listTallyCommands({ id: submission.id }, { withDeleted: true })).toHaveLength(0)
+      })
 
     it('an applied closure resent with an envelope.createdAt before 2020 answers duplicate, because the replay read comes first', async () => {
       const opening = open()

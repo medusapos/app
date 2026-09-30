@@ -3,6 +3,7 @@ import closureFixture from '../../tally-order-create/__fixtures__/register-envel
 import transitionFixture from '../../tally-order-create/__fixtures__/register-envelopes-2026-09-30/main-register.session.transition-closed.json'
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { registerPayloadErrors } from '../payload-shape'
+import { clientTimeStageErrors } from '../../client-time'
 
 const at = '2026-01-01T08:00:00.000Z'
 const open = { sessionId: 's', registerId: 'r', openedAt: at, countedFloatMinor: 100 }
@@ -60,7 +61,6 @@ it.each<[string, Record<string, unknown>, string]>([
   ['register.session.open', { ...open, sessionId: undefined }, 'sessionId'],
   ['register.session.open', { ...open, sessionId: '' }, 'sessionId'],
   ['register.session.open', { ...open, registerId: 'r'.repeat(65) }, 'registerId'],
-  ['register.session.open', { ...open, openedAt: 'not a date' }, 'openedAt'],
   ['register.session.open', { ...open, countedFloatMinor: -1 }, 'countedFloatMinor'],
   ['register.session.open', { ...open, expectedFloatMinor: 0.5 }, 'expectedFloatMinor'],
   ['register.session.open', { ...open, openingVarianceMinor: Number.MAX_SAFE_INTEGER + 1 }, 'openingVarianceMinor'],
@@ -74,7 +74,6 @@ it.each<[string, Record<string, unknown>, string]>([
   ['register.session.transition', { sessionId: 's', status: 'counting', at, counted: {} }, 'counted'],
   ['register.session.transition', { sessionId: 's', status: 'open', at, closedBy: 'cashier' }, 'closedBy'],
   ['register.session.transition', { sessionId: 's', status: 'open', at, approvedBy: 'manager' }, 'approvedBy'],
-  ['register.session.transition', { ...transition, at: 'invalid' }, 'at'],
   ['register.session.transition', { ...transition, status: 'invalid' }, 'status'],
   ['register.session.transition', { ...transition, counted: [] }, 'counted'],
   ['register.closure.submit', { ...closure, tillExpected: { cash: 0.5 } }, 'tillExpected'],
@@ -83,7 +82,6 @@ it.each<[string, Record<string, unknown>, string]>([
   ['register.closure.submit', { ...closure, number: 0 }, 'number'],
   ['register.closure.submit', { ...closure, number: 2147483648 }, 'number'],
   ['register.closure.submit', { ...closure, unsyncedCount: 2147483648 }, 'unsyncedCount'],
-  ['register.closure.submit', { ...closure, closedAt: 'invalid' }, 'closedAt'],
   ['register.closure.submit', { ...closure, unsyncedTotalMinor: -1 }, 'unsyncedTotalMinor'],
   ['register.closure.submit', { ...closure, orderIds: [''] }, 'orderIds'],
   ['register.closure.submit', { ...closure, movementIds: ['m'.repeat(65)] }, 'movementIds'],
@@ -98,11 +96,16 @@ it.each<[string, string, Record<string, unknown>]>([
   ['register.movement.void', 'createdAt', voidMovement],
   ['register.closure.submit', 'openedAt', closure],
   ['register.closure.submit', 'closedAt', closure],
-])('%s checks payload.%s parsing, leaving bounds to the client-time stage', (type, field, payload) => {
+])('%s leaves payload.%s format and bounds to the client-time stage', (type, field, payload) => {
   const late = new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString()
   for (const value of ['2019-12-31T23:59:59.999Z', late]) expect(registerPayloadErrors(type, { ...payload, [field]: value }))
     .toEqual([])
-  expect(registerPayloadErrors(type, { ...payload, [field]: 'invalid' })).toEqual([`payload.${field}: expected a valid date`])
+  for (const value of ['invalid', 'not a date']) {
+    const invalid = { ...payload, [field]: value }
+    expect(registerPayloadErrors(type, invalid)).toEqual([])
+    expect(clientTimeStageErrors({ type, payload: invalid } as never, Date.now()))
+      .toEqual([`payload.${field} must be an RFC 3339 time with Z or an offset`])
+  }
 })
 
 it('accepts positive paid_out amounts, zero no_sale amounts and signed safe integer records', () => {

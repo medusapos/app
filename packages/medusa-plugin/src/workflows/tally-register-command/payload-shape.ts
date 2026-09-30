@@ -1,7 +1,6 @@
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { RegisterClosureSubmitPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
   RegisterSessionOpenPayload, RegisterSessionTransitionPayload } from '../../modules/tally-register/types'
-import { clientTimeParseErrors } from '../client-time'
 
 // Register v1 fields (ruling 17): exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
 // makes tsc refuse a missing or an extra field. Register version 1 is the only one (versions.ts); process.ts refuses others.
@@ -42,7 +41,6 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
     if (optional && value === undefined) return
     check(typeof value === 'string' && (optional || value.length > 0), field, optional ? 'a string' : 'a non-empty string')
     if (typeof value === 'string' && (field.endsWith('Id') || field === 'voids')) check(value.length <= 64, field, 'at most 64 characters')
-    if (['openedAt', 'at', 'createdAt', 'closedAt'].includes(field) && errors.length < 10) errors.push(...clientTimeParseErrors(value, `payload.${field}`))
   }
   const integer = (field: string, min = -Infinity) =>
     check(Number.isSafeInteger(payload[field]) && (payload[field] as number) >= min, field, `a safe integer >= ${min}`)

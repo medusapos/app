@@ -1,5 +1,6 @@
 import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { payloadNulErrors, payloadShapeErrors } from '../payload-shape'
+import { clientTimeStageErrors } from '../../client-time'
 
 const payload: OrderCreatePayload = {
   clientOrderId: 'order_1', createdAt: '2026-09-23T10:00:00Z', currency: 'EUR', pricesIncludeTax: true,
@@ -74,9 +75,11 @@ it.each(['lines', 'payments'])('rejects non-object entries in %s', field => {
   }
 })
 
-it.each(['2019-12-31T23:59:59.999Z', 'late', ''])('checks parsing, leaving payload.createdAt %p bounds to the client-time stage', value => {
+it.each(['2019-12-31T23:59:59.999Z', 'late', 'invalid', ''])('leaves payload.createdAt %p format and bounds to the client-time stage', value => {
   const createdAt = value === 'late' ? new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString() : value
-  expect(payloadShapeErrors({ ...payload, createdAt })).toEqual(value ? [] : ['payload.createdAt: expected a valid date'])
+  expect(payloadShapeErrors({ ...payload, createdAt })).toEqual([])
+  if (value === 'invalid' || value === '') expect(clientTimeStageErrors({ type: 'order.create',
+    payload: { ...payload, createdAt } } as never, Date.now())).toEqual(['payload.createdAt must be an RFC 3339 time with Z or an offset'])
 })
 
 it('rejects a non-string customer email', () => {
@@ -189,11 +192,10 @@ it.each([
   const key = keys.pop()!
   const target = keys.reduce((object, part) => object[part], value as any)
   target[key] = 'x'.repeat(max)
-  const date = field === 'createdAt' ? ['payload.createdAt: expected a valid date'] : []
-  expect(payloadShapeErrors(value)).toEqual(date)
+  expect(payloadShapeErrors(value)).toEqual([])
   target[key] += 'x'
   const expected = max === 64 || max === 36 ? `a string of at most ${max} characters` : `at most ${max} characters`
-  expect(payloadShapeErrors(value)).toEqual([...date, `payload.${field.replace('.0.', '[0].')}: expected ${expected}`])
+  expect(payloadShapeErrors(value)).toEqual([`payload.${field.replace('.0.', '[0].')}: expected ${expected}`])
 })
 
 it.each([

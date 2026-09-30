@@ -182,16 +182,23 @@ describe('recorded TallyUI envelopes, 2026-09-30 (ruling 17)', () => {
 })
 
 describe('envelope fields (ruling 17)', () => {
-  it('checks createdAt parsing in the shape stage without checking bounds', () => {
-    expect(envelopeErrors({ ...mainV1, createdAt: 'invalid' } as never)).toEqual(['createdAt: expected a valid date'])
+  it('leaves createdAt format and bounds to the client-time stage', async () => {
+    expect(envelopeErrors({ ...mainV1, createdAt: 'invalid' } as never)).toEqual([])
     expect(envelopeErrors({ ...mainV1, createdAt: '2019-12-31T23:59:59.999Z' } as never)).toEqual([])
+    const claim = jest.fn()
+    const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
+    const outcome = await processBatch(replaying, [{ ...mainV1, createdAt: 'invalid' }] as never, {})
+    expect(outcome).toEqual({ status: 200, body: { results: [{ id: mainV1.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: 'createdAt must be an RFC 3339 time with Z or an offset',
+    } }] } })
+    expect(claim).not.toHaveBeenCalled()
   })
 
   it.each<[string, { id: string }]>([['order.create', mainV1], ['register.closure.submit', closure]])(
-    'refuses priority on a recorded %s envelope as invalid_payload, before the claim', async (type, fixture) => {
+    'refuses priority on a recorded %s envelope before an invalid client time and the claim', async (type, fixture) => {
       const claim = jest.fn()
       const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
-      const outcome = await processBatch(replaying, [{ ...fixture, priority: 1 }] as never, {})
+      const outcome = await processBatch(replaying, [{ ...fixture, createdAt: 'invalid', priority: 1 }] as never, {})
       expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: {
         code: 'invalid_payload', message: `envelope.priority: unknown field for ${type} version 1`,
       } }] } })
