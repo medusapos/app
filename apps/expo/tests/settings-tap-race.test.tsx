@@ -209,4 +209,23 @@ describe('tap race when new store settings land (#58 review)', () => {
     expect(button('Remove Shirt')).toBeTruthy();
     expect(screen.getByText('Total: €20.00')).toBeTruthy(); // Germany's €20, tax included
   });
+
+  it('a refused add does not leave the settings hold on: the next store settings still apply', async () => {
+    // A Cap priced only in USD: @tallyui/pos 2.0.0 addEntryToCart throws CartError(`No EUR price for Cap`) (sale/cart.ts:17),
+    // and useSale.add catches it into `error` (sale/use-sale.ts:195-197), so the tap's onBusy(true) meets an empty cart.
+    const replicated = vi.mocked(useReplicatedProducts).getMockImplementation()!;
+    vi.mocked(useReplicatedProducts).mockImplementation((...args) => {
+      const result = replicated(...args);
+      return { ...result, products: [...result.products, { ...product('cap', 'Cap', 9),
+        variants: [{ id: 'cap-1', title: 'One', sku: 'CAP', prices: [{ amount: 9, currency_code: 'usd' }] }] }] };
+    });
+    const retry = await idleWithRetryInFlight();
+    fireEvent.click(button('Cap'));
+    expect(screen.getByRole('alert').textContent).toBe('No EUR price for Cap');
+    expect(screen.queryByRole('button', { name: 'Remove Cap' })).toBeNull();
+    await germanyLands(retry);
+    expect(region()).toBe('reg_de');
+    fireEvent.click(button('Shirt'));
+    expect(screen.getByText('Total: €20.00')).toBeTruthy(); // Germany's €20, tax included
+  });
 });
