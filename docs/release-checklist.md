@@ -22,12 +22,15 @@ Work through this before tagging a release of the app or the plugin. An item tha
     - on an `unauthorized` notice, call the existing `onUnauthorized()`, so the till signs out the same way the old 401 did (Front desk ruling, 2026-09-30);
     - call `resume()` after a successful sign-in, so a pull stopped by an expired session starts again.
   - **Source:** the notices come from TallyUI/tallyui#259.
-  - **The connector factory (TallyUI/tallyui#307, a gate before 3.0.0), also in the same bump PR:**
+  - **The connector factory (TallyUI/tallyui#307: open; design approved, not merged; a gate before 3.0.0), also in the same bump PR:**
     - **Why:** the Medusa connector's reconcile feed is a module-level singleton. After a store switch in one runtime (sign out of A, sign into B), A's queued tombstones and refetches reach B's collection.
-    - **The change:** build the connector with the new factory (`createMedusaConnector(options?)`) anew on each sign-in or store change, one instance per store session. Today the app holds one module-level connector: `apps/expo/lib/pos-connector.ts:3` (`posConnector = medusaAdminUserConnector`), used at `apps/expo/app/index.tsx:33` and `lib/session.ts:51`, with `medusaConnector.id` at `lib/session-context.tsx:42`. Stop using the static `medusaConnector` export: it is deprecated, warns in dev when one feed serves two replications, and goes in 4.0.
+    - **The change:** per the approved design, TallyUI adds a factory (`createMedusaConnector(options?)`) that returns a connector with its own feed. The bump builds one anew on each sign-in or store change: one instance per store session.
+    - **Today:** the app holds one module-level connector: `apps/expo/lib/pos-connector.ts:3` (`posConnector = medusaAdminUserConnector`), used at `apps/expo/app/index.tsx:33` and `lib/session.ts:51`, with `medusaConnector.id` at `lib/session-context.tsx:42`.
+    - **The old export:** the static `medusaConnector` export is to be deprecated, with a dev warning when one feed serves two replications, and removed in 4.0.
+    - **At the bump:** re-check #307's merged API.
     - **The rule:** the bump, the pull notices and the factory ship in one PR, never apart.
 - [ ] **Storage start failures (TallyUI/tallyui#304, from #293), in the bump PR.**
-  - **What changes:** in `@tallyui/storage-sqlite` 3.0.0, a Safari private window is a `StorageUnavailableError`, and `isStorageWorkerStartError` is false for it. So the app's `isStorageWorkerFailure` checks no longer catch it (`apps/expo/lib/outbox-context.tsx:26`, `apps/expo/lib/use-replicated-products.ts:241`).
+  - **What changes:** in `@tallyui/storage-sqlite` 3.0.0, a Safari private window is a `StorageUnavailableError`, and `isStorageWorkerStartError` is false for it. So the app's calls to `@tallyui/database`'s `isStorageWorkerFailure` no longer catch it (`apps/expo/lib/outbox-context.tsx:26`, `apps/expo/lib/use-replicated-products.ts:241`).
   - **What the bump does:** it adopts the storage-sqlite README's three-way switch ("Recognising a failed start") with these exact texts:
     - `isStorageUnavailableError` → "This till can't save sales in a private window." with the detail "Open it in a normal Safari window (or another browser) and sign in again. Nothing has been lost: no sale was taken here."
     - `isStorageHeldError` → "This till is already open in another tab. Close the other tab, then reload this one."
