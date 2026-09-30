@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { POS_CONNECTOR_ID } from './pos-connector';
-import { resolveCapabilities, type ServerCapabilities } from '@tallyui/core';
+import { parseTaxRounding, resolveCapabilities, type ServerCapabilities } from '@tallyui/core';
 import { exposeE2eHook } from './e2e-debug';
 import { clearProductCache } from './product-cache';
 import {
@@ -79,7 +79,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const current = currentSession.current;
     const capabilities = resolveCapabilities(fresh, current?.capabilities);
     // Unchanged keeps the session's identity, so nothing that depends on it re-runs.
-    if (!current || capabilities?.orderCreate === current.capabilities?.orderCreate) return;
+    if (!current || (capabilities?.orderCreate === current.capabilities?.orderCreate &&
+      capabilities?.register === current.capabilities?.register &&
+      JSON.stringify(parseTaxRounding(capabilities?.taxRounding)) === JSON.stringify(parseTaxRounding(current.capabilities?.taxRounding)))) return;
     const next = { ...current, capabilities };
     saveSession(defaultStorage(), next);
     currentSession.current = next;

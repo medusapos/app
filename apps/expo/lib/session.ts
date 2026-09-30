@@ -1,4 +1,4 @@
-import { SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
+import { parseTaxRounding, SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
 import { medusaAdminUserAuth } from '@tallyui/connector-medusa';
 import { authHeaders } from './pos-connector';
 
@@ -127,7 +127,11 @@ export function loadSession(storage: SessionStorage | null): Session | null {
       name: typeof value.name === 'string' ? value.name : undefined,
       tokenExpiresAt: typeof value.tokenExpiresAt === 'number' ? value.tokenExpiresAt : undefined,
       capabilities: isRecord(value.capabilities) && typeof value.capabilities.orderCreate === 'number'
-        ? { orderCreate: value.capabilities.orderCreate } : undefined };
+        ? { orderCreate: value.capabilities.orderCreate,
+          ...(typeof value.capabilities.register === 'number' && Number.isSafeInteger(value.capabilities.register) && value.capabilities.register >= 1
+            ? { register: value.capabilities.register } : {}),
+          ...(parseTaxRounding(value.capabilities.taxRounding) ? { taxRounding: parseTaxRounding(value.capabilities.taxRounding) } : {}),
+        } : undefined };
   } catch { return null; }
 }
 

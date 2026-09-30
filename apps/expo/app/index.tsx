@@ -196,7 +196,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // `session`: complete() stamps the sale with the register session (ADR 0017). The Cart's tender start
   // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
   // close during the tender still reaches the stamp, which then makes the sale late.
-  const { register } = useRegister();
+  const { register, registerOutbox } = useRegister();
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
     isStored, session: register.saleSession });
   const { sale: cartSale, refused } = useGatedSale(sale);
@@ -278,7 +278,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
-    <SyncStatus state={outboxState} pullNotice={pullNotice} />
+    <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>

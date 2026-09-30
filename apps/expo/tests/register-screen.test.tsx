@@ -126,7 +126,7 @@ function SessionProbe() {
 }
 async function mount() {
   await act(async () => {
-    render(<SessionProvider><SessionProbe /><RegisterProvider orders={store.orders}><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>);
+    render(<SessionProvider><SessionProbe /><RegisterProvider orders={store.orders} deviceId="test-device"><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>);
   });
 }
 const sessions = () => registerCollections(store.orders).sessions;
@@ -809,7 +809,7 @@ describe('the tender gate', () => {
     await openTestRegister(store.orders, baseUrl);
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: null });
     const tree = (orders: typeof store.orders | null) =>
-      <SessionProvider><RegisterProvider orders={orders}><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>;
+      <SessionProvider><RegisterProvider orders={orders} deviceId="test-device"><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>;
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(tree(null)); });
     fireEvent.click(button('Shirt'));

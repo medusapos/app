@@ -171,3 +171,11 @@ movements and closures are local-only collections, never replicated.
   "Storage stopped" prompt; before, a completing sale showed "Saving is
   slow…" first. E2e `storage.spec.ts` still proves that note: it holds the
   sale's insert past both reads, then kills the worker and releases it.
+
+## 2026-10: register commands sync
+
+The till queues register facts as `register_commands` and sends them with
+`useRegisterOutbox` when `/info` advertises `register` ≥ 1. Without that
+capability, nothing is queued or sent and the register stays local.
+There is exactly one register outbox, in `RegisterProvider`.
+`SyncStatus` counts waiting till updates.

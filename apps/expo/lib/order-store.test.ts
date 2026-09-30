@@ -567,6 +567,16 @@ describe('register collections in the order store', () => {
   const opened = { registerId: 'register-1', expectedFloatMinor: null, countedFloatMinor: 10000, openedBy: 'cashier@store.test',
     businessDay: { year: 2026, month: 9, day: 28 } };
 
+  it('adds register_commands (schema version 0) beside the register collections', async () => {
+    const store = await openOrderStore('https://register-commands.test');
+    try {
+      const { commands, sessions } = registerCollections(store.orders);
+      expect(commands.name).toBe('register_commands');
+      expect(commands.schema.version).toBe(0);
+      expect(commands.database).toBe(sessions.database);
+    } finally { await store.close(); }
+  });
+
   it('open with the order store, and keep their sessions, movements and binding over a close and reopen', async () => {
     const url = 'https://registers.test';
     const first = await openOrderStore(url);
