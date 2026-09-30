@@ -29,7 +29,10 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
     // Only orders --apply marked: an order tally-ledger-resolve marked itself has no tally_rejected_by.
     const orders: Order[] = await knex('order').select(columns).whereNull('deleted_at')
       .whereRaw("metadata->>'tally_rejected_by' = 'backfill'").orderBy('id')
+    const commands: { id: string; order_id: string }[] = await knex('tally_command').where({ status: 'rejected' }).whereNull('deleted_at')
+      .select('id', knex.raw("result->'error'->'data'->>'orderId' as order_id"))
     for (const order of orders) order.sessions = sessionsOf(order)
+    for (const order of orders) order.command = commands.find(row => row.order_id === order.id)?.id ?? 'none'
     const before = await figuresOf(container, orders)
     for (const { id } of orders) await service.updateOrders(id, { metadata: { tally_rejected: '', tally_rejected_by: '' } })
     report(logger, orders, before, await figuresOf(container, orders))
@@ -67,11 +70,16 @@ export default async function tallyLedgerBackfillRejected({ container, args }: E
     after = await figuresOf(container, orders)
   } else {
     // As if the marks were written: each marked order's payments and sale leave the figures of each session that counts it.
-    after = new Map([...before].map(([session, figures]) => [session, figures && { ...figures, expected: { ...figures.expected } }]))
+    after = new Map([...before].map(([session, figures]) => [session, figures &&
+      { ...figures, expected: { ...figures.expected }, variance: figures.variance && { ...figures.variance } }]))
     for (const order of orders) for (const figures of order.sessions.map(id => after.get(id))) {
       if (!figures) continue
       figures.salesCount--
-      for (const [method, amount] of Object.entries(amounts(order.payments))) figures.expected[method] = (figures.expected[method] ?? 0) - amount
+      for (const [method, amount] of Object.entries(amounts(order.payments))) {
+        figures.expected[method] = (figures.expected[method] ?? 0) - amount
+        // A variance is counted less expected, for the methods counted.
+        if (figures.variance?.[method] !== undefined) figures.variance[method] += amount
+      }
     }
   }
   report(logger, orders, before, after)
@@ -105,8 +113,9 @@ function report(logger: { info(line: string): void }, orders: Order[], before: M
     if (!b || !a) { logger.info(`${PREFIX}: session ${id} (not found): orders ${ids}`); continue }
     const methods = [...new Set(['cash', ...Object.keys(b.expected).sort(), ...Object.keys(a.expected).sort()])]
     const expected = methods.map(method => `${method} ${b.expected[method] ?? 0} -> ${a.expected[method] ?? 0}`).join(', ')
+    const variance = Object.keys(b.variance ?? {}).sort().map(method => `${method} ${b.variance?.[method]} -> ${a.variance?.[method] ?? 0}`)
     logger.info(`${PREFIX}: session ${id} (${b.variance ? 'closed' : 'open'}): expected ${expected}; ` +
-      `salesCount ${b.salesCount} -> ${a.salesCount}; orders ${ids}`)
+      `salesCount ${b.salesCount} -> ${a.salesCount}; ${b.variance ? `variance ${variance.join(', ')}; ` : ''}orders ${ids}`)
   }
   const loose = orders.filter(order => !order.sessions.length).map(order => order.id)
   if (loose.length) logger.info(`${PREFIX}: no session: orders ${loose.join(', ')}`)

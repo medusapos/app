@@ -1346,7 +1346,8 @@ medusaIntegrationTestRunner({
         const sessionId = await openSession()
         const { sale, orderId } = await rejectUnmarked(sessionSale(sessionId))
         await closeSession(sessionId, sale)
-        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; orders ${orderId}`
+        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; ` +
+          `variance cash -1000 -> 0; orders ${orderId}`
         expect((await backfill()).slice(1, -1)).toEqual([line])
         expect((await backfill('--apply')).slice(1, -1)).toEqual([line])
       })
@@ -1364,7 +1365,8 @@ medusaIntegrationTestRunner({
         const sessionId = await openSession()
         const { sale, orderId } = await rejectUnmarked()
         await closeSession(sessionId, sale)
-        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; orders ${orderId}`
+        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; ` +
+          `variance cash -1000 -> 0; orders ${orderId}`
         expect(await backfill()).toEqual([`tally_ledger_backfill_rejected: command ${sale.id}, order ${orderId}, session none: cash 1000`,
           line, summary(' (dry run): would mark 1')])
         expect((await backfill('--apply')).slice(1, -1)).toEqual([line])
@@ -1372,7 +1374,7 @@ medusaIntegrationTestRunner({
 
       it('tally-ledger-backfill-rejected --undo unmarks only what --apply marked, and the session figures go back', async () => {
         const sessionId = await openSession()
-        const { orderId } = await rejectUnmarked(sessionSale(sessionId))
+        const { sale, orderId } = await rejectUnmarked(sessionSale(sessionId))
         // Rejected after tally-ledger-resolve marked orders itself: no tally_rejected_by.
         const { sale: other, orderId: resolved } = await parkLiveOrder(sessionSale(sessionId))
         await resolve(other.id, 'reject')
@@ -1380,11 +1382,23 @@ medusaIntegrationTestRunner({
         const resolvedRow = await orderRow(resolved)
         expect(resolvedRow.metadata).toMatchObject({ tally_rejected: true })
         expect(await backfill('--undo')).toEqual([
+          `tally_ledger_backfill_rejected: command ${sale.id}, order ${orderId}, session ${sessionId}: cash 1000`,
           `tally_ledger_backfill_rejected: session ${sessionId} (open): expected cash 100 -> 1100; salesCount 0 -> 1; orders ${orderId}`,
           'tally_ledger_backfill_rejected (undo): unmarked 1 order(s)'])
         expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected')
         expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected_by')
         expect(await orderRow(resolved)).toEqual(resolvedRow)
+      })
+
+      it('tally-ledger-resolve reject clears a tally_rejected_by it finds, so --undo leaves the order marked', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        await container.resolve(Modules.ORDER).updateOrders(orderId, { metadata: { tally_rejected_by: 'backfill' } })
+        expect((await orderRow(orderId)).metadata).toMatchObject({ tally_rejected_by: 'backfill' })
+        await resolve(sale.id, 'reject')
+        expect((await orderRow(orderId)).metadata).toMatchObject({ tally_rejected: true })
+        expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected_by')
+        await backfill('--undo')
+        expect((await orderRow(orderId)).metadata).toMatchObject({ tally_rejected: true })
       })
 
       it('tally-ledger-backfill-rejected skips a rejection that names no order and one whose order is missing', async () => {
