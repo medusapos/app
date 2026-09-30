@@ -9,6 +9,7 @@
     "build": "turbo build",
     "test": "vitest run",
     "e2e": "playwright test -c e2e/playwright.config.ts",
+    "e2e:carryover": "playwright test -c e2e/carryover/playwright.config.ts",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"

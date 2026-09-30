@@ -9,6 +9,7 @@ const appLocalUrl = `http://localhost:${E2E_RUN.appPort}`;
 
 export default defineConfig({
   testDir: '.',
+  testIgnore: 'carryover/**',
   globalTeardown: appUrl ? undefined : './global-teardown.ts',
   workers: 1,
   // The hosted demo catalogue (~2,000 products) takes ~47 s to sync first and seconds per search, so 90 s can end a hosted test before its sale syncs.

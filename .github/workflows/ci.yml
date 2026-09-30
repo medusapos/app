@@ -1,6 +1,7 @@
 name: CI
 
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches: [main]
@@ -103,6 +104,91 @@ jobs:
         if: failure()
         with:
           name: e2e-failure
+          path: |
+            app/test-results
+            app/playwright-report
+
+
+  carryover-web:
+    name: Carry-over (web)
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          path: app
+          fetch-depth: 0
+      - uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3
+        id: changes
+        with:
+          working-directory: app
+          token: ''
+          filters: |
+            dependencies:
+              - 'package.json'
+              - 'apps/expo/package.json'
+              - 'packages/medusa-plugin/package.json'
+              - 'pnpm-lock.yaml'
+              - 'packages/medusa-plugin/package-lock.json'
+      - uses: pnpm/action-setup@v4
+        if: steps.changes.outputs.dependencies == 'true' || github.event_name == 'workflow_dispatch'
+        with:
+          package_json_file: app/package.json
+      - uses: actions/setup-node@v5
+        if: steps.changes.outputs.dependencies == 'true' || github.event_name == 'workflow_dispatch'
+        id: setup-node
+        with:
+          node-version-file: app/apps/expo/package.json
+          package-manager-cache: false
+      - id: release
+        if: steps.changes.outputs.dependencies == 'true' || github.event_name == 'workflow_dispatch'
+        run: echo "tag=$(node e2e/carryover/released-tag.mjs)" >> "$GITHUB_OUTPUT"
+        working-directory: app
+      - uses: actions/checkout@v5
+        if: steps.release.outputs.tag != ''
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+          path: released
+      - name: Install licensed dependencies and check the store
+        if: steps.release.outputs.tag != ''
+        working-directory: app
+        env:
+          RXDB_PREMIUM: ${{ secrets.RXDB_PREMIUM }}
+          SETUP_NODE_CACHE_HIT: ${{ steps.setup-node.outputs.cache-hit }}
+        run: |
+          bash scripts/pnpm-install-filtered.sh --frozen-lockfile
+          (cd ../released && bash ../app/scripts/pnpm-install-filtered.sh --frozen-lockfile)
+          python3 scripts/assert-no-premium-side-effects.py
+      - name: Prepare and run carry-over
+        if: steps.release.outputs.tag != ''
+        working-directory: app
+        env:
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+          CI: 'true'
+          E2E_RELEASED_SRC: ${{ github.workspace }}/released
+        run: |
+          (cd packages/medusa-plugin && npm ci)
+          (cd dev/medusa-store && npm ci)
+          pnpm exec playwright install --with-deps chromium
+          pnpm e2e:carryover
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: carryover-web-failure
           path: |
             app/test-results
             app/playwright-report
