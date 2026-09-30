@@ -12,7 +12,7 @@ const parseCommandsJson = json({ limit: MAX_BODY_BYTES })
 const commandsBody = (req: MedusaRequest, res: MedusaResponse, next: MedusaNextFunction) =>
   parseCommandsJson(req, res, (err?: { type?: string }) => {
     if (err?.type !== 'entity.too.large') return next(err)
-    res.status(413).json({ code: 'body_too_large', maxBytes: MAX_BODY_BYTES, message: 'Request body over 1 MB' })
+    res.status(413).json({ code: 'body_too_large', maxBytes: MAX_BODY_BYTES, message: `Request body over ${MAX_BODY_BYTES} bytes` })
   })
 
 const tallyCors = (method: 'GET' | 'POST') => (req: MedusaRequest, res: MedusaResponse, next: MedusaNextFunction) => {

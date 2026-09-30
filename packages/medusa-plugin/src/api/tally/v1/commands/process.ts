@@ -15,7 +15,7 @@ export type BatchOutcome =
 
 // Most commands one batch may carry; a till splits a larger batch (shared with Vendure POS).
 export const MAX_COMMANDS = 50
-// Largest JSON body the endpoint parses: 50 commands of up to ~20 kB each.
+// Largest JSON body the endpoint parses: MAX_COMMANDS commands of up to ~20 kB each.
 export const MAX_BODY_BYTES = 1024 * 1024
 
 /** Validates every envelope before any command is claimed. */

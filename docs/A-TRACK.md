@@ -106,7 +106,7 @@ Import them; do not redeclare them.
 
 **Transport**
 - `POST /tally/v1/commands`, header `X-Tally-Protocol: 1`, body
-  `{ commands: CommandEnvelope[] }`. Maximum 50 per request; the client
+  `{ commands: CommandEnvelope[] }`. Maximum `MAX_COMMANDS` per request (in `packages/medusa-plugin/src/api/tally/v1/commands/process.ts`); the client
   sends at most 10.
 - Response `200 { results: CommandResult[] }`, in the same order.
 - Retryable by the client: network errors, `5xx`, `429`, and

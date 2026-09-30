@@ -11,6 +11,7 @@ import {
 } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import { MAX_BODY_BYTES, MAX_COMMANDS } from '../../src/api/tally/v1/commands/process'
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
@@ -1581,13 +1582,46 @@ medusaIntegrationTestRunner({
       })))
     })
 
-    it('rejects a JSON body over 1 MB with 413', async () => {
+    // A sale padded so that the JSON body `post` sends for it alone is exactly `bytes` long.
+    function paddedSale(bytes: number) {
       const sale = command()
-      const oversized = { ...sale, payload: { ...sale.payload, padding: 'x'.repeat(1024 * 1024) } }
+      const padded = (padding: string) => ({ ...sale, payload: { ...sale.payload, padding } })
+      const sized = padded('x'.repeat(bytes - Buffer.byteLength(JSON.stringify({ commands: [padded('')] }))))
+      expect(Buffer.byteLength(JSON.stringify({ commands: [sized] }))).toBe(bytes)
+      return sized
+    }
+
+    it('rejects a JSON body over MAX_BODY_BYTES with 413', async () => {
+      const sale = command()
+      const oversized = { ...sale, payload: { ...sale.payload, padding: 'x'.repeat(MAX_BODY_BYTES) } }
       const response = await post([oversized])
       expect(response.status).toBe(413)
-      expect(response.data).toEqual({ code: 'body_too_large', maxBytes: 1048576, message: expect.any(String) })
+      expect(response.data).toEqual({ code: 'body_too_large', maxBytes: MAX_BODY_BYTES,
+        message: `Request body over ${MAX_BODY_BYTES} bytes` })
       expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
+    })
+
+    it('accepts and applies a body of exactly MAX_BODY_BYTES', async () => {
+      const response = await post([paddedSale(MAX_BODY_BYTES)])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0].status).toBe('applied')
+    })
+
+    it('refuses a body of MAX_BODY_BYTES + 1 as body_too_large', async () => {
+      const sale = paddedSale(MAX_BODY_BYTES + 1)
+      const response = await post([sale])
+      expect(response.status).toBe(413)
+      expect(response.data).toEqual({ code: 'body_too_large', maxBytes: MAX_BODY_BYTES,
+        message: `Request body over ${MAX_BODY_BYTES} bytes` })
+      expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
+    })
+
+    it('a body over both limits answers body_too_large, not batch_too_large', async () => {
+      const sales = [paddedSale(MAX_BODY_BYTES), ...Array.from({ length: MAX_COMMANDS }, () => command())]
+      expect(Buffer.byteLength(JSON.stringify({ commands: sales }))).toBeGreaterThan(MAX_BODY_BYTES)
+      const response = await post(sales)
+      expect(response.status).toBe(413)
+      expect(response.data.code).toBe('body_too_large')
     })
 
     it('answers malformed JSON with Medusa\'s 400, not a 413', async () => {

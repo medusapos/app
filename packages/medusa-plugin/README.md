@@ -42,8 +42,9 @@ Sign in as a Medusa admin user through `/auth/user/emailpass` and send its JWT a
 `Authorization: Bearer <jwt>` (an authenticated admin session is also accepted).
 
 Send `POST /tally/v1/commands` with `X-Tally-Protocol: 1` and JSON
-`{ commands: CommandEnvelope[] }` containing 1–50 commands: `order.create` (version 1, 2 or 3)
+`{ commands: CommandEnvelope[] }` containing 1 to `MAX_COMMANDS` commands: `order.create` (version 1, 2 or 3)
 or the five register commands (version 1; see [Registers](#registers)).
+`MAX_COMMANDS` and `MAX_BODY_BYTES` (`src/api/tally/v1/commands/process.ts`) are the contract's limits. The endpoint parses only `application/json`; a body of any other content type isn't read and gets a `400`.
 Every envelope includes `id` (1–64 characters), `type` (one of the six command types), `version`, object `payload`, string `createdAt`
 and `deviceId`, and a safe integer `attempt` of at least 1.
 A `200 { results: CommandResult[] }` returns one result per command in the same order:
@@ -59,7 +60,8 @@ An unsupported version is a per-command `unsupported_version` with `error.data` 
 
 - `400`: unsupported protocol (`{ code: 'unsupported_protocol' }`) or invalid envelope.
 - `401`: no valid admin authentication.
-- `413 { code: 'batch_too_large', maxCommands: 50, message }`: more than 50 commands; `413 { code: 'body_too_large', maxBytes: 1048576, message }`: a JSON body over 1 MB. Nothing is claimed; split the batch and resend.
+- `413 { code: 'batch_too_large', maxCommands: MAX_COMMANDS, message }`: more than `MAX_COMMANDS` commands; `413 { code: 'body_too_large', maxBytes: MAX_BODY_BYTES, message }`: a JSON body over `MAX_BODY_BYTES` bytes. Nothing is claimed; split the batch and resend.
+  The parser reads and discards the whole oversized upload before it answers, so put a proxy body limit in front of the store to stop large uploads early.
 - `409 { code: 'in_progress', id }`: this command is already being processed.
 - `503 { code: 'transient', id, message }`: execution failed; its claim is released for retry.
 
