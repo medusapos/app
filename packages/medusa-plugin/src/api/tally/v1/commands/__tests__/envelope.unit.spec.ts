@@ -28,7 +28,9 @@ describe('validateBatch', () => {
   })
 
   it('rejects more than 50 commands', () => {
-    expect(validateBatch({ commands: Array(51).fill(command) })).toMatchObject({ ok: false, status: 413 })
+    expect(validateBatch({ commands: Array(51).fill(command) })).toEqual({
+      ok: false, status: 413, code: 'batch_too_large', maxCommands: 50, message: expect.any(String),
+    })
   })
 
   it.each([null, [], 'batch', 1, {}, { commands: {} }, { commands: [] }])('rejects invalid body %p', body => {

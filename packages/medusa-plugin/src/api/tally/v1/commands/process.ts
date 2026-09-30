@@ -13,16 +13,23 @@ export type BatchOutcome =
   | { status: 409; body: { code: 'in_progress'; id: string } }
   | { status: 503; body: { code: 'transient'; id: string; message: string } }
 
+// Most commands one batch may carry; a till splits a larger batch (shared with Vendure POS).
+export const MAX_COMMANDS = 50
+// Largest JSON body the endpoint parses: MAX_COMMANDS commands of up to ~20 kB each.
+export const MAX_BODY_BYTES = 1024 * 1024
+
 /** Validates every envelope before any command is claimed. */
 export function validateBatch(body: unknown):
   | { ok: true; commands: CommandEnvelope<unknown>[] }
-  | { ok: false; status: 400 | 413; message: string } {
+  | { ok: false; status: 400; message: string }
+  | { ok: false; status: 413; code: 'batch_too_large'; maxCommands: number; message: string } {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) {
     return { ok: false, status: 400, message: 'Expected body object with commands array' }
   }
   const { commands } = body as Record<string, unknown>
   if (!Array.isArray(commands)) return { ok: false, status: 400, message: 'Expected commands array' }
-  if (commands.length > 50) return { ok: false, status: 413, message: 'At most 50 commands are allowed' }
+  if (commands.length > MAX_COMMANDS) return { ok: false, status: 413, code: 'batch_too_large', maxCommands: MAX_COMMANDS,
+    message: `At most ${MAX_COMMANDS} commands are allowed` }
   if (commands.length === 0) return { ok: false, status: 400, message: 'commands must not be empty' }
   for (const [index, command] of commands.entries()) {
     if (typeof command !== 'object' || command === null || Array.isArray(command)) {
