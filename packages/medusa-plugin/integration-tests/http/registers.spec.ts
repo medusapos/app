@@ -254,7 +254,10 @@ medusaIntegrationTestRunner({
     it('/info lists order.create 1, 2, 3 and register 1', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
-      expect(response.data).toEqual({ contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] } })
+      expect(response.data).toEqual({
+        contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] },
+        taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
+      })
     })
 
     it('records and voids a movement and replays every result through the ledger', async () => {
