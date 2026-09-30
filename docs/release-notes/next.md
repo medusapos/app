@@ -11,13 +11,13 @@ This update changes how each till stores its sales, and there is no going back.
 
 ## What's new for your store
 
-- **Registers are checked by the server.** When a till opens, counts and closes a register, your Medusa store records it. The store works out what the drawer should hold from the sales it received, and you can compare that with the till's own count.
+- **Registers are recorded by the server.** When a till opens, counts and closes a register, your Medusa store records it and works out what the drawer should hold from the sales it received. The till's own figures (expected, counted and variance per payment method) are on its "Last closure" screen, under Register. The app doesn't show the store's figure yet; it's available from the plugin's register endpoint, `GET /tally/v1/registers/{id}`.
 - **Sales that need an admin are held, not lost.** If a sale can't be finished automatically (for example, its order was changed by hand in Medusa), it waits for an admin. The admin then completes it or rejects it with one command.
 - **Rejected sales don't count in the day's figures.** A sale an admin rejects no longer counts in the register's expected cash. A one-off step fixes sales rejected before this update. It first shows you exactly which closed days would change, and it can be undone.
 - **Stock stays right when a sale fails.** If a sale fails partway, the stock it took is put back exactly once.
-- **The till's stock location must belong to your sales channel.** A sale can no longer take stock from a location that isn't linked to your sales channel. The till tells you it's a store setup problem; link the location to the channel and the till's retry goes through.
-- **Resent sales answer the same way.** A sale the store already recorded always answers its recorded result when a till sends it again. That includes after a server update, and when two tills send the same sale.
-- **Oversized batches get a clear answer.** A batch with too many sales, or one too large, is refused with the limit, so the till can split it and resend.
+- **The till's stock location must belong to your sales channel.** A sale can no longer take stock from a location that isn't linked to your sales channel. The sale stays on the till's Orders screen as needing attention, with the store's message saying it's a store setup problem. Link the location to the channel in Medusa, then tap Retry on that sale and it goes through.
+- **Resent sales answer the same way.** A sale the store already recorded always answers its recorded result when a till sends it again. That includes after a server update, and when a till resends a sale.
+- **Oversized batches get a clear answer.** A batch of more than 50 sales, or one over the size limit, is refused whole, with the limit in the answer. Splitting it and resending in smaller pieces comes in a later version of the till.
 - **Experimental catalogue sync is included but off.** It's the server side of a faster catalogue sync. It stays off unless you turn it on.
 
 ## For developers
