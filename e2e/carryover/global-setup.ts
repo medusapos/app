@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { E2E_RUN } from '../ports';
@@ -42,11 +43,12 @@ export default function globalSetup() {
     writeFileSync(resolve(destination, 'BUILD_REF.json'), JSON.stringify(ref, null, 2) + '\n');
   };
   const released = resolve(root, 'e2e/.tmp/carryover/released');
-  const ref = { tag, commit, backendUrl, rxdb };
+  const dumpFile = resolve(root, 'apps/expo/lib/app-store-dump.ts');
+  const ref = { tag, commit, backendUrl, rxdb, dump: createHash('sha256').update(readFileSync(dumpFile)).digest('hex') };
   const refFile = resolve(released, 'BUILD_REF.json');
   if (!existsSync(refFile) || JSON.stringify(json(refFile)) !== JSON.stringify(ref)) {
     const dump = resolve(src, 'apps/expo/lib/app-store-dump.ts');
-    if (!existsSync(dump)) copyFileSync(resolve(root, 'apps/expo/lib/app-store-dump.ts'), dump);
+    copyFileSync(dumpFile, dump);
     const layout = resolve(src, 'apps/expo/app/_layout.tsx');
     if (!readFileSync(layout, 'utf8').includes("import '../lib/app-store-dump'")) {
       appendFileSync(layout, "\nimport '../lib/app-store-dump';\n");
