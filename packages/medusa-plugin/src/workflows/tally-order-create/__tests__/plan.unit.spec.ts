@@ -1,5 +1,5 @@
 import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
-import { customerWarnings, fulfillmentGroups, planOrderCreate, totalWarnings } from '../plan'
+import { customerWarnings, figuresWarnings, fulfillmentGroups, planOrderCreate, totalWarnings } from '../plan'
 import type { PlanContext } from '../plan'
 import type { OrderCreatePayloadV3 } from '../fiscal-figures'
 
@@ -267,6 +267,34 @@ it('has no warning for equal totals', () => {
 
 it.each([1704, 1706])('warns for server total %s', serverMinor => {
   expect(totalWarnings(1705, serverMinor)).toEqual([{ code: 'total_mismatch', expectedMinor: 1705, serverMinor }])
+})
+
+describe('figures_mismatch (#133)', () => {
+  const till = { subtotalMinor: 840, taxMinor: 160, discountMinor: 100 }
+
+  it('has no warning when subtotal, tax and discount all equal', () => {
+    expect(figuresWarnings(till, { ...till })).toEqual([])
+  })
+
+  it('lists each differing field once, in the order subtotalMinor, taxMinor, discountMinor, with the till and server values', () => {
+    expect(figuresWarnings(till, { subtotalMinor: 841, taxMinor: 159, discountMinor: 99 })).toEqual([
+      { code: 'figures_mismatch', fields: [
+        { field: 'subtotalMinor', tillMinor: 840, serverMinor: 841 },
+        { field: 'taxMinor', tillMinor: 160, serverMinor: 159 },
+        { field: 'discountMinor', tillMinor: 100, serverMinor: 99 },
+      ] },
+    ])
+  })
+
+  it('leaves discountMinor out when no server discount is passed, even if the till sent one (v1–v3)', () => {
+    expect(figuresWarnings(till, { subtotalMinor: 840, taxMinor: 160 })).toEqual([])
+  })
+
+  it.each([[840, 841], [841, 840]])('a one-unit difference is a mismatch: till %i, server %i', (tillMinor, serverMinor) => {
+    expect(figuresWarnings({ ...till, subtotalMinor: tillMinor }, { ...till, subtotalMinor: serverMinor })).toEqual([
+      { code: 'figures_mismatch', fields: [{ field: 'subtotalMinor', tillMinor, serverMinor }] },
+    ])
+  })
 })
 
 describe('version 2 discounts (ADR-062)', () => {

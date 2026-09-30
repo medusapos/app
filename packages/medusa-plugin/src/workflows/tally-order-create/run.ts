@@ -4,7 +4,7 @@ import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyu
 import { escapeLike, normaliseCustomerEmail, pickCustomer } from './customer-email'
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
-import { customerWarnings, planOrderCreate, totalWarnings } from './plan'
+import { customerWarnings, figuresWarnings, planOrderCreate, totalWarnings } from './plan'
 import { resumeOrderCreate } from './resume'
 import { mergeStockTopUps, planStockTopUp } from './stock'
 import { StoreConfigurationError } from './store-configuration-error'
@@ -184,7 +184,7 @@ export async function runOrderCreate(
     }
   }
   const { data: [order] } = await query.graph({
-    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'metadata', 'customer_id'], filters: { id: orderId },
+    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'raw_tax_total', 'metadata', 'customer_id'], filters: { id: orderId },
   })
   if (order.metadata?.tally_stock_topups) {
     const topUps = order.metadata.tally_stock_topups as StockTopUp[]
@@ -200,8 +200,13 @@ export async function runOrderCreate(
     })
   }
   const serverMinor = majorToMinor(order.raw_total.value, currencyDecimals(payload.currency))
+  const serverTax = majorToMinor(order.raw_tax_total.value, currencyDecimals(payload.currency))
+  const serverSubtotal = serverMinor - serverTax
   const tillCustomerId = typeof order.metadata?.tally_customer_id === 'string' ? order.metadata.tally_customer_id : undefined
-  const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings]
+  const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...(command.version >= 3 ? figuresWarnings(
+    { subtotalMinor: payload.subtotalMinor, taxMinor: payload.taxMinor, discountMinor: payload.discountMinor ?? 0 },
+    { subtotalMinor: serverSubtotal, taxMinor: serverTax }
+  ) : []), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings]
   return {
     id: command.id, status: 'applied',
     serverRefs: { orderId: order.id, displayId: String(order.display_id), totalMinor: serverMinor },

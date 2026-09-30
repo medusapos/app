@@ -1919,5 +1919,21 @@ medusaIntegrationTestRunner({
       expect(response.data.results[0]).toEqual({ id: sale.id, status: 'rejected', error: { code: 'invalid_payload', message } })
       expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(0)
     })
+
+    it('a figures_mismatch result is stored and replays as duplicate with the same warnings', async () => {
+      const sale = { ...command({ subtotalMinor: 841, taxMinor: 159 }), version: 3 }
+      const response = await post([sale])
+      expect(response.status).toBe(200)
+      const result = response.data.results[0]
+      expect(result.status).toBe('applied')
+      expect(result.warnings).toEqual([{ code: 'figures_mismatch', fields: [
+        { field: 'subtotalMinor', tillMinor: 841, serverMinor: 840 },
+        { field: 'taxMinor', tillMinor: 159, serverMinor: 160 },
+      ] }])
+      expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result })
+      const replay = await post([sale])
+      expect(replay.status).toBe(200)
+      expect(replay.data.results).toEqual([{ ...result, status: 'duplicate' }])
+    })
   },
 })
