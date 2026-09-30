@@ -15,13 +15,24 @@ Work through this before tagging a release of the app or the plugin. An item tha
   - Fixes go forward, never back.
   - The release notes for the store owner say this in plain words (see `release-notes/next.md`).
 - [ ] **Carry-over test:** the bump PR for TallyUI 3.0.0 carries one for every collection the app owns (`pos_orders`, `register_sessions`, `cash_movements`, `closures`, and the parked-sale drafts). The released build writes the documents, the new build opens the store, and whole documents are compared (issue #128).
-- [ ] **The 3.0.0 bump and the pull notices (TallyUI/tallyui#261) ship in one PR, never apart** (Front desk ruling, 2026-09-30).
+- [ ] **The 3.0.0 bump, the pull notices (TallyUI/tallyui#261) and the connector factory (TallyUI/tallyui#307) ship in one PR, never apart** (Front desk ruling, 2026-09-30).
   - **Why together:** from 3.0.0, a product pull that fails with 401 no longer reaches the replication state's `error$`. Today the app signs the till out from that `error$` path (`apps/expo/lib/use-replicated-products.ts`). A bump without the notice wiring would leave an expired till's products silently stale, and the product pull would no longer sign the till out. That is a regression. A 401 on a sale send is the outbox's, and is unaffected.
   - **The wiring:** the app takes `@tallyui/*` only from published npm pins. The wiring goes in the bump PR itself: a bump PR without it does not merge. It needs three changes:
     - wire the replication state's `notice$` into SyncStatus's pull notice;
     - on an `unauthorized` notice, call the existing `onUnauthorized()`, so the till signs out the same way the old 401 did (Front desk ruling, 2026-09-30);
     - call `resume()` after a successful sign-in, so a pull stopped by an expired session starts again.
   - **Source:** the notices come from TallyUI/tallyui#259.
+  - **The connector factory (TallyUI/tallyui#307, a gate before 3.0.0), also in the same bump PR:**
+    - **Why:** the Medusa connector's reconcile feed is a module-level singleton. After a store switch in one runtime (sign out of A, sign into B), A's queued tombstones and refetches reach B's collection.
+    - **The change:** build the connector with the new factory (`createMedusaConnector(options?)`) anew on each sign-in or store change, one instance per store session. Today the app holds one module-level connector: `apps/expo/lib/pos-connector.ts:3` (`posConnector = medusaAdminUserConnector`), used at `apps/expo/app/index.tsx:33` and `lib/session.ts:51`, with `medusaConnector.id` at `lib/session-context.tsx:42`. Stop using the static `medusaConnector` export: it is deprecated, warns in dev when one feed serves two replications, and goes in 4.0.
+    - **The rule:** the bump, the pull notices and the factory ship in one PR, never apart.
+- [ ] **Storage start failures (TallyUI/tallyui#304, from #293), in the bump PR.**
+  - **What changes:** in `@tallyui/storage-sqlite` 3.0.0, a Safari private window is a `StorageUnavailableError`, and `isStorageWorkerStartError` is false for it. So the app's `isStorageWorkerFailure` checks no longer catch it (`apps/expo/lib/outbox-context.tsx:26`, `apps/expo/lib/use-replicated-products.ts:241`).
+  - **What the bump does:** it adopts the storage-sqlite README's three-way switch ("Recognising a failed start") with these exact texts:
+    - `isStorageUnavailableError` → "This till can't save sales in a private window." with the detail "Open it in a normal Safari window (or another browser) and sign in again. Nothing has been lost: no sale was taken here."
+    - `isStorageHeldError` → "This till is already open in another tab. Close the other tab, then reload this one."
+    - `isRxdbRemoteVersionMismatch` (`@tallyui/core`) → "This till needs a quick reload to finish updating. Reload the page."
+    - anything else → the app's generic storage failure, as today.
 - [ ] **Two price runners on one collection (found in the review of TallyUI/tallyui#284, still open):**
   - **The problem:** `apps/expo/lib/use-replicated-products.ts` starts two `startFingerprintReconcile` runners on `db.products`: the calculated-price runner (`:188`), then the base-price runner (`:202`). Both use the default `stateId`. **If #284 ships as reviewed**, they share one persisted gate, and the second keeps its gate in memory and runs about an hour after every start.
   - **The fix lands in the bump PR for the first `@tallyui/*` version that carries #284:** pass `stateId: 'calculated-prices'` to the calculated-price runner (`:188`), as #284's docs example does. The base-price runner keeps the default. Re-check #284's final docs then.
