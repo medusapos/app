@@ -154,6 +154,31 @@ uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `n
 run `reject` again, not `apply`: an `apply` would leave the cancelled order unmarked, and it would count next to the new one.
 Cancelling the order by hand is fine: `reject` still takes back the plugin's top-up. See the ADR 0003 amendment of 2026-09-29.
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
+**Backfill for rejects made before the marking.** A store needs it only if an admin ran `tally-ledger-resolve reject`
+before the release that added the `tally_rejected` marker (#121): those cancelled orders still count in register figures.
+The script is manual; nothing runs it automatically. On a real store, plan the run with the store's owner, because it changes
+the figures of sessions that may already be closed. Run the dry run first, from the store's backend directory:
+
+```sh
+npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js
+npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js apply
+npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-backfill-rejected.js undo
+```
+
+It marks only each rejection's own canceled order and warns about one that is not canceled. Without an argument it is a dry run that writes nothing;
+`apply` writes `tally_rejected` and `tally_rejected_by: 'backfill'`, and `undo` removes both from the orders `apply` marked.
+The mode is a plain word, not `--apply`: `medusa exec` refuses a dashed option (`Unknown argument: apply`) and drops one given after `--`.
+Each run logs each order and each affected register session's expected figures and sales count before and after.
+Reading the dry run:
+- one `command …, order …, session …: <method> <amount>` line per order it would mark;
+- one `session … (open|closed): expected … -> …; salesCount … -> …` line per affected session, where a closed session also
+  shows `variance … -> …`, the change an owner will see on that session's report;
+- `skipped: no orderId` lines for rejections it can't tie to an order (never guessed);
+- a final `would mark <n> order(s), skipped <m> (…)`.
+
+`would mark 0` means there's nothing to do. After `apply`, a second dry run says `would mark 0`, and `undo` puts the figures back.
+These commands are the ones `integration-tests/backfill-seed/run.sh` runs in CI against a seeded store (there from the plugin's
+own path rather than `node_modules/…`).
 A new command id for the same live `clientOrderId` copies the original applied result, including its warnings,
 and stores it for duplicate replays; a superseded original copies its applied successor's result.
 A fresh lease or `needs_admin` row answers 503 without storing the new command; a busy sale lock or lost takeover

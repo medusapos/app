@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import fs from 'node:fs'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { WorkflowManager } from '@medusajs/framework/orchestration'
@@ -11,6 +12,8 @@ import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
+import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
+import type TallyRegisterModuleService from '../../src/modules/tally-register/service'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import type { OrderCreatePayloadV3 } from '../../src/workflows/tally-order-create/fiscal-figures'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
@@ -1257,6 +1260,197 @@ medusaIntegrationTestRunner({
           id: sale.id, status: 'applied', serverRefs: expect.objectContaining({ orderId }),
         })]])
         expect(await liveOrders(sale.payload.clientOrderId)).toEqual([expect.objectContaining({ id: orderId, status: 'completed' })])
+      })
+
+      // A reject made before tally-ledger-resolve marked its order: rejected normally, then the marker removed.
+      async function rejectUnmarked(sale = command()) {
+        const { orderId } = await parkLiveOrder(sale)
+        await resolve(sale.id, 'reject')
+        // The order module merges metadata; an empty string deletes the key.
+        await container.resolve(Modules.ORDER).updateOrders(orderId, { metadata: { tally_rejected: '' } })
+        const row = await orderRow(orderId)
+        expect([row.status, row.metadata]).toEqual(['canceled', expect.not.objectContaining({ tally_rejected: expect.anything() })])
+        return { sale, orderId }
+      }
+      function orderRow(id: string) {
+        return container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id }).first()
+      }
+      async function backfill(...args: string[]) {
+        const script = require(`${built}/scripts/tally-ledger-backfill-rejected`) as typeof import('../../src/scripts/tally-ledger-backfill-rejected')
+        const info = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'info')
+        await script.default({ container, args })
+        const lines = info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith('tally_ledger_backfill_rejected'))
+        info.mockRestore()
+        return lines
+      }
+      // A register session with a float of 100, and a version 3 sale in it.
+      async function openSession() {
+        const sessionId = randomUUID()
+        await container.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE).openSession({
+          sessionId, registerId: randomUUID(), openedAt: new Date().toISOString(), countedFloatMinor: 100 })
+        return sessionId
+      }
+      function sessionSale(sessionId: string) {
+        const base = command()
+        // @tallyui/core's envelope type stops at version 2.
+        return { ...base, version: 3, payload: { ...base.payload, sessionId } } as unknown as CommandEnvelope<OrderCreatePayload>
+      }
+      // Closes an openSession session through the endpoint with a closure that lists these orders' clientOrderIds.
+      async function closeSession(sessionId: string, ...sales: CommandEnvelope<OrderCreatePayload>[]) {
+        const session = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_register_session').where({ id: sessionId }).first()
+        const at = new Date().toISOString()
+        const envelope = (type: string, payload: object) => ({ ...command(), type, payload })
+        const response = await post([envelope('register.session.transition', { sessionId, status: 'closed', at, counted: { cash: 100 } }),
+          envelope('register.closure.submit', { closureId: randomUUID(), sessionId, registerId: session.register_id, number: 1,
+            openedAt: session.opened_at, closedAt: at, tillExpected: { cash: 100 }, counted: { cash: 100 }, periodSalesTotalMinor: 0,
+            periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 0, perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0,
+            softwareVersion: '1.0', orderIds: sales.map(sale => sale.payload.clientOrderId), movementIds: [] })])
+        expect([response.status, ...response.data.results.map(result => result.status)]).toEqual([200, 'applied', 'applied'])
+      }
+      const summary = (counts: string, skipped = '0 (already marked 0, not canceled 0, missing 0, no orderId 0)') =>
+        `tally_ledger_backfill_rejected${counts} order(s), skipped ${skipped}`
+
+      it('tally-ledger-backfill-rejected marks an unmarked rejected order, and a second run marks none', async () => {
+        const { sale, orderId } = await rejectUnmarked()
+        expect(await backfill('apply')).toEqual([
+          `tally_ledger_backfill_rejected: command ${sale.id}, order ${orderId}, session none: cash 1000`,
+          `tally_ledger_backfill_rejected: no session: orders ${orderId}`, summary(': marked 1')])
+        expect((await orderRow(orderId)).metadata).toMatchObject({
+          tally_rejected: true, tally_rejected_by: 'backfill', tally_client_id: expect.any(String) })
+        expect(await backfill('apply')).toEqual([summary(': marked 0', '1 (already marked 1, not canceled 0, missing 0, no orderId 0)')])
+      })
+
+      it('tally-ledger-backfill-rejected without apply writes nothing and reports what it would mark', async () => {
+        const sessionId = await openSession()
+        const { sale, orderId } = await rejectUnmarked(sessionSale(sessionId))
+        const row = await orderRow(orderId)
+        expect(await backfill()).toEqual([
+          `tally_ledger_backfill_rejected: command ${sale.id}, order ${orderId}, session ${sessionId}: cash 1000`,
+          `tally_ledger_backfill_rejected: session ${sessionId} (open): expected cash 1100 -> 100; salesCount 1 -> 0; orders ${orderId}`,
+          summary(' (dry run): would mark 1')])
+        expect(await orderRow(orderId)).toEqual(row)
+        await expect(backfill('--aply')).rejects.toThrow('[apply | undo] (no argument: a dry run)')
+      })
+
+      // The mode is a plain word: medusa exec refuses or drops a dashed option, so --apply is never taken for apply.
+      it('tally-ledger-backfill-rejected --apply throws the usage error and writes nothing', async () => {
+        const { orderId } = await rejectUnmarked()
+        const row = await orderRow(orderId)
+        await expect(backfill('--apply')).rejects.toThrow(
+          'Usage: medusa exec tally-ledger-backfill-rejected.js [apply | undo] (no argument: a dry run)')
+        expect(await orderRow(orderId)).toEqual(row)
+      })
+
+      it('tally-ledger-backfill-rejected: the dry run reports the session figures apply then shows', async () => {
+        const sessionId = await openSession()
+        const { orderId } = await rejectUnmarked(sessionSale(sessionId))
+        const sessionLines = (lines: string[]) => lines.filter(line => line.includes(`session ${sessionId} (`))
+        const dry = sessionLines(await backfill())
+        expect(dry).toEqual([
+          `tally_ledger_backfill_rejected: session ${sessionId} (open): expected cash 1100 -> 100; salesCount 1 -> 0; orders ${orderId}`])
+        expect(sessionLines(await backfill('apply'))).toEqual(dry)
+      })
+
+      it('tally-ledger-backfill-rejected: a closed session whose closure lists the order reports what apply shows', async () => {
+        const sessionId = await openSession()
+        const { sale, orderId } = await rejectUnmarked(sessionSale(sessionId))
+        await closeSession(sessionId, sale)
+        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; ` +
+          `variance cash -1000 -> 0; orders ${orderId}`
+        expect((await backfill()).slice(1, -1)).toEqual([line])
+        expect((await backfill('apply')).slice(1, -1)).toEqual([line])
+      })
+
+      it('tally-ledger-backfill-rejected: a closed session whose closure does not list the order is unchanged', async () => {
+        const sessionId = await openSession()
+        const { orderId } = await rejectUnmarked(sessionSale(sessionId))
+        await closeSession(sessionId)
+        const lines = [`tally_ledger_backfill_rejected: no session: orders ${orderId}`]
+        expect((await backfill()).slice(1, -1)).toEqual(lines)
+        expect((await backfill('apply')).slice(1, -1)).toEqual(lines)
+      })
+
+      it('tally-ledger-backfill-rejected: an order sent without sessionId that a closure lists changes that closed session', async () => {
+        const sessionId = await openSession()
+        const { sale, orderId } = await rejectUnmarked()
+        await closeSession(sessionId, sale)
+        const line = `tally_ledger_backfill_rejected: session ${sessionId} (closed): expected cash 1100 -> 100; salesCount 1 -> 0; ` +
+          `variance cash -1000 -> 0; orders ${orderId}`
+        expect(await backfill()).toEqual([`tally_ledger_backfill_rejected: command ${sale.id}, order ${orderId}, session none: cash 1000`,
+          line, summary(' (dry run): would mark 1')])
+        expect((await backfill('apply')).slice(1, -1)).toEqual([line])
+      })
+
+      it('tally-ledger-backfill-rejected undo unmarks only what apply marked, and the session figures go back', async () => {
+        const sessionId = await openSession()
+        const { sale, orderId } = await rejectUnmarked(sessionSale(sessionId))
+        // Rejected after tally-ledger-resolve marked orders itself: no tally_rejected_by.
+        const { sale: other, orderId: resolved } = await parkLiveOrder(sessionSale(sessionId))
+        await resolve(other.id, 'reject')
+        expect((await backfill('apply')).pop()).toBe(summary(': marked 1', '1 (already marked 1, not canceled 0, missing 0, no orderId 0)'))
+        const resolvedRow = await orderRow(resolved)
+        expect(resolvedRow.metadata).toMatchObject({ tally_rejected: true })
+        expect(await backfill('undo')).toEqual([
+          `tally_ledger_backfill_rejected: command ${sale.id}, order ${orderId}, session ${sessionId}: cash 1000`,
+          `tally_ledger_backfill_rejected: session ${sessionId} (open): expected cash 100 -> 1100; salesCount 0 -> 1; orders ${orderId}`,
+          'tally_ledger_backfill_rejected (undo): unmarked 1 order(s)'])
+        expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected')
+        expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected_by')
+        expect(await orderRow(resolved)).toEqual(resolvedRow)
+      })
+
+      it('tally-ledger-resolve reject clears a tally_rejected_by it finds, so undo leaves the order marked', async () => {
+        const { sale, orderId } = await parkLiveOrder()
+        await container.resolve(Modules.ORDER).updateOrders(orderId, { metadata: { tally_rejected_by: 'backfill' } })
+        expect((await orderRow(orderId)).metadata).toMatchObject({ tally_rejected_by: 'backfill' })
+        await resolve(sale.id, 'reject')
+        expect((await orderRow(orderId)).metadata).toMatchObject({ tally_rejected: true })
+        expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected_by')
+        await backfill('undo')
+        expect((await orderRow(orderId)).metadata).toMatchObject({ tally_rejected: true })
+      })
+
+      it('tally-ledger-backfill-rejected skips a rejection that names no order and one whose order is missing', async () => {
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        const { sale: unnamed } = await rejectUnmarked()
+        await knex('tally_command').where({ id: unnamed.id }).update({ result: knex.raw("result #- '{error,data,orderId}'") })
+        const { orderId: gone } = await rejectUnmarked()
+        await knex('order').where({ id: gone }).update({ deleted_at: new Date() })
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        expect(await backfill()).toEqual([
+          summary(' (dry run): would mark 0', '2 (already marked 0, not canceled 0, missing 1, no orderId 1)')])
+        expect(warn).toHaveBeenCalledWith(`tally_ledger_backfill_rejected: skipped: no orderId (command ${unnamed.id})`)
+      })
+
+      it('tally-ledger-backfill-rejected never runs by itself: nothing in src outside scripts names it', () => {
+        const src = path.resolve(__dirname, '../../src')
+        const files = fs.readdirSync(src, { recursive: true, encoding: 'utf8' })
+          .filter(file => !file.startsWith(`scripts${path.sep}`) && fs.statSync(path.join(src, file)).isFile())
+        expect(files.length).toBeGreaterThan(20)
+        expect(files.filter(file => /tally-ledger-backfill-rejected|tallyLedgerBackfillRejected/
+          .test(fs.readFileSync(path.join(src, file), 'utf8')))).toEqual([])
+      })
+
+      it('tally-ledger-backfill-rejected leaves an earlier canceled order of the same sale unmarked', async () => {
+        const first = command()
+        const applied = await post([first])
+        expect(applied.data.results[0].status).toBe('applied')
+        const earlier = applied.data.results[0].serverRefs.orderId
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: earlier }).update({ status: 'canceled' })
+        const { orderId } = await rejectUnmarked({ ...first, id: randomUUID() })
+        expect((await backfill('apply')).pop()).toBe(summary(': marked 1'))
+        expect((await orderRow(orderId)).metadata.tally_rejected).toBe(true)
+        expect(await orderRow(earlier)).toMatchObject({ status: 'canceled', metadata: expect.not.objectContaining({ tally_rejected: true }) })
+      })
+
+      it('tally-ledger-backfill-rejected skips and warns about a rejected command whose order is not canceled', async () => {
+        const { sale, orderId } = await rejectUnmarked()
+        await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').where({ id: orderId }).update({ status: 'completed' })
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        expect(await backfill('apply')).toEqual([summary(': marked 0', '1 (already marked 0, not canceled 1, missing 0, no orderId 0)')])
+        expect(warn).toHaveBeenCalledWith(
+          `tally_ledger_backfill_rejected: command ${sale.id} is rejected but its order ${orderId} is completed; left unmarked`)
+        expect((await orderRow(orderId)).metadata).not.toHaveProperty('tally_rejected')
       })
     })
 

@@ -195,5 +195,8 @@ jobs:
         working-directory: app/packages/medusa-plugin
       - run: npm run test:integration:http -- --maxWorkers=1
         working-directory: app/packages/medusa-plugin
+      # The rejected-order backfill as an operator runs it, through npx medusa exec (see its README).
+      - run: bash integration-tests/backfill-seed/run.sh
+        working-directory: app/packages/medusa-plugin
       - run: npm run build
         working-directory: app/packages/medusa-plugin

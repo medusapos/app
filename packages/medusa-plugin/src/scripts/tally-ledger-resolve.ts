@@ -84,7 +84,7 @@ async function resolveHeld(container: ExecArgs['container'], id: string, action:
       try {
         const service = container.resolve(Modules.ORDER)
         const { metadata } = await service.retrieveOrder(order.id)
-        await service.updateOrders(order.id, { metadata: { ...metadata, tally_rejected: true } })
+        await service.updateOrders(order.id, { metadata: { ...metadata, tally_rejected: true, tally_rejected_by: '' } })
       } catch (error) {
         logger.error(`tally_ledger_resolve: reject refused for command ${id}: order ${order.id} could not be marked rejected: ${error.message}`)
         throw error
