@@ -1217,6 +1217,17 @@ medusaIntegrationTestRunner({
         return { orderId: draft.id, collectionId: collection.id }
       }
 
+      it('a resumed leftover draft for an unknown customerId still warns customer_ignored', async () => {
+        const payload: OrderCreatePayloadV3 = { ...command().payload, customer: { customerId: 'cus_unknown' } }
+        const sale = { ...command(), version: 3 as const, payload }
+        const { orderId } = await halfWrittenOrder(sale)
+        const response = await post([sale])
+        expect(response.status).toBe(200)
+        expect(response.data.results[0]).toMatchObject({ status: 'applied', serverRefs: { orderId },
+          warnings: [{ code: 'customer_ignored', customerId: 'cus_unknown' }],
+        })
+      })
+
       // An admin then marks the collection partially captured: the real resume refuses it.
       async function parkLiveOrder(sale = command(), topUp = 0) {
         const { orderId, collectionId } = await halfWrittenOrder(sale, topUp)
@@ -1823,6 +1834,59 @@ medusaIntegrationTestRunner({
       } })
     })
 
+    it('an unknown customerId is applied as a guest sale with customer_ignored, and the replay repeats it', async () => {
+      const payload: OrderCreatePayloadV3 = { ...command().payload, customer: { customerId: 'cus_unknown' } }
+      const sale = { ...command(), version: 3, payload }
+      const response = await post([sale])
+      expect(response.status).toBe(200)
+      const result = response.data.results[0]
+      expect(result.status).toBe('applied')
+      expect(result.warnings).toEqual([{ code: 'customer_ignored', customerId: 'cus_unknown' }])
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBeNull()
+      expect(order.metadata.tally_customer_id).toBe('cus_unknown')
+      expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result })
+      const replay = await post([sale])
+      expect(replay.status).toBe(200)
+      expect(replay.data.results).toEqual([{ ...result, status: 'duplicate' }])
+    })
+
+    it('a soft-deleted customer is applied as a guest sale with customer_ignored', async () => {
+      const customers = container.resolve(Modules.CUSTOMER)
+      const { id } = await customers.createCustomers({ email: `deleted-${randomUUID()}@example.com` })
+      await customers.softDeleteCustomers([id])
+      const payload: OrderCreatePayloadV3 = { ...command().payload, customer: { customerId: id } }
+      const response = await post([{ ...command(), version: 3, payload }])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0]).toMatchObject({ status: 'applied', warnings: [{ code: 'customer_ignored', customerId: id }] })
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBeNull()
+      expect(order.metadata.tally_customer_id).toBe(id)
+    })
+
+    it('a live customerId is linked with no customer_ignored', async () => {
+      const { id } = await container.resolve(Modules.CUSTOMER).createCustomers({ email: `live-${randomUUID()}@example.com` })
+      const payload: OrderCreatePayloadV3 = { ...command().payload, customer: { customerId: id } }
+      const response = await post([{ ...command(), version: 3, payload }])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0].status).toBe('applied')
+      expect(response.data.results[0].warnings ?? []).not.toEqual(expect.arrayContaining([expect.objectContaining({ code: 'customer_ignored' })]))
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBe(id)
+    })
+
+    it('an unknown customerId with a stored guest email links the guest and warns customer_ignored', async () => {
+      const email = `guest-${randomUUID()}@example.com`
+      const guest = await container.resolve(Modules.CUSTOMER).createCustomers({ email, has_account: false })
+      const payload: OrderCreatePayloadV3 = { ...command().payload, customer: { customerId: 'cus_unknown', email } }
+      const response = await post([{ ...command(), version: 3, payload }])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0]).toMatchObject({ status: 'applied', warnings: [{ code: 'customer_ignored', customerId: 'cus_unknown' }] })
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBe(guest.id)
+      expect(order.metadata.tally_customer_id).toBe('cus_unknown')
+    })
+
     it.each(['email', 'id-only', 'unknown'])('creates v3 customerId orders: %s', async mode => {
       const email = `v3-${randomUUID()}@example.com`
       const customerId = mode === 'unknown' ? 'cus_unknown' : (await container.resolve(Modules.CUSTOMER).createCustomers({ email })).id
@@ -1838,6 +1902,7 @@ medusaIntegrationTestRunner({
       expect(order.metadata.tally_customer_id).toBe(customerId)
       expect(order.metadata.tally_session_id).toBe('unknown-session')
       expect(order.metadata.tally_pos_totals.v).toBe(1)
+      expect(response.data.results[0].warnings ?? []).toEqual(mode === 'unknown' ? [{ code: 'customer_ignored', customerId }] : [])
       if (mode === 'email') expect(order.email).toBe(email)
     })
 

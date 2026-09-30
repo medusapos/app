@@ -62,6 +62,12 @@ export function parseCommandResult(value: unknown): CommandResult {
         }
         return { code: item.code, expectedMinor: item.expectedMinor as number, serverMinor: item.serverMinor as number }
       }
+      if (item.code === 'customer_ignored') {
+        if (typeof item.customerId !== 'string' || item.customerId.length < 1 || item.customerId.length > 64) {
+          throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${field}.customerId`)
+        }
+        return { code: item.code, customerId: item.customerId }
+      }
       if (item.code === 'insufficient_stock') {
         if (typeof item.variantId !== 'string' || item.variantId.length === 0) {
           throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${field}.variantId`)
