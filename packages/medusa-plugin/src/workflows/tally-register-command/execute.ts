@@ -23,6 +23,24 @@ const conflictMessages = {
   register_closure_number_invalid: 'This closure number is not the next register number.',
 }
 
+/** Read-only replay before the version and shape checks (ADR 0003, 0004): a recorded id answers as recorded. Never claims. */
+export async function replayRegisterCommand(container: MedusaContainer, command: CommandEnvelope<unknown>): Promise<ExecuteOutcome | null> {
+  const { id } = command
+  try {
+    const [row] = await container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE).listTallyCommands({ id })
+    if (!row) return null
+    if (row.fingerprint !== commandFingerprint(command)) return { kind: 'result', result: { id, status: 'rejected', error: {
+      code: 'idempotency_mismatch', message: `Command ${id} was already used for a different payload.`,
+    } } }
+    if (row.status === 'in_progress') return null
+    if (row.status === 'needs_admin') return { kind: 'in_progress', id }
+    const result = parseCommandResult(row.result)
+    return { kind: 'result', result: row.status === 'applied' ? { ...result, status: 'duplicate' } : result }
+  } catch (error) {
+    return { kind: 'transient', id, message: error.message }
+  }
+}
+
 export async function executeRegisterCommand(container: MedusaContainer, command: CommandEnvelope<unknown>): Promise<ExecuteOutcome> {
   const { id, payload } = command
   const errors = registerPayloadErrors(command.type, payload)

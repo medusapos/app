@@ -2,7 +2,7 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { executeOrderCreate, replayOrderCreate } from '../../../../workflows/tally-order-create/execute'
-import { executeRegisterCommand } from '../../../../workflows/tally-register-command/execute'
+import { executeRegisterCommand, replayRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 import { payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
@@ -57,14 +57,16 @@ export async function processBatch(
   const results: CommandResult[] = []
   for (const envelope of commands) {
     if (envelope.type !== 'order.create') {
-      if (!SUPPORTED_REGISTER_VERSIONS.includes(envelope.version)) {
+      // Same step order as order.create: replay read, then the version rule, then shape and claim (ADR 0003, 0004).
+      const replay = await replayRegisterCommand(container, envelope)
+      if (!replay && !SUPPORTED_REGISTER_VERSIONS.includes(envelope.version)) {
         results.push({ id: envelope.id, status: 'rejected', error: { code: 'unsupported_version',
           message: `register version ${envelope.version} is not supported; this server supports ${SUPPORTED_REGISTER_VERSIONS.join(', ')}`,
           data: { register: Math.max(...SUPPORTED_REGISTER_VERSIONS) },
         } as CommandErrorWithData })
         continue
       }
-      const outcome = await executeRegisterCommand(container, envelope)
+      const outcome = replay ?? await executeRegisterCommand(container, envelope)
       if (outcome.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: outcome.id } }
       if (outcome.kind === 'transient') {
         const { id, message } = outcome
