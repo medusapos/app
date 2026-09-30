@@ -1,7 +1,6 @@
 import type { CommandResult } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { MedusaError } from '@medusajs/framework/utils'
 import type { RegisterCommandResult } from '../tally-register/types'
-import type { CommandErrorWithData } from '../../workflows/tally-order-create/fiscal-figures'
 
 /** Validates a CommandResult (e.g. one read back from the ledger). Throws
  *  MedusaError INVALID_DATA naming the first bad field. */
@@ -16,8 +15,7 @@ export function parseCommandResult(value: unknown): CommandResult {
   if (input.status !== 'applied' && input.status !== 'duplicate' && input.status !== 'rejected') {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid status')
   }
-  // BRIDGE (TallyUI c2a-1)
-  const result: CommandResult & { register?: RegisterCommandResult; error?: CommandErrorWithData } = { id: input.id, status: input.status }
+  const result: CommandResult = { id: input.id, status: input.status }
   const object = (value: unknown): boolean => typeof value === 'object' && value !== null
     && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
   if (input.serverRefs !== undefined) {

@@ -6,18 +6,16 @@ import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'
 import { TALLY_REGISTER_MODULE } from '../../modules/tally-register'
 import type TallyRegisterModuleService from '../../modules/tally-register/service'
-import type { RegisterCommandResult, RegisterOutcome, RegisterSessionOpenPayload, RegisterSessionTransitionPayload,
+import type { RegisterOutcome, RegisterSessionOpenPayload, RegisterSessionTransitionPayload,
   RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterClosureSubmitPayload } from '../../modules/tally-register/types'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
-import type { CommandErrorWithData } from '../tally-order-create/fiscal-figures'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
 import { envelopeErrors } from '../tally-order-create/payload-shape'
 import { clientTimeStageErrors } from '../client-time'
 import { registerPayloadErrors } from './payload-shape'
 import { loadSessionFigures } from './figures'
 
-// BRIDGE (TallyUI c2a-1)
-type RegisterResult = CommandResult & { register?: RegisterCommandResult; error?: CommandErrorWithData }
+type RegisterResult = CommandResult
 const conflictMessages = {
   register_session_already_open: 'This register already has an open session.',
   register_session_closed: 'This register session is closed.',

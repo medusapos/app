@@ -1,46 +1,9 @@
 import type { CommandError, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
+export type { OrderCreateDisplay, OrderCreateTaxRate } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { currencyDecimals } from './money'
 
-// BRIDGE (TallyUI order.create): replace when @tallyui/core adds CommandError.data.
-export type CommandErrorWithData = CommandError & { data?: Record<string, unknown> }
-
-// BRIDGE (TallyUI ADR-065 order.create v3; spec-order-create-v3, PR to follow): a local copy until
-// @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden
-// fixture __fixtures__/order-create-v3.json must still pass unchanged.
-export interface OrderCreateDisplay {
-  currency: string;
-  exponent: number;
-  taxInclusive: boolean;
-  subtotalMinor: number;
-  discountMinor: number;
-  taxMinor: number;
-  totalMinor: number;
-  orderDiscountMinor: number;
-  lines: Array<{
-    clientLineId: string;
-    amountMinor: number;
-    discounts: Array<{ discountId: string; label?: string; amountMinor: number }>;
-  }>;
-}
-
-// BRIDGE (TallyUI ADR-065 order.create v3; spec-order-create-v3, PR to follow): a local copy until
-// @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden
-// fixture __fixtures__/order-create-v3.json must still pass unchanged.
-export interface OrderCreateTaxRate {
-  ratePpm: number;
-  code?: string;
-  netMinor: number;
-  taxMinor: number;
-  grossMinor: number;
-}
-
-// BRIDGE (TallyUI ADR-065 order.create v3; spec-order-create-v3, PR to follow): a local copy until
-// @tallyui/core exports it. Replace with the @tallyui/core export at the next TallyUI bump; the golden
-// fixture __fixtures__/order-create-v3.json must still pass unchanged.
-export type OrderCreatePayloadV3 = OrderCreatePayload & {
-  display?: OrderCreateDisplay; taxByRate?: OrderCreateTaxRate[]; sessionId?: string
-  customer?: { email?: string; customerId?: string } | null
-}
+export type CommandErrorWithData = CommandError
+export type OrderCreatePayloadV3 = OrderCreatePayload
 
 export function fiscalFiguresErrors(payload: OrderCreatePayloadV3): string[] {
   const errors: string[] = []
