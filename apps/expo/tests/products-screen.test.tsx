@@ -236,6 +236,19 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText(text)).toBeTruthy();
   });
 
+  it.each([
+    [0, 'MedusaJS · Up to date · 0 products'],
+    [1, 'MedusaJS · Up to date · 1 product'],
+    [2, 'MedusaJS · Up to date · 2 products'],
+    [1234, 'MedusaJS · Up to date · 1,234 products'],
+  ])('with %i sellable products the status line reads %j', async (count, text) => {
+    const products = Array.from({ length: count }, (_, i) => ({ id: `p${i}`, title: `Product ${i}`, status: 'published',
+      variants: [{ id: `p${i}-v`, title: 'One size', sku: `p${i}`, prices: [{ amount: 1, currency_code: 'eur' }] }] }));
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products }));
+    await mount();
+    expect(screen.getByText(text)).toBeTruthy();
+  });
+
   it('says a held unsupported settings result applies after the sale, not "Offline"', async () => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt', status: 'published',
       variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] }));
