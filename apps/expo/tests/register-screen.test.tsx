@@ -491,15 +491,23 @@ describe('closing the register', () => {
   /** Every hold's release, run after each test (before the store closes) even when it failed: a held closure write
    *  left behind keeps TallyUI's module-level in-flight close stuck, and later tests would join it. */
   const holds: (() => void)[] = [];
-  afterEach(() => { for (const release of holds.splice(0)) release(); });
+  afterEach(async () => {
+    for (const release of holds.splice(0)) release();
+    // Two macrotasks for the released writes to settle before the file's afterEach closes the store.
+    await act(async () => { for (let turn = 0; turn < 2; turn++) await new Promise((resolve) => setTimeout(resolve, 0)); });
+  });
   /** Holds every closure insert until `release()` (twice is harmless): the session is closed in storage, its closure
-   *  not yet written. */
-  function holdClosureWrites() {
+   *  not yet written. With `failure`, the held write then fails with it. */
+  function holdClosureWrites(failure?: string) {
     let release!: () => void;
     const held = new Promise<void>((resolve) => { release = resolve; });
     holds.push(release);
     let waiting = 0;
-    registerCollections(store.orders).closures.preInsert(async () => { waiting++; await held; }, false);
+    registerCollections(store.orders).closures.preInsert(async () => {
+      waiting++;
+      await held;
+      if (failure) throw new Error(failure);
+    }, false);
     return { release, waiting: () => waiting };
   }
   /** Records whether RegisterColumn's Finish closing card ever renders, however briefly. */
@@ -634,6 +642,23 @@ describe('closing the register', () => {
     // Long enough for the settled close to reach the render.
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
     expect(screen.queryByTestId('closure-sheet')).toBeNull();
+  });
+
+  // #142 review: the error path's twin; for the same store only the turn, not the store tag, hides the error.
+  it.each(TARGETS)('a count close whose write fails after signing out and in to %s shows no close error', async (target) => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    const count = await startCount();
+    const hold = holdClosureWrites('Storage is full');
+    await closeWith(count, '100.00');
+    await waitFor(() => expect(hold.waiting()).toBe(1));
+    await switchStore(target);
+    await act(async () => { hold.release(); });
+    // The close has failed once its Finish closing card shows (the session closed, no longer closing).
+    await screen.findByTestId('register-column-finish-close');
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    expect(screen.queryByTestId('close-error')).toBeNull();
+    expect(await closures()).toEqual([]);
   });
 });
 

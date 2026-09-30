@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import type { RxCollection } from 'rxdb';
 import {
   bindRegister, getBoundRegisterId, observeRegister$, useRegisterSession, type PosOrder,
@@ -81,7 +81,7 @@ export function RegisterProvider({ orders, children }: { orders: RxCollection<Po
   const [closeError, setCloseError] = useState({ storeKey, message: '' });
   // Replaced on every change of store (A, signed out, A again included): a close started before it sets nothing.
   const storeTurn = useRef({});
-  useEffect(() => {
+  useLayoutEffect(() => {
     storeTurn.current = {};
     setShown(null);
     setCloseError({ storeKey, message: '' });
