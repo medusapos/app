@@ -1295,6 +1295,16 @@ medusaIntegrationTestRunner({
       expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
     })
 
+    it('answers malformed JSON with Medusa\'s 400, not a 413', async () => {
+      const sale = command()
+      const malformed = JSON.stringify({ commands: [sale] }).slice(0, -2)
+      const response = await api.post('/tally/v1/commands', malformed, { headers: { ...headers, 'Content-Type': 'application/json' },
+        transformRequest: [(body: string) => body], validateStatus: () => true })
+      expect(response.status).toBe(400)
+      expect(response.data).toEqual({ type: 'invalid_data', message: expect.any(String) })
+      expect(await ledger.listTallyCommands({ id: sale.id })).toHaveLength(0)
+    })
+
     it('rejects 51 commands with 413 without claiming any command', async () => {
       const sales = Array.from({ length: 51 }, () => command())
       const response = await post(sales)
