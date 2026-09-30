@@ -7,25 +7,28 @@ import { closeOrderStores, openOrderStore, registerCollections } from '../lib/or
 import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { REGISTER_ID_KEY, saveSession } from '../lib/session';
-import { SessionProvider } from '../lib/session-context';
+import { SessionProvider, useSession } from '../lib/session-context';
 
 let sequence = 0;
 let baseUrl: string;
 let token: string;
 let context: ReturnType<typeof useRegister>;
 let outbox: ReturnType<typeof useOutboxContext>;
+let session: ReturnType<typeof useSession>;
 let fetchImpl: ReturnType<typeof vi.fn<typeof fetch>>;
 let responseGate: Promise<void>;
 
 function Probe() {
   context = useRegister();
   outbox = useOutboxContext();
+  session = useSession();
   return null;
 }
 // OutboxProvider mounts the real RegisterProvider over its real order store.
 const providers = () => <SessionProvider><OutboxProvider><Probe /></OutboxProvider></SessionProvider>;
 const commands = () => registerCollections(outbox.orders!).commands;
-const sent = () => fetchImpl.mock.calls.flatMap(([, init]) =>
+const commandCalls = () => fetchImpl.mock.calls.filter(([url]) => String(url).endsWith('/tally/v1/commands'));
+const sent = () => commandCalls().flatMap(([, init]) =>
   (JSON.parse(String(init?.body)).commands as RegisterCommandEnvelope[]));
 const applied: typeof fetch = async (_url, init) => {
   await responseGate;
@@ -141,4 +144,39 @@ it('sends no waiting register command to a store that does not advertise registe
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
   expect(sent().filter((entry) => entry.type.startsWith('register.'))).toHaveLength(0);
   expect((await commands().findOne(command.key).exec())?.syncStatus).toBe('pending');
+});
+
+it('a session token change neither restarts the register outbox nor keeps the old token', async () => {
+  let answer!: () => void;
+  responseGate = new Promise((resolve) => { answer = resolve; });
+  const renewed = `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400, renewed: true }))}.signature`;
+  // The sign-in again: Medusa's emailpass login, its capabilities read (register 1 still) and the cashier's profile.
+  fetchImpl.mockImplementation(async (url, init) => {
+    const { pathname } = new URL(String(url));
+    if (pathname === '/auth/user/emailpass') return new Response(JSON.stringify({ token: renewed }));
+    if (pathname === '/tally/v1/info') return new Response(JSON.stringify({ contracts: { 'order.create': [3], register: [1] } }));
+    if (pathname === '/admin/users/me') return new Response('{}', { status: 404 });
+    return applied(url, init);
+  });
+  await mount();
+  await open();
+  await waitFor(() => expect(sent()).toHaveLength(1));
+  const [opened] = sent();
+  await act(async () => { await session.signIn(baseUrl, 'admin@store.test', 'password'); });
+  expect(session.session?.token).toBe(renewed);
+  const afterSignIn = commandCalls().length;
+  await act(async () => { answer(); });
+  await expectApplied(opened.id);
+  await act(async () => {
+    await context.register.actions.recordMovement({ type: 'paid_in', amountMinor: 500, reason: 'Change top-up' });
+  });
+  await waitFor(() => expect(sent().filter((command) => command.id !== opened.id)).toHaveLength(1));
+  const [next] = sent().filter((command) => command.id !== opened.id);
+  await expectApplied(next.id);
+
+  expect(sent().filter((command) => command.id === opened.id)).toHaveLength(1);
+  const carrying = commandCalls().find(([, init]) => String(init?.body).includes(next.id));
+  expect(carrying?.[1]?.headers).toMatchObject({ Authorization: `Bearer ${renewed}` });
+  expect(commandCalls().slice(afterSignIn).map(([, init]) => (init?.headers as Record<string, string>).Authorization))
+    .not.toContain(`Bearer ${token}`);
 });
