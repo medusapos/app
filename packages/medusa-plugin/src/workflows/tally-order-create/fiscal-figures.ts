@@ -1,5 +1,4 @@
 import type { CommandError, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
-export type { OrderCreateDisplay, OrderCreateTaxRate } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { currencyDecimals } from './money'
 
 export type CommandErrorWithData = CommandError

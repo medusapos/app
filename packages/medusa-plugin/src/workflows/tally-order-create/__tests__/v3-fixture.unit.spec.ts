@@ -6,7 +6,7 @@ import { payloadShapeErrors } from '../payload-shape'
 import { planOrderCreate } from '../plan'
 
 // JSON imports widen string literals. Narrow only the payment method, leaving the
-// entire payload shape checked by this assignment to the local bridge type.
+// entire payload shape checked by this assignment to OrderCreatePayloadV3 (@tallyui/core's OrderCreatePayload).
 // This catches missing or mistyped fields at tsc, but not extra keys: excess-property
 // checks do not apply to JSON imports, and Jest (swc) does not type-check.
 // Extra keys are caught at runtime: inside display and taxByRate by fiscalFiguresErrors,
