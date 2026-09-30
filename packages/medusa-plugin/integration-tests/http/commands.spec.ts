@@ -422,6 +422,26 @@ medusaIntegrationTestRunner({
         expect(response.data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
       })
 
+      it('an envelope.createdAt before 2020 between two good sales is refused alone, unstored, with no order (TallyUI #325)', async () => {
+        const [before, refused, after] = [command(), { ...command(), createdAt: '2019-12-31T23:59:59.999Z' }, command()]
+        const response = await post([before, refused, after])
+        expect(response.status).toBe(200)
+        expect(response.data.results.map(result => result.status)).toEqual(['applied', 'rejected', 'applied'])
+        expect(response.data.results[1]).toEqual({ id: refused.id, status: 'rejected', error: { code: 'invalid_payload',
+          message: "envelope.createdAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } })
+        expect(await ledger.listTallyCommands({ id: refused.id }, { withDeleted: true })).toHaveLength(0)
+        expect(await liveOrders(refused.payload.clientOrderId)).toHaveLength(0)
+      })
+
+      it('an applied id resent with an envelope.createdAt before 2020 answers duplicate, because the replay read comes first', async () => {
+        const sale = command()
+        const first = await post([sale])
+        expect(first.data.results[0].status).toBe('applied')
+        const response = await post([{ ...sale, attempt: 2, createdAt: '2019-12-31T23:59:59.999Z' }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
+      })
+
       it('an applied id resent with an extra unknown field answers duplicate, because the replay read comes first', async () => {
         const first = await post([command()])
         expect(first.data.results[0].status).toBe('applied')

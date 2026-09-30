@@ -118,6 +118,7 @@ before the claim. A field a later version declares is named with that
 version (`display: requires version 3`); envelope fields are strict too.
 Keys are free only in the maps the contract declares, `counted` and
 `tillExpected`, and those must be a `PaymentMethodKind` (`cash`, `external`).
+Every client-time field (envelope `createdAt` and each payload time) must parse and fall from 2020-01-01T00:00:00Z to 24 hours after the server's clock, refused the same way and never clamped (TallyUI #325, ADR-038).
 The earlier leniency was an accident: ADR 0004 checked only types and
 presence, and #90 kept it out of general caution, for no named client. The
 contract types are closed. Under leniency a misspelled optional money field

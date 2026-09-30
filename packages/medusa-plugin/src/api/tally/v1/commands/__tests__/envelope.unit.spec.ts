@@ -192,4 +192,14 @@ describe('envelope fields (ruling 17)', () => {
       } }] } })
       expect(claim).not.toHaveBeenCalled()
     })
+
+  it.each<[string, { id: string }]>([['order.create', mainV1], ['register.closure.submit', closure]])(
+    'refuses a %s envelope.createdAt before 2020 as invalid_payload, before the claim (TallyUI #325)', async (_type, fixture) => {
+      const claim = jest.fn()
+      const replaying = { resolve: () => ({ listTallyCommands: async () => [], claim }) } as unknown as MedusaContainer
+      const outcome = await processBatch(replaying, [{ ...fixture, createdAt: '2019-12-31T23:59:59.999Z' }] as never, {})
+      expect(outcome).toEqual({ status: 200, body: { results: [{ id: fixture.id, status: 'rejected', error: { code: 'invalid_payload',
+        message: "envelope.createdAt: expected a time from 2020-01-01T00:00:00Z to 24 hours after the server's clock" } }] } })
+      expect(claim).not.toHaveBeenCalled()
+    })
 })

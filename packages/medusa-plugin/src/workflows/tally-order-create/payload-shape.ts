@@ -1,4 +1,5 @@
 import type { CommandEnvelope, OrderCreateLine, OrderCreatePayment } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import { clientTimeErrors } from '../client-time'
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 
 // The fields of each order.create version (ruling 17): @tallyui/core 2.0.0 OrderCreatePayload, OrderCreateLine and
@@ -16,9 +17,11 @@ const CUSTOMER_FIELDS = since<NonNullable<OrderCreatePayloadV3['customer']>>({ e
 // The envelope's own fields, for every command type; satisfies makes tsc refuse a missing or an extra field.
 const ENVELOPE_FIELDS = Object.keys({ id: true, type: true, version: true, payload: true, createdAt: true, deviceId: true,
   attempt: true } satisfies Record<keyof CommandEnvelope, true>)
-/** Envelope fields CommandEnvelope doesn't declare, e.g. ['envelope.priority: unknown field for order.create version 1']. */
-export const envelopeErrors = (envelope: CommandEnvelope<unknown>) => Object.keys(envelope).filter(key => !ENVELOPE_FIELDS.includes(key))
-  .map(key => `envelope.${key}: unknown field for ${envelope.type} version ${envelope.version}`)
+/** Envelope fields CommandEnvelope doesn't declare, e.g. ['envelope.priority: unknown field for order.create version 1'],
+ * then an out-of-bounds envelope.createdAt (client time). */
+export const envelopeErrors = (envelope: CommandEnvelope<unknown>) => [...Object.keys(envelope).filter(key => !ENVELOPE_FIELDS.includes(key))
+  .map(key => `envelope.${key}: unknown field for ${envelope.type} version ${envelope.version}`),
+...clientTimeErrors(envelope.createdAt, 'envelope.createdAt')]
 
 /** Shape errors of an order.create payload, e.g. ['lines: expected a non-empty array',
  * 'payments[0].method: expected a string']; [] when the shape is valid. Checks presence, types, fields unknown to
@@ -50,6 +53,7 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   known(payload, TOP_FIELDS, '')
   check(typeof payload.clientOrderId === 'string' && payload.clientOrderId.length > 0, 'clientOrderId', 'a non-empty string')
   for (const field of ['createdAt', 'currency']) check(typeof payload[field] === 'string', field, 'a string')
+  errors.push(...clientTimeErrors(payload.createdAt, 'createdAt'))
   check(typeof payload.pricesIncludeTax === 'boolean', 'pricesIncludeTax', 'a boolean')
   for (const field of ['lines', 'payments']) {
     const items = payload[field]

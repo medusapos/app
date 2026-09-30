@@ -31,7 +31,7 @@ it.each([undefined, null, {}, { email: '' }])('accepts optional customer %j', cu
 
 it('leaves value rules to the planner and accepts absent optional fields and empty payments', () => {
   expect(payloadShapeErrors({
-    ...payload, createdAt: '', currency: '', subtotalMinor: -1, taxMinor: 0.5, totalMinor: Number.MAX_VALUE,
+    ...payload, currency: '', subtotalMinor: -1, taxMinor: 0.5, totalMinor: Number.MAX_VALUE,
     lines: [{ clientLineId: '', variantId: '', quantity: -0.5, unitPriceMinor: -1 }], payments: [],
   })).toEqual([])
   expect(payloadShapeErrors({ ...payload, payments: [{ clientPaymentId: '', method: 'custom', amountMinor: -1 }] })).toEqual([])
@@ -72,6 +72,12 @@ it.each(['lines', 'payments'])('rejects non-object entries in %s', field => {
   for (const item of [null, [], 'item']) {
     expect(payloadShapeErrors({ ...payload, [field]: [item] })).toEqual([`${field}[0]: expected an object`])
   }
+})
+
+it.each(['2019-12-31T23:59:59.999Z', 'late', ''])('refuses createdAt %p out of client-time bounds, never clamped (TallyUI #325)', value => {
+  const createdAt = value === 'late' ? new Date(Date.now() + 24 * 60 * 60 * 1000 + 60000).toISOString() : value
+  expect(payloadShapeErrors({ ...payload, createdAt })).toEqual([value ? "createdAt: expected a time from 2020-01-01T00:00:00Z"
+    + " to 24 hours after the server's clock" : 'createdAt: expected a valid date'])
 })
 
 it('rejects a non-string customer email', () => {
@@ -184,10 +190,11 @@ it.each([
   const key = keys.pop()!
   const target = keys.reduce((object, part) => object[part], value as any)
   target[key] = 'x'.repeat(max)
-  expect(payloadShapeErrors(value)).toEqual([])
+  const date = field === 'createdAt' ? ['createdAt: expected a valid date'] : []
+  expect(payloadShapeErrors(value)).toEqual(date)
   target[key] += 'x'
   const expected = max === 64 || max === 36 ? `a string of at most ${max} characters` : `at most ${max} characters`
-  expect(payloadShapeErrors(value)).toEqual([`${field.replace('.0.', '[0].')}: expected ${expected}`])
+  expect(payloadShapeErrors(value)).toEqual([...date, `${field.replace('.0.', '[0].')}: expected ${expected}`])
 })
 
 it.each([
