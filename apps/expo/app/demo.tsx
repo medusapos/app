@@ -30,7 +30,7 @@ export default function DemoScreen() {
 
   return (
     <View className="flex-1 justify-center bg-background px-6">
-      <Stack.Screen options={{ title: 'Demo' }} />
+      <Stack.Screen options={{ title: 'MedusaPOS demo – try the point of sale in one click' }} />
       <View className="w-full max-w-md self-center gap-4 rounded-md border border-border bg-card p-6">
         <Text accessibilityRole="header" aria-level={1} className="text-xl font-semibold text-foreground">Medusa POS demo store</Text>
         <Text className="text-foreground">This is a public demo store, data resets nightly.</Text>
