@@ -5,17 +5,8 @@ import { Redirect, router, Stack } from 'expo-router';
 import { version as appVersion } from '../package.json';
 import { storeConfig } from '../lib/config';
 import { feedbackUrl } from '../lib/feedback-url';
-import { LoginError, type LoginErrorCode } from '../lib/session';
+import { loginErrorMessage } from '../lib/login-errors';
 import { useSession } from '../lib/session-context';
-
-const ERROR_MESSAGES: Record<LoginErrorCode, string> = {
-  invalid_credentials: 'Incorrect email or password.',
-  unsupported_account: 'This account needs multi-factor authentication or verification, which the POS does not support yet.',
-  unreachable: 'Could not reach the backend. Check the URL and your connection.',
-  server_error: 'The backend could not sign you in. Please try again.',
-  invalid_url: 'Enter a valid backend URL starting with https://.',
-  insecure_url: 'Use https://. Plain http:// is only allowed for localhost and private network addresses.',
-};
 
 export default function LoginScreen() {
   const { session, signIn } = useSession();
@@ -34,7 +25,7 @@ export default function LoginScreen() {
       setPassword('');
       router.replace('/');
     } catch (err) {
-      setError(ERROR_MESSAGES[err instanceof LoginError ? err.code : 'server_error']);
+      setError(loginErrorMessage(err));
     } finally {
       setSigningIn(false);
     }
@@ -64,6 +55,9 @@ export default function LoginScreen() {
           className={`rounded-md bg-primary px-4 py-3 ${disabled ? 'opacity-50' : ''}`}>
           <Text className="text-center font-semibold text-primary-foreground">Sign in</Text>
         </Pressable>
+        {storeConfig.demo ? <Pressable accessibilityRole="link" onPress={() => router.push('/demo')}>
+          <Text className="text-center text-sm text-muted-foreground">Try the demo</Text>
+        </Pressable> : null}
         <Pressable accessibilityRole="link" onPress={() => { void Linking.openURL(feedbackUrl({
           appVersion, platform: Platform.OS,
           userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,

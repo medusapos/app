@@ -3,6 +3,14 @@
   "installCommand": "bash ../../scripts/vercel-install.sh",
   "buildCommand": "EXPO_PUBLIC_MEDUSA_URL=https://demo-api.medusapos.com CI=1 pnpm run build:web && bash ../../scripts/check-web-bundle.sh dist",
   "outputDirectory": "dist",
+  "redirects": [
+    {
+      "source": "/",
+      "destination": "/demo",
+      "permanent": false,
+      "has": [{ "type": "host", "value": "demo.medusapos.com" }]
+    }
+  ],
   "rewrites": [
     { "source": "/((?!_expo/|assets/|sqlite/).*)", "destination": "/index.html" }
   ],

@@ -89,6 +89,25 @@ psql -U <postgres user> -d postgres -c 'CREATE DATABASE medusapos_demo_golden TE
 
 and start `mpdemo-backend` again.
 
+## Demo accounts
+
+The public demo at `https://demo.medusapos.com/demo` signs in with one
+click as `cashier@demo.medusapos.com` or `manager@demo.medusapos.com`,
+using the password `demo1234` shown on the page. They are ordinary Medusa
+admin users created with `medusa user` in the container, like the seed:
+
+```sh
+cd /src/app/dev/medusa-store/apps/backend/.medusa/server && /src/app/dev/medusa-store/node_modules/.bin/medusa user -e <email> -p demo1234
+```
+
+Both users are in the golden copy, so the nightly reset restores them.
+Medusa has no roles: both are full admins of the demo backend, including
+its admin dashboard and admin API, published on a public page. Anything a
+visitor changes or deletes (these users included) lasts until the next
+nightly reset. Keep real outbound credentials (email, payment, webhooks)
+out of this backend's environment for that reason. The manager account
+exists for the POS's register-close approval (ADR 0018).
+
 ## Nightly reset
 
 The Coolify scheduled task `mpdemo-nightly-reset` runs
@@ -107,9 +126,10 @@ drop `medusapos_demo_golden` and create it again as above.
 
 ## CORS
 
-`STORE_CORS` is `https://app.medusapos.com,http://localhost:8081`.
-`ADMIN_CORS` and `AUTH_CORS` are the same plus the backend's own origin (for
-the admin dashboard). The POS signs in through `AUTH_CORS` and the plugin's
+`STORE_CORS` is `https://app.medusapos.com,https://demo.medusapos.com,http://localhost:8081`.
+`ADMIN_CORS` and `AUTH_CORS` need the demo origin too, plus the backend's
+own origin (for the admin dashboard). The demo page signs in from that
+origin. The POS signs in through `AUTH_CORS` and the plugin's
 `/tally/v1/commands` uses `ADMIN_CORS`. To add an origin, edit the variables
 in Coolify and restart the application.
 
