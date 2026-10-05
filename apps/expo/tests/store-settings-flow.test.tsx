@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CartLineProps, CartTotalProps, ProductGrid, SearchInput } from '@tallyui/components';
@@ -141,7 +141,7 @@ describe('store settings flow', () => {
     const context = vi.mocked(useReplicatedProducts).mock.lastCall![1];
     expect(context).toMatchObject({ connectorId: POS_CONNECTOR_ID, baseUrl: session.baseUrl, pricingContext: pricing.pricingContext });
     expect({ ...context.headers }).toEqual({ Authorization: 'Bearer jwt' });
-    expect(loadCachedPricing(localStorage, session.baseUrl)).toEqual(pricing);
+    await waitFor(() => expect(loadCachedPricing(localStorage, session.baseUrl)).toEqual(pricing));
   });
 
   it('shows the choice screen for regions, persists the pick with the location\'s country, and opens the POS', async () => {
