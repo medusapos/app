@@ -651,6 +651,42 @@ medusaIntegrationTestRunner({
       expect(result.warnings).toBeUndefined()
     })
 
+    it('v4 mixed modes with a 10% order discount: net discounts 84 and 100 give Medusa\'s figures equal to the till\'s, with no warnings', async () => {
+      // A: net 840.336 − 84 = 756.336, tax 143.70, total 900.04, gross discount 99.96 (minor units).
+      const sale = command({
+        discountMinor: 184,
+        lines: [
+          { clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000, discountMinor: 84 },
+          { clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, taxInclusive: false, discountMinor: 100 },
+        ],
+        subtotalMinor: 1656, taxMinor: 315, totalMinor: 1971,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+      })
+      const result = await runOrderCreate(container, { ...sale, version: 4 })
+      const { order, items } = await discountedItems(result)
+      expect(result.warnings).toBeUndefined()
+      expect(result.serverRefs!.totalMinor).toBe(1971)
+      expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([19.71])
+      expect(items).toEqual({
+        [data.variantA]: { inclusive: true, total: 900, tax: 144, discount: 100, discountNet: 84,
+          adjustments: [{ amount: 0.84, description: 'POS discount', is_tax_inclusive: false }] },
+        [data.variantB]: { inclusive: false, total: 1071, tax: 171, discount: 119, discountNet: 100,
+          adjustments: [{ amount: 1, description: 'POS discount', is_tax_inclusive: false }] },
+      })
+    })
+
+    it('v4 records tally_pos_totals with discountBasis net and the till\'s settlement figures as sent', async () => {
+      const sale = command({
+        discountMinor: 84, subtotalMinor: 756, taxMinor: 144, totalMinor: 900,
+        lines: [{ clientLineId: randomUUID(), variantId: data.variantA, quantity: 1, unitPriceMinor: 1000, discountMinor: 84 }],
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 900 }],
+      })
+      const order = await readOrder(await runOrderCreate(container, { ...sale, version: 4 }))
+      expect(order.metadata.tally_pos_totals).toEqual({ v: 1, discountBasis: 'net', currency: 'EUR', exponent: 2,
+        settlement: { subtotalMinor: 756, discountMinor: 84, taxMinor: 144, totalMinor: 900 },
+      })
+    })
+
     it('a v3 sale whose tax differs is applied with one figures_mismatch naming subtotalMinor and taxMinor, charged the till\'s total, with the till\'s figures kept', async () => {
       const sale = { ...command({ subtotalMinor: 841, taxMinor: 159 }), version: 3 as const }
       const result = await runOrderCreate(container, sale)

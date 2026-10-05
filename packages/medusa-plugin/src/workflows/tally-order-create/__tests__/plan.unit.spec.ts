@@ -338,6 +338,43 @@ describe('version 2 discounts (ADR-062)', () => {
   })
 })
 
+describe('order.create v4 (#147)', () => {
+  const sale = { ...payload, discountMinor: 184, lines: [
+    { ...payload.lines[0], quantity: 1, unitPriceMinor: 1000, discountMinor: 84 },
+    { ...payload.lines[1], unitPriceMinor: 1000, taxInclusive: false, discountMinor: 100 },
+  ] }
+
+  it('v4 gives every discounted line one tax-exclusive POS discount adjustment of its net discountMinor, in either line mode', () => {
+    const result = planOrderCreate(sale, ctx, 4)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.draftOrder.items.map(item => item.is_tax_inclusive)).toEqual([true, false])
+    expect(result.plan.draftOrder.items.map(item => item.adjustments)).toEqual([
+      [{ amount: '0.84', description: 'POS discount', is_tax_inclusive: false }],
+      [{ amount: '1.00', description: 'POS discount', is_tax_inclusive: false }],
+    ])
+  })
+
+  it('v3 keeps each line\'s own-mode adjustment', () => {
+    const result = planOrderCreate(sale, ctx, 3)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.draftOrder.items.map(item => item.adjustments)).toEqual([
+      [{ amount: '0.84', description: 'POS discount', is_tax_inclusive: true }],
+      [{ amount: '1.00', description: 'POS discount', is_tax_inclusive: false }],
+    ])
+  })
+
+  it('v4 records tally_pos_totals.discountBasis net; v3 records no discountBasis', () => {
+    for (const version of [3, 4]) {
+      const result = planOrderCreate(sale, ctx, version)
+      if (!result.ok) throw new Error('Expected a plan')
+      const totals = result.plan.draftOrder.metadata.tally_pos_totals
+      if (version === 4) expect(totals).toHaveProperty('discountBasis', 'net')
+      else expect(totals).not.toHaveProperty('discountBasis')
+      expect(totals).toMatchObject({ settlement: { discountMinor: 184 } })
+    }
+  })
+})
+
 describe('tally_pos_totals metadata (ADR 0012)', () => {
   it('records v1, the payload currency and exponent, and settlement as sent, defaulting discountMinor to 0', () => {
     const result = planOrderCreate(payload, ctx)

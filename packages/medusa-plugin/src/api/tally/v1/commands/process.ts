@@ -105,7 +105,7 @@ export async function processBatch(
     // ADR-062 sends version 2 exactly when there is a discount, so version 1 can never create adjustments.
     const payload = command.payload as OrderCreatePayloadV3
     const { display, taxByRate, discountMinor } = payload
-    const v3 = (command.version as number) === 3
+    const v3 = (command.version as number) >= 3
     const versionError = command.version === 2 && discountMinor === undefined ? 'version 2 requires discountMinor'
       : v3 && (display !== undefined) !== (taxByRate !== undefined) ? 'display and taxByRate must both be present or both absent'
       : undefined

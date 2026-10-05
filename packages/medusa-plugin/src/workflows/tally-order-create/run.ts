@@ -137,7 +137,7 @@ export async function runOrderCreate(
           id: region.id, currency_code: region.currency_code, country_codes: region.countries.map(country => country.iso_2),
         } : { id: '', currency_code: '', country_codes: [] },
         variants: Object.fromEntries(variants.filter(sellable).map(variant => [variant.id, { id: variant.id }])),
-      })
+      }, command.version)
       if (planned.ok === false) {
         if (planned.rejection.code === 'unsupported_currency') {
           throw new StoreConfigurationError(planned.rejection.message, 'unsupported_currency')
@@ -184,7 +184,7 @@ export async function runOrderCreate(
     }
   }
   const { data: [order] } = await query.graph({
-    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'raw_tax_total', 'metadata', 'customer_id'], filters: { id: orderId },
+    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'raw_tax_total', 'raw_discount_subtotal', 'metadata', 'customer_id'], filters: { id: orderId },
   })
   if (order.metadata?.tally_stock_topups) {
     const topUps = order.metadata.tally_stock_topups as StockTopUp[]
@@ -205,7 +205,8 @@ export async function runOrderCreate(
   const tillCustomerId = typeof order.metadata?.tally_customer_id === 'string' ? order.metadata.tally_customer_id : undefined
   const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...(command.version >= 3 ? figuresWarnings(
     { subtotalMinor: payload.subtotalMinor, taxMinor: payload.taxMinor, discountMinor: payload.discountMinor ?? 0 },
-    { subtotalMinor: serverSubtotal, taxMinor: serverTax }
+    { subtotalMinor: serverSubtotal, taxMinor: serverTax,
+      ...(command.version >= 4 ? { discountMinor: majorToMinor(order.raw_discount_subtotal.value, currencyDecimals(payload.currency)) } : {}) }
   ) : []), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings]
   return {
     id: command.id, status: 'applied',

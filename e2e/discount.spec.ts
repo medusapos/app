@@ -2,8 +2,8 @@ import { expect, type Page } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
-// Discounts in the cart (TallyUI ADR-062): the plugin reports order.create [1, 2] at GET /tally/v1/info,
-// and a discounted sale goes out as order.create version 2, with one "POS discount" adjustment per line.
+// Discounts in the cart: the plugin reports order.create [1, 2, 3, 4] at GET /tally/v1/info,
+// and a discounted sale goes out as order.create version 4, with one net "POS discount" adjustment per line.
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
 type Sale = { clientOrderId: string; lines: { discountMinor?: number }[] };
@@ -17,9 +17,9 @@ test('a discounted sale is applied as order.create v3, with a "POS discount" adj
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
   await signIn(page);
-  // The plugin advertises order.create [1, 2, 3] (ADR 0012 amendment), register 1 and its tax rounding (TallyUI #322).
-  // With the server's max unknown to the outbox, TallyUI 3.0 sends a discounted sale at version 3 (#300).
-  expect(await capabilities(page)).toEqual({ orderCreate: 3, register: 1,
+  // The plugin advertises order.create [1, 2, 3, 4] (ADR 0012 amendment), register 1 and its tax rounding (TallyUI #322).
+  // TallyUI 3.0 sends net discounts at version 4 only when the server advertises 4.
+  expect(await capabilities(page)).toEqual({ orderCreate: 4, register: 1,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   await addE2E1(page);
   await addE2E1(page);
@@ -57,7 +57,7 @@ test('a discounted sale is applied as order.create v3, with a "POS discount" adj
   expect(results[0].warnings).toBeUndefined();
   expect(commands).toHaveLength(1);
   const [{ version, payload }] = commands;
-  expect(version).toBe(3);
+  expect(version).toBe(4);
   // 2 × €2.00, 10% off (€0.40) plus the whole €0.50 order discount on the one line.
   expect(payload.lines).toEqual([expect.objectContaining({ discountMinor: 90 })]);
   const [order] = (await ordersByClientId(token)).filter((entry) => entry.metadata.tally_client_id === payload.clientOrderId);
@@ -108,7 +108,7 @@ test('100% off the line completes with cash at €0.00 as one Medusa order', asy
   expect(results[0].warnings).toBeUndefined();
   expect(results[0].serverRefs.totalMinor).toBe(0);
   expect(commands).toHaveLength(1);
-  expect(commands[0].version).toBe(3);
+  expect(commands[0].version).toBe(4);
   const orders = (await ordersByClientId(token)).filter((order) => order.metadata.tally_client_id === commands[0].payload.clientOrderId);
   expect(orders).toHaveLength(1);
   expect(orders[0].total).toBe(0);

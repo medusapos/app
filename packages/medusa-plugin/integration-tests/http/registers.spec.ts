@@ -255,7 +255,7 @@ medusaIntegrationTestRunner({
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4], register: [1], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
       })
     })
