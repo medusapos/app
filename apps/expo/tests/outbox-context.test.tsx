@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, cleanup, render, renderHook } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOrderOutbox, type UseOrderOutboxResult } from '@tallyui/pos';
-import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
+import { OutboxProvider, useOutboxContext, useSessionOutbox } from '../lib/outbox-context';
+import type { Session } from '../lib/session';
 
 // A stand-in for TallyUI's outbox, whose `savesInFlight` (#163) each test sets.
 vi.mock('@tallyui/pos', async (importOriginal) => ({
@@ -12,6 +13,34 @@ const setSavesHold = vi.fn();
 vi.mock('../lib/session-context', () => ({ useSession: () => ({ session: null, setSavesHold }) }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
+
+describe('useSessionOutbox order.create version', () => {
+  const session: Session = { baseUrl: 'https://store.test', email: 'test@example.com', token: 'token',
+    capabilities: { orderCreate: 4 } };
+  beforeEach(() => vi.mocked(useOrderOutbox).mockReturnValue({ orders: null } as UseOrderOutboxResult));
+
+  it('passes getMaxOrderCreateVersion, which reads the current session\'s orderCreate capability (#147)', () => {
+    const view = renderHook(({ session }) => useSessionOutbox(session, 'register-1'),
+      { initialProps: { session: session as Session | null } });
+    const getMaxOrderCreateVersion = vi.mocked(useOrderOutbox).mock.calls[0][0].getMaxOrderCreateVersion!;
+    expect(getMaxOrderCreateVersion()).toBe(4);
+    view.rerender({ session: { ...session, capabilities: { ...session.capabilities, orderCreate: 3 } } });
+    expect(getMaxOrderCreateVersion()).toBe(3);
+    view.rerender({ session: null });
+    expect(getMaxOrderCreateVersion()).toBeUndefined();
+  });
+
+  it('keeps getMaxOrderCreateVersion present on every call, so the outbox never needs a reopen (#147)', () => {
+    vi.mocked(useOrderOutbox).mockClear();
+    const view = renderHook(({ session }) => useSessionOutbox(session, 'register-1'),
+      { initialProps: { session: session as Session | null } });
+    view.rerender({ session: null });
+    expect(vi.mocked(useOrderOutbox).mock.calls.length).toBeGreaterThanOrEqual(2);
+    for (const [options] of vi.mocked(useOrderOutbox).mock.calls) {
+      expect(options.getMaxOrderCreateVersion).toBeTypeOf('function');
+    }
+  });
+});
 
 // The #85 re-review: TallyUI counts the saves in flight, and OutboxProvider holds the session's sign-out on them.
 describe('OutboxProvider savesInFlight', () => {

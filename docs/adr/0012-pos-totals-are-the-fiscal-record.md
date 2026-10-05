@@ -151,3 +151,15 @@ Only v3+ commands receive `figures_mismatch`, listing exact minor-unit differenc
 Medusa's subtotal is rounded `raw_total` minus rounded `raw_tax_total`, never its before-discount subtotal.
 The warning is recorded only in the command result and replayed from the ledger; it never refuses a sale.
 `tally_pos_totals` stays the till's fiscal record, and payment stays exactly the till's total; `total_mismatch` is unchanged.
+
+## Amendment: order.create version 4 (#147)
+
+Version 4 is version 3 with every order and line `discountMinor` tax-exclusive (net), still summing to the order discount.
+An inclusive line's discount is `net(A) − net(A − D)`, rounded to the minor unit by the till.
+Each v4 POS discount adjustment uses that amount with `is_tax_inclusive: false`, independently of the item's mode.
+This is exact: Medusa 2.21's `@medusajs/utils/dist/totals/adjustment/index.js` divides an adjustment by `1 + taxRate`
+only when the adjustment itself is tax-inclusive; the plugin needs no tax calculation or gross conversion.
+Only v4 adds top-level `discountBasis: 'net'` to `tally_pos_totals`; settlement stays as sent, and payment stays the till's total.
+For v4, `figures_mismatch` compares net `discountMinor` against Medusa's `discount_subtotal`, rounding its exact
+`raw_discount_subtotal.value` once. Versions 1–3 never compare discount and keep their own-mode adjustments and metadata.
+The till sends v4 only to a store advertising 4 in `/tally/v1/info`, and resends each order at the version it first went out at.

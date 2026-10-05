@@ -140,7 +140,7 @@ medusaIntegrationTestRunner({
       for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
         const response = await info(requestHeaders)
         expect([response.status, response.data]).toEqual([200, {
-          contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] },
+          contracts: { 'order.create': [1, 2, 3, 4], register: [1], sync: [1] },
           taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         }])
       }
@@ -155,23 +155,23 @@ medusaIntegrationTestRunner({
       }
     })
 
-    it('/info lists order.create versions 1, 2 and 3', async () => {
+    it('/info lists order.create versions 1, 2, 3 and 4', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4], register: [1], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
       })
     })
 
-    it('a batch with a version-4 command and a version-1 command rejects only the first, as unsupported_version, and applies the second', async () => {
-      const unsupported = { ...command(), version: 4 }
+    it('a batch with a version-5 command and a version-1 command rejects only the first, as unsupported_version, and applies the second', async () => {
+      const unsupported = { ...command(), version: 5 }
       const supported = command()
       const response = await post([unsupported, supported])
       expect(response.status).toBe(200)
       expect(response.data.results).toEqual([
         { id: unsupported.id, status: 'rejected', error: { code: 'unsupported_version',
-          message: 'order.create version 4 is not supported; this server supports 1, 2, 3', data: { orderCreate: 3 } } },
+          message: 'order.create version 5 is not supported; this server supports 1, 2, 3, 4', data: { orderCreate: 4 } } },
         expect.objectContaining({ id: supported.id, status: 'applied' }),
       ])
       expect(await ledger.listTallyCommands({ id: unsupported.id })).toHaveLength(0)
@@ -179,13 +179,13 @@ medusaIntegrationTestRunner({
       expect(await liveOrders(supported.payload.clientOrderId)).toHaveLength(1)
     })
 
-    it('a command rejected as unsupported_version was never recorded: resending its id at a supported version is applied, not a duplicate or mismatch', async () => {
+    it('a version-5 command rejected as unsupported_version was never recorded: resending its id at a supported version is applied, not a duplicate or mismatch', async () => {
       const sale = command()
-      const unsupported = await post([{ ...sale, version: 4 }])
+      const unsupported = await post([{ ...sale, version: 5 }])
       expect(unsupported.status).toBe(200)
       expect(unsupported.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-        code: 'unsupported_version', message: 'order.create version 4 is not supported; this server supports 1, 2, 3',
-        data: { orderCreate: 3 },
+        code: 'unsupported_version', message: 'order.create version 5 is not supported; this server supports 1, 2, 3, 4',
+        data: { orderCreate: 4 },
       } }])
       const supported = await post([sale])
       expect(supported.status).toBe(200)
@@ -193,6 +193,30 @@ medusaIntegrationTestRunner({
       const replay = await post([sale])
       expect(replay.status).toBe(200)
       expect(replay.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'duplicate' })])
+    })
+
+    it('a v4 discounted command is applied over HTTP and replays as duplicate with the same serverRefs', async () => {
+      const base = command()
+      const sale = { ...base, version: 4, payload: { ...base.payload,
+        discountMinor: 84, subtotalMinor: 756, taxMinor: 144, totalMinor: 900,
+        lines: [{ ...base.payload.lines[0], discountMinor: 84 }],
+        payments: [{ ...base.payload.payments[0], amountMinor: 900 }],
+        display: { currency: 'EUR', exponent: 2, taxInclusive: true, subtotalMinor: 1000,
+          discountMinor: 100, taxMinor: 144, totalMinor: 900, orderDiscountMinor: 0,
+          lines: [{ clientLineId: base.payload.lines[0].clientLineId, amountMinor: 900,
+            discounts: [{ discountId: 'd', label: 'Sale', amountMinor: 100 }] }] },
+        taxByRate: [{ ratePpm: 190000, code: 'VAT', netMinor: 756, taxMinor: 144, grossMinor: 900 }],
+      } }
+      const first = await post([sale])
+      expect(first.status).toBe(200)
+      expect(first.data.results).toEqual([expect.objectContaining({ id: sale.id, status: 'applied',
+        serverRefs: { orderId: expect.any(String), displayId: expect.any(String), totalMinor: 900 },
+      })])
+      expect(first.data.results[0].warnings).toBeUndefined()
+      const replay = await post([sale])
+      expect(replay.status).toBe(200)
+      expect(replay.data.results).toEqual([{ ...first.data.results[0], status: 'duplicate' }])
+      expect(await liveOrders(sale.payload.clientOrderId)).toHaveLength(1)
     })
 
     describe('unsellable variants and currency', () => {

@@ -64,8 +64,25 @@ describe('validateBatch', () => {
     expect(validateBatch({ commands: [{ ...command, version: 3 }] })).toEqual({ ok: true, commands: [{ ...command, version: 3 }] })
   })
 
+  it('accepts version 4', async () => {
+    const sale = { ...command, version: 4 }
+    expect(validateBatch({ commands: [sale] })).toEqual({ ok: true, commands: [sale] })
+    const outcome = await processBatch(container, [sale as never], {})
+    expect(outcome).toMatchObject({ status: 200, body: { results: [{ error: {
+      code: 'invalid_payload', message: expect.stringContaining('payload.clientOrderId: expected'),
+    } }] } })
+  })
+
+  it('a v4 with display but no taxByRate is rejected like v3', async () => {
+    const sale = { ...command, version: 4, payload: { ...mainV1.payload, display: {} } }
+    const outcome = await processBatch(container, [sale as never], {})
+    expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
+      code: 'invalid_payload', message: 'display and taxByRate must both be present or both absent',
+    } }] } })
+  })
+
   it("validateBatch accepts a positive integer version it doesn't support", () => {
-    for (const version of [4, Number.MAX_SAFE_INTEGER]) {
+    for (const version of [5, Number.MAX_SAFE_INTEGER]) {
       const commands = [{ ...command, version }]
       expect(validateBatch({ commands })).toEqual({ ok: true, commands })
     }
@@ -77,11 +94,11 @@ describe('validateBatch', () => {
     })
   })
 
-  it('rejects an unsupported version after the replay read and before shape checks or ledger claim', async () => {
-    const outcome = await processBatch(container, [{ ...command, version: 4, payload: { display: {} } } as never], {})
+  it('rejects unsupported version 5 after the replay read and before shape checks or ledger claim', async () => {
+    const outcome = await processBatch(container, [{ ...command, version: 5, payload: { display: {} } } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
-      code: 'unsupported_version', message: 'order.create version 4 is not supported; this server supports 1, 2, 3',
-      data: { orderCreate: 3 },
+      code: 'unsupported_version', message: 'order.create version 5 is not supported; this server supports 1, 2, 3, 4',
+      data: { orderCreate: 4 },
     } }] } })
   })
 
