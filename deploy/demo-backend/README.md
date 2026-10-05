@@ -93,8 +93,10 @@ and start `mpdemo-backend` again.
 
 After `seed-e2e.js`, the demo seed runs `seed-demo-presentation.js` to name
 the store "Medusa POS demo store" for the receipt header and make Europe's
-prices include VAT, as Danish retail prices do. This step is demo-only;
-e2e keeps its tax-exclusive Europe pricing.
+region and EUR currency price preferences tax-inclusive, as Danish retail prices
+are. Medusa uses a region preference only for prices with a region rule, so plain
+EUR prices need the currency preference too. This step is demo-only; e2e keeps
+its tax-exclusive Europe pricing.
 
 For the **live** demo, the front desk must run
 `medusa exec ./src/scripts/seed-demo-presentation.js` once in the running

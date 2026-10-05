@@ -11,6 +11,9 @@ export default async function seedDemoPresentation({ container }: ExecArgs) {
   if (!store) throw new Error("Missing store for demo presentation")
   const [region] = await container.resolve(Modules.REGION).listRegions({ name: "Europe" })
   if (!region) throw new Error("Missing Europe region for demo presentation")
+  const pricing = container.resolve(Modules.PRICING)
+  const [preference] = await pricing.listPricePreferences({ attribute: "currency_code", value: "eur" })
+  if (!preference) throw new Error("Missing EUR currency price preference for demo presentation")
 
   await updateStoresWorkflow(container).run({ input: {
     selector: { id: store.id }, update: { name: DEMO_STORE_NAME },
@@ -18,5 +21,6 @@ export default async function seedDemoPresentation({ container }: ExecArgs) {
   await updateRegionsWorkflow(container).run({ input: {
     selector: { id: region.id }, update: { is_tax_inclusive: true },
   } })
-  logger.info(`Renamed store to "${DEMO_STORE_NAME}" and set Europe prices to include VAT.`)
+  await pricing.updatePricePreferences(preference.id, { is_tax_inclusive: true })
+  logger.info(`Renamed store to "${DEMO_STORE_NAME}" and set Europe region and EUR currency prices to include VAT.`)
 }
