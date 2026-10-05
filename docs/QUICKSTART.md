@@ -104,6 +104,11 @@ Choose **Cash** or **Card terminal**. For a card sale, take the payment on
 your separate terminal; the POS records that external payment. Complete the
 sale, then view the receipt and print it if needed.
 
+Before paying, you can add a discount to a line or the whole order, as a
+percentage or a fixed amount. The cart and receipt show each discount and
+a Discount total. Medusa receives the order with a "POS discount"
+adjustment on each discounted line.
+
 You can keep selling from the loaded catalogue if the connection drops.
 The sync bar shows sales waiting to sync and confirms when they have synced.
 Reconnect to send queued sales to Medusa.
@@ -115,7 +120,6 @@ while a rejected order needs investigation.
 
 ## Known MVP limits
 
-- Discounts are not supported.
 - A product deleted in Medusa stays in the POS catalogue until you sign out
   and back in. Signing out clears the local catalogue.
 - Medusa keeps line tax unrounded, so its reports can differ from receipts by
