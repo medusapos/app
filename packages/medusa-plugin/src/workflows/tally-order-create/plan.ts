@@ -131,6 +131,8 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
             ? { tally_session_id: v3.sessionId } : {}),
           ...(v3.customer?.customerId !== undefined
             ? { tally_customer_id: v3.customer!.customerId } : {}),
+          ...(ctx.customer && typeof payload.customer?.email === 'string' && payload.customer.email.length > 0
+            ? { tally_customer_email: payload.customer.email } : {}),
           // The till's own settlement figures, as the fiscal record (ADR 0012). Written at create only;
           // resume.ts never rewrites this key. Version 3 adds the receipt's figures as sent (TallyUI ADR-065).
           tally_pos_totals: (() => {
