@@ -1,5 +1,6 @@
 {
   "name": "medusa-store",
+  "license": "MIT",
   "private": false,
   "packageManager": "npm@11.19.1",
   "engines": {
