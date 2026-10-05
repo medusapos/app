@@ -62,3 +62,7 @@ must include the app's origin (`http://localhost:8081` for local development).
 - [TallyUI](https://github.com/TallyUI/tallyui) — composable POS UI primitives
 - [RxDB](https://rxdb.info) — local-first reactive database
 - [Electron](https://www.electronjs.org) — desktop packaging
+
+## License
+
+MIT. See [LICENSE](LICENSE).
