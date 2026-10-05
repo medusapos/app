@@ -13,7 +13,7 @@ const appliedResponse = (page: Page) => page.waitForResponse(async (response) =>
 });
 const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medusapos.session') ?? 'null')?.capabilities);
 
-test('a discounted sale is applied as order.create v3, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
+test('a discounted sale is applied as order.create v4, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
   await signIn(page);

@@ -140,7 +140,7 @@ medusaIntegrationTestRunner({
       for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
         const response = await info(requestHeaders)
         expect([response.status, response.data]).toEqual([200, {
-          contracts: { 'order.create': [1, 2, 3], register: [1], sync: [1] },
+          contracts: { 'order.create': [1, 2, 3, 4], register: [1], sync: [1] },
           taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         }])
       }

@@ -137,7 +137,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
             const { display, taxByRate } = v3
             return {
               v: display !== undefined && taxByRate !== undefined ? 2 : 1,
-              ...(orderCreateVersion === 4 ? { discountBasis: 'net' } : {}),
+              ...(orderCreateVersion >= 4 ? { discountBasis: 'net' } : {}),
               currency: payload.currency,
               exponent: decimals,
               settlement: {
