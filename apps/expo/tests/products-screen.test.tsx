@@ -943,6 +943,18 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     expect(resumePull).toHaveBeenCalledTimes(1);
   });
 
+  it('a token renewed in place keeps the same sync context and onUnauthorized, so catalogue sync never restarts; requests read the new token', async () => {
+    await mountTill();
+    const [, syncContext, onUnauthorized] = vi.mocked(useReplicatedProducts).mock.calls[0];
+    const renewed = jwt(Math.floor(Date.now() / 1000) + 2 * 86400);
+    vi.mocked(login).mockResolvedValue({ baseUrl: 'https://store.test', email: 'admin@store.test', token: renewed });
+    await act(async () => { await context.signIn('https://store.test', 'admin@store.test', 'password'); });
+    const [, latestContext, latestOnUnauthorized] = vi.mocked(useReplicatedProducts).mock.lastCall!;
+    expect(latestContext).toBe(syncContext);
+    expect(latestOnUnauthorized).toBe(onUnauthorized);
+    expect(syncContext.headers.Authorization).toBe('Bearer ' + renewed);
+  });
+
   /** Tenders the shirt by card; the first save fails and isn't stored, the retry stores it. */
   async function failedSave(token?: string) {
     const record = vi.fn().mockRejectedValueOnce(new Error('Storage full')).mockResolvedValue(undefined);
