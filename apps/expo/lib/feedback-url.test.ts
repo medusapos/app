@@ -1,5 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { feedbackUrl } from './feedback-url';
+// @vitest-environment jsdom
+import { Platform } from 'react-native';
+import * as Linking from 'expo-linking';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { feedbackUrl, openFeedbackUrl } from './feedback-url';
+
+vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.clearAllMocks();
+});
 
 function params(url: string): URLSearchParams {
   return new URL(url).searchParams;
@@ -40,5 +50,23 @@ describe('feedbackUrl', () => {
   it('omits the user agent on non-web platforms', () => {
     const url = feedbackUrl({ appVersion: '0.1.0', platform: 'ios' });
     expect(params(url).get('device')).toBe('ios');
+  });
+});
+
+describe('openFeedbackUrl', () => {
+  it('openFeedbackUrl opens through expo-linking off the web', () => {
+    const original = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      openFeedbackUrl('https://example.com/feedback');
+      expect(Linking.openURL).toHaveBeenCalledWith('https://example.com/feedback');
+    } finally { Platform.OS = original; }
+  });
+
+  it('openFeedbackUrl opens a new tab on the web', () => {
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    openFeedbackUrl('https://example.com/feedback');
+    expect(open).toHaveBeenCalledWith('https://example.com/feedback', '_blank', 'noopener,noreferrer');
+    expect(Linking.openURL).not.toHaveBeenCalled();
   });
 });

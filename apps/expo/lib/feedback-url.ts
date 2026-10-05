@@ -1,3 +1,6 @@
+import { Platform } from 'react-native';
+import * as Linking from 'expo-linking';
+
 // The GitHub issue-form field ids double as prefill query params; see
 // .github/ISSUE_TEMPLATE/tester-feedback.yml.
 const ISSUE_FORM_URL = 'https://github.com/medusapos/app/issues/new';
@@ -36,4 +39,9 @@ export function feedbackUrl({ appVersion, backendUrl, platform, userAgent, error
   });
   if (errorCode) params.set('what-happened', `Error code: ${errorCode}`);
   return `${ISSUE_FORM_URL}?${params.toString()}`;
+}
+
+export function openFeedbackUrl(url: string): void {
+  if (Platform.OS === 'web') window.open(url, '_blank', 'noopener,noreferrer');
+  else void Linking.openURL(url).catch((error) => console.warn('Failed to open feedback URL:', error));
 }
