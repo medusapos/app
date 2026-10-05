@@ -8,6 +8,7 @@ cd /src/app/dev/medusa-store/apps/backend/.medusa/server
 /src/app/dev/medusa-store/node_modules/.bin/medusa exec ./src/scripts/seed-dev-store.js
 /src/app/dev/medusa-store/node_modules/.bin/medusa exec ./src/scripts/seed-tax-rates.js
 /src/app/dev/medusa-store/node_modules/.bin/medusa exec ./src/scripts/seed-e2e.js
+/src/app/dev/medusa-store/node_modules/.bin/medusa exec ./src/scripts/seed-demo-presentation.js
 
 if [[ -n "${DEMO_ADMIN_EMAIL:-}" ]]; then
   : "${DEMO_ADMIN_PASSWORD:?DEMO_ADMIN_PASSWORD must be set and non-empty when DEMO_ADMIN_EMAIL is set}"

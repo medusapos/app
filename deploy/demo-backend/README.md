@@ -89,6 +89,19 @@ psql -U <postgres user> -d postgres -c 'CREATE DATABASE medusapos_demo_golden TE
 
 and start `mpdemo-backend` again.
 
+### Demo presentation
+
+After `seed-e2e.js`, the demo seed runs `seed-demo-presentation.js` to name
+the store "Medusa POS demo store" for the receipt header and make Europe's
+prices include VAT, as Danish retail prices do. This step is demo-only;
+e2e keeps its tax-exclusive Europe pricing.
+
+For the **live** demo, the front desk must run
+`medusa exec ./src/scripts/seed-demo-presentation.js` once in the running
+container, from `/src/app/dev/medusa-store/apps/backend/.medusa/server`,
+then take a new golden snapshot. Without that re-snapshot, the nightly
+reset restores the old store name and tax-exclusive prices.
+
 ## Demo accounts
 
 The public demo at `https://demo.medusapos.com/demo` signs in with one
