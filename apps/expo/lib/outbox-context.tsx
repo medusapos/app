@@ -14,12 +14,15 @@ import { clearOrderStoreOpenFailure, reportOrderStoreOpenFailure } from './stora
 export function useSessionOutbox(session: Session | null, registerId: string): UseOrderOutboxResult {
   const tokenRef = useRef(session?.token);
   tokenRef.current = session?.token;
+  const sessionRef = useRef(session);
+  sessionRef.current = session;
   const outbox = useOrderOutbox({
     storeKey: session?.baseUrl ?? null,
     open: openOrderStore,
     // Headers are read per request, so a token refresh keeps the open store and its outbox.
     transport: (baseUrl) => createHttpCommandTransport({ baseUrl, getHeaders: () => authHeaders(tokenRef.current ?? '') }),
     deviceId: registerId,
+    getMaxOrderCreateVersion: () => sessionRef.current?.capabilities?.orderCreate,
     onBusy: (busy) => markBusy('outbox', busy),
     onOpenError: (error) => {
       const failure = storageStartFailureOf(error);
