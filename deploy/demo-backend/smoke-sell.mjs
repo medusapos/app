@@ -64,12 +64,16 @@ try {
   const stores = await request('store-name', '/admin/stores?fields=id,name')
   check(stores?.stores?.[0]?.name === 'Medusa POS demo store', 'expected the demo store name')
 
+  const preferences = await request('eur-price-preference', '/admin/price-preferences?attribute=currency_code&value=eur')
+  check(preferences?.price_preferences?.[0]?.is_tax_inclusive === true,
+    'expected EUR currency prices to include VAT')
+
   const products = await request('sale', '/admin/products?handle=e2e-1&fields=id,variants.id,variants.sku')
   const variant = products?.products?.flatMap(product => product.variants ?? []).find(item => item.sku === 'E2E-1')
   check(variant?.id, 'expected E2E-1 variant')
   // Version 2 requires a positive order discount equal to the sum of line discounts.
   // The till's figures for the demo store: E2E-1 is EUR 2.00 (seed-e2e.ts), Europe prices include tax
-  // (seed-demo-presentation.ts sets the region preference), and the sale's location, the channel's European
+  // (seed-demo-presentation.ts sets region and EUR currency preferences), and the sale's location, the channel's European
   // Warehouse in Copenhagen, falls in the Europe region (dk), whose default VAT is 25% (tax-rates.ts).
   // Inclusive line, discount in the line's own mode: gross 200 − 20 = 180; tax 180 × 0.25 / 1.25 = 36
   // (rounded once per order, half away from zero: exact); subtotal 144; total 180.
