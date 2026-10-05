@@ -153,6 +153,22 @@ describe('ProductsScreen catalogue', () => {
     expect(notice.compareDocumentPosition(sales) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it('names the Medusa POS plugin when sales are not reaching the store (#129)', async () => {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(),
+      state: { pending: 1, sending: false, backendMissing: { since: 0 } },
+    });
+    await mount();
+    expect(screen.getByText(/couldn't find the Medusa POS plugin on the online store/)).toBeTruthy();
+  });
+
+  it('names the Medusa POS plugin when the product pull reports missing_plugin (#129)', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
+      pullNotice: { code: 'missing_plugin', since: 0, fixedBy: 'store' },
+    }));
+    await mount();
+    expect(screen.getByText("Products aren't updating: the online store is missing the Medusa POS plugin.")).toBeTruthy();
+  });
+
   it('keeps search focusable and editable with the authRequired strip in the title slot and header actions present', async () => {
     const { SignInAgain } = await import('../components/sign-in-again');
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 1, sending: false, authRequired: true } });

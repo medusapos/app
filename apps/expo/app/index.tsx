@@ -40,6 +40,8 @@ const STATE_LABEL: Record<SyncState, string> = {
 };
 
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
+// Merchant-facing name of @medusapos/medusa-plugin (#129).
+const PLUGIN_NAME = 'the Medusa POS plugin';
 // TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
 const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
 // Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
@@ -288,7 +290,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
-    <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} />
+    <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
