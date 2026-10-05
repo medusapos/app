@@ -3,6 +3,8 @@
  * Expo inlines these at bundle time; nothing secret is configured here.
  */
 export const storeConfig = {
+  /** The hosted demo build; shows /demo and the sign-in screen's demo link. */
+  demo: process.env.EXPO_PUBLIC_DEMO === '1',
   /** Only the login form's backend URL prefill. */
   defaultBaseUrl: process.env.EXPO_PUBLIC_MEDUSA_URL ?? 'http://localhost:9000',
   /** ISO 4217 code prices are shown in when a product has several. */

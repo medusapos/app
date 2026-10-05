@@ -15,6 +15,7 @@ import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
+import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -141,6 +142,14 @@ function PricingScreen(props: PricingProps) {
   if (!held) shown.current = live;
   const regionNames = useRef(new Map<string, string>());
   const again = () => setAttempt(attempt + 1);
+  const demoChosen = useRef(false);
+  const autoChooseDemo = store.state === 'choose' && !held && !demoChosen.current && isDemoAccount(session.email)
+    && (!store.choices.countries || store.choices.countries.includes(country));
+  useEffect(() => {
+    if (!autoChooseDemo || demoChosen.current || store.state !== 'choose') return;
+    demoChosen.current = true;
+    store.choose({ ...demoTillChoice(store.choices, store.initial), country });
+  }, [autoChooseDemo, store, country]);
 
   if (store.state === 'choose' && !held) {
     for (const region of store.choices.regions ?? []) regionNames.current.set(region.id, region.name);
@@ -151,6 +160,7 @@ function PricingScreen(props: PricingProps) {
       return <SettingsMessage text={`Stock location ${settings.location.name} is in ${country.toUpperCase()}, which ${region ? `region ${regionNames.current.get(region) ?? region}` : 'the store\'s default region'} does not cover.`}
         actions={region ? { Retry: again, 'Choose another region': () => { clearSettingsRegion(defaultStorage(), session.baseUrl); again(); } } : { Retry: again }} />;
     }
+    if (autoChooseDemo) return <SettingsMessage text="Setting up the demo till…" actions={{}} />;
     return <><EarlierSaleNote /><StoreSettingsChoiceScreen choices={choices} initial={store.initial} title="Set up this till"
       onSubmit={(choice) => store.choose({ ...choice, country })} /></>;
   }

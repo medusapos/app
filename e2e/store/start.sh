@@ -39,4 +39,6 @@ npx medusa db:migrate --skip-scripts
 npx medusa db:migrate:search
 npx medusa exec ./src/scripts/seed-e2e.ts
 npx medusa user -e e2e@tally.test -p e2e-password
+npx medusa user -e cashier@demo.medusapos.com -p demo1234
+npx medusa user -e manager@demo.medusapos.com -p demo1234
 exec npx medusa develop --port "$BACKEND_PORT"
