@@ -43,10 +43,6 @@ A Playwright trace of the hosted smoke (app.medusapos.com against the demo backe
 
 The findings are in `~/agent/handoff/perf-spike-findings-2026-09-28.md`. The app's own share is under 1 s: every sync page maps every product to a new object (`use-replicated-products.ts:113-116`) and rebuilds the sorted list (`index.tsx:221-226`). Throttle both during the first sync.
 
-## Keep the till's email when a found customer is attached
-
-When `order.create` v3 names a customer the plugin finds, the till's email is deliberately not passed, because Medusa's `findOrCreateCustomerStep` would swap in a guest customer. So the order takes the customer's stored email. If that customer has none, the order email is null and the email the cashier typed is kept nowhere (`packages/medusa-plugin/src/workflows/tally-order-create/plan.ts`). Record it as `tally_customer_email` metadata, and add a test for a found customer without an email (from the #90 delta review).
-
 ## Publish the plugin to npm with trusted publishing
 
 v0.1.0 ships `@medusapos/medusa-plugin` as a tarball attached to the GitHub release. That's an MVP-week stopgap. From the next release, publish it to npm the way TallyUI does: a release workflow using npm trusted publishing (OIDC from GitHub Actions, with no long-lived token) and provenance. Testers then run `npm install @medusapos/medusa-plugin`.

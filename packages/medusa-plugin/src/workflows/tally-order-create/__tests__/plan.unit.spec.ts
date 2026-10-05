@@ -448,6 +448,37 @@ it.each(['buyer@example.com', undefined])('a found customer sets customer_id and
   expect(result.plan.draftOrder).not.toHaveProperty('email')
 })
 
+describe('tally_customer_email (found customer)', () => {
+  it('records the typed email when a found customer is attached', () => {
+    const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'customer_1', email: 'Typed@Example.com' } }
+    const result = planOrderCreate(input, { ...ctx, customer: { id: 'customer_1' } }, 3)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.draftOrder.customer_id).toBe('customer_1')
+    expect(result.plan.draftOrder).not.toHaveProperty('email')
+    expect(result.plan.draftOrder.metadata.tally_customer_email).toBe('Typed@Example.com')
+  })
+
+  it('records no tally_customer_email when no customer was found; the email goes on the order instead', () => {
+    const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'unknown', email: 'typed@example.com' } }
+    const result = planOrderCreate(input, ctx, 3)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.draftOrder).not.toHaveProperty('customer_id')
+    expect(result.plan.draftOrder.email).toBe('typed@example.com')
+    expect(result.plan.draftOrder.metadata).not.toHaveProperty('tally_customer_email')
+  })
+
+  it('records no tally_customer_email when the till sent no email or an empty one', () => {
+    for (const email of [undefined, '']) {
+      const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'customer_1', ...(email === undefined ? {} : { email }) } }
+      const result = planOrderCreate(input, { ...ctx, customer: { id: 'customer_1' } }, 3)
+      if (!result.ok) throw new Error('Expected a plan')
+      expect(result.plan.draftOrder.customer_id).toBe('customer_1')
+      expect(result.plan.draftOrder).not.toHaveProperty('email')
+      expect(result.plan.draftOrder.metadata).not.toHaveProperty('tally_customer_email')
+    }
+  })
+})
+
 it("an unknown customer keeps the till's email and sets no customer_id", () => {
   const input: OrderCreatePayloadV3 = { ...payload, customer: { customerId: 'unknown', email: 'buyer@example.com' } }
   const result = planOrderCreate(input, ctx)

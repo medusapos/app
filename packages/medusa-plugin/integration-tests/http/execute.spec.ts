@@ -365,6 +365,21 @@ medusaIntegrationTestRunner({
       expect(order.email).toBe('Mixed@Example.com')
     })
 
+    it('a found customer with no stored email keeps the typed email as tally_customer_email, and the order email stays null', async () => {
+      const customers = container.resolve(Modules.CUSTOMER)
+      const customer = await customers.createCustomers({ first_name: 'No', last_name: 'Email' })
+      expect((await customers.retrieveCustomer(customer.id)).email).toBeNull()
+      const base = command()
+      const payload: OrderCreatePayloadV3 = { ...base.payload, customer: { customerId: customer.id, email: 'typed@example.com' } }
+      const sale = { ...base, version: 3, payload } as unknown as CommandEnvelope<OrderCreatePayloadV3>
+      expect(result(await executeOrderCreate(container, sale)).status).toBe('applied')
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.customer_id).toBe(customer.id)
+      expect(order.email).toBeNull()
+      expect(order.metadata.tally_customer_email).toBe('typed@example.com')
+      expect((await customers.retrieveCustomer(customer.id)).email).toBeNull()
+    })
+
     function emailSale(email: string) {
       const base = command()
       const payload: OrderCreatePayloadV3 = { ...base.payload, customer: { email } }
