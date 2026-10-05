@@ -5,6 +5,7 @@
     "version": "0.1.0",
     "scheme": "medusapos",
     "web": {
+      "description": "MedusaPOS is an open-source point of sale for Medusa stores. Try the demo in one click; demo data resets nightly.",
       "bundler": "metro",
       "output": "single"
     },
