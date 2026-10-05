@@ -17,6 +17,7 @@ vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 
 beforeEach(() => {
+  vi.spyOn(window, 'open').mockImplementation(() => null);
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -31,16 +32,29 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
 describe('Send feedback link', () => {
+  it('on the web, Send feedback opens the issue form in a new tab and leaves the POS open', () => {
+    render(<SessionProvider><LoginScreen /></SessionProvider>);
+    fireEvent.click(screen.getByRole('link', { name: 'Send feedback' }));
+    expect(window.open).toHaveBeenCalledWith(expect.stringContaining('https://github.com/medusapos/app/issues/new?'), '_blank', 'noopener,noreferrer');
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    expect(screen.getByRole('link', { name: 'Send feedback' })).toBeTruthy();
+  });
+
   it('renders on the sign-in screen and opens the issue form with the typed backend URL', () => {
     render(<SessionProvider><LoginScreen /></SessionProvider>);
     fireEvent.change(screen.getByLabelText('Backend URL'), { target: { value: 'https://store.example.com' } });
     fireEvent.click(screen.getByRole('link', { name: 'Send feedback' }));
-    expect(Linking.openURL).toHaveBeenCalledTimes(1);
-    const url = new URL(vi.mocked(Linking.openURL).mock.calls[0][0]);
+    expect(window.open).toHaveBeenCalledTimes(1);
+    expect(window.open).toHaveBeenCalledWith(expect.any(String), '_blank', 'noopener,noreferrer');
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    const openedUrl = vi.mocked(window.open).mock.calls[0][0];
+    expect(openedUrl).toBeDefined();
+    const url = new URL(String(openedUrl));
     expect(url.origin + url.pathname).toBe('https://github.com/medusapos/app/issues/new');
     expect(url.searchParams.get('template')).toBe('tester-feedback.yml');
     expect(url.searchParams.get('backend-host')).toBe('store.example.com');
@@ -50,8 +64,12 @@ describe('Send feedback link', () => {
     saveSession(localStorage, { baseUrl: 'https://signed-in.test', email: 'cashier@test.com', token: 'token' });
     render(<SessionProvider><OrdersScreen /></SessionProvider>);
     fireEvent.click(screen.getByRole('link', { name: 'Send feedback' }));
-    expect(Linking.openURL).toHaveBeenCalledTimes(1);
-    const url = new URL(vi.mocked(Linking.openURL).mock.calls[0][0]);
+    expect(window.open).toHaveBeenCalledTimes(1);
+    expect(window.open).toHaveBeenCalledWith(expect.any(String), '_blank', 'noopener,noreferrer');
+    expect(Linking.openURL).not.toHaveBeenCalled();
+    const openedUrl = vi.mocked(window.open).mock.calls[0][0];
+    expect(openedUrl).toBeDefined();
+    const url = new URL(String(openedUrl));
     expect(url.searchParams.get('backend-host')).toBe('signed-in.test');
   });
 });

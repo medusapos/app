@@ -1,8 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
-import * as Linking from 'expo-linking';
 import { version as appVersion } from '../package.json';
-import { feedbackUrl } from '../lib/feedback-url';
+import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
 import { orderStoreOpenFailed$, storageHealth$, type OrderStoreOpenFailure } from '../lib/storage-health';
 
 /**
@@ -36,7 +35,7 @@ export function StorageHealth({ children, backendUrl }: { children: ReactNode; b
   }
 
   if (openFailure) {
-    const report = () => void Linking.openURL(feedbackUrl({
+    const report = () => openFeedbackUrl(feedbackUrl({
       appVersion, backendUrl, platform: Platform.OS, userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
       errorCode: openFailure.code,
     }));
