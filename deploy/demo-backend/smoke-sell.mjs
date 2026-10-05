@@ -61,24 +61,27 @@ try {
     'expected order.create contracts to include 3')
   check(JSON.stringify(info?.contracts?.register) === '[1]', 'expected register contracts [1]')
 
+  const stores = await request('store-name', '/admin/stores?fields=id,name')
+  check(stores?.stores?.[0]?.name === 'Medusa POS demo store', 'expected the demo store name')
+
   const products = await request('sale', '/admin/products?handle=e2e-1&fields=id,variants.id,variants.sku')
   const variant = products?.products?.flatMap(product => product.variants ?? []).find(item => item.sku === 'E2E-1')
   check(variant?.id, 'expected E2E-1 variant')
   // Version 2 requires a positive order discount equal to the sum of line discounts.
-  // The till's figures for the seeded store: E2E-1 is EUR 2.00 (seed-e2e.ts), EUR prices exclude tax
-  // (seed-e2e.ts sets the EUR price preference), and the sale's location, the channel's European
+  // The till's figures for the demo store: E2E-1 is EUR 2.00 (seed-e2e.ts), Europe prices include tax
+  // (seed-demo-presentation.ts sets the region preference), and the sale's location, the channel's European
   // Warehouse in Copenhagen, falls in the Europe region (dk), whose default VAT is 25% (tax-rates.ts).
-  // Exclusive line, discount in the line's own mode: net 200 − 20 = 180; tax 180 × 0.25 = 45
-  // (rounded once per order, half away from zero: exact); total 180 + 45 = 225.
-  const totalMinor = 225
+  // Inclusive line, discount in the line's own mode: gross 200 − 20 = 180; tax 180 × 0.25 / 1.25 = 36
+  // (rounded once per order, half away from zero: exact); subtotal 144; total 180.
+  const totalMinor = 180
   const sale = await command('sale', 'order.create', 2, {
     clientOrderId: randomUUID(), createdAt: new Date().toISOString(),
-    currency: 'EUR', pricesIncludeTax: false,
+    currency: 'EUR', pricesIncludeTax: true,
     lines: [{
       clientLineId: randomUUID(), variantId: variant.id, quantity: 1,
       unitPriceMinor: 200, discountMinor: 20,
     }],
-    discountMinor: 20, subtotalMinor: 180, taxMinor: 45, totalMinor,
+    discountMinor: 20, subtotalMinor: 144, taxMinor: 36, totalMinor,
     payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor }],
   })
   check(sale.serverRefs?.orderId, 'expected serverRefs.orderId')
