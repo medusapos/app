@@ -11,7 +11,10 @@ import SettingsScreen from '../app/settings';
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
-  Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() ?? null },
+  Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
+    <div data-testid="header-left">{options.headerLeft?.()}</div>
+    {options.headerRight?.()}
+  </> },
 }));
 
 const baseUrl = 'https://store.test';
@@ -112,6 +115,17 @@ describe('SettingsScreen', () => {
     await mount();
     expect(screen.getByText('Codes shorter than this are treated as typing, not a scan')).toBeTruthy();
     expect(screen.getByText('Scan a barcode into this field to check it counts as a scan')).toBeTruthy();
+  });
+
+  it('Settings shows one Products back control, in the header (walkthrough item 10)', async () => {
+    await mount();
+    const headerLeft = screen.getByTestId('header-left');
+    const products = screen.getAllByRole('button', { name: 'Products' });
+    expect(products).toHaveLength(1);
+    expect(headerLeft.contains(products[0])).toBe(true);
+    const labels = screen.getAllByText('‹ Products');
+    expect(labels).toHaveLength(1);
+    expect(headerLeft.contains(labels[0])).toBe(true);
   });
 
   it('the Products link navigates home, for when Settings was opened directly by URL', async () => {
