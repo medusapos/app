@@ -1928,7 +1928,8 @@ medusaIntegrationTestRunner({
       expect(order.metadata.tally_customer_id).toBe(customerId)
       expect(order.metadata.tally_session_id).toBe('unknown-session')
       expect(order.metadata.tally_pos_totals.v).toBe(1)
-      expect(response.data.results[0].warnings ?? []).toEqual(mode === 'unknown' ? [{ code: 'customer_ignored', customerId }] : [])
+      expect(response.data.results[0].warnings ?? []).toEqual([...(mode === 'unknown' ? [{ code: 'customer_ignored', customerId }] : []),
+        { code: 'register_session_unknown', sessionId: 'unknown-session' }])
       if (mode === 'email') expect(order.email).toBe(email)
     })
 

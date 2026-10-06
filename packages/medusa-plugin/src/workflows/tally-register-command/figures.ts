@@ -46,7 +46,7 @@ export async function loadSessionFigures(container: MedusaContainer, sessionId: 
   if (input.closure) {
     query.whereRaw("metadata->>'tally_client_id' = any(?)", [input.closure.orderIds])
   } else {
-    query.whereRaw("metadata->>'tally_session_id' = ?", [sessionId])
+    query.whereRaw("metadata->>'tally_session_id' = any(?)", [input.sessionIds])
   }
   const movements = input.closure
     ? input.movements.filter(row => row.type === 'void' || input.closure!.movementIds.includes(row.id))
@@ -83,7 +83,7 @@ export async function loadSessionRejected(container: MedusaContainer, sessionId:
   if (input.closure) {
     query.whereRaw("rejected.metadata->>'tally_client_id' = any(?)", [input.closure.orderIds])
   } else {
-    query.whereRaw("rejected.metadata->>'tally_session_id' = ?", [sessionId])
+    query.whereRaw("rejected.metadata->>'tally_session_id' = any(?)", [input.sessionIds])
   }
   return deriveRejected(await query)
 }

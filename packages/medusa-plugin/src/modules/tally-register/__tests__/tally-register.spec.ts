@@ -51,6 +51,41 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
         supersededBy: second.openedBy, deviceId: taker.deviceId, deviceName: taker.deviceName,
       } }
 
+      it('figuresInput for an alias answers for the aliased session, and sessionIds lists the real id then its aliases', async () => {
+        await service.openSession(owner)
+        const aliases = [randomUUID(), randomUUID()]
+        for (const sessionId of aliases) await service.openSession({ ...owner, sessionId })
+        await service.recordMovement(movement)
+        const input = await service.figuresInput(first.sessionId)
+        expect(input?.sessionIds[0]).toBe(first.sessionId)
+        expect(input?.sessionIds).toHaveLength(3)
+        expect(input).toEqual({ sessionIds: expect.arrayContaining([first.sessionId, ...aliases]),
+          countedFloatMinor: first.countedFloatMinor, closure: null, movements: [{ id: movement.movementId,
+            type: movement.type, amountMinor: movement.amountMinor, voids: null }] })
+        for (const sessionId of aliases) expect(await service.figuresInput(sessionId)).toEqual(input)
+        await service.transition({ sessionId: first.sessionId, status: 'closed', at })
+        const closing = closure()
+        await service.submitClosure(closing)
+        for (const sessionId of [first.sessionId, ...aliases]) expect(await service.figuresInput(sessionId))
+          .toEqual({ ...input, closure: { orderIds: closing.orderIds, movementIds: closing.movementIds, counted: closing.counted } })
+        expect(await service.figuresInput(randomUUID())).toBeNull()
+      })
+
+      it('the known-session check is true for a session id, a superseded session id and an alias id, false otherwise', async () => {
+        await service.openSession(owner)
+        const alias = { ...owner, sessionId: randomUUID() }
+        await service.openSession(alias)
+        expect(await service.isKnownSession(first.sessionId)).toBe(true)
+        await service.openSession(taker)
+        for (const sessionId of [first.sessionId, second.sessionId, alias.sessionId]) expect(await service.isKnownSession(sessionId)).toBe(true)
+        await service.transition({ sessionId: second.sessionId, status: 'closed', at })
+        expect(await service.isKnownSession(second.sessionId)).toBe(true)
+        await sql('update tally_register_session set deleted_at = now() where id = ?', [first.sessionId])
+        expect(await service.isKnownSession(first.sessionId)).toBe(true)
+        expect(await service.isKnownSession(alias.sessionId)).toBe(true)
+        expect(await service.isKnownSession(randomUUID())).toBe(false)
+      })
+
       it('a movement, a void, a transition and a closure naming an alias count on the aliased session', async () => {
         expect(await service.openSession(owner)).toMatchObject({ kind: 'ok' })
         const alias = { ...owner, sessionId: randomUUID() }

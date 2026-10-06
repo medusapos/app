@@ -2,6 +2,8 @@ import type { CommandResult } from '@tallyui/core' with { 'resolution-mode': 'im
 import { MedusaError } from '@medusajs/framework/utils'
 import type { RegisterCommandResult } from '../tally-register/types'
 
+export type RegisterSessionUnknownWarning = { code: 'register_session_unknown'; sessionId: string }
+
 /** Validates a CommandResult (e.g. one read back from the ledger). Throws
  *  MedusaError INVALID_DATA naming the first bad field. */
 export function parseCommandResult(value: unknown): CommandResult {
@@ -82,6 +84,12 @@ export function parseCommandResult(value: unknown): CommandResult {
         }
         return { code: item.code, customerId: item.customerId }
       }
+      if (item.code === 'register_session_unknown') {
+        if (typeof item.sessionId !== 'string' || item.sessionId.length < 1 || item.sessionId.length > 36) {
+          throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${field}.sessionId`)
+        }
+        return { code: item.code, sessionId: item.sessionId } satisfies RegisterSessionUnknownWarning
+      }
       if (item.code === 'insufficient_stock') {
         if (typeof item.variantId !== 'string' || item.variantId.length === 0) {
           throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${field}.variantId`)
@@ -92,7 +100,7 @@ export function parseCommandResult(value: unknown): CommandResult {
         return { code: item.code, variantId: item.variantId, quantity: item.quantity as number }
       }
       throw new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid ${field}.code`)
-    })
+    }) as CommandResult['warnings']
   }
   if (input.error !== undefined) {
     if (typeof input.error !== 'object' || input.error === null || Array.isArray(input.error)) {

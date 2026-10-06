@@ -267,6 +267,86 @@ medusaIntegrationTestRunner({
         return { ...opening, version: 2, deviceId, payload: { ...opening.payload, ...payload } }
       }
 
+      it('after a resume, a sale naming the alias counts in the register read and the next register result, with no warning', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const resumed = openV2('till-a', { registerId: opening.payload.registerId })
+        expect((await post([opening, resumed])).data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const result = (await post([sale(data.variantB, resumed.payload.sessionId)])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result).not.toHaveProperty('warnings')
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.data.session).toMatchObject({ id: opening.payload.sessionId, expected: { cash: 1100 }, salesCount: 1 })
+        const next = (await post([movement(opening.payload.sessionId, 'paid_in', 50)])).data.results[0]
+        expect(next).toMatchObject({ status: 'applied', register: { session: { expected: { cash: 1150 }, salesCount: 1 } } })
+        const again = (await post([openV2('till-a', { registerId: opening.payload.registerId })])).data.results[0]
+        expect(again).toMatchObject({ status: 'applied', register: { session: { expected: { cash: 1150 }, salesCount: 1 } } })
+      })
+
+      it('a sale naming a session the store never saw is applied with the register_session_unknown warning', async () => {
+        const data = await seed(container)
+        const sessionId = randomUUID()
+        const order = sale(data.variantB, sessionId)
+        const result = (await post([order])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result.warnings).toEqual([{ code: 'register_session_unknown', sessionId }])
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        expect(await knex('order').where({ id: result.serverRefs.orderId }).first()).toMatchObject({
+          metadata: { tally_session_id: sessionId, tally_client_id: order.payload.clientOrderId },
+        })
+        expect((await post([order])).data.results).toEqual([{ ...result, status: 'duplicate' }])
+      })
+
+      it('a sale applied before its session opens counts on that session once the open arrives', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const result = (await post([sale(data.variantB, opening.payload.sessionId)])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result.warnings).toEqual([{ code: 'register_session_unknown', sessionId: opening.payload.sessionId }])
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.data.session).toMatchObject({ id: opening.payload.sessionId, expected: { cash: 1100 }, salesCount: 1 })
+      })
+
+      it('a sale naming a superseded session is applied with no warning', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, supersedes: opening.payload.sessionId })
+        expect((await post([opening, takeover])).data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const result = (await post([sale(data.variantB, opening.payload.sessionId)])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result).not.toHaveProperty('warnings')
+      })
+
+      it('a rejected sale naming an alias is included in the live rejected summary', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const resumed = openV2('till-a', { registerId: opening.payload.registerId })
+        expect((await post([opening, resumed])).data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const order = sale(data.variantB, resumed.payload.sessionId)
+        const planned = planOrderCreate(order.payload as Parameters<typeof planOrderCreate>[0], {
+          customer: null, commandId: order.id, salesChannelId: data.channelId,
+          region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+          location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+          variants: { [data.variantB]: { id: data.variantB } },
+        })
+        if (!planned.ok) throw new Error('Expected a plan')
+        const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+        await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+        const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+          input: { order_id: draft.id, amount: order.payload.totalMinor / 100 },
+        })
+        await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+        await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
+        const parked = await post([order])
+        expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+        const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
+        await script.default({ container, args: [order.id, 'reject'] })
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.data.session).toMatchObject({ expected: { cash: 100 }, salesCount: 0,
+          rejected: { count: 1, byMethod: { cash: 1000 } } })
+      })
+
       it('a v2 open with a deviceName is applied with the plain session result', async () => {
         const opening = openV2('till-a', { deviceName: 'Till A' })
         const fingerprint = commandFingerprint(opening as never)
