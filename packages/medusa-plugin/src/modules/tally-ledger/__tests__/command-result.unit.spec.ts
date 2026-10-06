@@ -9,6 +9,17 @@ const warnings = [
 const applied = { id: 'command_123', status: 'applied', serverRefs, warnings }
 const rejected = { id: 'command_123', status: 'rejected', error: { code: 'invalid', message: '' } }
 
+it('keeps a stored register_session_unknown warning and drops its unknown keys', () => {
+  const warning = { code: 'register_session_unknown', sessionId: 'x'.repeat(36) }
+  expect(parseCommandResult({ ...applied, warnings: [{ ...warning, extra: true }] }))
+    .toEqual({ ...applied, warnings: [warning] })
+})
+
+it.each(['', 'x'.repeat(37), 7, undefined])('refuses a stored register_session_unknown with sessionId %j', sessionId => {
+  expect(() => parseCommandResult({ ...applied, warnings: [{ code: 'register_session_unknown', sessionId }] })).toThrow(
+    expect.objectContaining({ type: MedusaError.Types.INVALID_DATA, message: 'Invalid warnings[0].sessionId' }))
+})
+
 it('keeps a stored customer_ignored warning and drops its unknown keys', () => {
   const warning = { code: 'customer_ignored', customerId: 'cus_unknown' }
   expect(parseCommandResult({ ...applied, warnings: [{ ...warning, extra: true }] }))

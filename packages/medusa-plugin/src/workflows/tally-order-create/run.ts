@@ -1,6 +1,9 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, MathBN, Modules } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import type { RegisterSessionUnknownWarning } from '../../modules/tally-ledger/command-result'
+import { TALLY_REGISTER_MODULE } from '../../modules/tally-register'
+import type TallyRegisterModuleService from '../../modules/tally-register/service'
 import { escapeLike, normaliseCustomerEmail, pickCustomer } from './customer-email'
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
@@ -209,11 +212,15 @@ export async function runOrderCreate(
   ).toString(), currencyDecimals(payload.currency)) : 0
   const serverSubtotal = serverMinor - serverTax - chargesNet
   const tillCustomerId = typeof order.metadata?.tally_customer_id === 'string' ? order.metadata.tally_customer_id : undefined
+  const sessionId = typeof order.metadata?.tally_session_id === 'string' ? order.metadata.tally_session_id : undefined
+  const sessionWarnings: RegisterSessionUnknownWarning[] = sessionId !== undefined
+    && !await container.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE).isKnownSession(sessionId)
+    ? [{ code: 'register_session_unknown', sessionId }] : []
   const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...(command.version >= 3 ? figuresWarnings(
     { subtotalMinor: payload.subtotalMinor, taxMinor: payload.taxMinor, discountMinor: payload.discountMinor ?? 0 },
     { subtotalMinor: serverSubtotal, taxMinor: serverTax,
       ...(command.version >= 4 ? { discountMinor: majorToMinor(order.raw_discount_subtotal.value, currencyDecimals(payload.currency)) } : {}) }
-  ) : []), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings]
+  ) : []), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings, ...sessionWarnings] as NonNullable<CommandResult['warnings']>
   return {
     id: command.id, status: 'applied',
     serverRefs: { orderId: order.id, displayId: String(order.display_id), totalMinor: serverMinor },

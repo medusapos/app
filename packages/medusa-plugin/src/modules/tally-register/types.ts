@@ -1,7 +1,11 @@
+export type RegisterSessionStatus = 'open' | 'counting' | 'closed' | 'superseded'
+
 /** A register command's server figures (registers c2b applies them). */
 export interface RegisterCommandResult {
+  resumed?: { fromSessionId: string };
+  superseded?: { sessionId: string; openedAt: string; deviceId?: string; deviceName?: string };
   /** The session's server state after this command. `expected` is absent when the server redacts it (blind). */
-  session?: { id: string; status: 'open' | 'counting' | 'closed'; expected?: Record<string, number>; salesCount?: number };
+  session?: { id: string; status: 'open' | 'counting' | 'closed'; openedAt?: string; openingFloatMinor?: number; expected?: Record<string, number>; salesCount?: number };
   /** The register's counters: a floor for the till's own, never lowered. */
   counters?: { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
   /** `register.closure.submit` only. */
@@ -12,6 +16,15 @@ export interface RegisterSessionOpenPayload {
   sessionId: string; registerId: string; storeKey?: string; businessDay?: string; openedAt: string; openedBy?: string;
   expectedFloatMinor?: number; countedFloatMinor: number; openingVarianceMinor?: number;
 }
+export interface RegisterSessionOpenV2Payload extends RegisterSessionOpenPayload {
+  deviceName?: string; supersedes?: string;
+}
+export type RegisterSessionOpenInput = RegisterSessionOpenV2Payload & { deviceId?: string; contract?: number }
+export type RegisterSessionTransitionInput = RegisterSessionTransitionPayload & { contract?: number }
+export type RegisterMovementRecordInput = RegisterMovementRecordPayload & { contract?: number }
+export type RegisterMovementVoidInput = RegisterMovementVoidPayload & { contract?: number }
+export type RegisterClosureSubmitInput = RegisterClosureSubmitPayload & { contract?: number }
+
 export interface RegisterSessionTransitionPayload {
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;
   /** Closing only. */ counted?: Record<string, number>; closedBy?: string; approvedBy?: string;
@@ -40,6 +53,7 @@ export type RegisterCounters = {
 export type RegisterConflictCode =
   | 'register_session_already_open'
   | 'register_session_closed'
+  | 'register_session_superseded'
   | 'register_closure_exists'
   | 'register_closure_number_invalid'
 

@@ -9,6 +9,7 @@ import {
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
+import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { executeOrderCreate, type ExecuteOutcome } from '../../src/workflows/tally-order-create'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
@@ -23,6 +24,9 @@ medusaIntegrationTestRunner({
     beforeServerStart: async container => {
       container.resolve(ContainerRegistrationKeys.CONFIG_MODULE).modules![TALLY_LEDGER_MODULE] = {
         resolve: path.resolve(__dirname, '../../src/modules/tally-ledger'),
+      }
+      container.resolve(ContainerRegistrationKeys.CONFIG_MODULE).modules![TALLY_REGISTER_MODULE] = {
+        resolve: path.resolve(__dirname, '../../src/modules/tally-register'),
       }
     },
   },

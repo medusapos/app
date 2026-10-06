@@ -1,9 +1,9 @@
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { RegisterClosureSubmitPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
-  RegisterSessionOpenPayload, RegisterSessionTransitionPayload } from '../../modules/tally-register/types'
+  RegisterSessionOpenPayload, RegisterSessionOpenV2Payload, RegisterSessionTransitionPayload } from '../../modules/tally-register/types'
 
-// Register v1 fields (ruling 17): exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
-// makes tsc refuse a missing or an extra field. Register version 1 is the only one (versions.ts); process.ts refuses others.
+// Register v1 and v2 fields: exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
+// makes tsc refuse a missing or an extra field. Only the open gains fields in version 2.
 const fields = <T>(record: Record<keyof T, true>) => Object.keys(record)
 const REGISTER_FIELDS = new Map<string, string[]>([
   ['register.session.open', fields<RegisterSessionOpenPayload>({ sessionId: true, registerId: true, storeKey: true,
@@ -20,11 +20,14 @@ const REGISTER_FIELDS = new Map<string, string[]>([
     perpetualRefundsTotalMinor: true, unsyncedCount: true, unsyncedTotalMinor: true, softwareVersion: true, orderIds: true,
     movementIds: true })],
 ])
+const OPEN_V2_FIELDS = fields<RegisterSessionOpenV2Payload>({ sessionId: true, registerId: true, storeKey: true,
+  businessDay: true, openedAt: true, openedBy: true, expectedFloatMinor: true, countedFloatMinor: true,
+  openingVarianceMinor: true, deviceName: true, supersedes: true })
 // The only keys of the declared maps counted and tillExpected: PaymentMethodKind (@tallyui/core 2.0.0 src/types/commands.ts:68).
 const PAYMENT_METHODS = Object.keys({ cash: true, external: true } satisfies Record<PaymentMethodKind, true>)
 
-/** Shape errors before a register command claims a ledger row. A field its type's v1 payload doesn't declare is refused. */
-export function registerPayloadErrors(type: string, payload: unknown): string[] {
+/** Shape errors before a register command claims a ledger row. Fields undeclared by its type and version are refused. */
+export function registerPayloadErrors(type: string, payload: unknown, version = 1): string[] {
   const errors: string[] = []
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
@@ -33,8 +36,8 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
   }
   if (!object(payload)) return ['payload: expected an object']
   for (const key of Object.keys(payload)) {
-    const known = REGISTER_FIELDS.get(type)?.includes(key) ?? false
-    if (!known && errors.length < 10) errors.push(`payload.${key}: unknown field for ${type} version 1`)
+    const known = (type === 'register.session.open' && version >= 2 ? OPEN_V2_FIELDS : REGISTER_FIELDS.get(type))?.includes(key) ?? false
+    if (!known && errors.length < 10) errors.push(`payload.${key}: unknown field for ${type} version ${version}`)
   }
   const string = (field: string, optional = false) => {
     const value = payload[field]
@@ -60,6 +63,11 @@ export function registerPayloadErrors(type: string, payload: unknown): string[] 
       for (const field of ['storeKey', 'businessDay', 'openedBy']) string(field, true)
       integer('countedFloatMinor', 0)
       for (const field of ['expectedFloatMinor', 'openingVarianceMinor']) if (payload[field] !== undefined) integer(field)
+      if (version >= 2 && payload.deviceName !== undefined) check(typeof payload.deviceName === 'string'
+        && payload.deviceName.trim().length >= 1 && payload.deviceName.trim().length <= 64 && !payload.deviceName.includes('\u0000'),
+      'deviceName', 'a string of 1 to 64 characters after trim')
+      if (version >= 2 && payload.supersedes !== undefined) check(typeof payload.supersedes === 'string'
+        && payload.supersedes.length > 0 && payload.supersedes.length <= 64, 'supersedes', 'a non-empty string of at most 64 characters')
       break
     case 'register.session.transition':
       string('at')

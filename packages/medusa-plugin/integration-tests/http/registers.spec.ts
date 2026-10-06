@@ -11,7 +11,7 @@ import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
 import type TallyRegisterModuleService from '../../src/modules/tally-register/service'
-import type { RegisterClosureSubmitPayload, RegisterSessionOpenPayload } from '../../src/modules/tally-register/types'
+import type { RegisterClosureSubmitPayload, RegisterSessionOpenPayload, RegisterSessionOpenV2Payload } from '../../src/modules/tally-register/types'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
@@ -49,7 +49,7 @@ medusaIntegrationTestRunner({
     function command<P>(type: string, payload: P) {
       return { id: randomUUID(), type, version: 1, payload, createdAt: openedAt, deviceId: 'test-register', attempt: 1 }
     }
-    function open(registerId = randomUUID()) {
+    function open(registerId: string = randomUUID()) {
       return command('register.session.open', { sessionId: randomUUID(), registerId, openedAt, countedFloatMinor: 100 })
     }
     function close(sessionId: string) {
@@ -207,12 +207,12 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results[0].status).toBe('applied')
     })
 
-    it('an unsupported register version is rejected unsupported_version with data.register 1 and is not stored', async () => {
+    it('an unsupported register version is rejected unsupported_version with data.register 2 and is not stored', async () => {
       const opening = open()
-      const response = await post([{ ...opening, version: 2 }])
+      const response = await post([{ ...opening, version: 3 }])
       expect(response.status).toBe(200)
       expect(response.data.results[0]).toMatchObject({ id: opening.id, status: 'rejected', error: {
-        code: 'unsupported_version', data: { register: 1 },
+        code: 'unsupported_version', data: { register: 2 },
       } })
       expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
       expect((await post([opening])).data.results[0].status).toBe('applied')
@@ -251,13 +251,224 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results).toEqual([{ ...retry.data.results[0], status: 'duplicate' }])
     })
 
-    it('/info lists order.create 1, 2, 3 and register 1', async () => {
+    it('/info lists order.create 1, 2, 3 and register 1 and 2', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         lineTax: { none: false, classes: false },
+      })
+    })
+
+    describe('register v2 open', () => {
+      function openV2(deviceId: string, payload: Partial<RegisterSessionOpenV2Payload> = {}) {
+        const opening = open()
+        return { ...opening, version: 2, deviceId, payload: { ...opening.payload, ...payload } }
+      }
+
+      it('after a resume, a sale naming the alias counts in the register read and the next register result, with no warning', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const resumed = openV2('till-a', { registerId: opening.payload.registerId })
+        expect((await post([opening, resumed])).data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const result = (await post([sale(data.variantB, resumed.payload.sessionId)])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result).not.toHaveProperty('warnings')
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.data.session).toMatchObject({ id: opening.payload.sessionId, expected: { cash: 1100 }, salesCount: 1 })
+        const next = (await post([movement(opening.payload.sessionId, 'paid_in', 50)])).data.results[0]
+        expect(next).toMatchObject({ status: 'applied', register: { session: { expected: { cash: 1150 }, salesCount: 1 } } })
+        const again = (await post([openV2('till-a', { registerId: opening.payload.registerId })])).data.results[0]
+        expect(again).toMatchObject({ status: 'applied', register: { session: { expected: { cash: 1150 }, salesCount: 1 } } })
+      })
+
+      it('a sale naming a session the store never saw is applied with the register_session_unknown warning', async () => {
+        const data = await seed(container)
+        const sessionId = randomUUID()
+        const order = sale(data.variantB, sessionId)
+        const result = (await post([order])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result.warnings).toEqual([{ code: 'register_session_unknown', sessionId }])
+        const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+        expect(await knex('order').where({ id: result.serverRefs.orderId }).first()).toMatchObject({
+          metadata: { tally_session_id: sessionId, tally_client_id: order.payload.clientOrderId },
+        })
+        expect((await post([order])).data.results).toEqual([{ ...result, status: 'duplicate' }])
+      })
+
+      it('a sale applied before its session opens counts on that session once the open arrives', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const result = (await post([sale(data.variantB, opening.payload.sessionId)])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result.warnings).toEqual([{ code: 'register_session_unknown', sessionId: opening.payload.sessionId }])
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.data.session).toMatchObject({ id: opening.payload.sessionId, expected: { cash: 1100 }, salesCount: 1 })
+      })
+
+      it('a sale naming a superseded session is applied with no warning', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, supersedes: opening.payload.sessionId })
+        expect((await post([opening, takeover])).data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const result = (await post([sale(data.variantB, opening.payload.sessionId)])).data.results[0]
+        expect(result.status).toBe('applied')
+        expect(result).not.toHaveProperty('warnings')
+      })
+
+      it('a rejected sale naming an alias is included in the live rejected summary', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a')
+        const resumed = openV2('till-a', { registerId: opening.payload.registerId })
+        expect((await post([opening, resumed])).data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const order = sale(data.variantB, resumed.payload.sessionId)
+        const planned = planOrderCreate(order.payload as Parameters<typeof planOrderCreate>[0], {
+          customer: null, commandId: order.id, salesChannelId: data.channelId,
+          region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+          location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+          variants: { [data.variantB]: { id: data.variantB } },
+        })
+        if (!planned.ok) throw new Error('Expected a plan')
+        const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+        await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+        const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+          input: { order_id: draft.id, amount: order.payload.totalMinor / 100 },
+        })
+        await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+        await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
+        const parked = await post([order])
+        expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+        const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
+        await script.default({ container, args: [order.id, 'reject'] })
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.data.session).toMatchObject({ expected: { cash: 100 }, salesCount: 0,
+          rejected: { count: 1, byMethod: { cash: 1000 } } })
+      })
+
+      it('a v2 open with a deviceName is applied with the plain session result', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        const fingerprint = commandFingerprint(opening as never)
+        const response = await post([opening])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: opening.id, status: 'applied', register: {
+          session: { id: opening.payload.sessionId, status: 'open', expected: { cash: 100 }, salesCount: 0 }, counters,
+        } }])
+        const [stored] = await ledger.listTallyCommands({ id: opening.id })
+        expect(stored.fingerprint).toBe(fingerprint)
+      })
+
+      it('the same device opening a fresh session id resumes: applied with the live session, openedAt, openingFloatMinor, expected, salesCount and resumed; its replay is duplicate', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        expect((await post([sale(data.variantB, opening.payload.sessionId), movement(opening.payload.sessionId, 'paid_in', 50)]))
+          .data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const resumed = openV2('till-a', { registerId: opening.payload.registerId, openedAt: closedAt, countedFloatMinor: 999 })
+        const response = await post([resumed])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: resumed.id, status: 'applied', register: {
+          session: { id: opening.payload.sessionId, status: 'open', openedAt, openingFloatMinor: 100,
+            expected: { cash: 1150 }, salesCount: 1 }, counters, resumed: { fromSessionId: resumed.payload.sessionId },
+        } }])
+        const replay = await post([resumed])
+        expect(replay.status).toBe(200)
+        expect(replay.data.results).toEqual([{ ...response.data.results[0], status: 'duplicate' }])
+      })
+
+      it('another device is refused register_session_already_open with sessionId, registerId, openedAt, status, deviceId and deviceName', async () => {
+        const opening = openV2('till-a', { deviceName: '  Till A  ' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const second = openV2('till-b', { registerId: opening.payload.registerId })
+        const response = await post([second])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: second.id, status: 'rejected', error: {
+          code: 'register_session_already_open', message: 'This register already has an open session.',
+          data: { sessionId: opening.payload.sessionId, registerId: opening.payload.registerId, openedAt,
+            status: 'open', deviceId: 'till-a', deviceName: 'Till A' },
+        } }])
+      })
+
+      it('supersedes naming the live session is applied with register.superseded, and GET /tally/v1/registers/:id then shows the new session', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt, countedFloatMinor: 200 })
+        const response = await post([takeover])
+        expect(response.status).toBe(200)
+        const session = { id: takeover.payload.sessionId, status: 'open', expected: { cash: 200 }, salesCount: 0 }
+        expect(response.data.results).toEqual([{ id: takeover.id, status: 'applied', register: {
+          session, counters, superseded: { sessionId: opening.payload.sessionId, openedAt, deviceId: 'till-a', deviceName: 'Till A' },
+        } }])
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.status).toBe(200)
+        expect(read.data).toEqual({ session, counters })
+      })
+
+      it('after a take-over, a v2 movement on the superseded session is rejected register_session_superseded with the take-over data, is final, and the new session is unchanged', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt, countedFloatMinor: 200 })
+        expect((await post([takeover])).data.results[0].status).toBe('applied')
+        const before = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        const payout = { ...movement(opening.payload.sessionId, 'paid_out', 50), version: 2 }
+        const fingerprint = commandFingerprint(payout as never)
+        const response = await post([payout])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: payout.id, status: 'rejected', error: {
+          code: 'register_session_superseded', message: 'This register session was taken over by another till.',
+          data: { sessionId: opening.payload.sessionId, supersededAt: closedAt, newSessionId: takeover.payload.sessionId,
+            deviceId: takeover.deviceId, deviceName: 'Till B' },
+        } }])
+        const [stored] = await ledger.listTallyCommands({ id: payout.id })
+        expect(stored.status).toBe('rejected')
+        expect(stored.fingerprint).toBe(fingerprint)
+        const replay = await post([payout])
+        expect(replay.status).toBe(200)
+        expect(replay.data.results).toEqual(response.data.results)
+        const after = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(after.status).toBe(200)
+        expect(after.data).toEqual(before.data)
+        expect(after.data.session).toMatchObject({ id: takeover.payload.sessionId, status: 'open' })
+        expect(await service.listTallyRegisterMovements({ session_id: opening.payload.sessionId })).toHaveLength(0)
+      })
+
+      it('after a take-over, a v1 movement on the superseded session is rejected register_session_closed', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt })
+        expect((await post([takeover])).data.results[0].status).toBe('applied')
+        const payout = movement(opening.payload.sessionId, 'paid_out', 50)
+        const response = await post([payout])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: payout.id, status: 'rejected', error: {
+          code: 'register_session_closed', message: 'This register session is closed.',
+        } }])
+      })
+
+      it('a v1 open over a live v2 session is refused with data { sessionId } only', async () => {
+        const opening = openV2('test-register', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const second = open(opening.payload.registerId)
+        const response = await post([second])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: second.id, status: 'rejected', error: {
+          code: 'register_session_already_open', message: 'This register already has an open session.',
+          data: { sessionId: opening.payload.sessionId },
+        } }])
+      })
+
+      it('a v1 open with deviceName is invalid_payload naming the field, and is not stored', async () => {
+        const opening = open()
+        const response = await post([{ ...opening, payload: { ...opening.payload, deviceName: 'Till A' } }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: opening.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'payload.deviceName: unknown field for register.session.open version 1',
+        } }])
+        expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
       })
     })
 
