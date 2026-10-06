@@ -99,6 +99,20 @@ medusaIntegrationTestRunner({
       expect(await stockA()).toBe(8)
     })
 
+    it('an order paid by external then cash records both payments, one payment collection of exactly totalMinor, and change only from cash', async () => {
+      const sale = command({
+        payments: [
+          { clientPaymentId: randomUUID(), method: 'external', amountMinor: 600, reference: 'card-1' },
+          { clientPaymentId: randomUUID(), method: 'cash', amountMinor: 400, tenderedMinor: 500, changeMinor: 100 },
+        ],
+      })
+      const result = await runOrderCreate(container, sale)
+      const order = await readOrder(result)
+      expect(result.warnings).toBeUndefined()
+      expect(order.payment_collections.map(collection => Number(collection.amount))).toEqual([10.00])
+      expect(order.metadata.tally_payments).toEqual(sale.payload.payments)
+    })
+
     it('tax-exclusive prices total 11.90 with a collection of exactly 11.9', async () => {
       const sale = command({
         pricesIncludeTax: false, subtotalMinor: 1000, taxMinor: 190, totalMinor: 1190,
