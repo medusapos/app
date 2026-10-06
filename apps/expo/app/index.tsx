@@ -4,7 +4,7 @@ import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import { Cart, CartBar, Catalogue, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
-import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
+import { ConnectorProvider, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
@@ -215,8 +215,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const drafts = draftsCollection(orders);
   const { parked, discard } = useParkedSales(drafts);
   const [parkedOpen, setParkedOpen] = useState(false);
+  const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
-    isStored, session: register.saleSession, drafts });
+    isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
+      const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
+      return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
+    } });
   const { sale: cartSale, refused } = useGatedSale(sale);
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
@@ -253,6 +257,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     [products, stockOverlay],
   );
   const entries = useMemo(() => catalogueEntries(sorted, traits), [sorted]);
+  entriesRef.current = entries;
   // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
   const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);

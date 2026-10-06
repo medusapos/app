@@ -70,8 +70,10 @@ afterEach(async () => {
   vi.clearAllMocks();
 });
 async function mount() {
-  await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(<><ProductsScreen /><PortalHost /></>); });
   await screen.findByTestId('product-tile-Shirt');
+  return view;
 }
 async function park() {
   fireEvent.click(button(/^Parked sales/));
@@ -108,6 +110,43 @@ it('parks the cart from the Parked sales sheet, starts an empty sale, and resume
   expect(row('Total')).toBe('Total€30.00');
   expect(await drafts().find().exec()).toHaveLength(0);
   expect(record).not.toHaveBeenCalled();
+});
+
+it('a parked sale resumed after a catalogue price change is re-priced to today\'s price, with TallyUI\'s Prices changed note', async () => {
+  const view = await mount();
+  add();
+  expect(screen.getByText('€12.00 × 1')).toBeTruthy();
+  await park();
+  const replicated = vi.mocked(useReplicatedProducts).mock.results.at(-1)!.value;
+  const product = replicated.products[0];
+  vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [{ ...product,
+    variants: [{ ...product.variants[0], prices: [{ amount: 15, currency_code: 'eur' }] }] }] });
+  view.rerender(<><ProductsScreen /><PortalHost /></>);
+  await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
+  expect(screen.getByText('€15.00 × 1').parentElement!.parentElement!.textContent).toBe('Shirt€15.00 × 1€15.00');
+  expect([row('Subtotal'), row('VAT 25%'), row('Total')]).toEqual(['Subtotal€15.00', 'VAT 25%€3.75', 'Total€18.75']);
+  expect(screen.getByText("Prices changed since this sale was parked: 1 line updated to today's price.")).toBeTruthy();
+});
+
+it('a variant no longer in the catalogue keeps its parked price on resume', async () => {
+  const view = await mount();
+  add(); await park();
+  const replicated = vi.mocked(useReplicatedProducts).mock.results.at(-1)!.value;
+  vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [] });
+  view.rerender(<><ProductsScreen /><PortalHost /></>);
+  expect(screen.queryByTestId('product-tile-Shirt')).toBeNull();
+  await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
+  expect(screen.getByText('€12.00 × 1')).toBeTruthy();
+  expect(row('Total')).toBe('Total€15.00');
+  expect(screen.queryByText(/Prices changed/)).toBeNull();
+});
+
+it('an unchanged catalogue resumes at the same prices with no Prices changed note', async () => {
+  await mount(); add(); await park();
+  await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
+  expect(screen.getByText('€12.00 × 1')).toBeTruthy();
+  expect(row('Total')).toBe('Total€15.00');
+  expect(screen.queryByText(/Prices changed/)).toBeNull();
 });
 
 it('the opener counts parked sales', async () => {
