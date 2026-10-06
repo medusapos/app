@@ -141,6 +141,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await page.close();
       expect(old.rxdbVersion).toStrictEqual(releasedRef.rxdb);
       expect(old.stored).toStrictEqual(migration.stored);
+      expect(old.docs.drafts).toStrictEqual([]);
       expect(old.docs.pos_orders).toHaveLength(4);
       expect(old.docs.pos_orders.map(order => order.totalMinor).sort((a, b) => a - b))
         .toStrictEqual([...totals].sort((a, b) => a - b));
