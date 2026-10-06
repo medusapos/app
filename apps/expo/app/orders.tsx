@@ -1,4 +1,4 @@
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, Text } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { OrdersList } from '@tallyui/components';
 import { ProductsBack } from '../components/products-back';
@@ -15,8 +15,6 @@ export default function OrdersScreen() {
   return <>
     <Stack.Screen options={{ title: 'Orders', headerLeft: () => <ProductsBack /> }} />
     <OrdersList orders={recent} onRetry={requeue} formatDate={formatDate} footer={
-      <View>
-        {recent.length === 0 ? <Text className="text-center text-sm text-muted-foreground">No sales on this till yet. Completed sales show here.</Text> : null}
         <Pressable accessibilityRole="link" className="min-h-11 justify-center" onPress={() => { openFeedbackUrl(feedbackUrl({
           appVersion, platform: Platform.OS,
           userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
@@ -24,7 +22,6 @@ export default function OrdersScreen() {
         })); }}>
           <Text className="text-center text-sm text-muted-foreground">Send feedback</Text>
         </Pressable>
-      </View>
     } />
   </>;
 }

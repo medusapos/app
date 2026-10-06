@@ -325,7 +325,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <RegisterPanelSheet currency={pricing.currency} store={receiptStore} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <RegisterClosedSheet currency={pricing.currency} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
-      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order}
+      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
         store={receiptStore}
         topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}
         cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :

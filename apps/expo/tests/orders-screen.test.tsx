@@ -18,7 +18,7 @@ vi.mock('expo-router', () => ({
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 
-const emptyText = 'No sales on this till yet. Completed sales show here.';
+const emptyText = 'No sales yet. Completed sales appear here.';
 
 beforeEach(() => {
   const data = new Map<string, string>();
@@ -41,9 +41,10 @@ function mount() {
 }
 
 describe('OrdersScreen', () => {
-  it('shows the empty state when the till has no sales (#195)', () => {
+  it('shows TallyUI\'s single empty state when the till has no sales (#195, TallyUI 3.0.2)', () => {
     mount();
-    expect(screen.getByText(emptyText)).toBeTruthy();
+    expect(screen.getAllByText(emptyText)).toHaveLength(1);
+    expect(screen.queryByText('No sales on this till yet. Completed sales show here.')).toBeNull();
     expect(screen.getByRole('link', { name: 'Send feedback' })).toBeTruthy();
   });
 
