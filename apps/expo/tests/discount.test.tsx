@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, type ServerCapabilities, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
@@ -8,34 +7,7 @@ import {
   catalogueEntries, createOrderBuilder, DISCOUNTS_UNSUPPORTED, TaxProvider, taxProviderProps, toOrderCreateEnvelope, useSale, type Order, type PosOrder,
 } from '@tallyui/pos';
 import { Cart, parseDiscount, Receipt } from '@tallyui/components';
-import type { CartAction, CartLineProps, CartTotalProps } from '@tallyui/components';
 
-// Cart and Receipt (imported above) are real, unmocked (TallyUI TV6a/TV6b). Cart's own submodule
-// (sale/index.ts) re-exports cart.tsx, cart-bar.tsx, tender.tsx and discount-form.tsx together, so
-// importing it evaluates all four; the primitives they use internally (from '../cart', '../checkout',
-// not the barrel) are mocked below at those module ids, tender.tsx's included, even though this file
-// never renders Tender.
-vi.mock('@tallyui/components/checkout', () => ({
-  CashTendered: () => null,
-  ChangeDisplay: () => null,
-}));
-vi.mock('@tallyui/components/cart', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name, lineTotal }: CartLineProps) => <span>{name}: {formatMoney(lineTotal)}</span>,
-  CartLineActions: ({ children, actions }: { children: ReactNode; actions: CartAction[] }) => <div>{children}
-    {actions.map((action) => <button key={action.id} onClick={action.onPress}>{action.label}</button>)}</div>,
-  CartTotal: ({ subtotal, taxLines, discount, total, taxInclusive }: CartTotalProps) => <div>
-    <span>Subtotal: {formatMoney(subtotal)}</span>
-    {discount && discount.amount > 0 ? <span>Discount: {formatMoney(discount)}</span> : null}
-    {taxLines?.map((line) => <span key={line.label}>{taxInclusive ? 'incl. ' : ''}{line.label}: {formatMoney(line.amount)}</span>)}
-    <span>Total: {formatMoney(total)}</span>
-  </div>,
-  DiscountBadge: ({ label }: { label: string }) => <span>{label}</span>,
-}));
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
@@ -57,7 +29,11 @@ const receiptStore = { name: 'Shop', address: undefined };
 const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
 function discount(opener: string, type: 'Percent' | 'Amount', value: string) {
-  click(opener);
+  // The line action has no button role; scope its text to the line, away from the totals row.
+  if (opener === 'Discount') {
+    const line = within(screen.getByRole('button', { name: 'Remove Shirt' }).parentElement!.parentElement!);
+    fireEvent.click(line.getByText(opener));
+  } else click(opener);
   click(type);
   fireEvent.change(screen.getByRole('textbox', { name: 'Discount value' }), { target: { value } });
   click('Apply');
@@ -134,10 +110,10 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
   it('labels a fixed chip with the amount that comes off, not the amount asked for', () => {
     start();
     discount('Discount', 'Amount', '20');
-    expect(screen.getByText(`−${money(2000)}`)).toBeTruthy();
+    expect(within(screen.getByRole('button', { name: /^Remove discount/ })).getByText(`−${money(2000)}`)).toBeTruthy();
     act(() => sale.setQuantity(sale.order.lineItems[0].id, 1));
     expect(sale.order.lineItems[0].discounts[0]).toMatchObject({ value: 2000, amountMinor: 1250 });
-    expect(screen.getByText(`−${money(1250)}`)).toBeTruthy();
+    expect(within(screen.getByRole('button', { name: /^Remove discount/ })).getByText(`−${money(1250)}`)).toBeTruthy();
     expect(screen.queryByText(`−${money(2000)}`)).toBeNull();
   });
 
@@ -162,7 +138,8 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     const order = expected.getSnapshot();
     expect(totals(sale.order)).toEqual(totals(order));
     expect(sale.order.lineItems[0]).toMatchObject({ discountMinor: 300, orderDiscountMinor: 50, netMinor: 2200 });
-    expect(screen.getByText(`Discount: ${money(300)}`)).toBeTruthy();
+    const footer = within(screen.getByTestId('cart-footer'));
+    expect(footer.getByText('Discount').parentElement!.textContent).toBe(`Discount−${money(300)}`);
     // Each chip carries its order.display amount: the line's 10% of €25.00, and the order row.
     expect(screen.getByText(`10% −${money(250)}`)).toBeTruthy();
     expect(screen.getByText(`Order discount −${money(50)}`)).toBeTruthy();
@@ -170,7 +147,7 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     click(`Remove discount 10% −${money(250)}`);
     click(`Remove discount Order discount −${money(50)}`);
     expect(totals(sale.order)).toEqual(plain);
-    expect(screen.queryByText(/^Discount: /)).toBeNull();
+    expect(footer.queryByText('Discount')).toBeNull();
   });
 
   // Two shirts at €12.50, 10% off the line and €0.50 off the order: €3.00 off, 25% VAT, in each display mode (ADR-063).
@@ -193,9 +170,15 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     expect(display.lines.reduce((sum, row) => sum + row.amountMinor, 0)).toBe(display.subtotalMinor);
     expect(display.lines.flatMap((row) => row.discounts).reduce((sum, row) => sum + row.amountMinor, display.orderDiscountMinor))
       .toBe(display.discountMinor);
-    const tax = `${inclusive ? 'incl. ' : ''}VAT 25%: ${money(display.taxMinor)}`;
-    for (const text of [`Shirt: ${money(2500)}`, `10% −${money(250)}`, `Order discount −${money(50)}`, `Subtotal: ${money(2500)}`,
-      `Discount: ${money(300)}`, tax, `Total: ${money(display.totalMinor)}`]) expect(screen.getByText(text)).toBeTruthy();
+    const taxName = `${inclusive ? 'incl. ' : ''}VAT 25%`;
+    const tax = `${taxName}: ${money(display.taxMinor)}`;
+    expect(within(screen.getByText('Shirt').parentElement!.parentElement!).getByText(`${money(2500)}`)).toBeTruthy();
+    for (const text of [`10% −${money(250)}`, `Order discount −${money(50)}`]) expect(screen.getByText(text)).toBeTruthy();
+    const footer = within(screen.getByTestId('cart-footer'));
+    for (const [label, amount] of [['Subtotal', money(2500)], ['Discount', `−${money(300)}`],
+      [taxName, money(display.taxMinor)], ['Total', money(display.totalMinor)]] as const) {
+      expect(footer.getByText(label).parentElement!.textContent).toBe(`${label}${amount}`);
+    }
     const order = sale.order;
     cleanup();
     render(<Receipt order={order} store={receiptStore} taxLabel={taxLabel} cashier="cashier" registerId="register-1" newSale={() => {}} />);
