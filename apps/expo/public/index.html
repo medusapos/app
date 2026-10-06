@@ -32,6 +32,29 @@
         flex: 1;
       }
     </style>
+    <style id="splash-style">
+      #splash {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        width: 100%;
+        min-height: 100%;
+        background: #f8f9fa;
+        color: #111827;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        text-align: center;
+      }
+      #splash h1 {
+        margin: 0;
+        color: #6366f1;
+        font-size: 2rem;
+      }
+      #splash p {
+        margin: 0.5rem 0 0;
+        color: #6b7280;
+      }
+    </style>
   </head>
 
   <body>
@@ -40,6 +63,11 @@
       You need to enable JavaScript to run this app.
     </noscript>
     <!-- The root element for your Expo app. -->
-    <div id="root"></div>
+    <div id="root">
+      <div id="splash" role="status" aria-live="polite">
+        <h1>MedusaPOS</h1>
+        <p>Loading the point of sale…</p>
+      </div>
+    </div>
   </body>
 </html>
