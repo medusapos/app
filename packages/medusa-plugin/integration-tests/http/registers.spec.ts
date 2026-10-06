@@ -320,6 +320,45 @@ medusaIntegrationTestRunner({
       ])
     })
 
+    it('the register read lists a rejected sale with no retry as session.rejected, live and after the closure, and leaves expected unchanged', async () => {
+      const data = await seed(container)
+      const opening = open()
+      const { sessionId, registerId } = opening.payload
+      const order = sale(data.variantB, sessionId)
+      expect((await post([opening])).data.results[0].status).toBe('applied')
+      const planned = planOrderCreate(order.payload as Parameters<typeof planOrderCreate>[0], {
+        customer: null, commandId: order.id, salesChannelId: data.channelId,
+        region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+        location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+        variants: { [data.variantB]: { id: data.variantB } },
+      })
+      if (!planned.ok) throw new Error('Expected a plan')
+      const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+      await convertDraftOrderWorkflow(container).run({ input: { id: draft.id } })
+      const { result: [collection] } = await createOrderPaymentCollectionWorkflow(container).run({
+        input: { order_id: draft.id, amount: order.payload.totalMinor / 100 },
+      })
+      await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
+      await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
+      const parked = await post([order])
+      expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+      expect(await ledger.retrieveTallyCommand(order.id)).toMatchObject({ status: 'needs_admin' })
+      const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
+      await script.default({ container, args: [order.id, 'reject'] })
+      const live = await api.get(`/tally/v1/registers/${registerId}`, { headers })
+      expect(live.data.session.rejected).toEqual({ count: 1, byMethod: { cash: 1000 } })
+      expect(live.data.session.expected).toEqual({ cash: 100 })
+      expect(live.data.session.salesCount).toBe(0)
+      const submission = closure(opening.payload)
+      submission.payload.orderIds = [order.payload.clientOrderId]
+      const closed = await post([close(sessionId), submission])
+      expect(closed.status).toBe(200)
+      expect(closed.data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+      const read = await api.get(`/tally/v1/registers/${registerId}`, { headers })
+      expect(read.data.session.rejected).toEqual({ count: 1, byMethod: { cash: 1000 } })
+      expect(read.data.session.expected).toEqual({ cash: 100 })
+    })
+
     it('a rejected session sale and its retry count cash once in the live and closed figures', async () => {
       const data = await seed(container)
       const opening = open()
@@ -350,10 +389,14 @@ medusaIntegrationTestRunner({
         tally_rejected: true, tally_session_id: sessionId, tally_payments: order.payload.payments,
       } })
       expect(await loadSessionFigures(container, sessionId)).toEqual({ expected: { cash: 100 }, salesCount: 0 })
+      const rejectedRead = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+      expect(rejectedRead.data.session.rejected).toEqual({ count: 1, byMethod: { cash: 1000 } })
       const retry = await post([{ ...order, id: randomUUID() }])
       expect([retry.status, retry.data.results[0].status]).toEqual([200, 'applied'])
       expect(retry.data.results[0].serverRefs.orderId).not.toBe(draft.id)
       expect(await loadSessionFigures(container, sessionId)).toEqual({ expected: { cash: 1100 }, salesCount: 1 })
+      const retryRead = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+      expect(retryRead.data.session).not.toHaveProperty('rejected')
       const applied = await knex('order').where({ id: retry.data.results[0].serverRefs.orderId }).first()
       expect(applied.metadata).not.toHaveProperty('tally_rejected')
       const submission = closure(opening.payload)

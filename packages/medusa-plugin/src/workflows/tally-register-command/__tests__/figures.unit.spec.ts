@@ -1,4 +1,4 @@
-import { deriveSessionFigures, deriveVariance } from '../figures'
+import { deriveRejected, deriveSessionFigures, deriveVariance } from '../figures'
 
 const workedExample: Parameters<typeof deriveSessionFigures>[0] = {
   countedFloatMinor: 10000,
@@ -10,6 +10,28 @@ const workedExample: Parameters<typeof deriveSessionFigures>[0] = {
     { id: 'void', type: 'void', amountMinor: 700, voids: 'voided-out' },
   ],
 }
+
+describe('rejected sales', () => {
+  it('counts orders and sums their payments per method, skipping malformed rows', () => {
+    const orders = [{ payments: null }, { payments: {} }, { payments: [
+      null, { amountMinor: 500 }, { method: '', amountMinor: 500 }, { method: 1, amountMinor: 500 },
+      { method: 'cash', amountMinor: '500' }, { method: 'cash', amountMinor: 1.5 },
+      { method: 'cash', amountMinor: Number.MAX_SAFE_INTEGER + 1 },
+      { method: 'cash', amountMinor: NaN }, { method: 'cash', amountMinor: Infinity },
+      { method: 'cash', amountMinor: 500 }, { method: 'external', amountMinor: 1500 },
+      { method: 'constructor', amountMinor: 200 },
+    ] }, { payments: [
+      { method: 'cash', amountMinor: 300 }, { method: 'constructor', amountMinor: 100 },
+    ] }] as unknown as Parameters<typeof deriveRejected>[0]
+    const rejected = deriveRejected(orders)
+    expect(rejected).toEqual({ count: 4, byMethod: { cash: 800, external: 1500, constructor: 300 } })
+    expect(Object.getPrototypeOf(rejected.byMethod)).toBe(Object.prototype)
+  })
+
+  it('is zero with an empty byMethod for no orders', () => {
+    expect(deriveRejected([])).toEqual({ count: 0, byMethod: {} })
+  })
+})
 
 describe('session figures', () => {
   it('malformed payments are skipped and never throw', () => {

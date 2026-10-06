@@ -54,3 +54,36 @@ export async function loadSessionFigures(container: MedusaContainer, sessionId: 
   const figures = deriveSessionFigures({ countedFloatMinor: input.countedFloatMinor, orders: await query, movements })
   return { ...figures, ...(input.closure ? { variance: deriveVariance(input.closure.counted, figures.expected) } : {}) }
 }
+
+export function deriveRejected(orders: { payments: { method: string; amountMinor: number }[] }[]): { count: number; byMethod: Record<string, number> } {
+  const byMethod: Record<string, number> = Object.create(null)
+  for (const order of orders) {
+    if (!Array.isArray(order.payments)) continue
+    for (const payment of order.payments) {
+      if (typeof payment?.method !== 'string' || !payment.method.length || !Number.isSafeInteger(payment.amountMinor)) continue
+      byMethod[payment.method] = (byMethod[payment.method] ?? 0) + payment.amountMinor
+    }
+  }
+  return { count: orders.length, byMethod: { ...byMethod } }
+}
+
+export async function loadSessionRejected(container: MedusaContainer, sessionId: string): Promise<{ count: number; byMethod: Record<string, number> } | null> {
+  const service = container.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE)
+  const input = await service.figuresInput(sessionId)
+  if (!input) return null
+  const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+  const query = knex('order as rejected').select(knex.raw("rejected.metadata->'tally_payments' as payments"))
+    .whereNull('rejected.deleted_at').where('rejected.is_draft_order', false)
+    .whereRaw("rejected.metadata->>'tally_rejected' = 'true'")
+    .whereRaw("rejected.metadata->'tally_payments' is not null")
+    .whereNotExists(knex('order as counted').select(knex.raw('1'))
+      .whereNull('counted.deleted_at').where('counted.is_draft_order', false).whereIn('counted.status', ORDER_STATUSES_COUNTED)
+      .whereRaw("counted.metadata->>'tally_rejected' is distinct from 'true'")
+      .whereRaw("counted.metadata->>'tally_client_id' = rejected.metadata->>'tally_client_id'"))
+  if (input.closure) {
+    query.whereRaw("rejected.metadata->>'tally_client_id' = any(?)", [input.closure.orderIds])
+  } else {
+    query.whereRaw("rejected.metadata->>'tally_session_id' = ?", [sessionId])
+  }
+  return deriveRejected(await query)
+}
