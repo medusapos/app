@@ -6,7 +6,7 @@ import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
 import { customerWarnings, figuresWarnings, planOrderCreate, totalWarnings } from './plan'
 import { resumeOrderCreate } from './resume'
-import { mergeStockTopUps, planStockTopUp } from './stock'
+import { mergeStockTopUps, planStockTopUp, stockWarnings as warningsForStock } from './stock'
 import { StoreConfigurationError } from './store-configuration-error'
 import { tallyOrderCreateWorkflow, type StockTopUp } from './workflow'
 
@@ -194,12 +194,12 @@ export async function runOrderCreate(
       entity: 'product_variant', fields: ['id', 'manage_inventory', 'inventory_items.inventory_item_id', 'inventory_items.required_quantity'],
       filters: { id: catalogueLines.map(line => line.variantId) },
     })
-    stockWarnings = variants.filter(variant => variant.manage_inventory).flatMap(variant => {
-      const quantity = Math.max(0, ...variant.inventory_items.map(item => Math.ceil(
-        (topUps.find(topUp => topUp.inventory_item_id === item.inventory_item_id)?.shortfall ?? 0) / Number(item.required_quantity)
-      )))
-      return quantity > 0 ? [{ code: 'insufficient_stock' as const, variantId: variant.id, quantity }] : []
-    })
+    const sold = new Map<string, number>()
+    for (const line of catalogueLines) sold.set(line.variantId, (sold.get(line.variantId) ?? 0) + line.quantity)
+    stockWarnings = warningsForStock(variants.filter(variant => variant.manage_inventory).map(variant => ({
+      variantId: variant.id, manageInventory: variant.manage_inventory,
+      items: variant.inventory_items.map(item => ({ inventoryItemId: item.inventory_item_id, requiredQuantity: Number(item.required_quantity) })),
+    })), sold, topUps.map(topUp => ({ inventoryItemId: topUp.inventory_item_id, shortfall: topUp.shortfall })))
   }
   const serverMinor = majorToMinor(order.raw_total.value, currencyDecimals(payload.currency))
   const serverTax = majorToMinor(order.raw_tax_total.value, currencyDecimals(payload.currency))

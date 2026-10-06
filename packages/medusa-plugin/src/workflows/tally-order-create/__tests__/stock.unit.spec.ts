@@ -15,6 +15,23 @@ describe('planStockTopUp', () => {
       topUps: [{ inventoryItemId: 'i', shortfall: 1 }], missingLevels: [], warnings: [warning(1)],
     })
   })
+  it('S1: caps the warning at one sold unit when stock is minus one', () => {
+    expect(planStockTopUp([{ ...line, quantity: 1 }], [variant], [{ ...level, stocked: -1 }])).toEqual({
+      topUps: [{ inventoryItemId: 'i', shortfall: 2 }], missingLevels: [], warnings: [warning(1)],
+    })
+  })
+  it('S2: caps the warning in variant units when each unit requires two items', () => {
+    expect(planStockTopUp([{ ...line, quantity: 1 }],
+      [{ ...variant, items: [{ inventoryItemId: 'i', requiredQuantity: 2 }] }], [{ ...level, stocked: -2 }])).toEqual({
+      topUps: [{ inventoryItemId: 'i', shortfall: 4 }], missingLevels: [], warnings: [warning(1)],
+    })
+  })
+  it('S3: caps the warning at the sum of two lines of the same variant', () => {
+    expect(planStockTopUp([{ ...line, quantity: 1 }, { ...line, quantity: 1 }], [variant],
+      [{ ...level, stocked: -3 }])).toEqual({
+      topUps: [{ inventoryItemId: 'i', shortfall: 5 }], missingLevels: [], warnings: [warning(2)],
+    })
+  })
   it('subtracts reserved stock from availability', () => {
     expect(planStockTopUp([line], [variant], [{ ...level, reserved: 1 }])).toEqual({
       topUps: [{ inventoryItemId: 'i', shortfall: 1 }], missingLevels: [], warnings: [warning(1)],

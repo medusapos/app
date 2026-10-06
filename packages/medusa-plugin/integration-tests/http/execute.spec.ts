@@ -293,7 +293,7 @@ medusaIntegrationTestRunner({
       const retried = result(await executeOrderCreate(container, sale))
       expect(retried).toMatchObject({ id: sale.id, status: 'applied' })
       expect(retried.warnings).toEqual([
-        { code: 'insufficient_stock', variantId: data.variantC, quantity: 2 - Number(compensated.stocked_quantity) },
+        { code: 'insufficient_stock', variantId: data.variantC, quantity: 2 },
       ])
       expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'applied', result: retried })
       const orders = await liveOrders(sale.payload.clientOrderId)
