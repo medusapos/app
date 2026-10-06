@@ -9,7 +9,7 @@ import { TallyRegisterClosure } from './models/tally-register-closure'
 import type {
   RegisterCommandResult, RegisterCounters, RegisterOutcome, RegisterSessionOpenInput,
   RegisterSessionTransitionPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
-  RegisterClosureSubmitPayload,
+  RegisterClosureSubmitPayload, RegisterSessionStatus,
 } from './types'
 
 const COUNTERS = `json_build_object('lastClosureNumber', r.last_closure_number,
@@ -37,6 +37,11 @@ export default class TallyRegisterModuleService extends MedusaService({
         }
         const [alias] = v2 ? await em.execute(`select s.* from tally_register_session_alias a
           join tally_register_session s on s.id = a.session_id where a.id = ?`, [p.sessionId]) : []
+        if (alias) {
+          if (alias.register_id !== p.registerId) return { kind: 'invalid', message: 'session id belongs to another register' }
+          if (alias.status === 'superseded') return { kind: 'conflict', code: 'register_session_superseded',
+            data: (await this.supersededData(alias.id, { manager: em }))! }
+        }
         const [live] = alias ? [alias] : await em.execute(`select * from tally_register_session
           where register_id = ? and status in ('open','counting') and deleted_at is null`, [p.registerId])
         if (!alias && live?.id === p.sessionId) continue
@@ -66,7 +71,7 @@ export default class TallyRegisterModuleService extends MedusaService({
           (id, register_id, store_key, status, business_day, opened_at, opened_by, expected_float_minor, counted_float_minor, opening_variance_minor, device_id, device_name)
           values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing returning id`,
         [p.sessionId, p.registerId, p.storeKey ?? null, p.businessDay ?? null, p.openedAt, p.openedBy ?? null,
-          p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null, p.deviceId?.trim() ?? null, p.deviceName?.trim() ?? null])
+          p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null, p.deviceId ?? null, p.deviceName?.trim() ?? null])
         if (inserted.length) return { kind: 'ok', register: { ...(await em.execute(SESSION_STATE, [p.sessionId]))[0], ...(superseded ? { superseded } : {}) } }
       }
       return { kind: 'invalid', message: 'conflicting session is no longer active' }
@@ -214,12 +219,12 @@ export default class TallyRegisterModuleService extends MedusaService({
 
   @InjectManager()
   async registerState(registerId: string, @MedusaContext() sharedContext: Context = {}): Promise<{
-    session?: RegisterCommandResult['session']; counters?: RegisterCounters
+    session?: Omit<NonNullable<RegisterCommandResult['session']>, 'status'> & { status: RegisterSessionStatus }; counters?: RegisterCounters
   } | null> {
     return (sharedContext.manager as EntityManager).transactional(async (em) => {
       const [register] = await em.execute(COUNTER_STATE, [registerId])
       if (!register) return null
-      const [session] = await em.execute<{ id: string; status: 'open' | 'counting' | 'closed' | 'superseded' }[]>(`select id, status from tally_register_session where register_id = ? and deleted_at is null
+      const [session] = await em.execute<{ id: string; status: RegisterSessionStatus }[]>(`select id, status from tally_register_session where register_id = ? and deleted_at is null
         order by (status in ('open','counting')) desc, opened_at desc limit 1`, [registerId])
       return { ...register, ...(session ? { session } : {}) }
     })
