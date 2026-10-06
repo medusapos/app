@@ -14,6 +14,18 @@ export type VariantInventory = { variantId: string; manageInventory: boolean
   items: Array<{ inventoryItemId: string; requiredQuantity: number }> }
 export type LevelAt = { inventoryItemId: string; stocked: number; reserved: number }
 
+export function stockWarnings(managed: VariantInventory[], sold: Map<string, number>,
+  shortfalls: Array<{ inventoryItemId: string; shortfall: number }>) {
+  return managed.flatMap(variant => {
+    const shortfall = Math.max(0, ...variant.items.map(item => Math.ceil(
+      (shortfalls.find(topUp => topUp.inventoryItemId === item.inventoryItemId)?.shortfall ?? 0) / item.requiredQuantity
+    )))
+    // Units of this sale that stock did not cover (ruling on item 8, 2026-10-06).
+    const quantity = Math.min(sold.get(variant.variantId) ?? 0, shortfall)
+    return quantity > 0 ? [{ code: 'insufficient_stock' as const, variantId: variant.variantId, quantity }] : []
+  })
+}
+
 export function planStockTopUp(lines: Array<{ variantId: string; quantity: number }>,
   variants: VariantInventory[], levels: LevelAt[]): {
   topUps: Array<{ inventoryItemId: string; shortfall: number }>
@@ -22,8 +34,10 @@ export function planStockTopUp(lines: Array<{ variantId: string; quantity: numbe
 } {
   const managed = variants.filter(variant => variant.manageInventory && lines.some(line => line.variantId === variant.variantId))
   const needed = new Map<string, number>()
+  const sold = new Map<string, number>()
   for (const variant of managed) {
     const quantity = lines.filter(line => line.variantId === variant.variantId).reduce((sum, line) => sum + line.quantity, 0)
+    sold.set(variant.variantId, quantity)
     for (const item of variant.items) {
       needed.set(item.inventoryItemId, (needed.get(item.inventoryItemId) ?? 0) + quantity * item.requiredQuantity)
     }
@@ -36,11 +50,6 @@ export function planStockTopUp(lines: Array<{ variantId: string; quantity: numbe
     const shortfall = quantity - (level ? level.stocked - level.reserved : 0)
     if (shortfall > 0) topUps.push({ inventoryItemId, shortfall })
   }
-  const warnings = managed.flatMap(variant => {
-    const quantity = Math.max(0, ...variant.items.map(item => Math.ceil(
-      (topUps.find(topUp => topUp.inventoryItemId === item.inventoryItemId)?.shortfall ?? 0) / item.requiredQuantity
-    )))
-    return quantity > 0 ? [{ code: 'insufficient_stock' as const, variantId: variant.variantId, quantity }] : []
-  })
+  const warnings = stockWarnings(managed, sold, topUps)
   return { topUps, missingLevels, warnings }
 }

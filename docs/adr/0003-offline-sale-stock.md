@@ -13,8 +13,11 @@ reservations when stock is short.
 Check availability only at the sale's stock location. Raise each level by its
 shortfall before the draft and lower it by the same amount after fulfillment;
 both changes are compensated. Stock ends at original minus sold and may be
-negative. Return one `insufficient_stock` warning per short variant, with its
-shortfall in variant units.
+negative. Return one `insufficient_stock` warning per short variant, with the
+units of this sale that stock did not cover: the smaller of the units sold and
+the shortfall in variant units.
+
+Amendment 2026-10-06: `insufficient_stock.quantity` changes from the level's whole shortfall in variant units to the units of this sale that stock did not cover, min(units sold, shortfall in variant units); a one-way contract change released as plugin 0.2.0.
 
 Record top-ups in draft metadata and mark their take-back as reversed. Dedupe
 trusts only completed orders; resume a half-made order's missing steps in recipe

@@ -83,5 +83,4 @@ Written up for the TallyUI lane in `~/agent/handoff/tallyui-component-bugs-2026-
 - Done 2026-10-06: keep the till's email when a found customer is attached (#190, c0b76f5); a token refresh no longer
   restarts catalogue sync, now pinned by a test (#192, a697c4b).
 - Open: screen tests stub TallyUI primitives through deep aliases.
-- Design question: `insufficient_stock.quantity` is the level's whole shortfall (ADR 0003), so selling 1 when stock
-  already stood at −1 reports 2. Decide whether the cashier should see "units sold without stock" instead.
+- Ruling (2026-10-06): `insufficient_stock.quantity` is the units of this sale without stock, min(units sold, shortfall in variant units); plugin 0.2.0.
