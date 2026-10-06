@@ -33,6 +33,12 @@ find "$dist_dir" -type f \( -name '*.js' -o -name '*.html' \) -print0 > "$files"
 while IFS= read -r -d '' file; do
   [[ $file != *.js ]] || js_count=$((js_count + 1))
   scan "$bundle_pattern" "$file"
+  if [[ $file == *.js ]]; then scan 'sourceMappingURL=' "$file"; fi
+done < "$files"
+find "$dist_dir" -type f -name '*.map' -print0 > "$files"
+while IFS= read -r -d '' file; do
+  failed=1
+  printf '%s: source map in web export\n' "$file" >&2
 done < "$files"
 find "$app_dir/app" "$app_dir/components" "$app_dir/lib" -type f -name '*.[jt]s*' ! -name '*.test.*' \
   ! -path "$app_dir/lib/e2e-debug.ts" -print0 > "$files"
