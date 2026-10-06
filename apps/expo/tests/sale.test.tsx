@@ -2,11 +2,10 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useContext } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { formatMoney, moneyFromDecimalString, type StoreSettings as PricingSettings } from '@tallyui/core';
+import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import { catalogueEntries, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { Cart, Receipt, Tender } from '@tallyui/components';
-import type { CartLineProps, CartTotalProps, CashTenderedProps, ChangeDisplayProps } from '@tallyui/components';
 import { OutboxStrip, StripHeightContext } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
 import { formatDate } from '../lib/format-date';
@@ -20,45 +19,6 @@ import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
-// Cart, Tender, Receipt etc. live in @tallyui/components (TallyUI TV6a/TV6b) and are imported above,
-// real and unmocked. The primitives they compose internally (from `../cart`, `../checkout`,
-// `../product`, `../input`, not the barrel) are mocked below at those module ids (aliased to their
-// source in vitest.config.ts), not by path.
-vi.mock('@tallyui/components/product', () => ({
-  ProductGrid: ({ emptyState }: { emptyState: React.ReactNode }) => <div>{emptyState}</div>,
-  ProductCard: () => null,
-}));
-vi.mock('@tallyui/components/input', () => ({
-  SearchInput: () => <input aria-label="Search catalogue" />,
-}));
-vi.mock('@tallyui/components/cart', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => React.ReactNode; emptyState?: React.ReactNode; afterItems?: React.ReactNode; footer?: React.ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) => <div role="group" aria-label={name}>
-    <span>{name}</span><span>Quantity: {quantity}</span><span>Unit: {formatMoney(unitPrice)}</span><span>Line: {formatMoney(lineTotal)}</span>
-  </div>,
-  CartTotal: ({ subtotal, taxLines, total }: CartTotalProps) => <div>
-    <span>Subtotal: {formatMoney(subtotal)}</span>
-    {taxLines?.map((line, index) => <span key={index}>{line.label}: {formatMoney(line.amount)}</span>)}
-    <span>Total: {formatMoney(total)}</span>
-  </div>,
-  CartLineActions: ({ children }: { children?: React.ReactNode }) => <div>{children}</div>,
-  DiscountBadge: () => null,
-}));
-vi.mock('@tallyui/components/checkout', () => ({
-  CashTendered: ({ total, amount, onChangeAmount }: CashTenderedProps) => <div>
-    <span>To pay: {formatMoney(total)}</span><span>Tendered: {amount && formatMoney(amount)}</span>
-    <input aria-label="Cash tendered" onChange={(event) => {
-      const money = moneyFromDecimalString(event.target.value, total.currency);
-      if (money) onChangeAmount?.(money);
-    }} />
-    <button onClick={() => onChangeAmount?.(total)}>Exact cash</button>
-  </div>,
-  ChangeDisplay: ({ change }: ChangeDisplayProps) => <span>Change due: {formatMoney(change)}</span>,
-}));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
@@ -112,7 +72,7 @@ function SaleView({ onSaleCompleted, with: shown = pricing }: HarnessProps) {
 }
 const money = (amount: number) => formatMoney({ amount, currency: settings.currency });
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
-const typeCash = (value: string) => fireEvent.change(screen.getByRole('textbox', { name: 'Cash tendered' }), { target: { value } });
+const typeCash = (value: string) => fireEvent.change(within(screen.getByText('Cash Tendered').parentElement!).getByRole('textbox'), { target: { value } });
 function addSaleLines() { act(() => { sale.add(entries[0], traits); sale.add(entries[1], traits); sale.add(entries[0], traits); }); }
 
 beforeEach(() => {
@@ -171,14 +131,14 @@ describe('sale', () => {
     const order = expected.getSnapshot();
     expect(sale.order.lineItems.map((line) => line.quantity)).toEqual([2, 1]);
     for (const line of order.lineItems) {
-      const group = within(screen.getByRole('group', { name: line.name }));
-      expect(group.getByText(`Quantity: ${line.quantity}`)).toBeTruthy();
-      expect(group.getByText(`Unit: ${money(line.unitPriceMinor)}`)).toBeTruthy();
-      expect(group.getByText(`Line: ${money(line.netMinor)}`)).toBeTruthy();
+      const group = within(screen.getByText(line.name).parentElement!.parentElement!);
+      expect(group.getByText(`${money(line.unitPriceMinor)} × ${line.quantity}`).textContent).toBe(`${money(line.unitPriceMinor)} × ${line.quantity}`);
+      expect(group.getByText(money(line.netMinor)!).textContent).toBe(money(line.netMinor));
     }
-    expect(screen.getByText(`Subtotal: ${money(order.subtotalMinor)}`)).toBeTruthy();
-    expect(screen.getByText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
-    expect(screen.getByText(`Total: ${money(order.totalMinor)}`)).toBeTruthy();
+    const footer = within(screen.getByTestId('cart-footer'));
+    expect(footer.getByText('Subtotal').parentElement!.textContent).toBe(`Subtotal${money(order.subtotalMinor)}`);
+    expect(footer.getByText('VAT 25%').parentElement!.textContent).toBe(`VAT 25%${money(order.taxMinor)}`);
+    expect(footer.getByText('Total').parentElement!.textContent).toBe(`Total${money(order.totalMinor)}`);
     click('Increase Shirt · Red');
     expect(sale.order.lineItems[1].quantity).toBe(2);
   });
@@ -205,8 +165,13 @@ describe('sale', () => {
     const before = sale.order;
     expect(before.totalMinor).toBe(4375);
     click('Cash');
+    const cash = within(screen.getByText('Cash Tendered').parentElement!);
+    expect(cash.getByText(money(before.totalMinor)!).textContent).toBe(money(4375));
+    expect(screen.getByText(`Balance due: ${money(before.totalMinor)}`).textContent).toBe(`Balance due: ${money(4375)}`);
     typeCash('50');
-    expect(screen.getByText(`Change due: ${money(sale.order.changeDueMinor)}`)).toBeTruthy();
+    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('50');
+    expect(sale.order.changeDueMinor).toBe(625);
+    expect(screen.getByText('Change Due').parentElement!.textContent).toBe(`Change Due${money(sale.order.changeDueMinor)}`);
     await act(async () => { click('Complete sale'); });
     expect(sale.stage.kind).toBe('receipt');
     expect(screen.getByLabelText(`Change: ${money(625)}`)).toBeTruthy();
@@ -241,7 +206,9 @@ describe('sale', () => {
     render(<SaleHarness onSaleCompleted={completed} />);
     addSaleLines();
     click('Cash');
+    const cash = within(screen.getByText('Cash Tendered').parentElement!);
     typeCash('10');
+    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('10');
     expect(screen.getByText(`Balance due: ${money(sale.order.balanceDueMinor)}`)).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Complete sale' }).getAttribute('aria-disabled')).toBe('true');
     const tender = sale.order.payments[0];
@@ -251,9 +218,11 @@ describe('sale', () => {
     expect(sale.order.payments).toEqual([tender]);
     expect(completed).not.toHaveBeenCalled();
     typeCash('20');
+    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('20');
     expect(sale.order.payments).toHaveLength(1);
     expect(sale.order.payments[0].amountMinor).toBe(2000);
     typeCash('50');
+    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('50');
     expect(sale.order.payments).toHaveLength(1);
     expect(sale.order.payments[0].amountMinor).toBe(5000);
     expect(sale.error).toBeNull();
@@ -267,7 +236,10 @@ describe('sale', () => {
     render(<SaleHarness />);
     addSaleLines();
     click('Cash');
-    click('Exact cash');
+    const cash = within(screen.getByText('Cash Tendered').parentElement!);
+    // The first quick-cash control offers the exact total.
+    fireEvent.click(cash.getByText(money(sale.order.totalMinor)!));
+    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('43.75');
     expect(sale.order.payments).toHaveLength(1);
     expect(sale.order.payments[0].amountMinor).toBe(sale.order.totalMinor);
     expect(sale.order.balanceDueMinor).toBe(0);
