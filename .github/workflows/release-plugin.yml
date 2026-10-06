@@ -1,0 +1,61 @@
+name: Release plugin
+on:
+  push:
+    tags: ['plugin-v*']
+permissions:
+  contents: read
+concurrency: { group: release-plugin, cancel-in-progress: false }
+jobs:
+  publish:
+    name: Publish @medusapos/medusa-plugin to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions: { contents: read, id-token: write }
+    defaults:
+      run:
+        working-directory: packages/medusa-plugin
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
+      # Trusted publishing needs npm >= 11.5.1.
+      - run: |
+          npm install -g npm@11.19.1
+          npm --version
+      # Only the matching version on main can be released.
+      - id: version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "$GITHUB_REF_NAME" != "plugin-v${version}" ]; then
+            echo "Tag must equal plugin-v${version}, got $GITHUB_REF_NAME" >&2; exit 1
+          fi
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Tagged commit $GITHUB_SHA is not on main" >&2; exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      # Tagging a version already published by hand is a no-op.
+      - id: published
+        run: |
+          published="$(npm view "@medusapos/medusa-plugin@${{ steps.version.outputs.version }}" version || true)"
+          if [ -n "$published" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::@medusapos/medusa-plugin@$published is already on npm"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - run: npm ci
+        if: steps.published.outputs.skip != 'true'
+      - run: npm run typecheck
+        if: steps.published.outputs.skip != 'true'
+      - run: npm run build
+        if: steps.published.outputs.skip != 'true'
+      - run: node scripts/check-pack.mjs
+        if: steps.published.outputs.skip != 'true'
+      - run: npm publish --access public
+        if: steps.published.outputs.skip != 'true'

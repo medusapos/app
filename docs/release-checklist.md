@@ -51,3 +51,29 @@ Work through this before tagging a release of the app or the plugin. An item tha
 - [ ] The release notes (`docs/release-notes/v<version>.md`, renamed from `next.md`) say what changes for the store owner, and every gate above that applies.
 - [ ] Plugin: `npm run build` from `packages/medusa-plugin`, and check the package contents (`.medusa/server` only).
 - [ ] Any change to the command contract (codes, limits, fields) matches the TallyUI core version the app pins, and says which `@tallyui/*` version the app needs.
+
+## Plugin releases (npm)
+
+1. **First publish (0.2.0), once, by hand.** An npm owner of the `medusapos` org runs these commands from `packages/medusa-plugin` on main:
+
+   ```sh
+   npm ci
+   npm run build
+   node scripts/check-pack.mjs
+   npm pack --dry-run
+   ```
+
+   Review the package file list, then run `npm publish --access public` (npm asks for 2FA). Tag that commit `plugin-v0.2.0` and push the tag; the workflow exits green without publishing the version again.
+
+2. **Trusted publisher, once.** Configure this on npmjs.com only when a CI release will follow within 2 days: an unvalidated configuration expires after 2 days. Go to `@medusapos/medusa-plugin` → Settings → Trusted publishing → GitHub Actions and set:
+
+   - Organization: `medusapos`
+   - Repository: `app`
+   - Workflow filename: `release-plugin.yml`
+   - Environment: empty
+   - Allowed actions: tick `npm publish` (configurations made after 2026-09-03 default to stage only)
+   - Dist-tag: off
+
+   Then set Publishing access to "Require two-factor authentication and disallow tokens".
+
+3. **Every later release.** A PR bumps the plugin `version`; after it merges, tag the merge commit on main `plugin-v<version>` and push the tag. Check that the workflow run published with provenance.

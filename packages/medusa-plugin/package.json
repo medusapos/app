@@ -3,6 +3,16 @@
   "version": "0.2.0",
   "description": "Tally POS commands for Medusa: idempotent order ingestion from offline registers.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/medusapos/app.git",
+    "directory": "packages/medusa-plugin"
+  },
+  "homepage": "https://github.com/medusapos/app#readme",
+  "bugs": "https://github.com/medusapos/app/issues",
+  "publishConfig": {
+    "access": "public"
+  },
   "packageManager": "npm@11.19.1",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"
@@ -15,7 +25,8 @@
   "files": [
     ".medusa/server",
     "!.medusa/server/**/__tests__",
-    "!.medusa/server/**/__fixtures__"
+    "!.medusa/server/**/__fixtures__",
+    "CHANGELOG.md"
   ],
   "exports": {
     "./package.json": "./package.json",
