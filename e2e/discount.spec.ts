@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, closeStoreRegister, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 // Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5] at GET /tally/v1/info,
@@ -16,10 +16,12 @@ const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage
 test('a discounted sale is applied as order.create v4, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
+  // An earlier till left register-1 open at the store; close it so this till's open applies and its sales name a known session (ADR 0022).
+  await closeStoreRegister();
   await signIn(page);
-  // The plugin advertises order.create [1, 2, 3, 4, 5] (ADR 0021), register 1 and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0).
+  // The plugin advertises order.create [1, 2, 3, 4, 5] (ADR 0021), register 1 and 2 (ADR 0022) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
-  expect(await capabilities(page)).toEqual({ orderCreate: 5, register: 1,
+  expect(await capabilities(page)).toEqual({ orderCreate: 5, register: 2,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false } });
   await addE2E1(page);
   await addE2E1(page);
@@ -95,6 +97,7 @@ test('below order.create v2 the till refuses a discount when it is applied, and 
 test('100% off the line completes with cash at €0.00 as one Medusa order', async ({ page }) => {
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
+  await closeStoreRegister();
   await signIn(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '100');

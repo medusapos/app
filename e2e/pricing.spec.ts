@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { adminToken, captureSales, chooseRegion, closeStoreRegister, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 // TallyUI store settings (TV4) and priced replication (D2b) against the seeded store: regions
@@ -50,6 +50,8 @@ test('the catalogue shows E2E-1 at Medusa\'s calculated price for Europe', async
 test('an exclusive sale of E2E-1 is applied with no warnings and the till\'s total', async ({ page }) => {
   const token = await adminToken();
   const sales = captureSales(page);
+  // An earlier till left register-1 open at the store; close it so this till's open applies and its sales name a known session (ADR 0022).
+  await closeStoreRegister();
   await signIn(page);
   const applied = page.waitForResponse(async (response) => {
     if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
