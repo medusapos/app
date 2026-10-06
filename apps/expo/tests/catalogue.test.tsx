@@ -241,7 +241,12 @@ describe('Catalogue', () => {
   });
   it('shows an empty catalogue', () => {
     mount([]);
+    expect(screen.getByText('Loading products…').textContent).toBe('Loading products…');
+    expect(screen.queryByText('No products yet.')).toBeNull();
+    cleanup();
+    mount([], new Date('2026-10-06T10:00:00Z'));
     expect(screen.getByText('No products yet.')).toBeTruthy();
+    expect(screen.queryByText('Loading products…')).toBeNull();
   });
   it('renders a stock badge on every tile from the tile\'s own (already-overlaid) product, without an "as of"', () => {
     const soldOut = { id: 'boots', title: 'Green Boots', status: 'published', variants: [

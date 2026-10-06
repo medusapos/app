@@ -305,6 +305,24 @@ describe('ProductsScreen catalogue', () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
+  it('the receipt prints the finalized order reference, not (draft) (TallyUI 3.0.2)', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
+      id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
+        prices: [{ amount: 12, currency_code: 'eur' }] }],
+    }] }));
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
+    const record = vi.mocked(useOutboxContext().record);
+    expect(record).toHaveBeenCalledTimes(1);
+    const [finalized] = record.mock.calls[0];
+    expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${finalized.id.slice(-8)}`);
+    expect(screen.queryByText(/\(draft\)/)).toBeNull();
+    expect(screen.getByText(new Date(finalized.createdAt).toLocaleString()).textContent)
+      .toBe(new Date(finalized.createdAt).toLocaleString());
+  });
+
   it.each([undefined, 'Alex Shopkeeper'])('records the cashier email and shows the receipt with name %s', async (name) => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
       id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
@@ -366,10 +384,11 @@ describe('Orders screen and sync status', () => {
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Recent']);
-    for (const label of ["The online store refused this sale. Ask the store owner to look at the till's sync log.", 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order #42 · 3 items']) {
+    for (const label of ["The online store refused this sale. Ask the store owner to look at the till's sync log.", 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order warned · #42 · 3 items']) {
       expect(screen.getAllByText(label)).toHaveLength(2);
     }
-    expect(screen.getAllByText('1 item')).toHaveLength(3);
+    expect(screen.getAllByText('Order rejected · 1 item')).toHaveLength(2);
+    expect(screen.getAllByText(`Order ${order.id.slice(-8)} · 1 item`)).toHaveLength(1);
     const dateAndTotal = `${new Date(order.createdAt).toLocaleString()} · €12.00`;
     expect(screen.getByText(`${dateAndTotal} · Waiting to sync`)).toBeTruthy();
     expect(screen.getAllByText(`${dateAndTotal} · Synced`)).toHaveLength(2);

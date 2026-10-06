@@ -105,7 +105,7 @@ function SaleHarness(props: HarnessProps) {
 function SaleView({ onSaleCompleted, with: shown = pricing }: HarnessProps) {
   sale = useSale(shown, { registerId: 'register-1', cashierRef: session.email, onSaleCompleted });
   const topInset = useContext(StripHeightContext);
-  if (sale.stage.kind === 'receipt') return <Receipt order={sale.stage.order} store={store} taxLabel={taxLabel}
+  if (sale.stage.kind === 'receipt') return <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder} store={store} taxLabel={taxLabel}
     topInset={topInset} formatDate={formatDate}
     cashier={session.email} registerId="register-1" newSale={sale.newSale} />;
   return sale.stage.kind === 'cart' ? <Cart sale={sale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} /> : <Tender sale={sale} />;
@@ -214,8 +214,9 @@ describe('sale', () => {
     expect(screen.getAllByLabelText(`VAT 25%: ${money(before.taxMinor)}`)).toHaveLength(1);
     expect(screen.getByText('Test shop')).toBeTruthy();
     expect(screen.getByText('1 High Street')).toBeTruthy();
-    expect(screen.getByText(`Order ${before.id.slice(-8)}`)).toBeTruthy();
-    expect(screen.getByText(new Date(before.createdAt).toLocaleString())).toBeTruthy();
+    const finalized = completed.mock.calls[0][0] as PosOrder;
+    expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${finalized.id.slice(-8)}`);
+    expect(screen.getByText(new Date(finalized.createdAt).toLocaleString())).toBeTruthy();
     expect(screen.queryByText(before.createdAt)).toBeNull();
     expect(screen.queryByText(/^Register:/)).toBeNull();
     expect(screen.getByText(`Cashier: ${session.email}`)).toBeTruthy();

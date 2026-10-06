@@ -45,10 +45,11 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   await tender.locator('[tabindex="0"]').first().click();
   await amount.fill(await amount.inputValue());
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
-  for (const label of [/^2 × \D*2\.00: \D*4\.00$/, /^10% off: −\D*0\.40$/, /^Order discount: −\D*0\.50$/,
-    /^Subtotal: \D*4\.00$/, /^Discount: −\D*0\.90$/, /^VAT 25%: \D*0\.78$/, /^Total: \D*3\.88$/]) {
+  for (const label of [/^2 × \D*2\.00: \D*4\.00$/, /^10% off: −\D*0\.40$/, /^Subtotal: \D*4\.00$/,
+    /^Line discounts: −\D*0\.40$/, /^Order discount: −\D*0\.50$/, /^VAT 25%: \D*0\.78$/, /^Total: \D*3\.88$/]) {
     await expect(page.getByLabel(label)).toBeVisible();
   }
+  await expect(page.getByLabel(/^Discount:/)).toHaveCount(0);
   await page.getByRole('button', { name: 'New sale', exact: true }).click();
   const receiptTotal = 3.88;
   const { results } = await (await applied).json();

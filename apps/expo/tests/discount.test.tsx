@@ -199,11 +199,12 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     const order = sale.order;
     cleanup();
     render(<Receipt order={order} store={receiptStore} taxLabel={taxLabel} cashier="cashier" registerId="register-1" newSale={() => {}} />);
-    // In the cart's order: the line, its discount row, the order discount row, then Subtotal, Discount, VAT and Total.
-    const rows = [`2 × ${money(1250)}: ${money(2500)}`, `10% off: −${money(250)}`, `Order discount: −${money(50)}`,
-      `Subtotal: ${money(2500)}`, `Discount: −${money(300)}`, tax, `Total: ${money(display.totalMinor)}`];
+    // The line and its discount, then Subtotal, Line discounts, Order discount, VAT and Total.
+    const rows = [`2 × ${money(1250)}: ${money(2500)}`, `10% off: −${money(250)}`, `Subtotal: ${money(2500)}`,
+      `Line discounts: −${money(250)}`, `Order discount: −${money(50)}`, tax, `Total: ${money(display.totalMinor)}`];
     const labels = Array.from(document.querySelectorAll('[aria-label]'), (element) => element.getAttribute('aria-label'));
     expect(labels.filter((label) => rows.includes(label!))).toEqual(rows);
+    expect(screen.queryByLabelText(/^Discount:/)).toBeNull();
   });
 
   it('at order.create 1 shows TallyUI\'s message when applying, and the order stays undiscounted', async () => {
@@ -248,7 +249,8 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
       expect(screen.getByLabelText(label)).toBeTruthy();
     }
     expect(screen.queryByLabelText(/^Order discount/)).toBeNull();
-    expect(screen.getByLabelText(`Discount: −${money(500)}`)).toBeTruthy();
+    expect(screen.getByLabelText(`Line discounts: −${money(500)}`)).toBeTruthy();
+    expect(screen.queryByLabelText(/^Discount:/)).toBeNull();
     expect(screen.getByLabelText(`Subtotal: ${money(2500)}`)).toBeTruthy();
     expect(screen.getByLabelText(`VAT 25%: ${money(order.taxMinor)}`)).toBeTruthy();
     expect(screen.getByLabelText(`Total: ${money(order.totalMinor)}`)).toBeTruthy();
