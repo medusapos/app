@@ -14,6 +14,7 @@ export const DEMO_REGION_NAME = 'Europe';
 // Only features available in the public demo today, with links to learn more.
 export const DEMO_WHAT_TO_TRY = [
   'Ring up a sale and take cash or card',
+  'Split a payment: part card, the rest cash (Split payment at checkout)',
   'Park a sale, then resume it from Parked sales',
   "Change a line's price in the cart",
   'Close the register with a cash count',
