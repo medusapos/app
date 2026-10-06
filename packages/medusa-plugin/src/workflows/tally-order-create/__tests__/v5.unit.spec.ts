@@ -1,5 +1,6 @@
 import feeGolden from '../__fixtures__/order-create-v5-fee.json'
 import shippingGolden from '../__fixtures__/order-create-v5-shipping-custom.json'
+import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { fiscalFiguresErrors } from '../fiscal-figures'
 import { lineTaxRefusals, v5DisplayErrors, withoutV5Display } from '../v5'
 
@@ -56,7 +57,14 @@ it('display.fees and display.shipping must name payload fees and shipping, once 
 })
 
 it('withoutV5Display strips display.fees and display.shipping without mutating, and plugin fiscalFiguresErrors then passes the fee golden pair', () => {
-  const payload = { ...feeGolden.payload, payments: feeGolden.payload.payments.map(payment => ({ ...payment, method: 'cash' as const })) }
+  const payload: OrderCreatePayload = {
+    ...feeGolden.payload,
+    fees: feeGolden.payload.fees.map(fee => {
+      if (fee.taxStatus !== 'taxable') throw new Error('Expected the golden taxable fee')
+      return { ...fee, taxStatus: fee.taxStatus }
+    }),
+    payments: feeGolden.payload.payments.map(payment => ({ ...payment, method: 'cash' as const })),
+  }
   const original = structuredClone(payload), stripped = withoutV5Display(payload)
   expect(fiscalFiguresErrors(payload)).toEqual(['payload.display.fees: expected no unknown key'])
   expect(fiscalFiguresErrors(stripped)).toEqual([])

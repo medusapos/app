@@ -9,10 +9,10 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import {
   addPosOrderCollection, bindRegister, createOrderBuilder, ensureRegister, finalizeOrder, getBoundRegisterId, openSession, PosOrderOpenClosedError,
-  posOrderCollection, posOrderSchema, readRegister, recordMovement, type PosOrder,
+  orderDraftSchema, posOrderCollection, posOrderSchema, readRegister, recordMovement, restoreOrderDraft, type Order, type PosOrder,
 } from '@tallyui/pos';
 import {
-  carryOverOrders, closeOrderStores, openOrderStore, ORDER_STORE_CLOSE_WAIT_MS, orderDatabaseName, registerCollections,
+  carryOverOrders, closeOrderStores, draftsCollection, openOrderStore, ORDER_STORE_CLOSE_WAIT_MS, orderDatabaseName, registerCollections,
 } from './order-store';
 
 // ensureRegister, observed: the real one runs.
@@ -188,20 +188,34 @@ async function memoryOrdersDb(name: string, localDocuments = false) {
 const memoryStorage = () => wrappedValidateAjvStorage({ storage: getRxStorageMemory() });
 
 /** A stored older `pos_orders` version, which the store's open migrates to the current one. */
-type Origin = 0 | 1;
-/** The optional fields versions 2 to 7 added, which no older app wrote (taxRounding: the one they made required). */
+type Origin = 0 | 1 | 7;
+/** The optional fields versions 2 to 8 added, which no v0/v1 app wrote (taxRounding: the one they made required). */
 const ADDED_SINCE_V1 = ['lateSessionId', 'display', 'taxByRate', 'sentVersion', 'downgradedFrom', 'localWarnings',
-  'serverFailures', 'taxRounding', 'saleId'];
+  'serverFailures', 'taxRounding', 'saleId', 'fees', 'shipping'];
 
 /**
- * The shipped older schemas, as TallyUI's open.test-helper builds them: version 1 is version 7
- * minus the additions of versions 2 to 7 (`lateSessionId`, `display`, `taxByRate`; the `sessionId`
+ * The shipped older schemas, as TallyUI's open.test-helper builds them: version 1 is version 8
+ * minus the additions of versions 2 to 8 (`lateSessionId`, `display`, `taxByRate`; the `sessionId`
  * index and its `maxLength`, `sentVersion`, `downgradedFrom`; `localWarnings`, `serverFailures`;
- * the required `taxRounding`; `saleId`), and version 0 is version 1 minus its only addition (`sessionId`; TallyUI #123).
+ * the required `taxRounding`; `saleId`; fees/shipping, custom lines, netMicros and WooCommerce rounding),
+ * and version 0 is version 1 minus its only addition (`sessionId`; TallyUI #123).
+ * Version 7 is 3.2.1's schema: remove v8's additions, including nested fields and command version 5.
  */
 function olderSchema(from: Origin): RxJsonSchema<PosOrder> {
   const schema = structuredClone(posOrderSchema);
   const properties = schema.properties as Record<string, unknown>;
+  delete properties.fees;
+  delete properties.shipping;
+  const line = schema.properties.lines.items as RxJsonSchema<PosOrder['lines'][number]>;
+  for (const key of ['taxStatus', 'custom', 'netMicros']) delete (line.properties as Record<string, unknown>)[key];
+  delete schema.properties.display!.properties!.fees;
+  delete schema.properties.display!.properties!.shipping;
+  delete schema.properties.taxRounding.properties!.roundAtSubtotal;
+  schema.properties.taxRounding.properties!.granularity.enum =
+    schema.properties.taxRounding.properties!.granularity.enum!.filter((value) => value !== 'woocommerce');
+  schema.properties.sentVersion!.maximum = 4;
+  schema.properties.downgradedFrom!.maximum = 4;
+  if (from === 7) return { ...schema, version: 7 };
   for (const key of ADDED_SINCE_V1) delete properties[key];
   if (from === 0) delete properties.sessionId;
   else properties.sessionId = { type: 'string' };
@@ -209,10 +223,12 @@ function olderSchema(from: Origin): RxJsonSchema<PosOrder> {
     indexes: schema.indexes!.filter((index) => index !== 'sessionId') };
 }
 
-/** `pos_orders` as the shipped app at `from` added it: version 1 came with its identity strategy. */
+/** `pos_orders` as the shipped app at `from` added it, with only that version's migration strategies. */
 function olderCollection(from: Origin): RxCollectionCreator<PosOrder> {
-  posOrderCollection(); // loads the migration plugin that a version above 0 needs
-  return from === 0 ? { schema: olderSchema(0) } : { schema: olderSchema(1), migrationStrategies: { 1: (doc: PosOrder) => doc } };
+  const { migrationStrategies } = posOrderCollection(); // loads the migration plugin that a version above 0 needs
+  return { schema: olderSchema(from), ...(from === 0 ? {} : {
+    migrationStrategies: Object.fromEntries(Object.entries(migrationStrategies).filter(([version]) => Number(version) <= from)),
+  }) };
 }
 
 /** The version-`from` `pos_orders` storage beneath RxDB's collection (shared by name, like all memory storage). */
@@ -223,7 +239,7 @@ const rawOlder = (databaseName: string, from: Origin) => getRxStorageMemory().cr
 
 /**
  * A database written at version `from` holding `orders`, plus `invalid` written beneath RxDB (as
- * an unvalidated production build could have): it fails version 7's validation, so a validating
+ * an unvalidated production build could have): it fails version 8's validation, so a validating
  * open's migration stops with DM4.
  */
 async function seedOlder(from: Origin, name: string, orders: PosOrder[], invalid?: PosOrder) {
@@ -259,17 +275,17 @@ const olderSale = (from: Origin): PosOrder => {
   return { ...order, ...(from === 1 ? { sessionId: 'session-1' } : {}) } as PosOrder;
 };
 /**
- * An older order as the version-7 open leaves it: TallyUI's version-5 and version-6 migrations record
+ * An older order as the version-8 open leaves it: TallyUI's version-5 and version-6 migrations record
  * its `sentVersion` (its content version, 1 for these sales; #300) and the default `taxRounding` (#318).
- * Version 7 is the identity: older orders keep having no `saleId` (ADR-072).
+ * Versions 7 and 8 are identities: older orders keep having no `saleId` (ADR-072), fees or shipping.
  */
 const migrated = (order: PosOrder): PosOrder =>
   ({ ...order, sentVersion: 1, taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
-// Valid at the older version when it was written, but not at version 7 (an unknown syncStatus).
+// Valid at the older version when it was written, but not at version 8 (an unknown syncStatus).
 const invalidSale = (from: Origin = 0) => ({ ...olderSale(from), syncStatus: 'queued' }) as unknown as PosOrder;
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
 
-describe.each([0, 1] as const)('pos_orders schema v%i to v7', (from) => {
+describe.each([0, 1] as const)('pos_orders schema v%i to v8', (from) => {
   it(`reopens a version-${from} order store through openOrderStore: the pending order is there, as TallyUI migrates it`, async () => {
     const url = `https://v${from}-store.test`;
     const name = orderDatabaseName(url);
@@ -279,10 +295,10 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v7', (from) => {
     expect(await olderDocuments(from, name, [pending.id])).toEqual([original]);
     const store = await openOrderStore(url);
     try {
-      expect(store.orders.schema.version).toBe(7);
+      expect(store.orders.schema.version).toBe(8);
       const found = (await store.orders.findOne(pending.id).exec())?.toJSON();
       // Byte for byte the order that was stored plus what versions 5 and 6 record, and no other field added.
-      // Version 7 is the identity, so `saleId` stays absent.
+      // Versions 7 and 8 are identities, so `saleId`, fees and shipping stay absent.
       expect(found).toStrictEqual(migrated(original));
       for (const added of ADDED_SINCE_V1.filter((key) => !(key in migrated(original)))) expect(found).not.toHaveProperty(added);
       // The outbox's own query still finds it.
@@ -317,11 +333,81 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v7', (from) => {
     await writeRawOlder(from, name, fixed);
     const store = await openOrderStore(url);
     try {
-      expect(store.orders.schema.version).toBe(7);
+      expect(store.orders.schema.version).toBe(8);
       expect((await store.orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].map(migrated).sort(byId));
     } finally { await store.close(); }
     expect(await olderDocuments(from, name, [pending.id, invalid.id])).toEqual([]);
   });
+});
+
+it('reopens a version-7 order store (TallyUI 3.2.x) through openOrderStore: the pending order and its payments are there at version 8', async () => {
+  const url = 'https://v7-split-store.test';
+  const name = orderDatabaseName(url);
+  const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+  builder.addLine({ productId: 'shirt', variantId: 'blue', name: 'Blue shirt', unitPrice: { amount: 1200, currency: 'EUR' } });
+  builder.addPayment({ method: 'cash', amountMinor: 500 });
+  builder.addPayment({ method: 'external', amountMinor: 700, reference: 'terminal-split-1' });
+  const pending = { ...finalizeOrder(builder.getSnapshot()), sessionId: 'session-v7' };
+  const original = structuredClone(pending);
+  await seedOlder(7, name, [pending]); // asserts the seeded collection really is version 7 (M2)
+  expect(await olderDocuments(7, name, [pending.id])).toStrictEqual([original]);
+  const store = await openOrderStore(url);
+  try {
+    expect(store.orders.schema.version).toBe(8);
+    const found = (await store.orders.findOne(pending.id).exec())?.toJSON();
+    expect(found).toStrictEqual(original);
+    expect(found?.payments).toHaveLength(2);
+    expect(found?.payments).toMatchObject([
+      { method: 'cash', amountMinor: 500 }, { method: 'external', amountMinor: 700, reference: 'terminal-split-1' },
+    ]);
+    expect((await store.orders.find({ selector: { syncStatus: 'pending' } }).exec()).map((doc) => doc.id)).toEqual([pending.id]);
+  } finally { await store.close(); }
+  // The one-way migration moved the order out of v7, including both payment records.
+  expect(await olderDocuments(7, name, [pending.id])).toEqual([]);
+});
+
+it('a parked draft written at 3.2.x resumes at 3.3.0', async () => {
+  const url = 'https://v7-parked-draft.test';
+  // The 3.2.1 and 3.3.0 drafts schemas are identical at v0; data is the older Order JSON format.
+  const saved: Order = {
+    id: 'parked-v7', status: 'draft', currency: 'EUR', pricesIncludeTax: false,
+    createdAt: '2026-10-01T10:00:00Z', updatedAt: '2026-10-01T10:00:00Z',
+    customer: { id: 'customer-1', name: 'Ada', email: 'ada@example.test' }, note: 'Collect tomorrow',
+    lineItems: [{ id: 'line-v7', productId: 'shirt', variantId: 'blue', name: 'Blue shirt', sku: 'BLUE',
+      quantity: 2, unitPriceMinor: 1200, taxInclusive: false, discounts: [], discountMinor: 0, orderDiscountMinor: 0,
+      netMinor: 2400, taxMicros: '600000000', taxLines: [{ ratePpm: 250000, taxMicros: '600000000' }] }],
+    discounts: [], payments: [{ id: 'payment-v7', method: 'cash', amountMinor: 500 }],
+    subtotalMinor: 2400, discountMinor: 0, taxMinor: 600, totalMinor: 3000,
+    paidMinor: 500, balanceDueMinor: 2500, changeDueMinor: 0,
+    display: { taxInclusive: false, subtotalMinor: 2400, discountMinor: 0, taxMinor: 600, totalMinor: 3000,
+      orderDiscountMinor: 0, lines: [{ lineId: 'line-v7', amountMinor: 2400, discounts: [] }] },
+  };
+  const draft = { id: saved.id, data: JSON.stringify(saved), customerName: 'Ada', itemCount: 1,
+    total: 3000, parkedAt: '2026-10-01T10:01:00Z' };
+  const db = await createRxDatabase({ name: orderDatabaseName(url), storage: memoryStorage(), multiInstance: false });
+  try {
+    const { pos_orders, drafts } = await db.addCollections({ pos_orders: olderCollection(7), drafts: { schema: orderDraftSchema } });
+    expect(pos_orders.schema.version).toBe(7);
+    expect(drafts.schema.version).toBe(0);
+    await drafts.insert(draft);
+  } finally { await db.close(); }
+  const store = await openOrderStore(url);
+  try {
+    expect(store.orders.schema.version).toBe(8);
+    const drafts = draftsCollection(store.orders)!;
+    expect(drafts.schema.version).toBe(0);
+    const found = (await drafts.findOne(saved.id).exec(true)).toJSON();
+    expect(found).toStrictEqual(draft);
+    const resumed = restoreOrderDraft(JSON.parse(found.data), {
+      currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 250000 },
+    }).getSnapshot();
+    expect(resumed).toMatchObject({ id: saved.id, customer: saved.customer, note: saved.note, currency: 'EUR',
+      pricesIncludeTax: false, discounts: [], subtotalMinor: 2400, discountMinor: 0, taxMinor: 600, totalMinor: 3000,
+      paidMinor: 500, balanceDueMinor: 2500, changeDueMinor: 0 });
+    const { id: _lineId, ...line } = saved.lineItems[0];
+    expect(resumed.lineItems).toMatchObject([line]);
+    expect(resumed.payments).toMatchObject([{ method: 'cash', amountMinor: 500 }]);
+  } finally { await store.close(); }
 });
 // The legacy database "exists" (memory storages have no IndexedDB to list).
 const legacyExists = async () => true;
@@ -462,13 +548,13 @@ describe('carryOverOrders', () => {
     await to.remove();
   });
 
-  it.each([0, 1] as const)('carries over a pending order from a version-%i legacy source through the version-7 open', async (from) => {
+  it.each([0, 1] as const)('carries over a pending order from a version-%i legacy source through the version-8 open', async (from) => {
     const fromName = `legacy-carry-v${from}`;
     const pending = olderSale(from);
     const original = structuredClone(pending);
     await seedOlder(from, fromName, [pending]);
     const to = await memoryOrdersDb(`target-carry-v${from}`, true);
-    expect(to.pos_orders.schema.version).toBe(7);
+    expect(to.pos_orders.schema.version).toBe(8);
     await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
     expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual([migrated(original)]);
     expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 1 });
@@ -510,9 +596,9 @@ describe('carryOverOrders', () => {
     }
   });
 
-  // The legacy store is read, never migrated in place, so no DM4: the new store refuses the order v7 rejects, and the
+  // The legacy store is read, never migrated in place, so no DM4: the new store refuses the order v8 rejects, and the
   // read-back keeps the marker absent on failure (M3), so the next open retries the copy.
-  it.each([0, 1] as const)('an order v7 refuses keeps the version-%i legacy source and writes no marker; after a fix, the next carry-over copies the rest once', async (from) => {
+  it.each([0, 1] as const)('an order v8 refuses keeps the version-%i legacy source and writes no marker; after a fix, the next carry-over copies the rest once', async (from) => {
     const fromName = `legacy-carry-dm4-v${from}`;
     const pending = olderSale(from);
     const invalid = invalidSale(from);

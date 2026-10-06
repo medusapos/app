@@ -23,7 +23,7 @@ export async function runOrderCreate(
   ledger?: { claimToken: string; carriedTopUps: StockTopUp[] }
 ): Promise<CommandResult> {
   const payload = command.payload
-  const catalogueLines = payload.lines.filter(line => !('custom' in line))
+  const catalogueLines = payload.lines.filter((line): line is typeof line & { variantId: string } => !('custom' in line))
   const v3 = payload as OrderCreatePayloadV3
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
