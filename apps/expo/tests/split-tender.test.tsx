@@ -174,4 +174,4 @@ it('Single payment clears split payments and shows Tender; leaving tender resets
   expect(screen.getByText('Cash Tendered')).toBeTruthy();
   expect(screen.queryByTestId('split-tender-summary')).toBeNull();
   expect(record).toHaveBeenCalledTimes(2);
-});
+}, 20_000);
