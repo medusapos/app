@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import { URL } from 'node:url';
 import { expect, it } from 'vitest';
 
 const html = readFileSync(new URL('../public/index.html', import.meta.url), 'utf8');
