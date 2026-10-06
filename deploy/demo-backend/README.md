@@ -104,6 +104,63 @@ container, from `/src/app/dev/medusa-store/apps/backend/.medusa/server`,
 then take a new golden snapshot. Without that re-snapshot, the nightly
 reset restores the old store name and tax-exclusive prices.
 
+## Showcase catalogue (item 44)
+
+`seed-showcase.sh` adds 26 curated products across six categories, eight fictional
+customers and four historic orders. It keeps the starter's four apparel products
+and the E2E fixtures (including `E2E-1` for smoke sales). Five showcase products
+have three sizes; the lemon cake is out of stock. EUR prices are shelf prices,
+including VAT. Re-running fills only missing data and skips existing users.
+
+The front desk performs this swap; development does not touch the VPS. Keep the
+`_2000` databases for rollback. Perform the swap outside the nightly reset window.
+
+1. **Stop `mpdemo-backend`** in Coolify so there are no database connections.
+2. **In `mpdemo-postgres`**, preserve both old databases and create an empty one:
+
+   ```sh
+   psql -U <postgres user> -d postgres -c 'ALTER DATABASE medusapos_demo RENAME TO medusapos_demo_2000'
+   psql -U <postgres user> -d postgres -c 'ALTER DATABASE medusapos_demo_golden RENAME TO medusapos_demo_golden_2000'
+   psql -U <postgres user> -d postgres -c 'CREATE DATABASE medusapos_demo'
+   ```
+
+3. **Deploy** `ghcr.io/medusapos/demo-backend:<commit sha>` containing this change
+   and **start `mpdemo-backend`**. Wait for its health check: `start.sh` runs the
+   migrations, including the starter's store, Europe region, channel, warehouse
+   and sample products on the empty database.
+4. **Seed the showcase** in the running backend container:
+
+   ```sh
+   docker ps --filter name=<application uuid> --format '{{.Names}}'
+   docker exec -e DEMO_ADMIN_EMAIL=<email> -e DEMO_ADMIN_PASSWORD=<password> \
+     <container> /src/app/deploy/demo-backend/seed-showcase.sh
+   ```
+
+   Omit both admin variables if no additional admin is needed. The script always
+   creates the two public demo accounts below with password `demo1234`.
+5. **Stop `mpdemo-backend`**, then **in `mpdemo-postgres`** save the new golden copy:
+
+   ```sh
+   psql -U <postgres user> -d postgres -c 'CREATE DATABASE medusapos_demo_golden TEMPLATE medusapos_demo'
+   ```
+
+   **Start `mpdemo-backend`** again. The nightly reset now restores the showcase.
+6. **Rollback:** stop `mpdemo-backend`, then **in `mpdemo-postgres`**:
+
+   ```sh
+   psql -U <postgres user> -d postgres -c 'DROP DATABASE IF EXISTS medusapos_demo_golden'
+   psql -U <postgres user> -d postgres -c 'DROP DATABASE medusapos_demo'
+   psql -U <postgres user> -d postgres -c 'ALTER DATABASE medusapos_demo_2000 RENAME TO medusapos_demo'
+   psql -U <postgres user> -d postgres -c 'ALTER DATABASE medusapos_demo_golden_2000 RENAME TO medusapos_demo_golden'
+   ```
+
+   **Start `mpdemo-backend`** again.
+
+For a local fresh-database check, run `bash deploy/demo-backend/showcase-check.sh`
+from the repo root. It uses only localhost as `claude`, prints published and
+showcase counts separately, verifies a second seed changes nothing, and removes
+`medusapos_showcase_check` on success.
+
 ## Demo accounts
 
 The public demo at `https://demo.medusapos.com/demo` signs in with one
