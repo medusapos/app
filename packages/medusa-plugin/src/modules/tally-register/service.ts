@@ -88,12 +88,23 @@ export default class TallyRegisterModuleService extends MedusaService({
     return row?.data ?? null
   }
 
+  private async lockSession(sessionId: string, em: EntityManager) {
+    const [session] = await em.execute(`select id, register_id, status from tally_register_session where id = coalesce(
+      (select id from tally_register_session where id = ?),
+      (select session_id from tally_register_session_alias where id = ?)) for update`, [sessionId, sessionId])
+    return session
+  }
+
   @InjectManager()
   async transition(p: RegisterSessionTransitionPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      const [session] = await em.execute('select id, status from tally_register_session where id = ? for update', [p.sessionId])
+      const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
+      p = { ...p, sessionId: session.id }
       if (session.status === p.status) return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
+      if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+        ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
+        : { kind: 'conflict', code: 'register_session_closed' }
       if (session.status === 'closed') return { kind: 'conflict', code: 'register_session_closed' }
       if (p.status === 'closed') {
         await em.execute(`update tally_register_session set status = ?, status_at = ?, closed_at = ?, counted = ?::jsonb,
@@ -109,13 +120,17 @@ export default class TallyRegisterModuleService extends MedusaService({
   @InjectManager()
   async recordMovement(p: RegisterMovementRecordPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      const [session] = await em.execute('select id, status from tally_register_session where id = ? for update', [p.sessionId])
+      const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
+      p = { ...p, sessionId: session.id }
       const [existing] = await em.execute('select session_id from tally_register_movement where id = ?', [p.movementId])
       if (existing) {
         if (existing.session_id !== p.sessionId) return { kind: 'invalid', message: 'movement id belongs to another session' }
         return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
       }
+      if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+        ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
+        : { kind: 'conflict', code: 'register_session_closed' }
       const [closure] = await em.execute('select id from tally_register_closure where session_id = ?', [p.sessionId])
       if (session.status === 'closed' || closure) return { kind: 'conflict', code: 'register_session_closed' }
       const inserted = await em.execute(`insert into tally_register_movement
@@ -129,8 +144,9 @@ export default class TallyRegisterModuleService extends MedusaService({
   @InjectManager()
   async voidMovement(p: RegisterMovementVoidPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      const [session] = await em.execute('select id, status from tally_register_session where id = ? for update', [p.sessionId])
+      const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
+      p = { ...p, sessionId: session.id }
       const [existing] = await em.execute('select session_id, type, voids from tally_register_movement where id = ?', [p.movementId])
       if (existing) {
         if (existing.session_id !== p.sessionId || existing.type !== 'void' || existing.voids !== p.voids) {
@@ -138,6 +154,9 @@ export default class TallyRegisterModuleService extends MedusaService({
         }
         return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
       }
+      if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+        ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
+        : { kind: 'conflict', code: 'register_session_closed' }
       const [closure] = await em.execute('select id from tally_register_closure where session_id = ?', [p.sessionId])
       if (session.status === 'closed' || closure) return { kind: 'conflict', code: 'register_session_closed' }
       const [target] = await em.execute('select session_id, type, voided_by from tally_register_movement where id = ?', [p.voids])
@@ -161,12 +180,16 @@ export default class TallyRegisterModuleService extends MedusaService({
   @InjectManager()
   async submitClosure(p: RegisterClosureSubmitPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      const [session] = await em.execute('select register_id from tally_register_session where id = ? for update', [p.sessionId])
+      const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
+      p = { ...p, sessionId: session.id }
       let [closure] = await em.execute(`select id, register_id, number from tally_register_closure
         where id = ? or session_id = ? order by (id = ?) desc`, [p.closureId, p.sessionId, p.closureId])
       if (closure?.id !== p.closureId) {
         if (p.registerId !== session.register_id) return { kind: 'invalid', message: "closure registerId does not match the session's register" }
+        if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+          ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
+          : { kind: 'conflict', code: 'register_session_closed' }
         if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }
         let [{ counters }] = await em.execute(`${COUNTER_STATE} for update`, [p.registerId])
         const inserted = p.number === counters.lastClosureNumber + 1

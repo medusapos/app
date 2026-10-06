@@ -82,10 +82,10 @@ export async function executeRegisterCommand(container: MedusaContainer, command
       switch (command.type as string) {
         case 'register.session.open': outcome = await service.openSession({ ...(payload as RegisterSessionOpenV2Payload),
           deviceId: command.deviceId, contract: command.version } satisfies RegisterSessionOpenInput); break
-        case 'register.session.transition': outcome = await service.transition(payload as RegisterSessionTransitionPayload); break
-        case 'register.movement.record': outcome = await service.recordMovement(payload as RegisterMovementRecordPayload); break
-        case 'register.movement.void': outcome = await service.voidMovement(payload as RegisterMovementVoidPayload); break
-        case 'register.closure.submit': outcome = await service.submitClosure(payload as RegisterClosureSubmitPayload); break
+        case 'register.session.transition': outcome = await service.transition({ ...(payload as RegisterSessionTransitionPayload), contract: command.version }); break
+        case 'register.movement.record': outcome = await service.recordMovement({ ...(payload as RegisterMovementRecordPayload), contract: command.version }); break
+        case 'register.movement.void': outcome = await service.voidMovement({ ...(payload as RegisterMovementVoidPayload), contract: command.version }); break
+        case 'register.closure.submit': outcome = await service.submitClosure({ ...(payload as RegisterClosureSubmitPayload), contract: command.version }); break
         default: throw new Error('Unknown register command type')
       }
       if (outcome.kind === 'ok') {

@@ -43,6 +43,132 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
       return rows
     }
 
+    describe('register v2 later commands', () => {
+      const owner = { ...first, contract: 2, deviceId: 'device-1', deviceName: 'Front till' }
+      const taker = { ...second, contract: 2, deviceId: 'device-2', deviceName: 'Back till', supersedes: first.sessionId }
+      const superseded = { kind: 'conflict', code: 'register_session_superseded', data: {
+        sessionId: first.sessionId, supersededAt: second.openedAt, newSessionId: second.sessionId,
+        supersededBy: second.openedBy, deviceId: taker.deviceId, deviceName: taker.deviceName,
+      } }
+
+      it('a movement, a void, a transition and a closure naming an alias count on the aliased session', async () => {
+        expect(await service.openSession(owner)).toMatchObject({ kind: 'ok' })
+        const alias = { ...owner, sessionId: randomUUID() }
+        expect(await service.openSession(alias)).toMatchObject({ kind: 'ok', register: { resumed: { fromSessionId: alias.sessionId } } })
+        const input = { sessionId: alias.sessionId, contract: 2 }
+        expect(await service.recordMovement({ ...movement, ...input })).toMatchObject({
+          kind: 'ok', register: { session: { id: first.sessionId, status: 'open' } },
+        })
+        expect(await service.voidMovement({ ...voidPayload, ...input })).toMatchObject({
+          kind: 'ok', register: { session: { id: first.sessionId, status: 'open' } },
+        })
+        const transition = { ...input, status: 'counting' as const, at }
+        for (let replay = 0; replay < 2; replay++) expect(await service.transition(transition)).toMatchObject({
+          kind: 'ok', register: { session: { id: first.sessionId, status: 'counting' } },
+        })
+        expect(await sql('select id, status from tally_register_session')).toEqual([{ id: first.sessionId, status: 'counting' }])
+        const closing = closure(input)
+        const result = await service.submitClosure(closing)
+        expect(result).toMatchObject({ kind: 'ok', register: { closure: { serverClosureId: closing.closureId, number: 1 } } })
+        expect(result).not.toHaveProperty('register.session')
+        expect(await sql('select id, session_id, voided_by from tally_register_movement where id = ?', [movement.movementId]))
+          .toEqual([{ id: movement.movementId, session_id: first.sessionId, voided_by: voidPayload.movementId }])
+        expect(await sql('select id, session_id, voids from tally_register_movement where id = ?', [voidPayload.movementId]))
+          .toEqual([{ id: voidPayload.movementId, session_id: first.sessionId, voids: movement.movementId }])
+        expect(await sql('select id, session_id from tally_register_closure'))
+          .toEqual([{ id: closing.closureId, session_id: first.sessionId }])
+      })
+
+      it('a movement replayed under its alias and under the real id is the same movement', async () => {
+        await service.openSession(owner)
+        const alias = { ...owner, sessionId: randomUUID() }
+        await service.openSession(alias)
+        const input = { ...movement, sessionId: alias.sessionId, contract: 2 }
+        const result = await service.recordMovement(input)
+        expect(result).toMatchObject({ kind: 'ok', register: { session: { id: first.sessionId } } })
+        const before = await snapshot()
+        for (const contract of [undefined, 1, 2]) {
+          expect(await service.recordMovement({ ...input, contract })).toEqual(result)
+          expect(await service.recordMovement({ ...input, sessionId: first.sessionId, contract })).toEqual(result)
+        }
+        expect(input.sessionId).toBe(alias.sessionId)
+        expect(await snapshot()).toEqual(before)
+        expect(await sql('select id, session_id from tally_register_movement'))
+          .toEqual([{ id: movement.movementId, session_id: first.sessionId }])
+      })
+
+      it('on a superseded session, a new movement, void, transition and closure are refused register_session_superseded with the take-over data at contract 2', async () => {
+        await service.openSession(owner)
+        await service.recordMovement(movement)
+        expect(await service.openSession(taker)).toMatchObject({ kind: 'ok' })
+        const before = await snapshot()
+        for (const contract of [2, 3]) {
+          expect(await service.recordMovement({ ...movement, movementId: randomUUID(), contract })).toEqual(superseded)
+          expect(await service.voidMovement({ ...voidPayload, contract })).toEqual(superseded)
+          for (const status of ['open', 'counting', 'closed'] as const) {
+            expect(await service.transition({ sessionId: first.sessionId, status, at, contract })).toEqual(superseded)
+          }
+          expect(await service.submitClosure(closure({ contract }))).toEqual(superseded)
+        }
+        expect(await snapshot()).toEqual(before)
+      })
+
+      it('the same commands at contract 1 are refused register_session_closed with no data', async () => {
+        await service.openSession(owner)
+        await service.recordMovement(movement)
+        await service.openSession(taker)
+        const before = await snapshot()
+        const closed = { kind: 'conflict', code: 'register_session_closed' }
+        for (const contract of [undefined, 1]) {
+          expect(await service.recordMovement({ ...movement, movementId: randomUUID(), contract })).toEqual(closed)
+          expect(await service.voidMovement({ ...voidPayload, contract })).toEqual(closed)
+          for (const status of ['open', 'counting', 'closed'] as const) {
+            expect(await service.transition({ sessionId: first.sessionId, status, at, contract })).toEqual(closed)
+          }
+          expect(await service.submitClosure(closure({ contract }))).toEqual(closed)
+        }
+        expect(await snapshot()).toEqual(before)
+      })
+
+      it('a movement, void and closure stored before the take-over still replay ok after it', async () => {
+        await service.openSession(owner)
+        const alias = { ...owner, sessionId: randomUUID() }
+        await service.openSession(alias)
+        expect(await service.recordMovement(movement)).toMatchObject({ kind: 'ok' })
+        expect(await service.voidMovement(voidPayload)).toMatchObject({ kind: 'ok' })
+        const closing = closure()
+        const result = await service.submitClosure(closing)
+        expect(result).toMatchObject({ kind: 'ok' })
+        expect(await service.openSession(taker)).toMatchObject({ kind: 'ok' })
+        const before = await snapshot()
+        for (const contract of [undefined, 1, 2]) for (const sessionId of [first.sessionId, alias.sessionId]) {
+          expect(await service.recordMovement({ ...movement, sessionId, contract })).toMatchObject({
+            kind: 'ok', register: { session: { id: first.sessionId, status: 'superseded' } },
+          })
+          expect(await service.voidMovement({ ...voidPayload, sessionId, contract })).toMatchObject({
+            kind: 'ok', register: { session: { id: first.sessionId, status: 'superseded' } },
+          })
+          expect(await service.submitClosure({ ...closing, sessionId, contract })).toEqual(result)
+        }
+        expect(await snapshot()).toEqual(before)
+      })
+
+      it('a command naming an alias of a superseded session is refused register_session_superseded with the real session id in its data', async () => {
+        await service.openSession(owner)
+        const alias = { ...owner, sessionId: randomUUID() }
+        await service.openSession(alias)
+        await service.recordMovement(movement)
+        await service.openSession(taker)
+        const before = await snapshot()
+        const input = { sessionId: alias.sessionId, contract: 2 }
+        expect(await service.recordMovement({ ...movement, movementId: randomUUID(), ...input })).toEqual(superseded)
+        expect(await service.voidMovement({ ...voidPayload, ...input })).toEqual(superseded)
+        expect(await service.transition({ ...input, status: 'counting', at })).toEqual(superseded)
+        expect(await service.submitClosure(closure(input))).toEqual(superseded)
+        expect(await snapshot()).toEqual(before)
+      })
+    })
+
     describe('register v2 open', () => {
       const owner = { ...first, contract: 2, deviceId: 'device-1', deviceName: 'Front till' }
       const taker = { ...second, contract: 2, deviceId: 'device-2', deviceName: 'Back till', supersedes: first.sessionId }

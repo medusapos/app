@@ -326,6 +326,49 @@ medusaIntegrationTestRunner({
         expect(read.data).toEqual({ session, counters })
       })
 
+      it('after a take-over, a v2 movement on the superseded session is rejected register_session_superseded with the take-over data, is final, and the new session is unchanged', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt, countedFloatMinor: 200 })
+        expect((await post([takeover])).data.results[0].status).toBe('applied')
+        const before = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        const payout = { ...movement(opening.payload.sessionId, 'paid_out', 50), version: 2 }
+        const fingerprint = commandFingerprint(payout as never)
+        const response = await post([payout])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: payout.id, status: 'rejected', error: {
+          code: 'register_session_superseded', message: 'This register session was taken over by another till.',
+          data: { sessionId: opening.payload.sessionId, supersededAt: closedAt, newSessionId: takeover.payload.sessionId,
+            deviceId: takeover.deviceId, deviceName: 'Till B' },
+        } }])
+        const [stored] = await ledger.listTallyCommands({ id: payout.id })
+        expect(stored.status).toBe('rejected')
+        expect(stored.fingerprint).toBe(fingerprint)
+        const replay = await post([payout])
+        expect(replay.status).toBe(200)
+        expect(replay.data.results).toEqual(response.data.results)
+        const after = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(after.status).toBe(200)
+        expect(after.data).toEqual(before.data)
+        expect(after.data.session).toMatchObject({ id: takeover.payload.sessionId, status: 'open' })
+        expect(await service.listTallyRegisterMovements({ session_id: opening.payload.sessionId })).toHaveLength(0)
+      })
+
+      it('after a take-over, a v1 movement on the superseded session is rejected register_session_closed', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt })
+        expect((await post([takeover])).data.results[0].status).toBe('applied')
+        const payout = movement(opening.payload.sessionId, 'paid_out', 50)
+        const response = await post([payout])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: payout.id, status: 'rejected', error: {
+          code: 'register_session_closed', message: 'This register session is closed.',
+        } }])
+      })
+
       it('a v1 open over a live v2 session is refused with data { sessionId } only', async () => {
         const opening = openV2('test-register', { deviceName: 'Till A' })
         expect((await post([opening])).data.results[0].status).toBe('applied')
