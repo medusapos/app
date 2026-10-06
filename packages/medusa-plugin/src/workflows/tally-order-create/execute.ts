@@ -51,7 +51,7 @@ export async function executeOrderCreate(
   command: CommandEnvelope<OrderCreatePayload>,
   options?: TallyPluginOptions
 ): Promise<ExecuteOutcome> {
-  const errors = payloadShapeErrors(command.payload)
+  const errors = payloadShapeErrors(command.payload, command.version as number)
   if (errors.length > 0) {
     return { kind: 'result', result: { id: command.id, status: 'rejected', error: {
       code: 'invalid_payload', message: errors.join('; '),

@@ -1,16 +1,20 @@
 import type { CommandEnvelope, OrderCreateLine, OrderCreatePayment } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
+import type { OrderCreateFee, OrderCreateShipping, OrderCreateCustomLine } from './v5'
 
 // The fields of each order.create version (ruling 17): @tallyui/core 2.0.0 OrderCreatePayload, OrderCreateLine and
 // OrderCreatePayment (src/types/commands.ts, v2) and OrderCreatePayloadV3 (@tallyui/core's OrderCreatePayload, aliased in
 // fiscal-figures.ts). Each value is
 // the version that added the field; Record<keyof T, number> makes tsc refuse a missing or an extra field.
 const since = <T>(fields: Record<keyof T, number>) => new Map<string, number>(Object.entries(fields))
-const TOP_FIELDS = since<OrderCreatePayloadV3>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
+const TOP_FIELDS = since<OrderCreatePayloadV3 & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
   subtotalMinor: 1, taxMinor: 1, totalMinor: 1, payments: 1, customer: 1, registerId: 1, cashierRef: 1, locationId: 1,
-  discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3 })
-const LINE_FIELDS = since<OrderCreateLine>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
-  taxInclusive: 1, discountMinor: 2 })
+  discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3, fees: 5, shipping: 5 })
+const LINE_FIELDS = since<OrderCreateLine & { custom?: OrderCreateCustomLine }>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
+  taxInclusive: 1, discountMinor: 2, custom: 5 })
+const FEE_FIELDS = since<OrderCreateFee>({ clientFeeId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5 })
+const SHIPPING_FIELDS = since<OrderCreateShipping>({ clientShippingId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5, methodId: 5 })
+const CUSTOM_FIELDS = since<OrderCreateCustomLine>({ name: 5, sku: 5, taxClass: 5, taxStatus: 5 })
 const PAYMENT_FIELDS = since<OrderCreatePayment>({ clientPaymentId: 1, method: 1, amountMinor: 1, tenderedMinor: 1,
   changeMinor: 1, reference: 1 })
 const CUSTOMER_FIELDS = since<NonNullable<OrderCreatePayloadV3['customer']>>({ email: 1, customerId: 3 })
@@ -63,7 +67,8 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
       check(object(item), path, 'an object')
       if (!object(item)) continue
       known(item, isLines ? LINE_FIELDS : PAYMENT_FIELDS, `${path}.`)
-      for (const key of isLines ? ['clientLineId', 'variantId'] : ['clientPaymentId', 'method']) {
+      if (isLines && item.custom !== undefined) check(!('variantId' in item), `${path}.variantId`, 'no variantId on a custom line')
+      for (const key of isLines ? ['clientLineId', ...(item.custom === undefined ? ['variantId'] : [])] : ['clientPaymentId', 'method']) {
         check(typeof item[key] === 'string', `${path}.${key}`, 'a string')
       }
       const optionalString = isLines ? 'title' : 'reference'
@@ -79,6 +84,31 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
           if (item[key] !== undefined) number(item[key], `${path}.${key}`)
         }
       }
+    }
+  }
+  for (const field of ['fees', 'shipping', 'lines']) {
+    const items = payload[field], custom = field === 'lines', id = field === 'fees' ? 'clientFeeId' : 'clientShippingId'
+    if (!custom && items !== undefined) check(Array.isArray(items), field, 'an array')
+    if (!Array.isArray(items)) continue
+    const firstIds = new Map<string, number>()
+    for (const [index, item] of items.entries()) {
+      if (custom && item?.custom === undefined) continue
+      const value = custom ? item.custom : item, path = `${field}[${index}]${custom ? '.custom' : ''}`
+      check(object(value), path, 'an object')
+      if (!object(value)) continue
+      known(value, custom ? CUSTOM_FIELDS : field === 'fees' ? FEE_FIELDS : SHIPPING_FIELDS, `${path}.`)
+      for (const key of ['name', 'taxClass', ...(custom ? ['sku'] : [id, ...(field === 'shipping' ? ['methodId'] : [])])]) {
+        const required = key === 'name' || key === id
+        if (required || value[key] !== undefined) check(typeof value[key] === 'string' && (!required || (value[key] as string).length > 0),
+          `${path}.${key}`, required ? 'a non-empty string' : 'a string')
+      }
+      check(value.taxStatus === 'taxable' || value.taxStatus === 'none', `${path}.taxStatus`, "'taxable' or 'none'")
+      if (custom) continue
+      for (const key of ['amountMinor', 'taxMinor']) check(Number.isSafeInteger(value[key]) && (value[key] as number) >= 0, `${path}.${key}`, 'a non-negative safe integer')
+      if (typeof value[id] !== 'string') continue
+      const first = firstIds.get(value[id] as string)
+      if (first !== undefined && first >= 0) check(false, `${path}.${id}`, `no duplicate of payload.${field}[${first}].${id}`)
+      firstIds.set(value[id] as string, first === undefined ? index : -1)
     }
   }
   // One error per repeated clientLineId, at its second occurrence; -1 marks an id already reported.
@@ -136,6 +166,16 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
     }
   }
   const errors: string[] = []
+  for (const field of ['fees', 'shipping', 'lines']) {
+    if (!Array.isArray(value[field])) continue
+    for (const [index, item] of (value[field] as unknown[]).entries()) {
+      const entry = item as Record<string, unknown> | null, custom = field === 'lines'
+      const strings = (custom ? entry?.custom : entry) as Record<string, unknown> | null | undefined
+      fields.push([`${field}[${index}]${custom ? '.custom' : ''}.taxStatus`, strings?.taxStatus, 0])
+      for (const key of custom ? ['name', 'sku', 'taxClass'] : ['name', 'taxClass', field === 'fees' ? 'clientFeeId' : 'clientShippingId', ...(field === 'shipping' ? ['methodId'] : [])])
+        fields.push([`${field}[${index}]${custom ? '.custom' : ''}.${key}`, strings?.[key], key === 'name' ? 255 : 64])
+    }
+  }
   for (const [path, text, max] of fields) {
     if (typeof text !== 'string') continue
     if (bounds && max && text.length > max) errors.push(`payload.${path}: expected at most ${max} characters`)

@@ -1,5 +1,5 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, MathBN, Modules } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { escapeLike, normaliseCustomerEmail, pickCustomer } from './customer-email'
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
@@ -23,6 +23,7 @@ export async function runOrderCreate(
   ledger?: { claimToken: string; carriedTopUps: StockTopUp[] }
 ): Promise<CommandResult> {
   const payload = command.payload
+  const catalogueLines = payload.lines.filter(line => !('custom' in line))
   const v3 = payload as OrderCreatePayloadV3
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
@@ -70,7 +71,7 @@ export async function runOrderCreate(
     const { data: shippingVariants } = await query.graph({
       entity: 'product_variant', fields: ['id', 'product.id', 'product.shipping_profile.id', 'inventory_items.inventory.requires_shipping',
         'product.status', 'product.deleted_at', 'product.sales_channels.id'],
-      filters: { id: payload.lines.map(line => line.variantId) },
+      filters: { id: catalogueLines.map(line => line.variantId) },
     })
     // A resumed order's items are fixed, so every line keeps its profile even if its product is no longer sellable.
     const considered = existing ? shippingVariants : shippingVariants.filter(sellable)
@@ -123,7 +124,7 @@ export async function runOrderCreate(
         entity: 'product_variant', fields: ['id', 'manage_inventory', 'allow_backorder',
           'product.status', 'product.deleted_at', 'product.sales_channels.id',
           'inventory_items.inventory_item_id', 'inventory_items.required_quantity'],
-        filters: { id: payload.lines.map(line => line.variantId) },
+        filters: { id: catalogueLines.map(line => line.variantId) },
       })
       const { address_1, address_2, city, country_code, province, postal_code, phone } = location.address
       const customer = normalised !== null ? pickCustomer(await container.resolve(Modules.CUSTOMER).listCustomers({
@@ -148,7 +149,7 @@ export async function runOrderCreate(
         entity: 'inventory_level', fields: ['inventory_item_id', 'location_id', 'stocked_quantity', 'reserved_quantity'],
         filters: { inventory_item_id: variants.flatMap(variant => variant.inventory_items.map(item => item.inventory_item_id)), location_id: location.id },
       })
-      const stock = planStockTopUp(payload.lines, variants.map(variant => ({
+      const stock = planStockTopUp(catalogueLines, variants.map(variant => ({
         variantId: variant.id, manageInventory: variant.manage_inventory,
         items: variant.inventory_items.map(item => ({ inventoryItemId: item.inventory_item_id, requiredQuantity: Number(item.required_quantity) })),
       })), levels.map(level => ({ inventoryItemId: level.inventory_item_id, stocked: Number(level.stocked_quantity), reserved: Number(level.reserved_quantity) })))
@@ -184,13 +185,14 @@ export async function runOrderCreate(
     }
   }
   const { data: [order] } = await query.graph({
-    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'raw_tax_total', 'raw_discount_subtotal', 'metadata', 'customer_id'], filters: { id: orderId },
+    entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'raw_tax_total', 'raw_discount_subtotal', 'metadata', 'customer_id',
+      ...((command.version as number) === 5 ? ['items.metadata', 'items.raw_subtotal', 'shipping_methods.raw_subtotal'] : [])], filters: { id: orderId },
   })
   if (order.metadata?.tally_stock_topups) {
     const topUps = order.metadata.tally_stock_topups as StockTopUp[]
     const { data: variants } = await query.graph({
       entity: 'product_variant', fields: ['id', 'manage_inventory', 'inventory_items.inventory_item_id', 'inventory_items.required_quantity'],
-      filters: { id: payload.lines.map(line => line.variantId) },
+      filters: { id: catalogueLines.map(line => line.variantId) },
     })
     stockWarnings = variants.filter(variant => variant.manage_inventory).flatMap(variant => {
       const quantity = Math.max(0, ...variant.inventory_items.map(item => Math.ceil(
@@ -201,7 +203,11 @@ export async function runOrderCreate(
   }
   const serverMinor = majorToMinor(order.raw_total.value, currencyDecimals(payload.currency))
   const serverTax = majorToMinor(order.raw_tax_total.value, currencyDecimals(payload.currency))
-  const serverSubtotal = serverMinor - serverTax
+  const chargesNet = (command.version as number) === 5 ? majorToMinor(MathBN.sum(0,
+    ...order.items.filter(item => item.metadata?.tally_fee_uuid).map(item => item.raw_subtotal.value),
+    ...order.shipping_methods.map(method => method.raw_subtotal.value)
+  ).toString(), currencyDecimals(payload.currency)) : 0
+  const serverSubtotal = serverMinor - serverTax - chargesNet
   const tillCustomerId = typeof order.metadata?.tally_customer_id === 'string' ? order.metadata.tally_customer_id : undefined
   const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...(command.version >= 3 ? figuresWarnings(
     { subtotalMinor: payload.subtotalMinor, taxMinor: payload.taxMinor, discountMinor: payload.discountMinor ?? 0 },

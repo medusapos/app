@@ -82,7 +82,7 @@ describe('validateBatch', () => {
   })
 
   it("validateBatch accepts a positive integer version it doesn't support", () => {
-    for (const version of [5, Number.MAX_SAFE_INTEGER]) {
+    for (const version of [6, Number.MAX_SAFE_INTEGER]) {
       const commands = [{ ...command, version }]
       expect(validateBatch({ commands })).toEqual({ ok: true, commands })
     }
@@ -94,11 +94,11 @@ describe('validateBatch', () => {
     })
   })
 
-  it('rejects unsupported version 5 after the replay read and before shape checks or ledger claim', async () => {
-    const outcome = await processBatch(container, [{ ...command, version: 5, payload: { display: {} } } as never], {})
+  it('rejects unsupported version 6 after the replay read and before shape checks or ledger claim', async () => {
+    const outcome = await processBatch(container, [{ ...command, version: 6, payload: { display: {} } } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
-      code: 'unsupported_version', message: 'order.create version 5 is not supported; this server supports 1, 2, 3, 4',
-      data: { orderCreate: 4 },
+      code: 'unsupported_version', message: 'order.create version 6 is not supported; this server supports 1, 2, 3, 4, 5',
+      data: { orderCreate: 5 },
     } }] } })
   })
 

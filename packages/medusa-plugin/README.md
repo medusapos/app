@@ -57,7 +57,7 @@ Sign in as a Medusa admin user through `/auth/user/emailpass` and send its JWT a
 `Authorization: Bearer <jwt>` (an authenticated admin session is also accepted).
 
 Send `POST /tally/v1/commands` with `X-Tally-Protocol: 1` and JSON
-`{ commands: CommandEnvelope[] }` containing 1 to `MAX_COMMANDS` commands: `order.create` (version 1, 2 or 3)
+`{ commands: CommandEnvelope[] }` containing 1 to `MAX_COMMANDS` commands: `order.create` (version 1, 2, 3, 4 or 5)
 or the five register commands (version 1; see [Registers](#registers)).
 `MAX_COMMANDS` and `MAX_BODY_BYTES` (`src/api/tally/v1/commands/process.ts`) are the contract's limits. The endpoint parses only `application/json`; a body of any other content type isn't read and gets a `400`.
 Every envelope includes `id` (1–64 characters), `type` (one of the six command types), `version`, object `payload`, string `createdAt`
@@ -95,7 +95,7 @@ Version 3 (TallyUI ADR-065) adds optional fields:
 - `sessionId`, the register session, stored as `tally_session_id`;
 - `customer.customerId`, the Medusa customer. When that customer exists, the order uses it without the till's email; otherwise the order uses the till's email as before. `tally_customer_id` is stored either way.
 
-`GET /tally/v1/info` returns `{ "contracts": { "order.create": [1, 2, 3], "register": [1] } }`, with the same
+`GET /tally/v1/info` returns `{ "contracts": { "order.create": [1, 2, 3, 4, 5], "register": [1] } }`, with the same
 authentication and CORS as the command endpoint.
 It also returns `"taxRounding": { "granularity": "per_order", "mode": "half_away_from_zero" }`: the store rounds tax once per order, half away from zero, so the till computes tax the same way (TallyUI #309).
 

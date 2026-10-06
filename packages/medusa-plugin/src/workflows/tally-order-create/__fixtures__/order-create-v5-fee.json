@@ -1,0 +1,80 @@
+{
+  "id": "0199b0a0-0000-7000-8000-000000000001",
+  "type": "order.create",
+  "version": 5,
+  "payload": {
+    "clientOrderId": "0199b0a0-0000-7000-8000-0000000000a1",
+    "currency": "EUR",
+    "pricesIncludeTax": false,
+    "lines": [
+      {
+        "clientLineId": "0199b0a0-0000-7000-8000-0000000000b1",
+        "variantId": "var_123",
+        "title": "Coffee beans",
+        "quantity": 1,
+        "unitPriceMinor": 1000
+      }
+    ],
+    "fees": [
+      {
+        "clientFeeId": "0199b0a0-0000-7000-8000-0000000000f1",
+        "name": "Bag",
+        "amountMinor": 20,
+        "taxStatus": "taxable",
+        "taxMinor": 4
+      }
+    ],
+    "subtotalMinor": 1000,
+    "taxMinor": 204,
+    "totalMinor": 1224,
+    "payments": [
+      {
+        "clientPaymentId": "0199b0a0-0000-7000-8000-0000000000c1",
+        "method": "cash",
+        "amountMinor": 1224
+      }
+    ],
+    "display": {
+      "currency": "EUR",
+      "exponent": 2,
+      "taxInclusive": false,
+      "subtotalMinor": 1000,
+      "discountMinor": 0,
+      "taxMinor": 204,
+      "totalMinor": 1224,
+      "orderDiscountMinor": 0,
+      "lines": [
+        {
+          "clientLineId": "0199b0a0-0000-7000-8000-0000000000b1",
+          "amountMinor": 1000,
+          "discounts": []
+        }
+      ],
+      "fees": [
+        {
+          "clientFeeId": "0199b0a0-0000-7000-8000-0000000000f1",
+          "amountMinor": 20
+        }
+      ]
+    },
+    "taxByRate": [
+      {
+        "ratePpm": 200000,
+        "netMinor": 1020,
+        "taxMinor": 204,
+        "grossMinor": 1224
+      }
+    ],
+    "createdAt": "2026-09-28T10:00:00.000Z",
+    "customer": {
+      "email": "buyer@example.com",
+      "customerId": "cus_golden_v3"
+    },
+    "registerId": "register_golden",
+    "cashierRef": "cashier_golden",
+    "sessionId": "019f6d2e-7800-7000-8000-000000000003"
+  },
+  "createdAt": "2026-09-28T10:00:00.000Z",
+  "deviceId": "device_golden",
+  "attempt": 1
+}
