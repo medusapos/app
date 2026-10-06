@@ -44,7 +44,7 @@ describe('dumpAppStore', () => {
       expect(dump.rxdbVersion).toBe('17.5.0');
       expect(dump.stored).toStrictEqual([
         { name: 'cash_movements', version: 0 }, { name: 'closures', version: 0 },
-        { name: 'pos_orders', version: 6 }, { name: 'register_commands', version: 0 }, { name: 'register_sessions', version: 0 },
+        { name: 'pos_orders', version: 7 }, { name: 'register_commands', version: 0 }, { name: 'register_sessions', version: 0 },
       ]);
       for (const name of Object.keys(inserted) as (keyof typeof inserted)[]) {
         expect(dump.docs[name]).toStrictEqual(inserted[name].map((doc) => doc.toJSON()));
