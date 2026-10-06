@@ -1,9 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CartLineProps, CartTotalProps, ProductGrid, SearchInput } from '@tallyui/components';
-import { formatMoney, SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
+import { SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -31,40 +29,6 @@ vi.mock('../lib/register-context', async (importOriginal) => ({
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
-// The choice screen and the sale components (Cart, CartBar, Tender, Catalogue: TallyUI TV6a/TV6b)
-// come from @tallyui/components, real and unmocked (app/index.tsx imports them directly). The
-// primitives Cart/Tender/Catalogue use internally (from '../cart', '../checkout', '../product',
-// '../input', not the barrel) are mocked below at those module ids, not by path; the rest of the
-// POS pieces are stand-ins.
-vi.mock('@tallyui/components/product', () => ({
-  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) =>
-    <div>{items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}</div>,
-  ProductImage: () => null,
-  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
-  ProductPrice: () => null,
-  ProductStockBadge: () => null,
-}));
-vi.mock('@tallyui/components/ui', () => ({
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-}));
-vi.mock('@tallyui/components/input', () => ({
-  SearchInput: ({ placeholder }: ComponentProps<typeof SearchInput>) => <input placeholder={placeholder} />,
-}));
-vi.mock('@tallyui/components/cart', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name, quantity, lineTotal }: CartLineProps) => <div>{name} × {quantity} = {formatMoney(lineTotal)}</div>,
-  CartTotal: ({ total }: CartTotalProps) => <span>Total: {formatMoney(total)}</span>,
-  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DiscountBadge: () => null,
-}));
-vi.mock('@tallyui/components/checkout', () => ({
-  CashTendered: () => null,
-  ChangeDisplay: () => null,
-}));
 
 const session = { baseUrl: 'https://store.test', email: 'cashier@store.test', token: 'jwt' };
 const settings: StoreSettings = {
@@ -82,7 +46,7 @@ const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError
 const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
   setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
-const pos = () => screen.findByPlaceholderText('Search or scan barcode / SKU');
+const pos = () => screen.findByRole('searchbox');
 
 beforeEach(() => {
   setWindowWidth(1280);
@@ -114,7 +78,7 @@ describe('store settings flow', () => {
     render(<ProductsScreen />);
     expect(await screen.findByText("Can't reach the store's settings yet. Retrying…")).toBeTruthy();
     expect(screen.queryByText('Store capabilities unavailable')).toBeNull();
-    expect(screen.queryByPlaceholderText('Search or scan barcode / SKU')).toBeNull();
+    expect(screen.queryByRole('searchbox')).toBeNull();
     capabilities.mockResolvedValue({ orderCreate: 3, register: 1,
       taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
     await act(async () => { fireEvent.click(button('Retry')); });
@@ -209,7 +173,7 @@ describe('store settings flow', () => {
     storeSettings.mockRejectedValueOnce(new TypeError('Failed to fetch')).mockResolvedValueOnce(pricing);
     render(<ProductsScreen />);
     expect(await screen.findByText('Failed to fetch')).toBeTruthy();
-    expect(screen.queryByPlaceholderText('Search or scan barcode / SKU')).toBeNull();
+    expect(screen.queryByRole('searchbox')).toBeNull();
     await act(async () => { fireEvent.click(button('Retry')); });
     await pos();
   });
@@ -233,7 +197,7 @@ describe('store settings flow', () => {
     await requested(1);
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
-    const startSale = async () => { fireEvent.click(button('Shirt')); await act(async () => { fireEvent.click(button('Card terminal')); }); };
+    const startSale = async () => { fireEvent.click(screen.getByTestId('product-tile-Shirt')); await act(async () => { fireEvent.click(button('Card terminal')); }); };
     const inTender = () => {
       expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
       expect(button('Payment approved on terminal')).toBeTruthy();
@@ -260,7 +224,7 @@ describe('store settings flow', () => {
     expect(vi.mocked(useReplicatedProducts).mock.lastCall![1]).toBe(replicationContext);
     fireEvent.click(button('Back'));
     expect(button('Remove Shirt')).toBeTruthy();
-    expect(screen.getByText('Total: €15.00')).toBeTruthy();
+    expect(screen.getByTestId('cart-footer').textContent).toContain('Total€15.00');
   }, 20000);
 
   it('hides Retry while the cart has lines or a tender is open, and new settings wait for the sale to end (a money rule)', async () => {
@@ -272,7 +236,7 @@ describe('store settings flow', () => {
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
     expect(button('Retry')).toBeTruthy();
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     await act(async () => { fireEvent.click(button('Card terminal')); });
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
@@ -285,13 +249,13 @@ describe('store settings flow', () => {
     vi.mocked(useReplicatedProducts).mockImplementation((_connector, context) => ({ products: [context.pricingContext?.region_id === 'reg_de' ? shirtDe : shirt],
       state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined }));
     const region = () => vi.mocked(useReplicatedProducts).mock.lastCall![1].pricingContext?.region_id;
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     // Germany's settings (19% inclusive, its own prices) arrive mid-sale: the sale, and the catalogue, stay on Europe's.
     await act(async () => { settle.resolve({ currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000 },
       pricingContext: { region_id: 'reg_de', currency_code: 'eur', publishable_key: 'pk_1' } }); });
     expect(region()).toBe('reg_eu');
-    fireEvent.click(button('Shirt'));
-    expect(screen.getByText('Total: €30.00')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(screen.getByTestId('cart-footer').textContent).toContain('Total€30.00');
     await act(async () => { fireEvent.click(button('Card terminal')); });
     expect(screen.getByText('Card terminal: €30.00')).toBeTruthy();
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
@@ -303,8 +267,8 @@ describe('store settings flow', () => {
     expect(region()).toBe('reg_eu');
     await act(async () => { fireEvent.click(button('New sale')); });
     expect(region()).toBe('reg_de');
-    fireEvent.click(button('Shirt'));
-    expect(screen.getByText('Total: €20.00')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(screen.getByTestId('cart-footer').textContent).toContain('Total€20.00');
   }, 20000);
 
   it('keeps the POS and its sale when a retry resolves to the choice screen mid-sale, and shows the choice after it (a money rule)', async () => {
@@ -317,7 +281,7 @@ describe('store settings flow', () => {
     await pos();
     await act(async () => { fireEvent.click(button('Retry')); });
     await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { settle.reject(choiceRequired({ regions })); });
     expect(screen.queryByText('Set up this till')).toBeNull();
