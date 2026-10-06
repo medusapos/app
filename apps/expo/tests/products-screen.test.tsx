@@ -344,7 +344,7 @@ describe('Orders screen and sync status', () => {
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Recent']);
-    for (const label of ["The online store refused this sale. Ask the store owner to look at the till's sync log.", 'Stock short by 2 for Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order warned · #42 · 3 items']) {
+    for (const label of ["The online store refused this sale. Ask the store owner to look at the till's sync log.", '2 sold without stock: Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order warned · #42 · 3 items']) {
       expect(screen.getAllByText(label)).toHaveLength(2);
     }
     expect(screen.getAllByText('Order rejected · 1 item')).toHaveLength(2);
