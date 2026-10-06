@@ -25,7 +25,8 @@
   "files": [
     ".medusa/server",
     "!.medusa/server/**/__tests__",
-    "!.medusa/server/**/__fixtures__"
+    "!.medusa/server/**/__fixtures__",
+    "CHANGELOG.md"
   ],
   "exports": {
     "./package.json": "./package.json",
