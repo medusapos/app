@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Response } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, closeStoreRegister, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
@@ -7,10 +7,20 @@ import { E2E_RUN } from './ports';
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
 type Sale = { clientOrderId: string; lines: { discountMinor?: number }[] };
+// The response applying the sale itself, not a register command's that may come first or share its batch.
 const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
-  if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-  return ((await response.json()).results ?? []).some((result: { status: string }) => result.status === 'applied');
+  const request = response.request();
+  if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
+  const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
+  return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
+    result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
 });
+// That batch held exactly one sale; its results, by the sale's command id.
+async function saleResults(response: Response) {
+  const sales = response.request().postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
+  expect(sales).toHaveLength(1);
+  return (await response.json()).results.filter((result: { id: string }) => result.id === sales[0].id);
+}
 const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medusapos.session') ?? 'null')?.capabilities);
 
 test('a discounted sale is applied as order.create v4, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
@@ -54,7 +64,7 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   await expect(page.getByLabel(/^Discount:/)).toHaveCount(0);
   await page.getByRole('button', { name: 'New sale', exact: true }).click();
   const receiptTotal = 3.88;
-  const { results } = await (await applied).json();
+  const results = await saleResults(await applied);
   expect(results).toHaveLength(1);
   expect(results[0].status).toBe('applied');
   expect(results[0].warnings).toBeUndefined();
@@ -107,7 +117,7 @@ test('100% off the line completes with cash at €0.00 as one Medusa order', asy
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   await expect(page.getByLabel(/^Total: /)).toHaveAttribute('aria-label', /^Total: \D*0\.00$/);
-  const { results } = await (await applied).json();
+  const results = await saleResults(await applied);
   expect(results).toEqual([expect.objectContaining({ status: 'applied' })]);
   expect(results[0].warnings).toBeUndefined();
   expect(results[0].serverRefs.totalMinor).toBe(0);

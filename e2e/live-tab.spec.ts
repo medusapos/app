@@ -83,10 +83,13 @@ test('pageshow after pagehide re-opens both databases', async ({ page }) => {
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 
   const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
+  // The sale's own applied result, not a register command's.
   const saleApplied = page.waitForResponse(async response => {
-    if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-    const body = await response.json();
-    return (body.results ?? []).some((result: { status: string }) => result.status === 'applied');
+    const request = response.request();
+    if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
+    const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
+    return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
+      result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
   });
   await sellBySku(page, ['E2E-1'], 'exact');
   await saleApplied;

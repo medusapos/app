@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Page, type Response } from '@playwright/test';
 import { adminToken, captureSales, chooseRegion, closeStoreRegister, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
@@ -9,6 +9,20 @@ import { E2E_RUN } from './ports';
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const setUp = (page: Page) => page.getByText('Set up this till', { exact: true });
 const tile = (page: Page) => page.getByTestId('product-tile-E2E product 1');
+// The response applying the sale itself, not a register command's that may come first or share its batch.
+const saleApplied = (page: Page) => page.waitForResponse(async (response) => {
+  const request = response.request();
+  if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
+  const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
+  return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
+    result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
+});
+// That batch held exactly one sale; its results, by the sale's command id.
+async function saleResults(response: Response) {
+  const sales = response.request().postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
+  expect(sales).toHaveLength(1);
+  return (await response.json()).results.filter((result: { id: string }) => result.id === sales[0].id);
+}
 
 // E2E-1's price as Medusa's store API calculates it in `region`, with the publishable key,
 // formatted in the browser the way the catalogue formats it (Intl, the page's locale).
@@ -53,12 +67,9 @@ test('an exclusive sale of E2E-1 is applied with no warnings and the till\'s tot
   // An earlier till left register-1 open at the store; close it so this till's open applies and its sales name a known session (ADR 0022).
   await closeStoreRegister();
   await signIn(page);
-  const applied = page.waitForResponse(async (response) => {
-    if (response.request().method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-    return ((await response.json()).results ?? []).some((result: { status: string }) => result.status === 'applied');
-  });
+  const applied = saleApplied(page);
   const receiptTotal = await sellBySku(page, ['E2E-1'], 'exact');
-  const { results } = await (await applied).json();
+  const results = await saleResults(await applied);
   expect(results).toHaveLength(1);
   expect(results[0].status).toBe('applied');
   expect(results[0].warnings).toBeUndefined();
