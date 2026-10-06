@@ -2,8 +2,8 @@ import { expect, type Page } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
-// Discounts in the cart: the plugin reports order.create [1, 2, 3, 4] at GET /tally/v1/info,
-// and a discounted sale goes out as order.create version 4, with one net "POS discount" adjustment per line.
+// Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5] at GET /tally/v1/info,
+// and a discounted sale without charges or custom lines goes out as version 4, with one net "POS discount" adjustment per line.
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
 type Sale = { clientOrderId: string; lines: { discountMinor?: number }[] };
@@ -17,9 +17,9 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
   await signIn(page);
-  // The plugin advertises order.create [1, 2, 3, 4] (ADR 0012 amendment), register 1 and its tax rounding (TallyUI #322).
-  // TallyUI 3.0 sends net discounts at version 4 only when the server advertises 4.
-  expect(await capabilities(page)).toEqual({ orderCreate: 4, register: 1,
+  // The plugin advertises order.create [1, 2, 3, 4, 5] (ADR 0021), register 1 and its tax rounding (TallyUI #322).
+  // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
+  expect(await capabilities(page)).toEqual({ orderCreate: 5, register: 1,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   await addE2E1(page);
   await addE2E1(page);
