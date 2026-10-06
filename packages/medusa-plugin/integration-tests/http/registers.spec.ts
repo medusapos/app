@@ -49,7 +49,7 @@ medusaIntegrationTestRunner({
     function command<P>(type: string, payload: P) {
       return { id: randomUUID(), type, version: 1, payload, createdAt: openedAt, deviceId: 'test-register', attempt: 1 }
     }
-    function open(registerId = randomUUID()) {
+    function open(registerId: string = randomUUID()) {
       return command('register.session.open', { sessionId: randomUUID(), registerId, openedAt, countedFloatMinor: 100 })
     }
     function close(sessionId: string) {
