@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, closeStoreRegister, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -16,8 +16,6 @@ const appliedResponse = (page: Page) => page.waitForResponse(async (response) =>
 test('park a sale, sell another, resume the first and complete it: both orders reach Medusa once at the till\'s figures', async ({ page }) => {
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
-  // An earlier till left register-1 open at the store; close it so this till's open applies and its sales name a known session (ADR 0022).
-  await closeStoreRegister();
   await signIn(page);
   await addE2E1(page);
   await addE2E1(page);
@@ -60,7 +58,6 @@ test('park a sale, sell another, resume the first and complete it: both orders r
 test('an edited unit price settles in Medusa at the till\'s total with no warnings', async ({ page }) => {
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
-  await closeStoreRegister();
   await signIn(page);
   await addE2E1(page);
   await addE2E1(page);

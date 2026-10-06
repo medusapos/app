@@ -159,7 +159,7 @@ async function olderSqliteSaleSyncsOnce(page: Page, version: 0 | 1) {
 
   // signIn loads /login afresh (a new page, as after a build switch); its store open migrates the order to v2.
   await page.route('**/tally/v1/commands', (route) => route.abort());
-  await signIn(page);
+  await signIn(page, 'Europe', 'unsynced');
   await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
   await expect(page.getByText('· Waiting to sync', { exact: false })).toBeVisible();
 
@@ -193,7 +193,7 @@ test('a pending order left in the legacy Dexie store carries over on sign-in and
   }).__medusaposSeedLegacyOrder(backendUrl, posOrder), [backend, order] as const)).toBe(0);
 
   await page.route('**/tally/v1/commands', (route) => route.abort());
-  await signIn(page);
+  await signIn(page, 'Europe', 'unsynced');
   await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
   await expect(page.getByText('· Waiting to sync', { exact: false })).toBeVisible();
   await page.unroute('**/tally/v1/commands');
