@@ -671,7 +671,7 @@ describe('register collections in the order store', () => {
     const first = await openOrderStore(url);
     const { sessions, movements, closures } = registerCollections(first.orders);
     for (const collection of [sessions, movements, closures]) expect(collection.database).toBe(first.orders.database);
-    expect(sessions.schema.version).toBe(0);
+    expect(sessions.schema.version).toBe(1);
     await bindRegister(sessions, url, { id: 'register-1', name: 'Register 1' });
     const session = await openSession(sessions, { ...opened, storeKey: url });
     await recordMovement(sessions, movements, closures, { sessionId: session.id, type: 'paid_in', amountMinor: 500, reason: 'Change', actor: 'cashier@store.test' });
