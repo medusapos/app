@@ -1,10 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import { useState, type ComponentProps, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { BehaviorSubject } from 'rxjs';
-import type { ProductGrid, SearchInput, CartLineProps, CartTotalProps } from '@tallyui/components';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
-import { formatMoney, SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
+import { SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
 import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
 import { createOrderBuilder, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -62,54 +61,6 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 }));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
-}));
-// Cart, CartBar, Tender, Catalogue, SyncStatus and StoreSettingsChoiceScreen come from
-// @tallyui/components (TallyUI TV6a/TV6b), real and unmocked (imported directly where used).
-// The primitives they compose internally (from '../cart', '../checkout', '../product', '../input',
-// not the barrel) are mocked below at those module ids (aliased to their source in
-// vitest.config.ts), not by path.
-vi.mock('@tallyui/components/product', () => ({
-  ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
-    <div data-testid="product-grid" data-columns={numColumns}>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
-  ),
-  // The tile is composed directly in catalogue.tsx (ProductCard has no children slot); these
-  // stand in for its pieces. Only ProductTitle needs to render visible content — this file's
-  // tests aren't about price or the tile badge (see catalogue.test.tsx) and the tile's
-  // accessibilityRole="button" name must stay exactly the product name for the button-role
-  // assertions below.
-  ProductImage: () => null,
-  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
-  ProductPrice: () => null,
-  ProductStockBadge: () => null,
-}));
-vi.mock('@tallyui/components/ui', () => ({
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-}));
-vi.mock('@tallyui/components/input', () => ({
-  SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder }: ComponentProps<typeof SearchInput>) => (
-    <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)}
-      onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />
-  ),
-}));
-vi.mock('@tallyui/components/cart', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name, quantity, unitPrice, lineTotal }: CartLineProps) =>
-    <div>{name}: {formatMoney(unitPrice)} × {quantity} = {formatMoney(lineTotal)}</div>,
-  CartTotal: ({ subtotal, total, taxLines }: CartTotalProps) => <div>
-    <span>Subtotal: {formatMoney(subtotal)}</span>
-    {taxLines?.map((line, index) => <span key={index}>{line.label}: {formatMoney(line.amount)}</span>)}
-    <span>Total: {formatMoney(total)}</span>
-  </div>,
-  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DiscountBadge: () => null,
-}));
-vi.mock('@tallyui/components/checkout', () => ({
-  CashTendered: () => null,
-  ChangeDisplay: () => null,
 }));
 
 type Replicated = ReturnType<typeof useReplicatedProducts>;
@@ -180,7 +131,7 @@ describe('ProductsScreen catalogue', () => {
     expect(banner.container.textContent).toBe('');
     render(<header>{setOptions.mock.lastCall![0].headerTitle!()}</header>);
     expect(screen.getByText('1 sale saved, waiting to send ·').closest('header')).toBeTruthy();
-    const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
+    const input = screen.getByRole('searchbox') as HTMLInputElement;
     expect(getComputedStyle(input).display).not.toBe('none');
     expect(getComputedStyle(input).visibility).toBe('visible');
     act(() => input.focus());
@@ -201,7 +152,7 @@ describe('ProductsScreen catalogue', () => {
     expect(banner.container.textContent).toBe('');
     render(<header>{setOptions.mock.lastCall![0].headerTitle!()}</header>);
     expect(screen.getByText('1 sale not accepted ·').closest('header')).toBeTruthy();
-    const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
+    const input = screen.getByRole('searchbox') as HTMLInputElement;
     act(() => input.focus());
     expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: '123456' } });
@@ -222,15 +173,20 @@ describe('ProductsScreen catalogue', () => {
   });
 
   it('uses the catalogue layout width for two to six columns with room for 160 px tiles', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: Array.from({ length: 6 }, (_, i) => ({
+      id: `p${i}`, title: `Product ${i}`, status: 'published',
+      variants: [{ id: `p${i}-v`, title: 'One size', prices: [{ amount: 1, currency_code: 'eur' }] }],
+    })) }));
     await mount();
-    const grid = screen.getByTestId('product-grid');
-    const pane = grid.parentElement as HTMLElement & {
+    const pane = screen.getByTestId('catalogue-status-row').parentElement!.parentElement as HTMLElement & {
       __reactLayoutHandler: (event: { nativeEvent: { layout: { width: number } } }) => void;
     };
-    expect(grid.getAttribute('data-columns')).toBe('2');
+    expect(screen.getByTestId('product-tile-Product 0').parentElement!.parentElement!.children).toHaveLength(2);
     for (const [width, columns] of [[300, 2], [511, 2], [512, 3], [680, 4], [848, 5], [1016, 6], [1600, 6], [400, 2]]) {
       act(() => pane.__reactLayoutHandler({ nativeEvent: { layout: { width } } }));
-      expect(grid.getAttribute('data-columns')).toBe(String(columns));
+      const cell = screen.getByTestId('product-tile-Product 0').parentElement!;
+      expect(cell.parentElement!.children).toHaveLength(columns);
+      expect(parseFloat(cell.style.width)).toBeCloseTo(100 / columns);
     }
   });
   it('keeps cached sellable products sorted while offline and adds selections to the cart', async () => {
@@ -245,14 +201,18 @@ describe('ProductsScreen catalogue', () => {
     }));
     await mount();
     expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
+    expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
+      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.textContent))
+      .toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Cash', 'Card terminal']);
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
-    fireEvent.click(screen.getByRole('button', { name: 'Apple' }));
-    expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
-    fireEvent.change(screen.getByPlaceholderText('Search or scan barcode / SKU'), { target: { value: 'zebra' } });
-    fireEvent.keyDown(screen.getByPlaceholderText('Search or scan barcode / SKU'), { key: 'Enter' });
-    expect(screen.getByText('Zebra: €12.50 × 1 = €12.50')).toBeTruthy();
-    expect(screen.getByText('Apple: €12.50 × 1 = €12.50')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('product-tile-Apple'));
+    expect(screen.getByText('€12.50 × 1').parentElement!.parentElement!.textContent).toBe('Apple€12.50 × 1€12.50');
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'zebra' } });
+    fireEvent.keyDown(screen.getByRole('searchbox'), { key: 'Enter' });
+    for (const name of ['Zebra', 'Apple']) {
+      const line = within(screen.getByRole('button', { name: `Remove ${name}` }).parentElement!.parentElement!);
+      expect(line.getByText(name).parentElement!.parentElement!.textContent).toBe(`${name}€12.50 × 1€12.50`);
+    }
   });
 
   it.each([
@@ -283,12 +243,12 @@ describe('ProductsScreen catalogue', () => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt', status: 'published',
       variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] }));
     const view = await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     vi.mocked(useStoreSettings).mockReturnValue({ state: 'unsupported' });
     await act(async () => { view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>); });
     expect(screen.getByText('Store settings changed; this applies after the current sale')).toBeTruthy();
     expect(screen.queryByText('Offline')).toBeNull();
-    expect(screen.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
+    expect(screen.getByText('€12.00 × 1').parentElement!.parentElement!.textContent).toBe('Shirt€12.00 × 1€12.00');
   });
 
   it('shows the outbox status and attention count and pushes Orders without replacing the route', async () => {
@@ -311,7 +271,7 @@ describe('ProductsScreen catalogue', () => {
         prices: [{ amount: 12, currency_code: 'eur' }] }],
     }] }));
     await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     const record = vi.mocked(useOutboxContext().record);
@@ -329,7 +289,7 @@ describe('ProductsScreen catalogue', () => {
         prices: [{ amount: 12, currency_code: 'eur' }] }],
     }] }));
     await mount(true, false, name);
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     expect(useOutboxContext().record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
@@ -481,7 +441,7 @@ describe('ProductsScreen live stock', () => {
         ['inv-large', [{ stocked_quantity: 2, reserved_quantity: 2 }]],
       ]) }));
     await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     const asOf = `as of ${formatStockSyncTime(pass)}`;
     expect(screen.getByRole('button', { name: /Small/ }).textContent).toContain(`In Stock · ${asOf}`);
     expect(screen.getByRole('button', { name: /Large/ }).textContent).toContain(`Out of Stock · ${asOf}`);
@@ -502,7 +462,7 @@ describe('ProductsScreen live stock', () => {
 
 describe('ProductsScreen sale layout (ADR 0009)', () => {
   const button = (name: string | RegExp) => screen.getByRole('button', { name });
-  const search = () => screen.queryByPlaceholderText('Search or scan barcode / SKU');
+  const search = () => screen.queryByRole('searchbox');
   beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
 
@@ -510,19 +470,19 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     setWindowWidth(360);
     await mount();
     expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(button('Open cart, 1 item, €15.00').textContent).toBe('Cart · 1 item€15.00 ›');
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(button('Open cart, 2 items, €30.00').textContent).toBe('Cart · 2 items€30.00 ›');
     expect(search()).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Cash' })).toBeNull();
     fireEvent.click(button(/^Open cart/));
-    expect(screen.getByText('Shirt: €12.00 × 2 = €24.00')).toBeTruthy();
+    expect(screen.getByText('€12.00 × 2').parentElement!.parentElement!.textContent).toBe('Shirt€12.00 × 2€24.00');
     expect(search()).toBeNull();
     fireEvent.click(button('Products'));
     expect(search()).toBeTruthy();
     fireEvent.click(button('Open cart, 2 items, €30.00'));
-    expect(screen.getByText('Shirt: €12.00 × 2 = €24.00')).toBeTruthy();
+    expect(screen.getByText('€12.00 × 2').parentElement!.parentElement!.textContent).toBe('Shirt€12.00 × 2€24.00');
     await act(async () => { fireEvent.click(button('Cash')); });
     expect(button('Complete sale')).toBeTruthy();
     for (const name of ['Products', /^Open cart/, 'Cash']) expect(screen.queryByRole('button', { name })).toBeNull();
@@ -537,16 +497,17 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
 
   it('at 1280 wide shows the catalogue and cart with no bar; the order discount scrolls and pay is pinned', async () => {
     await mount();
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(search()).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Open cart|^Cart is empty$/ })).toBeNull();
     // CartPanel's scroll region isn't a separate testID; the Order discount button comes after the last line instead.
-    const lastLine = screen.getByText('Shirt: €12.00 × 1 = €12.00');
+    const lastLine = screen.getByText('€12.00 × 1').parentElement!.parentElement!;
+    expect(lastLine.textContent).toBe('Shirt€12.00 × 1€12.00');
     const orderDiscount = screen.getByRole('button', { name: 'Order discount' });
     expect(lastLine.compareDocumentPosition(orderDiscount) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const footer = within(screen.getByTestId('cart-footer'));
     for (const name of ['Cash', 'Card terminal']) expect(footer.getByRole('button', { name })).toBeTruthy();
-    expect(footer.getByText('Total: €15.00')).toBeTruthy();
+    expect(footer.getByText('Total').parentElement!.textContent).toBe('Total€15.00');
   });
 });
 
@@ -604,7 +565,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     const isStored = vi.fn().mockResolvedValue(settles === 'continue');
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored });
     await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBeNull();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
@@ -651,7 +612,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     const record = vi.fn(() => new Promise<void>((resolve) => { save = resolve; }));
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
     await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     // Replication reports 401 twice while the save is held: nothing signs out or navigates.
@@ -681,7 +642,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     const record = vi.fn().mockRejectedValueOnce(new Error('Storage full')).mockResolvedValue(undefined);
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
     await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
@@ -724,7 +685,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
     await act(async () => { hungView = render(hungTree()); });
     vi.useFakeTimers();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
     expect(record).toHaveBeenCalledTimes(1);
@@ -773,8 +734,8 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       expect(screen.queryByText(SALE_SAVING)).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
       expect(signedOut()).toBe(false);
-      fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
-      expect(screen.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+      expect(screen.getByText('€12.00 × 1').parentElement!.parentElement!.textContent).toBe('Shirt€12.00 × 1€12.00');
       // The poll has stopped.
       await advance(15000);
       expect(isStored).toHaveBeenCalledTimes(2);
@@ -908,18 +869,18 @@ describe('ProductsScreen search minCodeLength', () => {
   it.each([[6, false], [3, true]])('with minChars %i, Enter on the 5-character code "AB123" adds the product: %s', async (minChars, adds) => {
     saveScannerSettings(localStorage, 'https://store.test', { avgKeyMs: 100, minChars });
     await mount();
-    const search = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
+    const search = screen.getByRole('searchbox') as HTMLInputElement;
     fireEvent.change(search, { target: { value: 'AB123' } });
     fireEvent.keyDown(search, { key: 'Enter' });
     if (adds) {
-      expect(screen.getByText('Shirt: €12.00 × 1 = €12.00')).toBeTruthy();
+      expect(screen.getByText('€12.00 × 1').parentElement!.parentElement!.textContent).toBe('Shirt€12.00 × 1€12.00');
       expect(search.value).toBe('');
     } else {
       // No code lookup: the text stays a search, still showing its match, and the cart stays empty.
-      expect(screen.queryByText(/× 1 =/)).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Remove Shirt' })).toBeNull();
       expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
       expect(search.value).toBe('AB123');
-      expect(screen.getByRole('button', { name: 'Shirt' })).toBeTruthy();
+      expect(screen.getByTestId('product-tile-Shirt')).toBeTruthy();
     }
   });
 });
@@ -995,7 +956,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     const record = vi.fn().mockRejectedValueOnce(new Error('Storage full')).mockResolvedValue(undefined);
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
     await mountTill(token);
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
@@ -1051,7 +1012,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token: inADay() });
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(<Root sale />); });
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
     act(() => { vi.mocked(useReplicatedProducts).mock.lastCall![2](); });
@@ -1107,7 +1068,7 @@ describe('ProductsScreen earlier-sale note wording', () => {
   async function pay(savesInFlight: number, resolves: boolean) {
     const record = vi.fn<(order: PosOrder) => Promise<void>>();
     await arrange(savesInFlight, resolves ? record.mockResolvedValue(undefined) : record.mockImplementation(() => new Promise(() => {})));
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Payment approved on terminal' })); });
   }
@@ -1181,7 +1142,7 @@ describe('ProductsScreen tender gated on the order store opening', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       await mount();
-      fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+      fireEvent.click(screen.getByTestId('product-tile-Shirt'));
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cash' })); });
       expect(screen.getByRole('alert').textContent).toBe("Couldn't check the register. Try again.");
       expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
@@ -1194,7 +1155,7 @@ describe('ProductsScreen tender gated on the order store opening', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: null });
     vi.mocked(useRegister).mockReturnValue(openRegisterFixture({ enabled: false }));
     const view = await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Shirt' }));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
     expect(screen.getByRole('alert').textContent).toBe('Getting ready to save sales…');
     expect(screen.queryByRole('button', { name: 'Payment approved on terminal' })).toBeNull();
