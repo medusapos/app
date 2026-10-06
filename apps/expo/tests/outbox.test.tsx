@@ -1,9 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import type { ComponentProps, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { RxCollection } from 'rxdb';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
-import type { ProductGrid, SearchInput } from '@tallyui/components';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import {
@@ -42,8 +41,6 @@ vi.mock('../lib/order-store', async (importOriginal) => {
     return store;
   } };
 });
-// For the Products screen on the real outbox (the last describe): only the router, the catalogue's replication,
-// the store settings and the component primitives are stubbed, as in products-screen.test.tsx.
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
@@ -65,35 +62,6 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
-vi.mock('@tallyui/components/product', () => ({
-  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) => (
-    <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
-  ),
-  ProductImage: () => null,
-  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
-  ProductPrice: () => null,
-  ProductStockBadge: () => null,
-}));
-vi.mock('@tallyui/components/ui', () => ({
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-}));
-vi.mock('@tallyui/components/input', () => ({
-  SearchInput: ({ value, onChangeText, placeholder }: ComponentProps<typeof SearchInput>) => (
-    <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)} />
-  ),
-}));
-vi.mock('@tallyui/components/cart', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name }: { name: string }) => <div>{name}</div>,
-  CartTotal: () => null,
-  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DiscountBadge: () => null,
-}));
-vi.mock('@tallyui/components/checkout', () => ({ CashTendered: () => null, ChangeDisplay: () => null }));
 
 let outbox: ReturnType<typeof useSessionOutbox>;
 let session: Session;
@@ -632,7 +600,7 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     // The cashier binds Register 1 and opens it (ADR 0017): paying needs an open session.
     await act(async () => { await openTestRegister(outbox.orders!, session.baseUrl); });
     await waitFor(() => expect(screen.queryByTestId('open-register-card')).toBeNull());
-    fireEvent.click(await screen.findByRole('button', { name: 'Shirt' }));
+    fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
     fireEvent.click(button('Card terminal'));
     await screen.findByRole('button', { name: 'Payment approved on terminal' });
     return view;
