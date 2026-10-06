@@ -2,9 +2,8 @@
 // The register on the sale screen (ADR 0017): a real RegisterProvider, useRegisterSession and TallyUI register
 // components over a real order store (memory storage); the outbox is a stand-in whose record inserts into it.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import type { ComponentProps, ReactNode } from 'react';
-import type { CartLineProps, CartTotalProps, SearchInput, ProductGrid } from '@tallyui/components';
-import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
+import type { ReactNode } from 'react';
+import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import {
   bindRegister, closeSession, formatClosureDate, openSession, readRegister, recordMovement, saleLogger, startCounting, TAX_ROUNDING_MIXED_NOTE, useStoreSettings,
   voidMovement, type LogEntry, type PosOrder,
@@ -42,39 +41,6 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
-// The sale primitives as products-screen.test.tsx stubs them; the register components are real.
-vi.mock('@tallyui/components/product', () => ({
-  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) => (
-    <div>{items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}</div>
-  ),
-  ProductImage: () => null,
-  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
-  ProductPrice: () => null,
-  ProductStockBadge: () => null,
-}));
-// The rest of the UI kit stays real: the app's approval dialog and last-closure figures use it.
-vi.mock('@tallyui/components/ui', async (importOriginal) => ({
-  ...await importOriginal<Record<string, unknown>>(),
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-}));
-vi.mock('@tallyui/components/input', () => ({
-  SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder }: ComponentProps<typeof SearchInput>) => (
-    <input value={value} placeholder={placeholder} onChange={(event) => onChangeText(event.target.value)}
-      onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />
-  ),
-}));
-vi.mock('@tallyui/components/cart', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name, quantity, lineTotal }: CartLineProps) => <div>{name} × {quantity} = {formatMoney(lineTotal)}</div>,
-  CartTotal: ({ total }: CartTotalProps) => <span>Total: {formatMoney(total)}</span>,
-  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DiscountBadge: () => null,
-}));
-vi.mock('@tallyui/components/checkout', () => ({ CashTendered: () => null, ChangeDisplay: () => null }));
 
 const settings: StoreSettings = { storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' } };
 const pricing: PricingSettings = { currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 } };
@@ -174,11 +140,13 @@ describe('the register on the sale screen', () => {
       if (state !== 'unbound') await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
       await mount();
       const card = await screen.findByTestId(gate);
-      fireEvent.click(button('Shirt'));
-      const search = screen.getByPlaceholderText('Search or scan barcode / SKU');
+      fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+      const search = screen.getByRole('searchbox');
       fireEvent.change(search, { target: { value: 'BLUE' } });
       fireEvent.keyDown(search, { key: 'Enter' });
-      expect(screen.getByText('Shirt × 2 = €24.00')).toBeTruthy();
+      const line = within(screen.getByText('€12.00 × 2').parentElement!.parentElement!);
+      expect(line.getByText('Shirt')).toBeTruthy();
+      expect(line.getByText('€24.00')).toBeTruthy();
       for (const method of ['Cash', 'Card terminal']) {
         await act(async () => { fireEvent.click(button(method)); });
         expect(screen.getByRole('alert').textContent).toBe(OPEN_TO_PAY);
@@ -193,7 +161,7 @@ describe('the register on the sale screen', () => {
     const session = await openTestRegister(store.orders, baseUrl);
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     expect(screen.queryByRole('alert')).toBeNull();
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
@@ -427,7 +395,7 @@ describe('closing the register', () => {
     await voidMovement(sessions(), movements, paidOut.id, 'admin@store.test', closureRows);
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
     await act(async () => { fireEvent.click(button('New sale')); });
@@ -464,7 +432,7 @@ describe('closing the register', () => {
   it("the last closure shows TallyUI's tax-rounding note when the session's sales used more than one rounding method", async () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
     await act(async () => { fireEvent.click(button('New sale')); });
@@ -774,7 +742,7 @@ describe('the tender gate', () => {
     await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
     await mount();
     await screen.findByTestId('open-register-card');
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     // Opened straight in storage, then tapped before the register's watcher renders it (as the reviewer reproduced).
     const opened = await openSession(sessions(), { registerId: 'register-1', expectedFloatMinor: null, countedFloatMinor: 10000,
       openedBy: 'admin@store.test', businessDay: { year: 2026, month: 9, day: 28 }, storeKey: baseUrl });
@@ -793,7 +761,7 @@ describe('the tender gate', () => {
     const session = await openTestRegister(store.orders, baseUrl);
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     const approve = await screen.findByRole('button', { name: 'Payment approved on terminal' });
     // A close lands under the tender (as a server close or another path could): saleSession goes undefined.
@@ -812,7 +780,7 @@ describe('the tender gate', () => {
       <SessionProvider><RegisterProvider orders={orders} deviceId="test-device"><ProductsScreen /></RegisterProvider><PortalHost /></SessionProvider>;
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(tree(null)); });
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Cash')); });
     expect(screen.getByRole('alert').textContent).toBe(GETTING_READY);
     expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
@@ -828,7 +796,7 @@ describe('the tender gate', () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
-    fireEvent.click(button('Shirt'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => {
       fireEvent.click(button('Card terminal'));
       fireEvent.click(button('Card terminal'));
