@@ -511,3 +511,58 @@ it('keeps the v3 plan without customerId byte-identical', () => {
     },
   } }))
 })
+
+it('v5: a fee becomes a non-discountable, non-shipping variant-less item and shipping a shipping method, with their uuids in metadata', () => {
+  const sale = { ...payload,
+    fees: [{ clientFeeId: 'fee_1', name: 'Bag', amountMinor: 20, taxStatus: 'taxable' as const, taxMinor: 3 }],
+    shipping: [{ clientShippingId: 'shipping_1', name: 'Delivery', amountMinor: 500, taxStatus: 'taxable' as const,
+      taxMinor: 80, methodId: 'flat_rate' }],
+  }
+  const before = structuredClone(sale)
+  const result = planOrderCreate(sale, ctx, 5)
+  expect(result.ok).toBe(true)
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(result.plan.draftOrder.items).toHaveLength(3)
+  expect(result.plan.draftOrder.items[2]).toEqual({
+    title: 'Bag', quantity: 1, unit_price: '0.20', is_tax_inclusive: true,
+    requires_shipping: false, is_discountable: false, metadata: { tally_fee_uuid: 'fee_1' },
+  })
+  expect(result.plan.draftOrder.shipping_methods).toEqual([{
+    name: 'Delivery', amount: '5.00', is_tax_inclusive: true,
+    metadata: { tally_shipping_uuid: 'shipping_1', tally_method_id: 'flat_rate' },
+  }])
+  const totals = result.plan.draftOrder.metadata.tally_pos_totals as { settlement: unknown; charges: unknown }
+  expect(totals).toMatchObject({
+    settlement: { subtotalMinor: sale.subtotalMinor, discountMinor: 0, taxMinor: sale.taxMinor, totalMinor: sale.totalMinor },
+    charges: { fees: sale.fees, shipping: sale.shipping },
+  })
+  sale.fees[0].name = 'Changed'
+  sale.shipping[0].amountMinor = 900
+  expect(totals.charges).toEqual({ fees: before.fees, shipping: before.shipping })
+})
+
+it('v5: a custom line becomes a variant-less item titled custom.name, with its discount adjustment, and is not an unknown variant', () => {
+  const sale = { ...payload, discountMinor: 50, lines: [{
+    clientLineId: 'custom_1', title: 'Ignored title', quantity: 2, unitPriceMinor: 300, discountMinor: 50,
+    custom: { name: 'Gift wrap', sku: 'WRAP', taxStatus: 'taxable' },
+  }] } as unknown as OrderCreatePayload
+  const result = planOrderCreate(sale, { ...ctx, variants: {} }, 5)
+  expect(result.ok).toBe(true)
+  if (!result.ok) throw new Error('Expected a plan')
+  expect(result.plan.draftOrder.items).toEqual([{
+    title: 'Gift wrap', variant_sku: 'WRAP', quantity: 2, unit_price: '3.00', is_tax_inclusive: true,
+    requires_shipping: false, metadata: { tally_line_uuid: 'custom_1' },
+    adjustments: [{ amount: '0.50', description: 'POS discount', is_tax_inclusive: false }],
+  }])
+  expect(result.plan.draftOrder.metadata.tally_pos_totals).not.toHaveProperty('charges')
+  expect(fulfillmentGroups(result.plan.draftOrder.items.map((item, i) => ({
+    id: String(i), quantity: item.quantity, requires_shipping: item.requires_shipping!,
+  })))).toEqual([[{ id: '0', quantity: 2 }]])
+})
+
+it.each(['fees', 'shipping'])('v5: validates integer amounts on %s', field => {
+  for (const amountMinor of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
+    const result = planOrderCreate({ ...payload, [field]: [{ amountMinor }] }, ctx, 5)
+    expect(result).toEqual({ ok: false, rejection: { code: 'invalid_quantity', message: `Invalid ${field}[0].amountMinor` } })
+  }
+})

@@ -7,6 +7,7 @@ import type { TallyPluginOptions } from '../../../../workflows/tally-order-creat
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 import { envelopeErrors, payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
 import { clientTimeStageErrors, clientTimeUpperBound } from '../../../../workflows/client-time'
+import { lineTaxRefusals, v5DisplayErrors, withoutV5Display } from '../../../../workflows/tally-order-create/v5'
 import { SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
@@ -115,9 +116,19 @@ export async function processBatch(
     }
     // Shape rules, with the fields this version or the envelope doesn't know (ruling 17): after the replay read, unstored, before the claim.
     const errors = [...envelopeErrors(command), ...payloadShapeErrors(payload, command.version)]
-    if (!errors.length && v3 && display !== undefined && taxByRate !== undefined) errors.push(...fiscalFiguresErrors(payload))
+    if (!errors.length && v3 && display !== undefined && taxByRate !== undefined) {
+      errors.push(...fiscalFiguresErrors((command.version as number) === 5 ? withoutV5Display(payload) : payload))
+      if ((command.version as number) === 5) errors.push(...v5DisplayErrors(payload as unknown as Record<string, unknown>))
+    }
     if (errors.length) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
+      continue
+    }
+    const refusals = (command.version as number) === 5 ? lineTaxRefusals(payload as unknown as Record<string, unknown>) : []
+    if (refusals.length) {
+      const { reason, path } = refusals[0]
+      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload',
+        message: refusals.map(refusal => refusal.message).join('; '), data: { reason, path } } })
       continue
     }
     const timeErrors = clientTimeStageErrors(command, upperBound)

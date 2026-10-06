@@ -140,8 +140,9 @@ medusaIntegrationTestRunner({
       for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
         const response = await info(requestHeaders)
         expect([response.status, response.data]).toEqual([200, {
-          contracts: { 'order.create': [1, 2, 3, 4], register: [1], sync: [1] },
+          contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1], sync: [1] },
           taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
+          lineTax: { none: false, classes: false },
         }])
       }
       expect((await info({})).status).toBe(401)
@@ -159,19 +160,20 @@ medusaIntegrationTestRunner({
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3, 4], register: [1], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
+        lineTax: { none: false, classes: false },
       })
     })
 
-    it('a batch with a version-5 command and a version-1 command rejects only the first, as unsupported_version, and applies the second', async () => {
-      const unsupported = { ...command(), version: 5 }
+    it('a batch with a version-6 command and a version-1 command rejects only the first, as unsupported_version, and applies the second', async () => {
+      const unsupported = { ...command(), version: 6 }
       const supported = command()
       const response = await post([unsupported, supported])
       expect(response.status).toBe(200)
       expect(response.data.results).toEqual([
         { id: unsupported.id, status: 'rejected', error: { code: 'unsupported_version',
-          message: 'order.create version 5 is not supported; this server supports 1, 2, 3, 4', data: { orderCreate: 4 } } },
+          message: 'order.create version 6 is not supported; this server supports 1, 2, 3, 4, 5', data: { orderCreate: 5 } } },
         expect.objectContaining({ id: supported.id, status: 'applied' }),
       ])
       expect(await ledger.listTallyCommands({ id: unsupported.id })).toHaveLength(0)
@@ -179,13 +181,13 @@ medusaIntegrationTestRunner({
       expect(await liveOrders(supported.payload.clientOrderId)).toHaveLength(1)
     })
 
-    it('a version-5 command rejected as unsupported_version was never recorded: resending its id at a supported version is applied, not a duplicate or mismatch', async () => {
+    it('a version-6 command rejected as unsupported_version was never recorded: resending its id at a supported version is applied, not a duplicate or mismatch', async () => {
       const sale = command()
-      const unsupported = await post([{ ...sale, version: 5 }])
+      const unsupported = await post([{ ...sale, version: 6 }])
       expect(unsupported.status).toBe(200)
       expect(unsupported.data.results).toEqual([{ id: sale.id, status: 'rejected', error: {
-        code: 'unsupported_version', message: 'order.create version 5 is not supported; this server supports 1, 2, 3, 4',
-        data: { orderCreate: 4 },
+        code: 'unsupported_version', message: 'order.create version 6 is not supported; this server supports 1, 2, 3, 4, 5',
+        data: { orderCreate: 5 },
       } }])
       const supported = await post([sale])
       expect(supported.status).toBe(200)

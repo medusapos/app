@@ -18,6 +18,12 @@ This update changes how each till stores its sales, and there is no going back.
 - **The till's stock location must belong to your sales channel.** A sale can no longer take stock from a location that isn't linked to your sales channel. The sale stays on the till's Orders screen as needing attention, with the store's message saying it's a store setup problem. Link the location to the channel in Medusa, then tap Retry on that sale and it goes through.
 - **Resent sales answer the same way.** A sale the store already recorded always answers its recorded result when a till sends it again. That includes after a server update, and when a till resends a sale.
 - **Oversized batches get a clear answer.** A batch of more than 50 sales, or one over the size limit, is refused whole, with the limit in the answer. Splitting it and resending in smaller pieces comes in a later version of the till.
+- **Fees, delivery charges and items not in your catalogue.** A till that supports them can add a bag fee, a delivery
+  charge or a one-off item to a sale.
+  - Your store records the fee and the one-off item as order items without a product, and the delivery as a shipping
+    method. All are taxed at your region's rate.
+  - Medusa can't keep one charge tax-free and has no tax classes, so the till doesn't offer those for your store. The
+    store refuses a sale that asks for them.
 - **Experimental catalogue sync is included but off.** It's the server side of a faster catalogue sync. It stays off unless you turn it on.
 
 ## For developers
@@ -35,4 +41,9 @@ Plugin changes since 0.1.0 (merged):
 - **413 answers:** `batch_too_large` / `body_too_large` (#134).
 - **Experimental sync:** the `tally_sync` change journal, `/changes` routes and the rescan script, behind `experimentalSync`, off by default (#110, #112, #114).
 - **Security:** the `majorToMinor` ReDoS fix (#111).
+- **`order.create` v5** (TallyUI ADR-075, ADR 0021):
+  - fees and custom lines become variant-less items, and shipping becomes a shipping method;
+  - `/tally/v1/info` advertises `[1, 2, 3, 4, 5]` and `lineTax: { none: false, classes: false }`;
+  - `taxStatus: 'none'` and any `taxClass` are `invalid_payload`, with `data.reason` `tax_status_unsupported` or
+    `tax_class_unknown` (this PR).
 - **More than one Medusa instance needs a shared locking provider (Redis or Postgres):** the plugin warns once at startup while Medusa's in-memory locking provider is active (#154).

@@ -1,6 +1,7 @@
 import type { OrderCreatePayload, CommandWarning } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, minorToMajor } from './money'
+import type { OrderCreateCustomLine, OrderCreateFee, OrderCreateShipping } from './v5'
 
 export type OrderRejectionCode =
   'unknown_variant' | 'invalid_quantity' | 'underpaid' | 'unsupported_currency'
@@ -23,8 +24,9 @@ export type PlanContext = {
 }
 
 export type DraftOrderItemInput = {
-  variant_id: string; quantity: number; unit_price: string; is_tax_inclusive: boolean
-  metadata: { tally_line_uuid: string }
+  variant_id?: string; title?: string; variant_sku?: string; quantity: number; unit_price: string; is_tax_inclusive: boolean
+  requires_shipping?: boolean; is_discountable?: boolean
+  metadata: { tally_line_uuid?: string; tally_fee_uuid?: string }
   /** Only on a discounted line: one adjustment of its discountMinor, net at v4, own-mode below v4. */
   // No code: createOrderWorkflow's promotion refresh deletes every adjustment whose code is not an applied promotion.
   adjustments?: Array<{ amount: string; description: 'POS discount'; is_tax_inclusive: boolean }>
@@ -45,12 +47,16 @@ export type OrderCreatePlan = {
     no_notification: true
     metadata: Record<string, unknown>
     items: DraftOrderItemInput[]
+    shipping_methods?: Array<{ name: string; amount: string; is_tax_inclusive: boolean
+      metadata: { tally_shipping_uuid: string; tally_method_id?: string } }>
   }
 }
 
 export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, orderCreateVersion = 1):
   { ok: true; plan: OrderCreatePlan } | { ok: false; rejection: Rejection } {
   const v3 = payload as OrderCreatePayloadV3
+  const v5 = payload as OrderCreatePayload & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }
+  const fees = orderCreateVersion === 5 ? v5.fees ?? [] : [], shipping = orderCreateVersion === 5 ? v5.shipping ?? [] : []
   if (payload.lines.length === 0) {
     return { ok: false, rejection: { code: 'invalid_quantity', message: 'Invalid lines: must not be empty' } }
   }
@@ -59,6 +65,9 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
     fields.push([`lines[${i}].quantity`, line.quantity, 1], [`lines[${i}].unitPriceMinor`, line.unitPriceMinor, 0])
     if (line.discountMinor !== undefined) fields.push([`lines[${i}].discountMinor`, line.discountMinor, 1])
   })
+  for (const [name, charges] of [['fees', fees], ['shipping', shipping]] as const) {
+    charges.forEach((charge, i) => fields.push([`${name}[${i}].amountMinor`, charge.amountMinor, 0]))
+  }
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor'] as const) {
     fields.push([field, payload[field], 0])
   }
@@ -91,7 +100,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
     return { ok: false, rejection: { code: 'unsupported_currency', message: `Location country ${address.country_code} is outside region` } }
   }
 
-  const unknownIds = payload.lines.map(line => line.variantId)
+  const unknownIds = payload.lines.filter(line => !('custom' in line)).map(line => line.variantId)
     .filter(id => !Object.prototype.hasOwnProperty.call(ctx.variants, id))
   if (unknownIds.length > 0) {
     return { ok: false, rejection: { code: 'unknown_variant', message: `Unknown variants: ${unknownIds.join(', ')}` } }
@@ -148,13 +157,15 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
                 taxMinor: payload.taxMinor,
                 totalMinor: payload.totalMinor,
               },
+              ...(fees.length || shipping.length ? { charges: structuredClone({ fees: v5.fees, shipping: v5.shipping }) } : {}),
               ...(display !== undefined && taxByRate !== undefined
                 ? { display: structuredClone(display), taxByRate: structuredClone(taxByRate) } : {}),
             }
           })(),
         },
-        items: payload.lines.map(line => ({
-          variant_id: line.variantId,
+        items: [...payload.lines.map((line: OrderCreatePayload['lines'][number] & { custom?: OrderCreateCustomLine }) => ({
+          ...(line.custom ? { title: line.custom.name, requires_shipping: false,
+            ...(line.custom.sku !== undefined ? { variant_sku: line.custom.sku } : {}) } : { variant_id: line.variantId }),
           quantity: line.quantity,
           unit_price: minorToMajor(line.unitPriceMinor, decimals),
           // A line's own tax mode wins; absent means the order's (ADR-038 amendment).
@@ -163,7 +174,16 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
           // Version 4 discounts are net in every line mode; earlier versions use the item's mode (ADR-062).
           ...(line.discountMinor !== undefined ? { adjustments: [{ amount: minorToMajor(line.discountMinor, decimals),
             description: 'POS discount' as const, is_tax_inclusive: orderCreateVersion >= 4 ? false : line.taxInclusive ?? payload.pricesIncludeTax }] } : {}),
-        })),
+        })), ...fees.map(fee => ({
+          title: fee.name, quantity: 1, unit_price: minorToMajor(fee.amountMinor, decimals),
+          is_tax_inclusive: payload.pricesIncludeTax, requires_shipping: false, is_discountable: false,
+          metadata: { tally_fee_uuid: fee.clientFeeId },
+        }))],
+        ...(shipping.length ? { shipping_methods: shipping.map(charge => ({
+          name: charge.name, amount: minorToMajor(charge.amountMinor, decimals), is_tax_inclusive: payload.pricesIncludeTax,
+          metadata: { tally_shipping_uuid: charge.clientShippingId,
+            ...(charge.methodId !== undefined ? { tally_method_id: charge.methodId } : {}) },
+        })) } : {}),
       },
     },
   }
