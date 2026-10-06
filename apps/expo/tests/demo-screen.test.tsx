@@ -57,6 +57,7 @@ describe('Demo card', () => {
       'Attach a customer to a sale: search one, or add a new one',
       'Park a sale, then resume it from Parked sales',
       "Change a line's price in the cart",
+      'Add a fee, shipping or a custom item to a sale (Add charge in the cart)',
       'Close the register with a cash count',
     ]) expect(screen.getByText(`• ${item}`)).toBeTruthy();
   });
