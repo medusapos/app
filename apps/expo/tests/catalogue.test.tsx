@@ -2,49 +2,15 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import { webcrypto } from 'node:crypto';
 import { Subject } from 'rxjs';
-import type { ComponentProps, ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { getCalendars } from 'expo-localization';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import type { SyncContext } from '@tallyui/core';
-import type { ProductGrid, ProductStockBadge, SearchInput } from '@tallyui/components';
+import { ConnectorProvider, type SyncContext } from '@tallyui/core';
 import { Catalogue, formatStockSyncTime } from '@tallyui/components';
 import { createTallyDatabase } from '@tallyui/database';
 import { clearProductCache, pricedCacheName, productCacheStorage } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
-// Catalogue and formatStockSyncTime (imported above) are real, from the barrel, unmocked (TallyUI
-// TV6b). The primitives Catalogue composes tiles from come from its own sibling submodules
-// (`../product`, `../input`, `../ui`), not the barrel, so they are mocked at those module ids
-// (aliased in vitest.config.ts) rather than by overriding the barrel itself.
-vi.mock('@tallyui/components/input', () => ({
-  SearchInput: ({ value, onChangeText, onSubmitEditing, placeholder, autoFocus }: ComponentProps<typeof SearchInput>) => (
-    <input value={value} placeholder={placeholder} autoFocus={autoFocus}
-      onChange={(event) => onChangeText(event.target.value)}
-      onKeyDown={(event) => { if (event.key === 'Enter') onSubmitEditing?.({} as never); }} />
-  ),
-}));
-vi.mock('@tallyui/components/ui', () => ({
-  VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-}));
-vi.mock('@tallyui/components/product', () => ({
-  ProductGrid: ({ items, renderItem, emptyState, numColumns }: ComponentProps<typeof ProductGrid>) => (
-    <div data-testid="grid" data-columns={numColumns}>
-      {items.length ? items.map((item, index) => <div key={item.id}>{renderItem(item, index)}</div>) : emptyState}
-    </div>
-  ),
-  // The tile is composed directly in catalogue.tsx (ProductCard has no children slot), so these
-  // stand in for its pieces; only ProductTitle needs to render real content for the tests below.
-  ProductImage: () => null,
-  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
-  ProductPrice: () => null,
-  // Stands in for TallyUI's real badge (which reads useProductStock off a ConnectorProvider):
-  // reports the status this doc's own fields resolve to, so a test can tell which product a
-  // tile's badge belongs to and confirm the tile never asks it to show an "as of".
-  ProductStockBadge: ({ doc, showAsOf }: ComponentProps<typeof ProductStockBadge>) => (
-    <span data-testid={`stock-badge-${doc.id}`} data-as-of={String(showAsOf)}>{traits.getStock(doc).status}</span>
-  ),
-}));
 // expo-localization's native module isn't available under vitest; mock it with a controllable clock preference.
 const localization = vi.hoisted(() => ({ uses24hourClock: null as boolean | null }));
 vi.mock('expo-localization', () => ({
@@ -69,10 +35,13 @@ afterEach(() => { cleanup(); localization.uses24hourClock = null; });
 
 function mount(items = products, lastSyncedAt: Date | null = null, lastStockCheckAt: Date | null = null, hour12?: boolean) {
   const onSelect = vi.fn();
-  render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced"
-    lastSyncedAt={lastSyncedAt} lastStockCheckAt={lastStockCheckAt} hour12={hour12} />);
-  const input = screen.getByPlaceholderText('Search or scan barcode / SKU') as HTMLInputElement;
-  return { input, onSelect };
+  const { container } = render(<Catalogue products={items} traits={traits} currency="EUR" onSelect={onSelect} statusText="Synced"
+    lastSyncedAt={lastSyncedAt} lastStockCheckAt={lastStockCheckAt} hour12={hour12} />, {
+    wrapper: ({ children }) => <ConnectorProvider connector={medusaConnector}>{children}</ConnectorProvider>,
+  });
+  const input = screen.getByRole('searchbox') as HTMLInputElement;
+  expect(input.placeholder).toBe('Search or scan barcode / SKU');
+  return { input, onSelect, container };
 }
 
 describe('Catalogue', () => {
@@ -158,8 +127,10 @@ describe('Catalogue', () => {
   it('filters products through search and shows matching counts', () => {
     const { input } = mount();
     expect(document.activeElement).toBe(input);
+    expect(screen.getAllByTestId(/^product-tile-/).map((tile) =>
+      within(tile).getByText(/^(Blue Hat|Red Shirt)$/).textContent)).toEqual(['Blue Hat', 'Red Shirt']);
     fireEvent.change(input, { target: { value: 'red' } });
-    expect(screen.getByTestId('product-tile-Red Shirt')).toBeTruthy();
+    expect(within(screen.getByTestId('product-tile-Red Shirt')).getByText('Red Shirt').textContent).toBe('Red Shirt');
     expect(screen.queryByTestId('product-tile-Blue Hat')).toBeNull();
     expect(screen.getByText('Synced · 1 matching')).toBeTruthy();
   });
@@ -171,8 +142,8 @@ describe('Catalogue', () => {
       product: products[1], variant: traits.getVariants!(products[1])[1],
     });
     expect(input.value).toBe('');
-    expect(screen.getByTestId('product-tile-Blue Hat')).toBeTruthy();
-    expect(screen.getByTestId('product-tile-Red Shirt')).toBeTruthy();
+    expect(screen.getAllByTestId(/^product-tile-/).map((tile) =>
+      within(tile).getByText(/^(Blue Hat|Red Shirt)$/).textContent)).toEqual(['Blue Hat', 'Red Shirt']);
   });
   it('leaves an unknown code and its results intact', () => {
     const { input, onSelect } = mount();
@@ -217,7 +188,9 @@ describe('Catalogue', () => {
   it('re-renders an open chooser with the stock status of a new products prop', () => {
     const onSelect = vi.fn();
     const props = { traits, currency: 'EUR', onSelect, lastSyncedAt: null };
-    const view = render(<Catalogue products={products} {...props} />);
+    const view = render(<Catalogue products={products} {...props} />, {
+      wrapper: ({ children }) => <ConnectorProvider connector={medusaConnector}>{children}</ConnectorProvider>,
+    });
     fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     const large = () => within(screen.getByLabelText('Choose variant')).getByRole('button', { name: /Large/ });
     expect(within(large()).getByText('Out of Stock · not yet synced')).toBeTruthy();
@@ -232,7 +205,9 @@ describe('Catalogue', () => {
   });
   it('closes an open chooser when its product leaves the catalogue', () => {
     const props = { traits, currency: 'EUR', onSelect: vi.fn(), lastSyncedAt: null };
-    const view = render(<Catalogue products={products} {...props} />);
+    const view = render(<Catalogue products={products} {...props} />, {
+      wrapper: ({ children }) => <ConnectorProvider connector={medusaConnector}>{children}</ConnectorProvider>,
+    });
     fireEvent.click(screen.getByTestId('product-tile-Red Shirt'));
     view.rerender(<Catalogue products={[products[0]]} {...props} />);
     expect(screen.queryByLabelText('Choose variant')).toBeNull();
@@ -253,24 +228,31 @@ describe('Catalogue', () => {
       { id: 'boots-one', title: 'One size', sku: 'BOOTS', barcode: '333',
         prices: [{ amount: 40, currency_code: 'eur' }], manage_inventory: true, inventory_quantity: 0 },
     ] };
-    mount([...products, soldOut]);
-    const hatBadge = screen.getByTestId('stock-badge-hat');
-    expect(hatBadge.textContent).toBe('in_stock');
-    expect(hatBadge.getAttribute('data-as-of')).toBe('false');
-    const bootsBadge = screen.getByTestId('stock-badge-boots');
-    expect(bootsBadge.textContent).toBe('out_of_stock');
-    expect(bootsBadge.getAttribute('data-as-of')).toBe('false');
+    // A confirmed overlay time makes the absence of "as of" exercise showAsOf={false}.
+    render(<ConnectorProvider connector={medusaConnector} stockOverlay={new Map()}
+      stockOverlayAsOf="2026-10-06T10:00:00Z">
+      <Catalogue products={[...products, soldOut]} traits={traits} currency="EUR" onSelect={vi.fn()} lastSyncedAt={null} />
+    </ConnectorProvider>);
+    expect(screen.getAllByTestId(/^product-tile-/)).toHaveLength(3);
+    for (const [title, status] of [['Blue Hat', 'In Stock'], ['Red Shirt', 'In Stock'], ['Green Boots', 'Out of Stock']]) {
+      const tile = within(screen.getByTestId(`product-tile-${title}`));
+      expect(tile.getByText(title).textContent).toBe(title);
+      expect(tile.getByText(status).textContent).toBe(status);
+      expect(tile.queryByText(/as of/)).toBeNull();
+    }
   });
   it('uses the catalogue pane width for two to six columns with room for 160 px tiles', () => {
-    mount();
-    const grid = screen.getByTestId('grid');
-    const pane = grid.parentElement as HTMLElement & {
+    const { container } = mount();
+    const pane = container.firstElementChild as HTMLElement & {
       __reactLayoutHandler: (event: { nativeEvent: { layout: { width: number } } }) => void;
     };
-    expect(grid.getAttribute('data-columns')).toBe('2');
+    // ProductGrid exposes the column allocation as each cell's percentage width.
+    expect(screen.getByTestId('product-tile-Blue Hat').parentElement!.style.width).toBe('50%');
     for (const [width, columns] of [[300, 2], [511, 2], [512, 3], [680, 4], [848, 5], [1016, 6], [1600, 6], [400, 2]]) {
       act(() => pane.__reactLayoutHandler({ nativeEvent: { layout: { width } } }));
-      expect(grid.getAttribute('data-columns')).toBe(String(columns));
+      for (const tile of screen.getAllByTestId(/^product-tile-/)) {
+        expect(parseFloat(tile.parentElement!.style.width)).toBeCloseTo(100 / columns);
+      }
     }
   });
 });
