@@ -8,17 +8,6 @@ in TallyUI's backlog: a multi-variant tile will show "from &lt;lowest
 price&gt;" when variants differ, and connectors will return variants in a
 stable order (by id). Nothing to fix in this app.
 
-## Screen tests stub TallyUI primitives through deep aliases
-
-The screen tests use the real TallyUI components (`importOriginal()`), but stub
-the primitives those components compose (`CartPanel`, `CartTotal`,
-`CashTendered`, …) and assert against the stand-ins. To reach them,
-`vitest.config.ts` aliases `@tallyui/components/{cart,checkout,product,input,ui}`
-to TallyUI's internal submodules, so a TallyUI refactor of those folders breaks
-the app's tests in one place. Moving the assertions onto the real primitives
-(or TallyUI exporting those subpaths) would drop the aliases (from the TV6b
-review).
-
 ## Hosted catalogue sync and search are too slow at 1,956 products
 
 A Playwright trace of the hosted smoke (app.medusapos.com against the demo backend, both at 4a60da6, 2026-09-28) shows:
