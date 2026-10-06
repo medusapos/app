@@ -186,14 +186,17 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
       expect(NEW.stored).toStrictEqual([...migration.stored.map(entry => entry.name === 'pos_orders'
-        ? { name: 'pos_orders', version: migration.orderVersion } : entry), { name: 'register_commands', version: 0 }, { name: 'drafts', version: 0 }]
+        ? { name: 'pos_orders', version: migration.orderVersion } : entry.name === 'register_sessions'
+          ? { ...entry, version: 1 } : entry), { name: 'register_commands', version: 0 }, { name: 'drafts', version: 0 }]
         .sort((a, b) => a.name.localeCompare(b.name) || a.version - b.version));
       expect(NEW.docs.pos_orders).toStrictEqual(OLD.docs.pos_orders.map(order => ({
         ...order,
         taxRounding: migration.taxRounding,
         sentVersion: order.totalMinor === totals[1] ? migration.discountedSentVersion : migration.sentVersion,
       })));
-      expect(NEW.docs.register_sessions).toStrictEqual(OLD.docs.register_sessions);
+      expect(NEW.docs.register_sessions).toStrictEqual(OLD.docs.register_sessions.map(session => ({
+        ...session, server_session_id: session.server_session_id ?? null,
+      })));
       expect(NEW.docs.cash_movements).toStrictEqual(OLD.docs.cash_movements);
       expect(NEW.docs.closures).toStrictEqual(OLD.docs.closures);
       expect(NEW.docs.drafts).toStrictEqual([]); // The released build predates parked sales.
@@ -330,10 +333,13 @@ test('a 3.2.x till (pos_orders v7) upgrades to 3.3.0 (v8): sales, split payments
       await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
       expect(NEW.stored).toStrictEqual(OLD.stored.map(entry => entry.name === 'pos_orders'
-        ? { ...entry, version: 8 } : entry));
+        ? { ...entry, version: 8 } : entry.name === 'register_sessions'
+          ? { ...entry, version: 1 } : entry));
       expect(NEW.docs.pos_orders).toStrictEqual(OLD.docs.pos_orders);
       expect(NEW.docs.drafts).toStrictEqual(OLD.docs.drafts);
-      expect(NEW.docs.register_sessions).toStrictEqual(OLD.docs.register_sessions);
+      expect(NEW.docs.register_sessions).toStrictEqual(OLD.docs.register_sessions.map(session => ({
+        ...session, server_session_id: session.server_session_id ?? null,
+      })));
       expect(NEW.docs.cash_movements).toStrictEqual(OLD.docs.cash_movements);
       expect(NEW.docs.closures).toStrictEqual(OLD.docs.closures);
       expect(NEW.register).toStrictEqual(OLD.register);

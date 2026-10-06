@@ -7,7 +7,7 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
 import {
-  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, posOrderCollection, posOrderSchema, registerCommandCollection, registerSessionCollection,
+  addPosOrderCollection, addRegisterSessionCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, posOrderCollection, posOrderSchema, registerCommandCollection,
   type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
 } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
@@ -196,11 +196,12 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
             legacyExists: () => legacyOrdersDatabaseExists(legacyDexieName('orders', baseUrl)),
           });
         }
-        // New at TallyUI 451a0ca, so nothing to migrate or carry over; they share this store's close and watchdog.
-        const { register_sessions, closures } = await db.addCollections({
-          register_sessions: registerSessionCollection(), cash_movements: { schema: cashMovementSchema }, closures: { schema: closureSchema },
+        // Other register collections need no migration; register_sessions opens through the migrating opener.
+        const { closures } = await db.addCollections({
+          cash_movements: { schema: cashMovementSchema }, closures: { schema: closureSchema },
           register_commands: registerCommandCollection(), drafts: { schema: orderDraftSchema },
         });
+        const register_sessions = await addRegisterSessionCollection(db as unknown as RxDatabase);
         // E2E debug only (folded away in production): FailNextClosureInsert fails one closure write, leaving a
         // session closed with its closure unwritten, as a restart mid-close does (ADR 0018).
         if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') {
