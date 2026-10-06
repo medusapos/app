@@ -16,6 +16,7 @@ import {
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
+import { withDemoSaleEvent } from '../lib/demo-analytics';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
@@ -217,7 +218,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [parkedOpen, setParkedOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
-  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
+  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
