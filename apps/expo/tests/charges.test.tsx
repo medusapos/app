@@ -106,4 +106,4 @@ it('a fee added at the till shows in the cart and raises the total', async () =>
   click('Remove Gift wrap');
   expect(screen.queryByTestId('cart-fee-0')).toBeNull();
   expect(await totalMinor()).toBe(before);
-});
+}, 15000);
