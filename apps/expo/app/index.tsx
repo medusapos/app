@@ -3,7 +3,7 @@ import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
-import { Cart, CartBar, Catalogue, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
+import { Cart, CartBar, Catalogue, ParkedSales, Receipt, SplitTender, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
 import { ConnectorProvider, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
@@ -222,6 +222,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
     } });
   const { sale: cartSale, refused } = useGatedSale(sale);
+  const [split, setSplit] = useState(false);
+  useEffect(() => { if (sale.stage.kind !== 'tender') setSplit(false); }, [sale.stage.kind]);
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
@@ -283,7 +285,16 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // catalogue don't need a store to add lines, so only this pane is gated.
   const tenderPane = orders === null
     ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
-    : <Tender sale={sale} />;
+    : <>
+      {!sale.saving && !sale.canContinue ? <Pressable accessibilityRole="button" className="min-h-11 justify-center"
+        onPress={() => {
+          if (split) for (const payment of sale.order.payments) sale.removeTender(payment.id);
+          setSplit(!split);
+        }}>
+        <Text className="text-foreground">{split ? 'Single payment' : 'Split payment'}</Text>
+      </Pressable> : null}
+      {split ? <SplitTender sale={sale} /> : <Tender sale={sale} />}
+    </>;
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
   // The receipt's and the last closure's store (ADR 0018).
