@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import DemoScreen from '../app/demo';
 import { storeConfig } from '../lib/config';
+import { DEMO_CAPTURE_URL } from '../lib/demo-analytics';
 import { SessionProvider } from '../lib/session-context';
 
 vi.mock('expo-router', () => ({
@@ -14,6 +15,8 @@ vi.mock('expo-router', () => ({
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 
 const originalDemoMode = storeConfig.demo;
+const originalAnalytics = storeConfig.analytics;
+const originalFetch = globalThis.fetch;
 beforeEach(() => {
   storeConfig.demo = true;
   vi.spyOn(window, 'open').mockImplementation(() => null);
@@ -27,12 +30,24 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   storeConfig.demo = originalDemoMode;
+  storeConfig.analytics = originalAnalytics;
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
 describe('Demo card', () => {
+  it.each([true, false])('sends demo_opened only with analytics enabled (%s)', (analytics) => {
+    storeConfig.analytics = analytics;
+    const fetchMock = vi.fn<typeof fetch>((input, init) => input === DEMO_CAPTURE_URL
+      ? Promise.resolve(new Response()) : originalFetch(input, init));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<SessionProvider><DemoScreen /></SessionProvider>);
+    const captures = fetchMock.mock.calls.filter(([url]) => url === DEMO_CAPTURE_URL);
+    expect(captures).toHaveLength(analytics ? 1 : 0);
+    if (analytics) expect(JSON.parse(captures[0][1]?.body as string).event).toBe('demo_opened');
+  });
+
   it('the demo card lists what to try: sell, split, attach a customer, park and resume, change a price, close the register', () => {
     render(<SessionProvider><DemoScreen /></SessionProvider>);
     expect(screen.getByRole('heading', { name: 'What to try', level: 2 })).toBeTruthy();

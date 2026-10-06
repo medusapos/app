@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, Text, View } from 'react-native';
 import * as Linking from 'expo-linking';
 import { Redirect, router, Stack } from 'expo-router';
 import { storeConfig } from '../lib/config';
 import { DEMO_ABOUT_URL, DEMO_ACCOUNTS, DEMO_QUICK_START_URL, DEMO_WHAT_TO_TRY } from '../lib/demo';
+import { trackDemoEvent } from '../lib/demo-analytics';
 import { loginErrorMessage } from '../lib/login-errors';
 import { useSession } from '../lib/session-context';
 
@@ -17,11 +18,16 @@ export default function DemoScreen() {
   const [signingIn, setSigningIn] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  useEffect(() => {
+    if (storeConfig.demo && !session) trackDemoEvent('demo_opened');
+  }, []);
+
   async function submit(email: string, password: string) {
     setSigningIn(email);
     setError(null);
     try {
       await signIn(storeConfig.defaultBaseUrl, email, password);
+      trackDemoEvent('demo_signed_in');
       router.replace('/');
     } catch (err) {
       setError(loginErrorMessage(err));
