@@ -43,6 +43,179 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
       return rows
     }
 
+    describe('register v2 open', () => {
+      const owner = { ...first, contract: 2, deviceId: 'device-1', deviceName: 'Front till' }
+      const taker = { ...second, contract: 2, deviceId: 'device-2', deviceName: 'Back till', supersedes: first.sessionId }
+
+      it('a v2 open stores the device id and trimmed device name; a v1 open stores the device id only', async () => {
+        expect(await sql(`select conname from pg_constraint where conrelid = 'tally_register_session'::regclass
+          and contype = 'c'`)).toEqual([{ conname: 'tally_register_session_status_check' }])
+        expect(await service.openSession({ ...owner, deviceName: '  Front till  ' })).toEqual({
+          kind: 'ok', register: { session: { id: first.sessionId, status: 'open' }, counters: zero },
+        })
+        expect(await sql('select device_id, device_name from tally_register_session where id = ?', [first.sessionId]))
+          .toEqual([{ device_id: owner.deviceId, device_name: owner.deviceName }])
+        for (const contract of [undefined, 1]) {
+          const legacy = { ...second, sessionId: randomUUID(), registerId: randomUUID(), deviceId: 'legacy', contract }
+          expect(await service.openSession(legacy)).toEqual({
+            kind: 'ok', register: { session: { id: legacy.sessionId, status: 'open' }, counters: zero },
+          })
+          expect(await sql('select device_id, device_name from tally_register_session where id = ?', [legacy.sessionId]))
+            .toEqual([{ device_id: 'legacy', device_name: null }])
+        }
+      })
+
+      it('the same device resumes the live session: ok with the existing session, openedAt, openingFloatMinor and resumed, and writes an alias', async () => {
+        await service.openSession({ ...owner, countedFloatMinor: 6_000_000_000 })
+        await sql('update tally_register set last_closure_number = 3, perpetual_sales_total_minor = 7000 where id = ?', [first.registerId])
+        for (const status of ['open', 'counting'] as const) {
+          if (status === 'counting') await service.transition({ sessionId: first.sessionId, status, at })
+          const before = await snapshot()
+          const resume = { ...second, sessionId: randomUUID(), contract: 2, deviceId: owner.deviceId, supersedes: first.sessionId }
+          expect(await service.openSession(resume)).toEqual({ kind: 'ok', register: {
+            session: { id: first.sessionId, status, openedAt: first.openedAt, openingFloatMinor: 6_000_000_000 },
+            counters: { ...zero, lastClosureNumber: 3, perpetualSalesTotalMinor: 7000 }, resumed: { fromSessionId: resume.sessionId },
+          } })
+          expect(await sql('select id, session_id from tally_register_session_alias where id = ?', [resume.sessionId]))
+            .toEqual([{ id: resume.sessionId, session_id: first.sessionId }])
+          expect(await snapshot()).toEqual(before)
+        }
+      })
+
+      it('a v2 open from another device is refused with the widened data, omitting absent fields', async () => {
+        await service.openSession(owner)
+        const before = await snapshot()
+        expect(await service.openSession({ ...taker, supersedes: undefined })).toEqual({
+          kind: 'conflict', code: 'register_session_already_open', data: {
+            sessionId: first.sessionId, registerId: first.registerId, openedAt: first.openedAt, status: 'open',
+            openedBy: first.openedBy, deviceId: owner.deviceId, deviceName: owner.deviceName,
+          },
+        })
+        expect(await service.openSession({ ...second, deviceId: owner.deviceId })).toEqual({
+          kind: 'conflict', code: 'register_session_already_open', data: { sessionId: first.sessionId },
+        })
+        expect(await snapshot()).toEqual(before)
+        await service.transition({ sessionId: first.sessionId, status: 'closed', at })
+        await service.openSession({ ...second, openedBy: undefined })
+        expect(await service.openSession({ ...owner, sessionId: randomUUID() })).toEqual({
+          kind: 'conflict', code: 'register_session_already_open', data: {
+            sessionId: second.sessionId, registerId: second.registerId, openedAt: second.openedAt, status: 'open',
+          },
+        })
+        expect(await sql('select id from tally_register_session_alias')).toEqual([])
+      })
+
+      it('supersedes naming the live session marks it superseded with the taker fields and opens the new session', async () => {
+        await service.openSession(owner)
+        await service.transition({ sessionId: first.sessionId, status: 'counting', at })
+        expect(await service.openSession({ ...taker, deviceName: '  Back till  ' })).toEqual({ kind: 'ok', register: {
+          session: { id: second.sessionId, status: 'open' }, counters: zero,
+          superseded: { sessionId: first.sessionId, openedAt: first.openedAt, deviceId: owner.deviceId, deviceName: owner.deviceName },
+        } })
+        expect(await sql(`select status, superseded_at, superseded_by, superseded_by_device,
+          superseded_by_session, status_at from tally_register_session where id = ?`, [first.sessionId])).toEqual([{
+          status: 'superseded', superseded_at: second.openedAt, superseded_by: second.openedBy,
+          superseded_by_device: taker.deviceId, superseded_by_session: second.sessionId, status_at: second.openedAt,
+        }])
+        expect(await sql('select device_id, device_name from tally_register_session where id = ?', [second.sessionId]))
+          .toEqual([{ device_id: taker.deviceId, device_name: taker.deviceName }])
+        expect(await service.supersededData(first.sessionId)).toEqual({
+          sessionId: first.sessionId, supersededAt: second.openedAt, newSessionId: second.sessionId,
+          supersededBy: second.openedBy, deviceId: taker.deviceId, deviceName: taker.deviceName,
+        })
+        expect(await service.supersededData(second.sessionId)).toBeNull()
+        expect(await service.supersededData(randomUUID())).toBeNull()
+      })
+
+      it('supersedes naming a session that is no longer live is refused with fresh data when another session is live, and is a plain open when none is', async () => {
+        await service.openSession(owner)
+        await service.openSession(taker)
+        const stale = { ...owner, sessionId: randomUUID(), supersedes: first.sessionId }
+        const before = await snapshot()
+        expect(await service.openSession(stale)).toEqual({ kind: 'conflict', code: 'register_session_already_open', data: {
+          sessionId: second.sessionId, registerId: second.registerId, openedAt: second.openedAt, status: 'open',
+          openedBy: second.openedBy, deviceId: taker.deviceId, deviceName: taker.deviceName,
+        } })
+        expect(await snapshot()).toEqual(before)
+        await service.transition({ sessionId: second.sessionId, status: 'closed', at })
+        expect(await service.openSession(stale)).toEqual({ kind: 'ok', register: {
+          session: { id: stale.sessionId, status: 'open' }, counters: zero,
+        } })
+        await service.transition({ sessionId: stale.sessionId, status: 'closed', at })
+        const afterClosed = { ...stale, sessionId: randomUUID(), supersedes: second.sessionId }
+        expect(await service.openSession(afterClosed)).toEqual({ kind: 'ok', register: {
+          session: { id: afterClosed.sessionId, status: 'open' }, counters: zero,
+        } })
+      })
+
+      it('two concurrent supersedes of one live session: exactly one wins, the other is refused with the winner as sessionId', async () => {
+        await service.openSession(owner)
+        const challenger = { ...taker, sessionId: randomUUID(), deviceId: 'device-3', deviceName: 'Third till' }
+        const outcomes = await Promise.all([service.openSession(taker), service.openSession(challenger)])
+        expect(outcomes.filter(outcome => outcome.kind === 'ok')).toHaveLength(1)
+        const rows = await sql("select id from tally_register_session where status in ('open','counting')")
+        expect(rows).toHaveLength(1)
+        const winner = rows[0].id === taker.sessionId ? taker : challenger
+        expect(outcomes).toContainEqual({ kind: 'conflict', code: 'register_session_already_open', data: {
+          sessionId: winner.sessionId, registerId: winner.registerId, openedAt: winner.openedAt, status: 'open',
+          openedBy: winner.openedBy, deviceId: winner.deviceId, deviceName: winner.deviceName,
+        } })
+        expect(outcomes).toContainEqual({ kind: 'ok', register: {
+          session: { id: winner.sessionId, status: 'open' }, counters: zero,
+          superseded: { sessionId: owner.sessionId, openedAt: owner.openedAt, deviceId: owner.deviceId, deviceName: owner.deviceName },
+        } })
+        expect(await sql('select status, superseded_by_session, superseded_by_device from tally_register_session where id = ?', [first.sessionId]))
+          .toEqual([{ status: 'superseded', superseded_by_session: winner.sessionId, superseded_by_device: winner.deviceId }])
+        expect(await sql('select id from tally_register_session')).toHaveLength(2)
+      })
+
+      it('an open naming a superseded session is register_session_superseded for v2 and register_session_closed for v1', async () => {
+        await service.openSession(owner)
+        await service.openSession(taker)
+        const before = await snapshot()
+        expect(await service.openSession(owner)).toEqual({ kind: 'conflict', code: 'register_session_superseded', data: {
+          sessionId: first.sessionId, supersededAt: second.openedAt, newSessionId: second.sessionId,
+          supersededBy: second.openedBy, deviceId: taker.deviceId, deviceName: taker.deviceName,
+        } })
+        for (const contract of [undefined, 1]) expect(await service.openSession({ ...first, contract }))
+          .toEqual({ kind: 'conflict', code: 'register_session_closed' })
+        expect(await snapshot()).toEqual(before)
+        const anonymous = { ...first, sessionId: randomUUID(), contract: 2, supersedes: second.sessionId, openedBy: undefined }
+        await service.openSession(anonymous)
+        expect(await service.openSession(taker)).toEqual({ kind: 'conflict', code: 'register_session_superseded', data: {
+          sessionId: second.sessionId, supersededAt: anonymous.openedAt, newSessionId: anonymous.sessionId,
+        } })
+        expect(await service.supersededData(second.sessionId)).toEqual({
+          sessionId: second.sessionId, supersededAt: anonymous.openedAt, newSessionId: anonymous.sessionId,
+        })
+      })
+
+      it('a replayed resumed open naming the alias returns the same resume result', async () => {
+        await service.openSession(owner)
+        const resume = { ...second, contract: 2, deviceId: owner.deviceId }
+        const result = await service.openSession(resume)
+        const before = await snapshot()
+        const aliases = await sql('select * from tally_register_session_alias')
+        expect(aliases).toHaveLength(1)
+        expect(await service.openSession({ ...resume, deviceId: 'different-device' })).toEqual(result)
+        expect(await snapshot()).toEqual(before)
+        expect(await sql('select * from tally_register_session_alias')).toEqual(aliases)
+      })
+
+      it('a superseded session does not hold the register: registerState returns the new session', async () => {
+        await service.openSession(first)
+        // An earlier client clock on the taker must not make the superseded session current.
+        const earlier = { ...taker, openedAt: '2026-09-28T07:00:00Z' }
+        expect(await service.openSession(earlier)).toEqual({ kind: 'ok', register: {
+          session: { id: second.sessionId, status: 'open' }, counters: zero,
+          superseded: { sessionId: first.sessionId, openedAt: first.openedAt },
+        } })
+        expect(await service.registerState(first.registerId)).toEqual({ session: { id: second.sessionId, status: 'open' }, counters: zero })
+        await service.transition({ sessionId: second.sessionId, status: 'counting', at })
+        expect(await service.registerState(first.registerId)).toEqual({ session: { id: second.sessionId, status: 'counting' }, counters: zero })
+      })
+    })
+
     it('opens a session and creates the register', async () => {
       expect(await service.openSession(first)).toEqual({
         kind: 'ok', register: { session: { id: first.sessionId, status: 'open' }, counters: zero },

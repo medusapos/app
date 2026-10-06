@@ -3,10 +3,11 @@ import type { Context } from '@medusajs/framework/types'
 import { InjectManager, MedusaContext, MedusaService } from '@medusajs/framework/utils'
 import { TallyRegister } from './models/tally-register'
 import { TallyRegisterSession } from './models/tally-register-session'
+import { TallyRegisterSessionAlias } from './models/tally-register-session-alias'
 import { TallyRegisterMovement } from './models/tally-register-movement'
 import { TallyRegisterClosure } from './models/tally-register-closure'
 import type {
-  RegisterCommandResult, RegisterCounters, RegisterOutcome, RegisterSessionOpenPayload,
+  RegisterCommandResult, RegisterCounters, RegisterOutcome, RegisterSessionOpenInput,
   RegisterSessionTransitionPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
   RegisterClosureSubmitPayload,
 } from './types'
@@ -19,34 +20,67 @@ const SESSION_STATE = `select json_build_object('id', s.id, 'status', s.status) 
   ${COUNTERS} as counters from tally_register_session s join tally_register r on r.id = s.register_id where s.id = ?`
 
 export default class TallyRegisterModuleService extends MedusaService({
-  TallyRegister, TallyRegisterSession, TallyRegisterMovement, TallyRegisterClosure,
+  TallyRegister, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterMovement, TallyRegisterClosure,
 }) {
   @InjectManager()
-  async openSession(p: RegisterSessionOpenPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
+  async openSession(p: RegisterSessionOpenInput, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
-      let [session] = await em.execute('select id, register_id from tally_register_session where id = ?', [p.sessionId])
-      if (!session) {
-        await em.execute('insert into tally_register (id) values (?) on conflict do nothing', [p.registerId])
-        for (let attempt = 0; attempt < 3; attempt++) {
-          const inserted = await em.execute(`insert into tally_register_session
-            (id, register_id, store_key, status, business_day, opened_at, opened_by, expected_float_minor, counted_float_minor, opening_variance_minor)
-            values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?) on conflict do nothing returning id`,
-          [p.sessionId, p.registerId, p.storeKey ?? null, p.businessDay ?? null, p.openedAt, p.openedBy ?? null,
-            p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null])
-          if (inserted.length) return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
-          ;[session] = await em.execute('select id, register_id from tally_register_session where id = ?', [p.sessionId])
-          if (session) break
-          const [active] = await em.execute(`select id from tally_register_session
-            where register_id = ? and status <> 'closed' and deleted_at is null`, [p.registerId])
-          if (active) return { kind: 'conflict', code: 'register_session_already_open', data: { sessionId: active.id } }
+      const v2 = (p.contract ?? 1) >= 2
+      for (let attempt = 0; attempt < 3; attempt++) {
+        const [session] = await em.execute('select id, register_id, status from tally_register_session where id = ?', [p.sessionId])
+        if (session) {
+          if (session.status === 'superseded') return v2
+            ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
+            : { kind: 'conflict', code: 'register_session_closed' }
+          if (session.register_id !== p.registerId) return { kind: 'invalid', message: 'session id belongs to another register' }
+          return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
         }
-      }
-      if (session) {
-        if (session.register_id !== p.registerId) return { kind: 'invalid', message: 'session id belongs to another register' }
-        return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
+        const [alias] = v2 ? await em.execute(`select s.* from tally_register_session_alias a
+          join tally_register_session s on s.id = a.session_id where a.id = ?`, [p.sessionId]) : []
+        const [live] = alias ? [alias] : await em.execute(`select * from tally_register_session
+          where register_id = ? and status in ('open','counting') and deleted_at is null`, [p.registerId])
+        if (!alias && live?.id === p.sessionId) continue
+        if (alias || (v2 && live?.device_id != null && live.device_id === p.deviceId)) {
+          if (!alias) await em.execute('insert into tally_register_session_alias (id, session_id) values (?, ?) on conflict do nothing', [p.sessionId, live.id])
+          const state = (await em.execute(SESSION_STATE, [live.id]))[0]
+          return { kind: 'ok', register: { ...state, session: { ...state.session, openedAt: live.opened_at,
+            openingFloatMinor: Number(live.counted_float_minor) }, resumed: { fromSessionId: p.sessionId } } }
+        }
+        let superseded: RegisterCommandResult['superseded']
+        if (live) {
+          if (!v2) return { kind: 'conflict', code: 'register_session_already_open', data: { sessionId: live.id } }
+          const device = { ...(live.device_id == null ? {} : { deviceId: live.device_id }),
+            ...(live.device_name == null ? {} : { deviceName: live.device_name }) }
+          if (p.supersedes !== live.id) return { kind: 'conflict', code: 'register_session_already_open', data: {
+            sessionId: live.id, registerId: live.register_id, openedAt: live.opened_at, status: live.status,
+            ...(live.opened_by == null ? {} : { openedBy: live.opened_by }), ...device } }
+          const changed = await em.execute(`update tally_register_session set status = 'superseded', superseded_at = ?,
+            superseded_by = ?, superseded_by_device = ?, superseded_by_session = ?, status_at = ?, updated_at = now()
+            where id = ? and status in ('open','counting') returning id`,
+          [p.openedAt, p.openedBy ?? null, p.deviceId ?? null, p.sessionId, p.openedAt, live.id])
+          if (!changed.length) continue
+          superseded = { sessionId: live.id, openedAt: live.opened_at, ...device }
+        }
+        await em.execute('insert into tally_register (id) values (?) on conflict do nothing', [p.registerId])
+        const inserted = await em.execute(`insert into tally_register_session
+          (id, register_id, store_key, status, business_day, opened_at, opened_by, expected_float_minor, counted_float_minor, opening_variance_minor, device_id, device_name)
+          values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing returning id`,
+        [p.sessionId, p.registerId, p.storeKey ?? null, p.businessDay ?? null, p.openedAt, p.openedBy ?? null,
+          p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null, p.deviceId?.trim() ?? null, p.deviceName?.trim() ?? null])
+        if (inserted.length) return { kind: 'ok', register: { ...(await em.execute(SESSION_STATE, [p.sessionId]))[0], ...(superseded ? { superseded } : {}) } }
       }
       return { kind: 'invalid', message: 'conflicting session is no longer active' }
     })
+  }
+
+  @InjectManager()
+  async supersededData(sessionId: string, @MedusaContext() sharedContext: Context = {}): Promise<Record<string, unknown> | null> {
+    const [row] = await (sharedContext.manager as EntityManager).execute(`select json_strip_nulls(json_build_object(
+      'sessionId', s.id, 'supersededAt', s.superseded_at, 'newSessionId', s.superseded_by_session,
+      'supersededBy', s.superseded_by, 'deviceId', s.superseded_by_device, 'deviceName', taker.device_name)) as data
+      from tally_register_session s left join tally_register_session taker on taker.id = s.superseded_by_session
+      where s.id = ? and s.status = 'superseded'`, [sessionId])
+    return row?.data ?? null
   }
 
   @InjectManager()
@@ -185,8 +219,8 @@ export default class TallyRegisterModuleService extends MedusaService({
     return (sharedContext.manager as EntityManager).transactional(async (em) => {
       const [register] = await em.execute(COUNTER_STATE, [registerId])
       if (!register) return null
-      const [session] = await em.execute<{ id: string; status: 'open' | 'counting' | 'closed' }[]>(`select id, status from tally_register_session where register_id = ? and deleted_at is null
-        order by (status <> 'closed') desc, opened_at desc limit 1`, [registerId])
+      const [session] = await em.execute<{ id: string; status: 'open' | 'counting' | 'closed' | 'superseded' }[]>(`select id, status from tally_register_session where register_id = ? and deleted_at is null
+        order by (status in ('open','counting')) desc, opened_at desc limit 1`, [registerId])
       return { ...register, ...(session ? { session } : {}) }
     })
   }

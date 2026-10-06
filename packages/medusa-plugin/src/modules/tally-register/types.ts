@@ -1,7 +1,9 @@
 /** A register command's server figures (registers c2b applies them). */
 export interface RegisterCommandResult {
+  resumed?: { fromSessionId: string };
+  superseded?: { sessionId: string; openedAt: string; deviceId?: string; deviceName?: string };
   /** The session's server state after this command. `expected` is absent when the server redacts it (blind). */
-  session?: { id: string; status: 'open' | 'counting' | 'closed'; expected?: Record<string, number>; salesCount?: number };
+  session?: { id: string; status: 'open' | 'counting' | 'closed' | 'superseded'; openedAt?: string; openingFloatMinor?: number; expected?: Record<string, number>; salesCount?: number };
   /** The register's counters: a floor for the till's own, never lowered. */
   counters?: { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
   /** `register.closure.submit` only. */
@@ -10,8 +12,11 @@ export interface RegisterCommandResult {
 
 export interface RegisterSessionOpenPayload {
   sessionId: string; registerId: string; storeKey?: string; businessDay?: string; openedAt: string; openedBy?: string;
+  deviceName?: string; supersedes?: string;
   expectedFloatMinor?: number; countedFloatMinor: number; openingVarianceMinor?: number;
 }
+export type RegisterSessionOpenInput = RegisterSessionOpenPayload & { deviceId?: string; contract?: number }
+
 export interface RegisterSessionTransitionPayload {
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;
   /** Closing only. */ counted?: Record<string, number>; closedBy?: string; approvedBy?: string;
@@ -40,6 +45,7 @@ export type RegisterCounters = {
 export type RegisterConflictCode =
   | 'register_session_already_open'
   | 'register_session_closed'
+  | 'register_session_superseded'
   | 'register_closure_exists'
   | 'register_closure_number_invalid'
 

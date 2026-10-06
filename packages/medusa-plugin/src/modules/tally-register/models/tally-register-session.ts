@@ -4,7 +4,13 @@ export const TallyRegisterSession = model.define('tally_register_session', {
   id: model.text().primaryKey(),
   register_id: model.text(),
   store_key: model.text().nullable(),
-  status: model.enum(['open', 'counting', 'closed']),
+  status: model.enum(['open', 'counting', 'closed', 'superseded']),
+  device_id: model.text().nullable(),
+  device_name: model.text().nullable(),
+  superseded_at: model.text().nullable(),
+  superseded_by: model.text().nullable(),
+  superseded_by_device: model.text().nullable(),
+  superseded_by_session: model.text().nullable(),
   business_day: model.text().nullable(),
   opened_at: model.text(),
   opened_by: model.text().nullable(),
@@ -22,5 +28,5 @@ export const TallyRegisterSession = model.define('tally_register_session', {
 }).indexes([
   { name: 'IDX_tally_register_session_deleted_at', on: ['deleted_at'], where: 'deleted_at is null' },
   { name: 'IDX_tally_register_session_active', on: ['register_id'], unique: true,
-    where: "status <> 'closed' and deleted_at is null" },
+    where: "status in ('open','counting') and deleted_at is null" },
 ])
