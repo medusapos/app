@@ -11,7 +11,7 @@ const backendUrl = `http://localhost:${E2E_RUN.backendPort}`;
 const appUrl = `http://localhost:${E2E_RUN.appPort}`;
 const released = resolve(root, 'e2e/.tmp/carryover/released');
 const current = resolve(root, 'e2e/.tmp/carryover/current');
-// @tallyui/pos 2.0.0 wrote these versions; 3.0.0-next.1 migrates orders to v6 with these outputs.
+// @tallyui/pos 2.0.0 wrote these versions; 3.1.0 migrates orders to v7 with these outputs.
 const RELEASE_EXPECTATIONS: Record<string, {
   stored: { name: string; version: number }[];
   orderVersion: number; sentVersion: number; discountedSentVersion: number;
@@ -22,13 +22,13 @@ const RELEASE_EXPECTATIONS: Record<string, {
       { name: 'cash_movements', version: 0 }, { name: 'closures', version: 0 },
       { name: 'pos_orders', version: 2 }, { name: 'register_sessions', version: 0 },
     ],
-    orderVersion: 6, sentVersion: 1, discountedSentVersion: 2,
+    orderVersion: 7, sentVersion: 1, discountedSentVersion: 2,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
   },
 };
 type Dump = {
   rxdbVersion: string; stored: { name: string; version: number }[];
-  docs: Record<'pos_orders' | 'register_sessions' | 'cash_movements' | 'closures', Record<string, any>[]>;
+  docs: Record<'pos_orders' | 'register_sessions' | 'cash_movements' | 'closures' | 'drafts', Record<string, any>[]>;
   register: { stores: Record<string, { register_id: string; register_name: string }> } | null;
 };
 
@@ -182,7 +182,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
       expect(NEW.stored).toStrictEqual([...migration.stored.map(entry => entry.name === 'pos_orders'
-        ? { name: 'pos_orders', version: migration.orderVersion } : entry), { name: 'register_commands', version: 0 }]
+        ? { name: 'pos_orders', version: migration.orderVersion } : entry), { name: 'register_commands', version: 0 }, { name: 'drafts', version: 0 }]
         .sort((a, b) => a.name.localeCompare(b.name) || a.version - b.version));
       expect(NEW.docs.pos_orders).toStrictEqual(OLD.docs.pos_orders.map(order => ({
         ...order,
@@ -192,6 +192,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       expect(NEW.docs.register_sessions).toStrictEqual(OLD.docs.register_sessions);
       expect(NEW.docs.cash_movements).toStrictEqual(OLD.docs.cash_movements);
       expect(NEW.docs.closures).toStrictEqual(OLD.docs.closures);
+      expect(NEW.docs.drafts).toStrictEqual([]); // The released build predates parked sales.
       expect(NEW.register).toStrictEqual(OLD.register);
     });
 
@@ -218,6 +219,21 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       expect(OLD.docs.pos_orders.map(order => settled.filter(sent => sent.metadata.tally_client_id === order.id).length))
         .toStrictEqual([1, 1, 1, 1]);
       await closeGated(page);
+    });
+    await test.step('E: a current-build parked draft survives reopening with its whole document intact', async () => {
+      const page = await context.newPage();
+      await signIn(page, 'Europe', false);
+      await addE2E1(page);
+      await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
+      await page.getByTestId('parked-sales-park').click();
+      await expect(page.getByTestId(/^parked-resume-/)).toHaveCount(1);
+      const before = await dump(page);
+      expect(before.docs.drafts).toHaveLength(1);
+      expect(JSON.parse(before.docs.drafts[0].data).lineItems).toHaveLength(1);
+      await closeGated(page);
+      const reopened = await context.newPage();
+      expect((await dump(reopened)).docs.drafts).toStrictEqual(before.docs.drafts);
+      await closeGated(reopened);
     });
   } finally {
     await server?.stop();

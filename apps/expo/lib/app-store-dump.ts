@@ -1,12 +1,12 @@
 import { getAllCollectionDocuments, RXDB_VERSION, type RxCollection } from 'rxdb';
 import { readRegister } from '@tallyui/pos';
-import { openOrderStore, registerCollections } from './order-store';
+import { draftsCollection, openOrderStore, registerCollections } from './order-store';
 import { exposeE2eHook } from './e2e-debug';
 
 export type AppStoreDump = {
   rxdbVersion: string;
   stored: { name: string; version: number }[];
-  docs: { pos_orders: object[]; register_sessions: object[]; cash_movements: object[]; closures: object[] };
+  docs: { pos_orders: object[]; register_sessions: object[]; cash_movements: object[]; closures: object[]; drafts: object[] };
   register: object | null;
 };
 
@@ -16,9 +16,9 @@ export async function dumpAppStore(baseUrl: string): Promise<AppStoreDump> {
   try {
     const { sessions, movements, closures } = registerCollections(store.orders);
     const collections: Record<keyof AppStoreDump['docs'], RxCollection> = {
-      pos_orders: store.orders, register_sessions: sessions, cash_movements: movements, closures,
+      pos_orders: store.orders, register_sessions: sessions, cash_movements: movements, closures, drafts: draftsCollection(store.orders)!,
     };
-    const docs: AppStoreDump['docs'] = { pos_orders: [], register_sessions: [], cash_movements: [], closures: [] };
+    const docs: AppStoreDump['docs'] = { pos_orders: [], register_sessions: [], cash_movements: [], closures: [], drafts: [] };
     for (const name of Object.keys(collections) as (keyof AppStoreDump['docs'])[]) {
       docs[name] = (await collections[name].find().exec())
         .sort((a, b) => a.primary.localeCompare(b.primary)).map((doc) => doc.toJSON());
