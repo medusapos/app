@@ -1,12 +1,13 @@
 import { getAllCollectionDocuments, RXDB_VERSION, type RxCollection } from 'rxdb';
 import { readRegister } from '@tallyui/pos';
+// Copied into the released checkout; import only what every released order-store.ts exports.
 import { openOrderStore, registerCollections } from './order-store';
 import { exposeE2eHook } from './e2e-debug';
 
 export type AppStoreDump = {
   rxdbVersion: string;
   stored: { name: string; version: number }[];
-  docs: { pos_orders: object[]; register_sessions: object[]; cash_movements: object[]; closures: object[] };
+  docs: { pos_orders: object[]; register_sessions: object[]; cash_movements: object[]; closures: object[]; drafts: object[] };
   register: object | null;
 };
 
@@ -15,12 +16,15 @@ export async function dumpAppStore(baseUrl: string): Promise<AppStoreDump> {
   const store = await openOrderStore(baseUrl);
   try {
     const { sessions, movements, closures } = registerCollections(store.orders);
-    const collections: Record<keyof AppStoreDump['docs'], RxCollection> = {
-      pos_orders: store.orders, register_sessions: sessions, cash_movements: movements, closures,
+    const drafts = store.orders.database.collections.drafts as RxCollection | undefined;
+    const collections: Record<keyof AppStoreDump['docs'], RxCollection | undefined> = {
+      pos_orders: store.orders, register_sessions: sessions, cash_movements: movements, closures, drafts,
     };
-    const docs: AppStoreDump['docs'] = { pos_orders: [], register_sessions: [], cash_movements: [], closures: [] };
+    const docs: AppStoreDump['docs'] = { pos_orders: [], register_sessions: [], cash_movements: [], closures: [], drafts: [] };
     for (const name of Object.keys(collections) as (keyof AppStoreDump['docs'])[]) {
-      docs[name] = (await collections[name].find().exec())
+      const collection = collections[name];
+      if (!collection) continue;
+      docs[name] = (await collection.find().exec())
         .sort((a, b) => a.primary.localeCompare(b.primary)).map((doc) => doc.toJSON());
     }
     const stored = (await getAllCollectionDocuments(store.orders.database.internalStore))

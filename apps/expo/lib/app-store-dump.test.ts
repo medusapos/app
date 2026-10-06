@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { getAllCollectionDocuments } from 'rxdb';
-import { bindRegister, createOrderBuilder, finalizeOrder, openSession, readRegister, recordMovement, voidMovement } from '@tallyui/pos';
+import { bindRegister, createOrderBuilder, finalizeOrder, openSession, readRegister, recordMovement, voidMovement, writeOrderDraft } from '@tallyui/pos';
 import * as orderStore from './order-store';
 import { dumpAppStore } from './app-store-dump';
 
@@ -9,6 +9,8 @@ async function seed(baseUrl: string) {
   const { sessions, movements, closures } = orderStore.registerCollections(store.orders);
   const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
   const lineId = builder.addLine({ productId: 'shirt', variantId: 'blue', name: 'Blue shirt', unitPrice: { amount: 1200, currency: 'EUR' } });
+  const drafts = orderStore.draftsCollection(store.orders)!;
+  const draftId = await writeOrderDraft(drafts, builder.getSnapshot());
   builder.addPayment({ method: 'cash', amountMinor: 1200 });
   // The default query sorts by createdAt, deliberately opposite to the primary keys.
   const pending = await store.orders.insert({ ...finalizeOrder(builder.getSnapshot()), id: 'z-order', createdAt: '2026-09-28T08:00:00Z' });
@@ -29,9 +31,10 @@ async function seed(baseUrl: string) {
     unsynced_count: 2, unsynced_total_minor: 2300, software_version: 'test', breakdowns: {},
     order_ids: [pending.id, discounted.id], movement_ids: [paidIn.id, voided.id], print_count: 0,
   });
-  return { store, sessions, collections: [store.orders, sessions, movements, closures], inserted: {
+  return { store, sessions, collections: [store.orders, sessions, movements, closures, drafts], inserted: {
     pos_orders: [discounted, pending], register_sessions: [await sessions.findOne(session.id).exec(true)],
     cash_movements: [paidIn.getLatest(), voided].sort((a, b) => a.id.localeCompare(b.id)), closures: [closure],
+    drafts: [await drafts.findOne(draftId).exec(true)],
   } };
 }
 
@@ -43,8 +46,8 @@ describe('dumpAppStore', () => {
       const dump = await dumpAppStore(url);
       expect(dump.rxdbVersion).toBe('17.5.0');
       expect(dump.stored).toStrictEqual([
-        { name: 'cash_movements', version: 0 }, { name: 'closures', version: 0 },
-        { name: 'pos_orders', version: 6 }, { name: 'register_commands', version: 0 }, { name: 'register_sessions', version: 0 },
+        { name: 'cash_movements', version: 0 }, { name: 'closures', version: 0 }, { name: 'drafts', version: 0 },
+        { name: 'pos_orders', version: 7 }, { name: 'register_commands', version: 0 }, { name: 'register_sessions', version: 0 },
       ]);
       for (const name of Object.keys(inserted) as (keyof typeof inserted)[]) {
         expect(dump.docs[name]).toStrictEqual(inserted[name].map((doc) => doc.toJSON()));

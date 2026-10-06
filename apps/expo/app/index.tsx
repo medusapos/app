@@ -3,10 +3,10 @@ import { Pressable, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
-import { Cart, CartBar, Catalogue, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
+import { Cart, CartBar, Catalogue, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
 import { ConnectorProvider, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
-  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, SALE_SAVING, TaxProvider, taxProviderProps, useSale, useStoreSettings,
+  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
@@ -18,6 +18,7 @@ import { StripHeightContext } from '../components/store-refused';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
+import { draftsCollection } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useRegister } from '../lib/register-context';
@@ -211,8 +212,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
   // close during the tender still reaches the stamp, which then makes the sale late.
   const { register, registerOutbox } = useRegister();
+  const drafts = draftsCollection(orders);
+  const { parked, discard } = useParkedSales(drafts);
+  const [parkedOpen, setParkedOpen] = useState(false);
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
-    isStored, session: register.saleSession });
+    isStored, session: register.saleSession, drafts });
   const { sale: cartSale, refused } = useGatedSale(sale);
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
@@ -296,7 +300,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
-    <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} />
+    <View className="flex-row justify-end px-3">
+      <Pressable accessibilityRole="button" onPress={() => setParkedOpen(true)} className="min-h-11 justify-center">
+        <Text className="text-foreground">Parked sales{parked.length ? ` (${parked.length})` : ''}</Text>
+      </Pressable>
+    </View>
+    <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice
+      onPriceChange={(change) => saleLogger.info('Price changed', change)} />
   </RegisterGate>;
 
   return (
@@ -324,6 +334,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
       <RegisterPanelSheet currency={pricing.currency} store={receiptStore} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <RegisterClosedSheet currency={pricing.currency} />
+      <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
+        open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
         store={receiptStore}

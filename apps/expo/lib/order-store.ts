@@ -7,7 +7,7 @@ import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
 import {
-  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, posOrderCollection, posOrderSchema, registerCommandCollection, registerSessionCollection,
+  addPosOrderCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, posOrderCollection, posOrderSchema, registerCommandCollection, registerSessionCollection,
   type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
 } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
@@ -52,6 +52,10 @@ export function registerCollections(orders: RxCollection<PosOrder>): RegisterCol
   const { register_sessions, cash_movements, closures, register_commands } = orders.database.collections as unknown as Record<string, RxCollection>;
   return { sessions: register_sessions as RegisterSessionCollection, movements: cash_movements as CashMovementCollection,
     closures: closures as ClosureCollection, commands: register_commands as RegisterCommandCollection };
+}
+
+export function draftsCollection(orders: RxCollection<PosOrder> | null): RxCollection | undefined {
+  return orders?.database?.collections.drafts;
 }
 
 export function orderDatabaseName(baseUrl: string): string {
@@ -195,7 +199,7 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
         // New at TallyUI 451a0ca, so nothing to migrate or carry over; they share this store's close and watchdog.
         const { register_sessions, closures } = await db.addCollections({
           register_sessions: registerSessionCollection(), cash_movements: { schema: cashMovementSchema }, closures: { schema: closureSchema },
-          register_commands: registerCommandCollection(),
+          register_commands: registerCommandCollection(), drafts: { schema: orderDraftSchema },
         });
         // E2E debug only (folded away in production): FailNextClosureInsert fails one closure write, leaving a
         // session closed with its closure unwritten, as a restart mid-close does (ADR 0018).
