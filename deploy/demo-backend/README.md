@@ -132,12 +132,15 @@ The front desk performs this swap; development does not touch the VPS. Keep the
 
    ```sh
    docker ps --filter name=<application uuid> --format '{{.Names}}'
-   docker exec -e DEMO_ADMIN_EMAIL=<email> -e DEMO_ADMIN_PASSWORD=<password> \
-     <container> /src/app/deploy/demo-backend/seed-showcase.sh
+   docker exec <container> /src/app/deploy/demo-backend/seed-showcase.sh
    ```
 
-   Omit both admin variables if no additional admin is needed. The script always
-   creates the two public demo accounts below with password `demo1234`.
+   The script always creates the two public demo accounts below, with password
+   `demo1234`. Both are Medusa admin users, so they also sign in to Medusa's admin.
+   The public demo needs no other admin. A private admin is optional: add
+   `-e DEMO_ADMIN_EMAIL=<email> -e DEMO_ADMIN_PASSWORD=<password>` to the
+   `docker exec`, with a password the operator chooses and keeps in their own
+   secret store. It never goes in this repo, and a re-run skips an existing user.
 5. **Stop `mpdemo-backend`**, then **in `mpdemo-postgres`** save the new golden copy:
 
    ```sh
