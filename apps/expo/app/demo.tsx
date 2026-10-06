@@ -1,10 +1,16 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, Text, View } from 'react-native';
+import * as Linking from 'expo-linking';
 import { Redirect, router, Stack } from 'expo-router';
 import { storeConfig } from '../lib/config';
-import { DEMO_ACCOUNTS } from '../lib/demo';
+import { DEMO_ABOUT_URL, DEMO_ACCOUNTS, DEMO_QUICK_START_URL, DEMO_WHAT_TO_TRY } from '../lib/demo';
 import { loginErrorMessage } from '../lib/login-errors';
 import { useSession } from '../lib/session-context';
+
+function openDemoUrl(url: string): void {
+  if (Platform.OS === 'web') window.open(url, '_blank', 'noopener,noreferrer');
+  else void Linking.openURL(url).catch((error) => console.warn('Failed to open demo URL:', error));
+}
 
 export default function DemoScreen() {
   const { session, signIn } = useSession();
@@ -44,6 +50,18 @@ export default function DemoScreen() {
           <Text selectable className="text-sm text-muted-foreground">{account.email} · {account.password}</Text>
         </View>)}
         {error ? <Text accessibilityRole="alert" className="text-sm text-destructive">{error}</Text> : null}
+        <View className="gap-2">
+          <Text accessibilityRole="header" aria-level={2} className="font-semibold text-foreground">What to try</Text>
+          {DEMO_WHAT_TO_TRY.map((item) => <Text key={item} className="text-foreground">• {item}</Text>)}
+        </View>
+        <View className="flex-row items-center gap-4">
+          <Pressable accessibilityRole="link" onPress={() => openDemoUrl(DEMO_ABOUT_URL)} className="min-h-11 justify-center">
+            <Text className="text-sm text-foreground">About MedusaPOS</Text>
+          </Pressable>
+          <Pressable accessibilityRole="link" onPress={() => openDemoUrl(DEMO_QUICK_START_URL)} className="min-h-11 justify-center">
+            <Text className="text-sm text-foreground">Quick start</Text>
+          </Pressable>
+        </View>
         <Pressable accessibilityRole="link" onPress={() => router.push('/login')} className="min-h-11 justify-center">
           <Text className="text-center text-sm text-foreground">Sign in with another account</Text>
         </Pressable>

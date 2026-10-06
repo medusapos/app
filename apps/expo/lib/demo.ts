@@ -11,6 +11,16 @@ export const DEMO_ACCOUNTS = [
 // The region the demo till is set up in.
 export const DEMO_REGION_NAME = 'Europe';
 
+// Only features available in the public demo today, with links to learn more.
+export const DEMO_WHAT_TO_TRY = [
+  'Ring up a sale and take cash or card',
+  'Park a sale, then resume it from Parked sales',
+  "Change a line's price in the cart",
+  'Close the register with a cash count',
+] as const;
+export const DEMO_ABOUT_URL = 'https://medusapos.com';
+export const DEMO_QUICK_START_URL = 'https://github.com/medusapos/app/blob/main/docs/QUICKSTART.md';
+
 export function isDemoAccount(email: string, demo = storeConfig.demo): boolean {
   return demo && DEMO_ACCOUNTS.some((account) => account.email === email.trim().toLowerCase());
 }
