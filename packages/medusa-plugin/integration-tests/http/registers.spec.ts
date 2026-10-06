@@ -273,6 +273,22 @@ medusaIntegrationTestRunner({
       expect((await post(batch)).data.results).toEqual(response.data.results.map(result => ({ ...result, status: 'duplicate' })))
     })
 
+    it('a split sale adds only its cash part, net of change, to the session\'s expected cash, and its external part to external', async () => {
+      const data = await seed(container)
+      const opening = open()
+      const order = sale(data.variantB, opening.payload.sessionId)
+      const split = { ...order, payload: { ...order.payload, payments: [
+        { clientPaymentId: randomUUID(), method: 'external', amountMinor: 600, reference: 'card-1' },
+        { clientPaymentId: randomUUID(), method: 'cash', amountMinor: 400, tenderedMinor: 500, changeMinor: 100 },
+      ] } }
+      const response = await post([opening, split])
+      expect(response.status).toBe(200)
+      expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+      const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+      expect(read.status).toBe(200)
+      expect(read.data.session.expected).toEqual({ cash: opening.payload.countedFloatMinor + 400, external: 600 })
+    })
+
     it('live expected counts every completed order carrying the sessionId, plus float and movements', async () => {
       const data = await seed(container)
       const opening = open()
