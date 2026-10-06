@@ -49,7 +49,9 @@ const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: '
 
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized, mergeCapabilities } = useSession();
-  if (!session) return <Redirect href="/login" />;
+  const lastEmail = useRef<string | undefined>(undefined);
+  if (!session) return <Redirect href={isDemoAccount(lastEmail.current ?? '') ? '/demo' : '/login'} />;
+  lastEmail.current = session.email;
   return <SettingsScreen key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
     onCapabilities={mergeCapabilities} />;
 }
