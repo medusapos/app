@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
-import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, test, variantIdBySku } from './helpers';
+import { addE2E1, adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, test, variantIdBySku } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -13,6 +13,12 @@ const SEARCH_PLACEHOLDER = 'Search or scan barcode / SKU';
 async function submitSignIn(page: Page) {
   await page.goto('/login');
   await page.waitForLoadState('networkidle');
+  await fillSignIn(page);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+}
+
+// Fills in the sign-in form already on screen, without loading /login: no new document.
+async function fillSignIn(page: Page) {
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   await expect(async () => {
     await page.getByLabel('Backend URL', { exact: true }).clear();
@@ -21,8 +27,11 @@ async function submitSignIn(page: Page) {
     await page.getByLabel('Password', { exact: true }).fill(credentials.password);
     await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled({ timeout: 1000 });
   }).toPass({ timeout: 20_000 });
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
+
+// The product caches recorded for this backend (product-cache.ts's recordProductCache), by name.
+const recordedCaches = (page: Page) => page.evaluate((key) => localStorage.getItem(key)?.split('\n').filter(Boolean) ?? [],
+  `medusapos.product-cache.${backend}`);
 
 // Builds one pending PosOrder for a single E2E-1 (25% Danish VAT, tax-exclusive prices, matching
 // dev/medusa-store's seed-e2e.ts region), by the same shape `@tallyui/pos`'s `finalizeOrder`
@@ -78,6 +87,57 @@ test('cold open, offline sale, and reload keep the SQLite catalogue and carry th
   const orders = (await ordersByClientId(token)).filter((order) => order.metadata.tally_client_id === clientId);
   expect(orders).toHaveLength(1);
 
+  const after = await stockBySku(token);
+  expect(after['E2E-1']).toBe(before['E2E-1'] - 1);
+});
+
+// Sign-out (session-context.tsx's endSession) removes the product cache without awaiting it, and
+// signing in again to the same backend and region opens a cache of the same name (pricedCacheName):
+// this signs in again in the same tab, with no reload, while that removal may still be running.
+test('signing out and in again in the same tab rebuilds the SQLite catalogue under the same name, which persists and syncs a sale once', async ({ page }) => {
+  const token = await adminToken();
+  const before = await stockBySku(token);
+  const sales = captureSales(page);
+  const blocked = page.getByText('Reload', { exact: true });
+
+  await signIn(page);
+  const caches = await recordedCaches(page);
+  expect(caches).toHaveLength(1);
+
+  await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  // Sign-out forgets the cache it removes, so the second sign-in records it afresh.
+  expect(await recordedCaches(page)).toEqual([]);
+
+  await fillSignIn(page);
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+  await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
+  // The region choice and the open register belong to the till, not the session: sign-out keeps
+  // both, so there is no "Set up this till" and no register picker the second time.
+  await expect(page.getByText('Set up this till', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+  await expect(page.getByTestId('register-picker-row-register-1')).toHaveCount(0);
+  expect(await recordedCaches(page)).toEqual(caches);
+  await expect(blocked).toHaveCount(0);
+
+  await sellBySku(page, ['E2E-1'], 'exact'); // the SKU search finds E2E-1 in the rebuilt catalogue.
+
+  await page.route('**/admin/products**', (route) => route.abort());
+  await page.reload();
+  // Straight from the re-created SQLite-wasm cache: the product pull is blocked.
+  await expect(page.getByText(/5 products/)).toBeVisible();
+  await addE2E1(page);
+  expect(await recordedCaches(page)).toEqual(caches);
+  await page.unroute('**/admin/products**');
+
+  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await expect(page.getByText('· Synced', { exact: false })).toHaveCount(1, { timeout: 30_000 });
+  await expect(blocked).toHaveCount(0);
+
+  expect(sales.size).toBe(1);
+  const [clientId] = sales.keys();
+  const orders = (await ordersByClientId(token)).filter((order) => order.metadata.tally_client_id === clientId);
+  expect(orders).toHaveLength(1);
   const after = await stockBySku(token);
   expect(after['E2E-1']).toBe(before['E2E-1'] - 1);
 });
