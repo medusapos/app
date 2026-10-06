@@ -95,5 +95,5 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
   const row = attention.getByText(`Order ${shortSale.clientOrderId.slice(-8)} · #${shortOrder.display_id} · 3 items`, { exact: true }).locator('../..');
   await expect(row).toBeVisible();
   await expect(row.getByText(/· Synced$/)).toBeVisible();
-  await expect(row.getByText('Stock short by 1 for E2E product 5', { exact: true })).toBeVisible();
+  await expect(row.getByText('1 sold without stock: E2E product 5', { exact: true })).toBeVisible();
 });
