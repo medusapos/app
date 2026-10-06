@@ -85,7 +85,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
     await server.ready();
     const totals = await test.step('A: released build writes four sales and register history', async () => {
       const page = await context.newPage();
-      await signIn(page);
+      await signIn(page, 'Europe', 'unsynced');
       const sale1 = await sellBySku(page, ['E2E-1'], 'exact');
       await expect(page.getByLabel('Sync status', { exact: true })).toHaveText('All sales synced');
 
@@ -263,7 +263,7 @@ test('a 3.2.x till (pos_orders v7) upgrades to 3.3.0 (v8): sales, split payments
     await server.ready();
     const totals = await test.step('A: released 3.2.1 build writes three sales, split payments and a parked customer draft', async () => {
       const page = await context.newPage();
-      await signIn(page);
+      await signIn(page, 'Europe', 'unsynced');
       const sale1 = await sellBySku(page, ['E2E-1'], 'exact');
       await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
       await page.route('**/tally/v1/commands', route => route.abort());

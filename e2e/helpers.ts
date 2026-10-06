@@ -82,12 +82,12 @@ export async function signIn(page: Page, region: string | null = 'Europe', regis
 // opens it with `float` through the open card, both above the cart. On a phone they show in the cart view, which
 // the register pill opens even with an empty cart; it then returns to Products. The store keeps one open session per
 // register (spec-42) and every earlier till left Register 1 open there, so this first closes the store's session, then
-// waits for the store to apply this till's open (unless not `synced`): a refused open (ADR-078's conflict) fails here, not in a later sale.
+// waits for the store to apply this till's open (unless not `synced`): a refused open (ADR-078's conflict) fails here, not in a later sale; a missing open times out in 30 seconds.
 export async function openRegister(page: Page, float = '100.00', synced = true) {
   const phone = (page.viewportSize()?.width ?? 1280) < 600;
   await closeStoreRegister();
   const opened = synced && page.waitForResponse(response => isCommandPost(response.request())
-    && (response.request().postDataJSON().commands as PostedCommand<unknown>[]).some(({ type }) => type === 'register.session.open'));
+    && (response.request().postDataJSON().commands as PostedCommand<unknown>[]).some(({ type }) => type === 'register.session.open'), { timeout: 30_000 });
   if (phone) await page.getByTestId('register-bar-pill').click();
   await page.getByTestId('register-picker-row-register-1').click();
   await page.getByTestId('open-register-amount').fill(float);
