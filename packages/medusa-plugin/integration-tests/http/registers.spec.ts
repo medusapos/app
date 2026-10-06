@@ -11,7 +11,7 @@ import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
 import { TALLY_REGISTER_MODULE } from '../../src/modules/tally-register'
 import type TallyRegisterModuleService from '../../src/modules/tally-register/service'
-import type { RegisterClosureSubmitPayload, RegisterSessionOpenPayload } from '../../src/modules/tally-register/types'
+import type { RegisterClosureSubmitPayload, RegisterSessionOpenPayload, RegisterSessionOpenV2Payload } from '../../src/modules/tally-register/types'
 import { commandFingerprint } from '../../src/workflows/tally-order-create/fingerprint'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
@@ -207,12 +207,12 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results[0].status).toBe('applied')
     })
 
-    it('an unsupported register version is rejected unsupported_version with data.register 1 and is not stored', async () => {
+    it('an unsupported register version is rejected unsupported_version with data.register 2 and is not stored', async () => {
       const opening = open()
-      const response = await post([{ ...opening, version: 2 }])
+      const response = await post([{ ...opening, version: 3 }])
       expect(response.status).toBe(200)
       expect(response.data.results[0]).toMatchObject({ id: opening.id, status: 'rejected', error: {
-        code: 'unsupported_version', data: { register: 1 },
+        code: 'unsupported_version', data: { register: 2 },
       } })
       expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
       expect((await post([opening])).data.results[0].status).toBe('applied')
@@ -251,13 +251,101 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results).toEqual([{ ...retry.data.results[0], status: 'duplicate' }])
     })
 
-    it('/info lists order.create 1, 2, 3 and register 1', async () => {
+    it('/info lists order.create 1, 2, 3 and register 1 and 2', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         lineTax: { none: false, classes: false },
+      })
+    })
+
+    describe('register v2 open', () => {
+      function openV2(deviceId: string, payload: Partial<RegisterSessionOpenV2Payload> = {}) {
+        const opening = open()
+        return { ...opening, version: 2, deviceId, payload: { ...opening.payload, ...payload } }
+      }
+
+      it('a v2 open with a deviceName is applied with the plain session result', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        const fingerprint = commandFingerprint(opening as never)
+        const response = await post([opening])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: opening.id, status: 'applied', register: {
+          session: { id: opening.payload.sessionId, status: 'open', expected: { cash: 100 }, salesCount: 0 }, counters,
+        } }])
+        const [stored] = await ledger.listTallyCommands({ id: opening.id })
+        expect(stored.fingerprint).toBe(fingerprint)
+      })
+
+      it('the same device opening a fresh session id resumes: applied with the live session, openedAt, openingFloatMinor, expected, salesCount and resumed; its replay is duplicate', async () => {
+        const data = await seed(container)
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        expect((await post([sale(data.variantB, opening.payload.sessionId), movement(opening.payload.sessionId, 'paid_in', 50)]))
+          .data.results.map(result => result.status)).toEqual(['applied', 'applied'])
+        const resumed = openV2('till-a', { registerId: opening.payload.registerId, openedAt: closedAt, countedFloatMinor: 999 })
+        const response = await post([resumed])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: resumed.id, status: 'applied', register: {
+          session: { id: opening.payload.sessionId, status: 'open', openedAt, openingFloatMinor: 100,
+            expected: { cash: 1150 }, salesCount: 1 }, counters, resumed: { fromSessionId: resumed.payload.sessionId },
+        } }])
+        const replay = await post([resumed])
+        expect(replay.status).toBe(200)
+        expect(replay.data.results).toEqual([{ ...response.data.results[0], status: 'duplicate' }])
+      })
+
+      it('another device is refused register_session_already_open with sessionId, registerId, openedAt, status, deviceId and deviceName', async () => {
+        const opening = openV2('till-a', { deviceName: '  Till A  ' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const second = openV2('till-b', { registerId: opening.payload.registerId })
+        const response = await post([second])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: second.id, status: 'rejected', error: {
+          code: 'register_session_already_open', message: 'This register already has an open session.',
+          data: { sessionId: opening.payload.sessionId, registerId: opening.payload.registerId, openedAt,
+            status: 'open', deviceId: 'till-a', deviceName: 'Till A' },
+        } }])
+      })
+
+      it('supersedes naming the live session is applied with register.superseded, and GET /tally/v1/registers/:id then shows the new session', async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt, countedFloatMinor: 200 })
+        const response = await post([takeover])
+        expect(response.status).toBe(200)
+        const session = { id: takeover.payload.sessionId, status: 'open', expected: { cash: 200 }, salesCount: 0 }
+        expect(response.data.results).toEqual([{ id: takeover.id, status: 'applied', register: {
+          session, counters, superseded: { sessionId: opening.payload.sessionId, openedAt, deviceId: 'till-a', deviceName: 'Till A' },
+        } }])
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.status).toBe(200)
+        expect(read.data).toEqual({ session, counters })
+      })
+
+      it('a v1 open over a live v2 session is refused with data { sessionId } only', async () => {
+        const opening = openV2('test-register', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const second = open(opening.payload.registerId)
+        const response = await post([second])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: second.id, status: 'rejected', error: {
+          code: 'register_session_already_open', message: 'This register already has an open session.',
+          data: { sessionId: opening.payload.sessionId },
+        } }])
+      })
+
+      it('a v1 open with deviceName is invalid_payload naming the field, and is not stored', async () => {
+        const opening = open()
+        const response = await post([{ ...opening, payload: { ...opening.payload, deviceName: 'Till A' } }])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: opening.id, status: 'rejected', error: {
+          code: 'invalid_payload', message: 'payload.deviceName: unknown field for register.session.open version 1',
+        } }])
+        expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
       })
     })
 

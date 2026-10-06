@@ -6,7 +6,7 @@ import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'
 import { TALLY_REGISTER_MODULE } from '../../modules/tally-register'
 import type TallyRegisterModuleService from '../../modules/tally-register/service'
-import type { RegisterOutcome, RegisterSessionOpenPayload, RegisterSessionTransitionPayload,
+import type { RegisterOutcome, RegisterSessionOpenV2Payload, RegisterSessionOpenInput, RegisterSessionTransitionPayload,
   RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterClosureSubmitPayload } from '../../modules/tally-register/types'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
@@ -19,6 +19,7 @@ type RegisterResult = CommandResult
 const conflictMessages = {
   register_session_already_open: 'This register already has an open session.',
   register_session_closed: 'This register session is closed.',
+  register_session_superseded: 'This register session was taken over by another till.',
   register_closure_exists: 'This session already has a closure.',
   register_closure_number_invalid: 'This closure number is not the next register number.',
 }
@@ -43,7 +44,7 @@ export async function replayRegisterCommand(container: MedusaContainer, command:
 
 export async function executeRegisterCommand(container: MedusaContainer, command: CommandEnvelope<unknown>, upperBound: number): Promise<ExecuteOutcome> {
   const { id, payload } = command
-  const errors = [...envelopeErrors(command), ...registerPayloadErrors(command.type, payload)].slice(0, 10)
+  const errors = [...envelopeErrors(command), ...registerPayloadErrors(command.type, payload, command.version)].slice(0, 10)
   if (errors.length) return { kind: 'result', result: { id, status: 'rejected', error: { code: 'invalid_payload', message: errors.join('; ') } } }
   const timeErrors = clientTimeStageErrors(command, upperBound)
   if (timeErrors.length) return { kind: 'result', result: { id, status: 'rejected', error: { code: 'invalid_payload', message: timeErrors.join('; ') } } }
@@ -79,7 +80,8 @@ export async function executeRegisterCommand(container: MedusaContainer, command
         throw error
       }
       switch (command.type as string) {
-        case 'register.session.open': outcome = await service.openSession(payload as RegisterSessionOpenPayload); break
+        case 'register.session.open': outcome = await service.openSession({ ...(payload as RegisterSessionOpenV2Payload),
+          deviceId: command.deviceId, contract: command.version } satisfies RegisterSessionOpenInput); break
         case 'register.session.transition': outcome = await service.transition(payload as RegisterSessionTransitionPayload); break
         case 'register.movement.record': outcome = await service.recordMovement(payload as RegisterMovementRecordPayload); break
         case 'register.movement.void': outcome = await service.voidMovement(payload as RegisterMovementVoidPayload); break

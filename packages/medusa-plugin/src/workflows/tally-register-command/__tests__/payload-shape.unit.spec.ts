@@ -16,6 +16,43 @@ const closure = {
   unsyncedCount: 0, unsyncedTotalMinor: 0, tillExpected: { cash: 150 }, counted: { cash: 150 }, orderIds: ['o'], movementIds: ['m'],
 }
 
+it('a v2 open accepts deviceName and supersedes; a v1 open refuses them as unknown fields for version 1', () => {
+  const payload = { ...open, deviceName: '  Till 1  ', supersedes: 'previous-session' }
+  expect(registerPayloadErrors('register.session.open', payload, 2)).toEqual([])
+  expect(registerPayloadErrors('register.session.open', open, 2)).toEqual([])
+  expect(registerPayloadErrors('register.session.open', { ...open, deviceName: ` ${'t'.repeat(64)} `, supersedes: 's'.repeat(64) }, 2)).toEqual([])
+  for (const version of [undefined, 1]) expect(registerPayloadErrors('register.session.open', payload, version)).toEqual([
+    'payload.deviceName: unknown field for register.session.open version 1',
+    'payload.supersedes: unknown field for register.session.open version 1',
+  ])
+})
+
+it('a v2 open refuses a deviceName that is blank after trim, longer than 64, or holds NUL, and an empty or over-long supersedes', () => {
+  for (const deviceName of ['', ' \t ', 't'.repeat(65), 'Till\u0000', null, 1]) {
+    expect(registerPayloadErrors('register.session.open', { ...open, deviceName }, 2))
+      .toEqual(['payload.deviceName: expected a string of 1 to 64 characters after trim'])
+  }
+  for (const supersedes of ['', 's'.repeat(65), null, 1]) {
+    expect(registerPayloadErrors('register.session.open', { ...open, supersedes }, 2))
+      .toEqual(['payload.supersedes: expected a non-empty string of at most 64 characters'])
+  }
+})
+
+it('the unknown-field message names the command version', () => {
+  for (const version of [1, 2, 3]) {
+    expect(registerPayloadErrors('register.session.open', { ...open, extra: true }, version))
+      .toEqual([`payload.extra: unknown field for register.session.open version ${version}`])
+    for (const [type, payload] of [['register.session.transition', transition], ['register.movement.record', movement],
+      ['register.movement.void', voidMovement], ['register.closure.submit', closure]] as const) {
+      expect(registerPayloadErrors(type, payload, version)).toEqual([])
+      expect(registerPayloadErrors(type, { ...payload, deviceName: 'Till', supersedes: 's' }, version)).toEqual([
+        `payload.deviceName: unknown field for ${type} version ${version}`,
+        `payload.supersedes: unknown field for ${type} version ${version}`,
+      ])
+    }
+  }
+})
+
 it.each<[string, Record<string, unknown>]>([
   ['register.session.open', open],
   ['register.session.transition', transition],
