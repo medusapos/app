@@ -1,11 +1,10 @@
 // @vitest-environment jsdom
 // The tap race when new store settings land (#58 review, TallyUI/tallyui#301): a line added at the instant new store settings
 // land must stay in the cart. The real useSale (@tallyui/pos) and the real ProductsScreen, as the app runs them.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { useEffect, useLayoutEffect, type ComponentProps, type ReactNode } from 'react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { useEffect, useLayoutEffect } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { CartLineProps, CartTotalProps, ProductGrid, SearchInput } from '@tallyui/components';
-import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
+import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -28,30 +27,6 @@ vi.mock('../lib/register-context', async (importOriginal) => ({
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
-vi.mock('@tallyui/components/product', () => ({
-  ProductGrid: ({ items, renderItem, emptyState }: ComponentProps<typeof ProductGrid>) =>
-    <div>{items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}</div>,
-  ProductImage: () => null,
-  ProductTitle: ({ doc }: { doc: { title?: ReactNode } }) => <span>{doc.title}</span>,
-  ProductPrice: () => null,
-  ProductStockBadge: () => null,
-}));
-vi.mock('@tallyui/components/ui', () => ({ VStack: ({ children }: { children?: ReactNode }) => <div>{children}</div> }));
-vi.mock('@tallyui/components/input', () => ({
-  SearchInput: ({ placeholder }: ComponentProps<typeof SearchInput>) => <input placeholder={placeholder} />,
-}));
-vi.mock('@tallyui/components/cart', () => ({
-  CartPanel: <T,>({ items, renderItem, emptyState, afterItems, footer }:
-    { items: T[]; renderItem: (item: T, index: number) => ReactNode; emptyState?: ReactNode; afterItems?: ReactNode; footer?: ReactNode }) => <div>
-    {items.length ? items.map((item, index) => <div key={index}>{renderItem(item, index)}</div>) : emptyState}
-    {afterItems}{footer}
-  </div>,
-  CartLine: ({ name, quantity, lineTotal }: CartLineProps) => <div>{name} × {quantity} = {formatMoney(lineTotal)}</div>,
-  CartTotal: ({ total }: CartTotalProps) => <span>Total: {formatMoney(total)}</span>,
-  CartLineActions: ({ children }: { children?: ReactNode }) => <div>{children}</div>,
-  DiscountBadge: () => null,
-}));
-vi.mock('@tallyui/components/checkout', () => ({ CashTendered: () => null, ChangeDisplay: () => null }));
 
 const session = { baseUrl: 'https://store.test', email: 'cashier@store.test', token: 'jwt' };
 const settings: StoreSettings = { storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Copenhagen', countryCode: 'dk' } };
@@ -71,14 +46,14 @@ const product = (id: string, title: string, amount: number) => ({ id, title, sta
 const catalogue = (region?: string) => region === 'reg_de'
   ? [product('shirt', 'Shirt', 20), product('hat', 'Hat', 30)] : [product('shirt', 'Shirt', 12), product('hat', 'Hat', 10)];
 const button = (name: string) => screen.getByRole('button', { name });
-const pos = () => screen.findByPlaceholderText('Search or scan barcode / SKU');
+const pos = () => screen.findByRole('searchbox');
 const region = () => vi.mocked(useReplicatedProducts).mock.lastCall![1].pricingContext?.region_id;
 // Outside act() React runs on its real scheduler, as in the browser: a default-priority render (settings landing
 // from a fetch) commits in one task and runs its passive effects in a later one, so a tap can land between them.
 const actEnvironment = (on: boolean) => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = on; };
 const settleTasks = () => new Promise((resolve) => setTimeout(resolve, 100));
 /** A native click, not wrapped in act(): the browser's own event, dispatched to React's root listener. */
-const tap = (name: string) => { button(name).click(); };
+const tap = (name: string) => { screen.getByTestId(`product-tile-${name}`).click(); };
 
 // Probes in SignedInProducts (the replication hook is a stand-in, called as a hook there) for the POS moving onto
 // Germany's settings: `onGermanyCommit` from a layout effect (during that commit, before its passive effects), and
@@ -186,11 +161,11 @@ describe('tap race when new store settings land (#58 review)', () => {
     // task, and renders the tap's update together with it (19.x renders sync and default lanes in one pass).
     await germanyLands(retry, async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); tap('Shirt'); });
     expect(button('Remove Shirt')).toBeTruthy();
-    expect(screen.getByText('Total: €15.00')).toBeTruthy(); // the Shirt at Europe's €12 + 25%
+    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€15.00'); // the Shirt at Europe's €12 + 25%
     // The sale started on Europe's settings, so the catalogue stays on them too (a money rule): Hat is €10 + 25%.
-    fireEvent.click(button('Hat'));
+    fireEvent.click(screen.getByTestId('product-tile-Hat'));
     expect(region()).toBe('reg_eu');
-    expect(screen.getByText('Total: €27.50')).toBeTruthy();
+    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€27.50');
   });
 
   it('control: keeps a line tapped in the same tick the new settings resolve (the tap first)', async () => {
@@ -198,7 +173,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     await germanyLands(retry, () => tap('Shirt'));
     expect(button('Remove Shirt')).toBeTruthy();
     expect(region()).toBe('reg_eu');
-    expect(screen.getByText('Total: €15.00')).toBeTruthy();
+    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€15.00');
   });
 
   it('control: keeps a line tapped once the new settings\' effects have run, on Germany\'s pricing', async () => {
@@ -207,7 +182,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     onGermanyCommit = () => { committed = true; };
     await germanyLands(retry, async () => { await vi.waitFor(() => expect(committed).toBe(true)); await settleTasks(); tap('Shirt'); });
     expect(button('Remove Shirt')).toBeTruthy();
-    expect(screen.getByText('Total: €20.00')).toBeTruthy(); // Germany's €20, tax included
+    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€20.00'); // Germany's €20, tax included
   });
 
   it('a refused add does not leave the settings hold on: the next store settings still apply', async () => {
@@ -220,12 +195,13 @@ describe('tap race when new store settings land (#58 review)', () => {
         variants: [{ id: 'cap-1', title: 'One', sku: 'CAP', prices: [{ amount: 9, currency_code: 'usd' }] }] }] };
     });
     const retry = await idleWithRetryInFlight();
-    fireEvent.click(button('Cap'));
+    fireEvent.click(screen.getByTestId('product-tile-Cap'));
     expect(screen.getByRole('alert').textContent).toBe('No EUR price for Cap');
     expect(screen.queryByRole('button', { name: 'Remove Cap' })).toBeNull();
     await germanyLands(retry);
     expect(region()).toBe('reg_de');
-    fireEvent.click(button('Shirt'));
-    expect(screen.getByText('Total: €20.00')).toBeTruthy(); // Germany's €20, tax included
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(button('Remove Shirt')).toBeTruthy();
+    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€20.00'); // Germany's €20, tax included
   });
 });
