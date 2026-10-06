@@ -10,6 +10,7 @@ import { createOrderBuilder, finalizeOrder, useOrderOutbox, useStoreSettings, ty
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
+import { storeConfig } from '../lib/config';
 import { clearProductCache } from '../lib/product-cache';
 import { saveScannerSettings } from '../lib/scanner-settings';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
@@ -124,6 +125,7 @@ const pricing: PricingSettings = {
   currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 },
   pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' },
 };
+const originalDemoMode = storeConfig.demo;
 beforeEach(() => {
   setWindowWidth(1280);
   const data = new Map<string, string>();
@@ -321,13 +323,14 @@ describe('ProductsScreen catalogue', () => {
 });
 afterEach(() => {
   cleanup();
+  storeConfig.demo = originalDemoMode;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
-async function mount(signedIn = true, orders = false, name?: string) {
+async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test') {
   if (signedIn) saveSession(localStorage, {
-    baseUrl: 'https://store.test', email: 'admin@store.test', name,
+    baseUrl: 'https://store.test', email, name,
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
   let view!: ReturnType<typeof render>;
@@ -541,6 +544,19 @@ describe('ProductsScreen session routing', () => {
     // The screen's own <Redirect href="/login">, with no extra navigation.
     expect(screen.getByText('redirect:/login')).toBeTruthy();
     expect(router.replace).not.toHaveBeenCalled();
+  });
+  it('a demo account lands back on /demo after Sign out (#196)', async () => {
+    storeConfig.demo = true;
+    await mount(true, false, undefined, 'cashier@demo.medusapos.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(localStorage.getItem('medusapos.session')).toBeNull();
+    expect(screen.getByText('redirect:/demo')).toBeTruthy();
+  });
+  it('a demo email on a non-demo build still lands on /login (#196)', async () => {
+    storeConfig.demo = false;
+    await mount(true, false, undefined, 'cashier@demo.medusapos.com');
+    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(screen.getByText('redirect:/login')).toBeTruthy();
   });
   it('signs out when product replication reports unauthorized', async () => {
     await mount();

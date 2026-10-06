@@ -44,7 +44,7 @@ export default function DemoScreen() {
           <Text selectable className="text-sm text-muted-foreground">{account.email} · {account.password}</Text>
         </View>)}
         {error ? <Text accessibilityRole="alert" className="text-sm text-destructive">{error}</Text> : null}
-        <Pressable accessibilityRole="link" onPress={() => router.push('/login')}>
+        <Pressable accessibilityRole="link" onPress={() => router.push('/login')} className="min-h-11 justify-center">
           <Text className="text-center text-sm text-foreground">Sign in with another account</Text>
         </Pressable>
       </View>

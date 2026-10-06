@@ -54,10 +54,10 @@ export default function LoginScreen() {
           className={`rounded-md bg-primary px-4 py-3 ${disabled ? 'opacity-50' : ''}`}>
           <Text className="text-center font-semibold text-primary-foreground">Sign in</Text>
         </Pressable>
-        {storeConfig.demo ? <Pressable accessibilityRole="link" onPress={() => router.push('/demo')}>
+        {storeConfig.demo ? <Pressable accessibilityRole="link" onPress={() => router.push('/demo')} className="min-h-11 justify-center">
           <Text className="text-center text-sm text-muted-foreground">Try the demo</Text>
         </Pressable> : null}
-        <Pressable accessibilityRole="link" onPress={() => { openFeedbackUrl(feedbackUrl({
+        <Pressable accessibilityRole="link" className="min-h-11 justify-center" onPress={() => { openFeedbackUrl(feedbackUrl({
           appVersion, platform: Platform.OS,
           userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
           backendUrl: baseUrl,
