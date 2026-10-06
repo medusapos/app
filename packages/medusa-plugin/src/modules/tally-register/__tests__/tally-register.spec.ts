@@ -190,6 +190,49 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
         expect(await sql('select id from tally_register_session')).toHaveLength(2)
       })
 
+      it('a take-over whose live row was superseded while it waited is refused with the winner, and leaves the winner\'s take-over fields intact', async () => {
+        await service.openSession(owner)
+        const winner = { ...taker, sessionId: randomUUID(), deviceId: 'device-3', deviceName: 'Third till' }
+        const holder = MikroOrmWrapper.forkManager()
+        let pending: Promise<unknown> = Promise.resolve()
+        await holder.begin()
+        try {
+          await holder.execute("set local statement_timeout = '5s'")
+          await holder.execute('select id from tally_register_session where id = ? for update', [owner.sessionId])
+          pending = MikroOrmWrapper.forkManager().transactional(async em => {
+            await em.execute("set local statement_timeout = '5s'")
+            return service.openSession(taker, { manager: em })
+          }).catch(error => error)
+          // Observe the real lock wait before committing the winner; no guessed interleaving delay.
+          const deadline = Date.now() + 3000
+          let blocked = false
+          while (Date.now() < deadline) {
+            const [lock] = await holder.execute(`select exists (select 1 from pg_locks
+              where not granted and pg_backend_pid() = any(pg_blocking_pids(pid))) as blocked`)
+            if (lock.blocked) {
+              blocked = true
+              break
+            }
+            await new Promise(resolve => setTimeout(resolve, 10))
+          }
+          expect(blocked).toBe(true)
+          expect(await service.openSession(winner, { manager: holder })).toMatchObject({
+            kind: 'ok', register: { session: { id: winner.sessionId, status: 'open' } },
+          })
+          await holder.commit()
+        } finally {
+          if (holder.isInTransaction()) await holder.rollback()
+          await pending
+        }
+        expect(await pending).toMatchObject({
+          kind: 'conflict', code: 'register_session_already_open', data: { sessionId: winner.sessionId },
+        })
+        expect(await sql('select superseded_by_session, superseded_by_device from tally_register_session where id = ?', [owner.sessionId]))
+          .toEqual([{ superseded_by_session: winner.sessionId, superseded_by_device: winner.deviceId }])
+        expect(await sql("select id from tally_register_session where status in ('open','counting')"))
+          .toEqual([{ id: winner.sessionId }])
+      })
+
       it('an open naming a superseded session is register_session_superseded for v2 and register_session_closed for v1', async () => {
         await service.openSession(owner)
         await service.openSession(taker)
