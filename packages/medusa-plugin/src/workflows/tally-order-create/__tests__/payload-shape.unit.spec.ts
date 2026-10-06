@@ -1,6 +1,8 @@
 import type { OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { payloadNulErrors, payloadShapeErrors } from '../payload-shape'
 import { clientTimeStageErrors } from '../../client-time'
+import feeGolden from '../__fixtures__/order-create-v5-fee.json'
+import shippingGolden from '../__fixtures__/order-create-v5-shipping-custom.json'
 
 const payload: OrderCreatePayload = {
   clientOrderId: 'order_1', createdAt: '2026-09-23T10:00:00Z', currency: 'EUR', pricesIncludeTax: true,
@@ -221,4 +223,78 @@ it('reports only NUL errors independently of shape and bounds', () => {
 it.each([null, 'payload', { lines: 5 }])('NUL checking never throws on %j', value => {
   expect(() => payloadNulErrors(value)).not.toThrow()
   expect(payloadNulErrors(value)).toEqual([])
+})
+
+it('version 5: the fee and shipping+custom golden pairs have no shape errors', () => {
+  for (const fixture of [feeGolden, shippingGolden]) expect(payloadShapeErrors(fixture.payload, fixture.version)).toEqual([])
+})
+
+it('below version 5, fees, shipping and lines[].custom are named "requires version 5"', () => {
+  const value = { ...payload, fees: feeGolden.payload.fees, shipping: shippingGolden.payload.shipping, lines: shippingGolden.payload.lines }
+  for (const version of [1, 2, 3, 4]) expect(payloadShapeErrors(value, version)).toEqual(expect.arrayContaining([
+    'payload.fees: requires version 5', 'payload.shipping: requires version 5', 'payload.lines[1].custom: requires version 5',
+  ]))
+})
+
+it('a custom line with a variantId, and a non-custom line without one, are refused naming the line', () => {
+  const { variantId, ...line } = payload.lines[0]
+  expect(payloadShapeErrors({ ...payload, lines: [line, { ...shippingGolden.payload.lines[1], variantId }] }, 5)).toEqual([
+    'payload.lines[0].variantId: expected a string', 'payload.lines[1].variantId: expected no variantId on a custom line',
+  ])
+})
+
+it('a fee or shipping amountMinor that is negative or not an integer, an unknown taxStatus, an unknown fee key, and a duplicate clientFeeId are refused', () => {
+  for (const [field, charge, id] of [['fees', feeGolden.payload.fees[0], 'clientFeeId'], ['shipping', shippingGolden.payload.shipping[0], 'clientShippingId']] as const) {
+    for (const key of ['amountMinor', 'taxMinor']) for (const amount of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, '1', null]) {
+      expect(payloadShapeErrors({ ...payload, [field]: [{ ...charge, [key]: amount }] }, 5))
+        .toEqual([`payload.${field}[0].${key}: expected a non-negative safe integer`])
+    }
+    expect(payloadShapeErrors({ ...payload, [field]: [{ ...charge, taxStatus: 'exempt' }] }, 5))
+      .toEqual([`payload.${field}[0].taxStatus: expected 'taxable' or 'none'`])
+    expect(payloadShapeErrors({ ...payload, [field]: [charge, charge, charge] }, 5))
+      .toEqual([`payload.${field}[1].${id}: expected no duplicate of payload.${field}[0].${id}`])
+    expect(payloadShapeErrors({ ...payload, [field]: [{ ...charge, amountMinor: 0, taxMinor: 0 }] }, 5)).toEqual([])
+  }
+  expect(payloadShapeErrors({ ...feeGolden.payload, fees: [{ ...feeGolden.payload.fees[0], extra: true }] }, 5))
+    .toEqual(['payload.fees[0].extra: unknown field for order.create version 5'])
+})
+
+it('checks v5 string types, bounds and NUL, including optional empty strings', () => {
+  const value = { ...structuredClone(shippingGolden.payload), fees: structuredClone(feeGolden.payload.fees) }
+  for (const [prefix, entry, keys] of [
+    ['fees[0]', value.fees[0], ['clientFeeId', 'name', 'taxClass']],
+    ['shipping[0]', value.shipping[0], ['clientShippingId', 'name', 'taxClass', 'methodId']],
+    ['lines[1].custom', value.lines[1].custom!, ['name', 'sku', 'taxClass']],
+  ] as const) for (const key of keys) {
+    const target = entry as Record<string, unknown>, original = target[key], max = key === 'name' ? 255 : 64
+    target[key] = 'x'.repeat(max)
+    expect(payloadShapeErrors(value, 5)).toEqual([])
+    target[key] = 'x'.repeat(max + 1)
+    expect(payloadShapeErrors(value, 5)).toEqual([`payload.${prefix}.${key}: expected at most ${max} characters`])
+    target[key] = '\0'
+    expect(payloadShapeErrors(value, 5)).toEqual([`payload.${prefix}.${key}: expected no NUL character`])
+    expect(payloadNulErrors(value)).toEqual([`payload.${prefix}.${key}: expected no NUL character`])
+    target[key] = ''
+    const required = key === 'name' || key.startsWith('client')
+    expect(payloadShapeErrors(value, 5)).toEqual(required ? [`payload.${prefix}.${key}: expected a non-empty string`] : [])
+    target[key] = null
+    expect(payloadShapeErrors(value, 5)).toEqual([`payload.${prefix}.${key}: expected ${required ? 'a non-empty string' : 'a string'}`])
+    if (original === undefined) delete target[key]
+    else target[key] = original
+  }
+})
+
+it('checks v5 containers, required fields and unknown shipping and custom keys', () => {
+  for (const field of ['fees', 'shipping']) for (const value of [null, {}, 'charge']) {
+    expect(payloadShapeErrors({ ...payload, [field]: value }, 5)).toEqual([`payload.${field}: expected an array`])
+    expect(payloadShapeErrors({ ...payload, [field]: [value === null ? null : 'charge'] }, 5)).toEqual([`payload.${field}[0]: expected an object`])
+  }
+  for (const custom of [null, [], 'custom']) expect(payloadShapeErrors({ ...payload, lines: [{ clientLineId: 'c', quantity: 1, unitPriceMinor: 1, custom }] }, 5))
+    .toEqual(['payload.lines[0].custom: expected an object'])
+  expect(payloadShapeErrors({ ...shippingGolden.payload, shipping: [{ ...shippingGolden.payload.shipping[0], extra: true }] }, 5))
+    .toEqual(['payload.shipping[0].extra: unknown field for order.create version 5'])
+  expect(payloadShapeErrors({ ...payload, lines: [{ clientLineId: 'c', quantity: 1, unitPriceMinor: 1, custom: { extra: true } }] }, 5)).toEqual([
+    'payload.lines[0].custom.extra: unknown field for order.create version 5',
+    'payload.lines[0].custom.name: expected a non-empty string', "payload.lines[0].custom.taxStatus: expected 'taxable' or 'none'",
+  ])
 })

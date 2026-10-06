@@ -1,0 +1,102 @@
+{
+  "id": "0199b0a0-0000-7000-8000-000000000002",
+  "type": "order.create",
+  "version": 5,
+  "payload": {
+    "clientOrderId": "0199b0a0-0000-7000-8000-0000000000a2",
+    "currency": "EUR",
+    "pricesIncludeTax": false,
+    "lines": [
+      {
+        "clientLineId": "0199b0a0-0000-7000-8000-0000000000b2",
+        "variantId": "var_456",
+        "title": "Scarf",
+        "quantity": 1,
+        "unitPriceMinor": 2500
+      },
+      {
+        "clientLineId": "0199b0a0-0000-7000-8000-0000000000b3",
+        "title": "Gift wrap",
+        "quantity": 1,
+        "unitPriceMinor": 300,
+        "custom": {
+          "name": "Gift wrap",
+          "taxStatus": "none"
+        }
+      }
+    ],
+    "shipping": [
+      {
+        "clientShippingId": "0199b0a0-0000-7000-8000-0000000000d1",
+        "name": "Local delivery",
+        "methodId": "flat_rate",
+        "amountMinor": 500,
+        "taxStatus": "taxable",
+        "taxMinor": 100
+      }
+    ],
+    "subtotalMinor": 2800,
+    "taxMinor": 600,
+    "totalMinor": 3900,
+    "payments": [
+      {
+        "clientPaymentId": "0199b0a0-0000-7000-8000-0000000000c2",
+        "method": "external",
+        "amountMinor": 3900
+      }
+    ],
+    "display": {
+      "currency": "EUR",
+      "exponent": 2,
+      "taxInclusive": false,
+      "subtotalMinor": 2800,
+      "discountMinor": 0,
+      "taxMinor": 600,
+      "totalMinor": 3900,
+      "orderDiscountMinor": 0,
+      "lines": [
+        {
+          "clientLineId": "0199b0a0-0000-7000-8000-0000000000b2",
+          "amountMinor": 2500,
+          "discounts": []
+        },
+        {
+          "clientLineId": "0199b0a0-0000-7000-8000-0000000000b3",
+          "amountMinor": 300,
+          "discounts": []
+        }
+      ],
+      "shipping": [
+        {
+          "clientShippingId": "0199b0a0-0000-7000-8000-0000000000d1",
+          "amountMinor": 500
+        }
+      ]
+    },
+    "taxByRate": [
+      {
+        "ratePpm": 200000,
+        "netMinor": 3000,
+        "taxMinor": 600,
+        "grossMinor": 3600
+      },
+      {
+        "ratePpm": 0,
+        "netMinor": 300,
+        "taxMinor": 0,
+        "grossMinor": 300
+      }
+    ],
+    "createdAt": "2026-09-28T10:00:00.000Z",
+    "customer": {
+      "email": "buyer@example.com",
+      "customerId": "cus_golden_v3"
+    },
+    "registerId": "register_golden",
+    "cashierRef": "cashier_golden",
+    "sessionId": "019f6d2e-7800-7000-8000-000000000003"
+  },
+  "createdAt": "2026-09-28T10:00:00.000Z",
+  "deviceId": "device_golden",
+  "attempt": 1
+}
