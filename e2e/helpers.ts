@@ -200,15 +200,22 @@ export async function closeStoreRegister(registerId = 'register-1') {
   expect((await response.json()).results).toEqual([expect.objectContaining({ status: 'applied' })]);
 }
 
+export async function createAdminCustomer(token: string, email: string, firstName: string, lastName: string): Promise<string> {
+  const response = await fetch(`${backend}/admin/customers`, { method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, first_name: firstName, last_name: lastName }) });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  return (await response.json()).customer.id;
+}
+
 export type AdminOrder = {
   id: string; display_id: number; metadata: { tally_client_id?: string }; total: number;
-  status: string; payment_status: string;
+  status: string; payment_status: string; customer_id: string | null;
   payment_collections: { amount: number; status: string }[];
   items: { quantity: number; variant_id: string }[];
 };
 
 export async function ordersByClientId(token: string): Promise<AdminOrder[]> {
-  const fields = 'id,display_id,metadata,total,status,payment_status,payment_collections.amount,payment_collections.status,items.quantity,items.variant_id';
+  const fields = 'id,display_id,metadata,total,status,payment_status,customer_id,payment_collections.amount,payment_collections.status,items.quantity,items.variant_id';
   const all: AdminOrder[] = [];
   let count: number;
   do {

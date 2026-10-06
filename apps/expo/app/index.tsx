@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
-import { Cart, CartBar, Catalogue, ParkedSales, Receipt, SplitTender, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
-import { ConnectorProvider, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
+import { Cart, CartBar, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, ParkedSales, Receipt, SplitTender, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
+import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
@@ -215,6 +215,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const drafts = draftsCollection(orders);
   const { parked, discard } = useParkedSales(drafts);
   const [parkedOpen, setParkedOpen] = useState(false);
+  const [customerOpen, setCustomerOpen] = useState(false);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: record,
     isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
@@ -316,7 +317,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
-    <View className="flex-row justify-end px-3">
+    <View className="flex-row justify-end gap-4 px-3">
+      {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
+        className="min-h-11 justify-center">
+        <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
+      </Pressable>}
       <Pressable accessibilityRole="button" onPress={() => setParkedOpen(true)} className="min-h-11 justify-center">
         <Text className="text-foreground">Parked sales{parked.length ? ` (${parked.length})` : ''}</Text>
       </Pressable>
@@ -352,6 +357,16 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <RegisterClosedSheet currency={pricing.currency} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
         open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />
+      {connector.searchCustomers && <Dialog open={customerOpen} onOpenChange={setCustomerOpen}>
+        <DialogContent testID="customer-dialog"><DialogTitle>Customer</DialogTitle>
+          <ScrollView><CustomerPicker selected={sale.order.customer} online={state !== 'offline'}
+            search={(q) => connector.searchCustomers!(syncContext, q)}
+            create={(input) => connector.createCustomer!(syncContext, input)}
+            onSelect={(c) => { sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
+            onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); }} />
+          </ScrollView>
+        </DialogContent>
+      </Dialog>}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
         store={receiptStore}
