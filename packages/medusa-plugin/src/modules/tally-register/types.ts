@@ -20,23 +20,23 @@ export interface RegisterSessionOpenV2Payload extends RegisterSessionOpenPayload
   deviceName?: string; supersedes?: string;
 }
 export type RegisterSessionOpenInput = RegisterSessionOpenV2Payload & { deviceId?: string; contract?: number }
+export type RegisterSessionTransitionInput = RegisterSessionTransitionPayload & { contract?: number }
+export type RegisterMovementRecordInput = RegisterMovementRecordPayload & { contract?: number }
+export type RegisterMovementVoidInput = RegisterMovementVoidPayload & { contract?: number }
+export type RegisterClosureSubmitInput = RegisterClosureSubmitPayload & { contract?: number }
 
 export interface RegisterSessionTransitionPayload {
-  contract?: number;
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;
   /** Closing only. */ counted?: Record<string, number>; closedBy?: string; approvedBy?: string;
 }
 export interface RegisterMovementRecordPayload {
-  contract?: number;
   movementId: string; sessionId: string; type: 'paid_in' | 'paid_out' | 'no_sale'; amountMinor: number; reason: string;
   createdAt: string; createdBy?: string;
 }
 export interface RegisterMovementVoidPayload {
-  contract?: number;
   movementId: string; sessionId: string; voids: string; createdAt: string; createdBy?: string;
 }
 export interface RegisterClosureSubmitPayload {
-  contract?: number;
   closureId: string; sessionId: string; registerId: string; number: number; businessDay?: string;
   openedAt: string; closedAt: string; closedBy?: string; approvedBy?: string;
   tillExpected: Record<string, number>; counted: Record<string, number>;

@@ -8,8 +8,8 @@ import { TallyRegisterMovement } from './models/tally-register-movement'
 import { TallyRegisterClosure } from './models/tally-register-closure'
 import type {
   RegisterCommandResult, RegisterCounters, RegisterOutcome, RegisterSessionOpenInput,
-  RegisterSessionTransitionPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
-  RegisterClosureSubmitPayload, RegisterSessionStatus,
+  RegisterSessionTransitionInput, RegisterMovementRecordInput, RegisterMovementVoidInput,
+  RegisterClosureSubmitInput, RegisterSessionStatus,
 } from './types'
 
 const COUNTERS = `json_build_object('lastClosureNumber', r.last_closure_number,
@@ -96,7 +96,7 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async transition(p: RegisterSessionTransitionPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
+  async transition(p: RegisterSessionTransitionInput, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
       const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
@@ -118,7 +118,7 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async recordMovement(p: RegisterMovementRecordPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
+  async recordMovement(p: RegisterMovementRecordInput, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
       const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
@@ -142,7 +142,7 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async voidMovement(p: RegisterMovementVoidPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
+  async voidMovement(p: RegisterMovementVoidInput, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
       const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
@@ -178,7 +178,7 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async submitClosure(p: RegisterClosureSubmitPayload, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
+  async submitClosure(p: RegisterClosureSubmitInput, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
       const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }

@@ -7,6 +7,7 @@ import { parseCommandResult } from '../../modules/tally-ledger/command-result'
 import { TALLY_REGISTER_MODULE } from '../../modules/tally-register'
 import type TallyRegisterModuleService from '../../modules/tally-register/service'
 import type { RegisterOutcome, RegisterSessionOpenV2Payload, RegisterSessionOpenInput, RegisterSessionTransitionPayload,
+  RegisterSessionTransitionInput, RegisterMovementRecordInput, RegisterMovementVoidInput, RegisterClosureSubmitInput,
   RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterClosureSubmitPayload } from '../../modules/tally-register/types'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
@@ -82,10 +83,10 @@ export async function executeRegisterCommand(container: MedusaContainer, command
       switch (command.type as string) {
         case 'register.session.open': outcome = await service.openSession({ ...(payload as RegisterSessionOpenV2Payload),
           deviceId: command.deviceId, contract: command.version } satisfies RegisterSessionOpenInput); break
-        case 'register.session.transition': outcome = await service.transition({ ...(payload as RegisterSessionTransitionPayload), contract: command.version }); break
-        case 'register.movement.record': outcome = await service.recordMovement({ ...(payload as RegisterMovementRecordPayload), contract: command.version }); break
-        case 'register.movement.void': outcome = await service.voidMovement({ ...(payload as RegisterMovementVoidPayload), contract: command.version }); break
-        case 'register.closure.submit': outcome = await service.submitClosure({ ...(payload as RegisterClosureSubmitPayload), contract: command.version }); break
+        case 'register.session.transition': outcome = await service.transition({ ...(payload as RegisterSessionTransitionPayload), contract: command.version } satisfies RegisterSessionTransitionInput); break
+        case 'register.movement.record': outcome = await service.recordMovement({ ...(payload as RegisterMovementRecordPayload), contract: command.version } satisfies RegisterMovementRecordInput); break
+        case 'register.movement.void': outcome = await service.voidMovement({ ...(payload as RegisterMovementVoidPayload), contract: command.version } satisfies RegisterMovementVoidInput); break
+        case 'register.closure.submit': outcome = await service.submitClosure({ ...(payload as RegisterClosureSubmitPayload), contract: command.version } satisfies RegisterClosureSubmitInput); break
         default: throw new Error('Unknown register command type')
       }
       if (outcome.kind === 'ok') {

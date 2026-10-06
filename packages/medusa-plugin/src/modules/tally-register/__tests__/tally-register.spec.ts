@@ -108,7 +108,7 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           for (const status of ['open', 'counting', 'closed'] as const) {
             expect(await service.transition({ sessionId: first.sessionId, status, at, contract })).toEqual(superseded)
           }
-          expect(await service.submitClosure(closure({ contract }))).toEqual(superseded)
+          expect(await service.submitClosure({ ...closure(), contract })).toEqual(superseded)
         }
         expect(await snapshot()).toEqual(before)
       })
@@ -125,7 +125,7 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           for (const status of ['open', 'counting', 'closed'] as const) {
             expect(await service.transition({ sessionId: first.sessionId, status, at, contract })).toEqual(closed)
           }
-          expect(await service.submitClosure(closure({ contract }))).toEqual(closed)
+          expect(await service.submitClosure({ ...closure(), contract })).toEqual(closed)
         }
         expect(await snapshot()).toEqual(before)
       })
