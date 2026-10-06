@@ -223,6 +223,8 @@ test('released till documents survive the web storage upgrade intact', async ({ 
     });
     await test.step('E: a current-build parked draft survives reopening with its whole document intact', async () => {
       const page = await context.newPage();
+      await page.goto('/login');
+      await page.evaluate(() => localStorage.removeItem('medusapos.session'));
       await signIn(page, 'Europe', false);
       await addE2E1(page);
       await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
