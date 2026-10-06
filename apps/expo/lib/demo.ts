@@ -15,6 +15,7 @@ export const DEMO_REGION_NAME = 'Europe';
 export const DEMO_WHAT_TO_TRY = [
   'Ring up a sale and take cash or card',
   'Split a payment: part card, the rest cash (Split payment at checkout)',
+  'Attach a customer to a sale: search one, or add a new one',
   'Park a sale, then resume it from Parked sales',
   "Change a line's price in the cart",
   'Close the register with a cash count',

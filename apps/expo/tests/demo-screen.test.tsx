@@ -33,12 +33,13 @@ afterEach(() => {
 });
 
 describe('Demo card', () => {
-  it('the demo card lists what to try: sell, split, park and resume, change a price, close the register', () => {
+  it('the demo card lists what to try: sell, split, attach a customer, park and resume, change a price, close the register', () => {
     render(<SessionProvider><DemoScreen /></SessionProvider>);
     expect(screen.getByRole('heading', { name: 'What to try', level: 2 })).toBeTruthy();
     for (const item of [
       'Ring up a sale and take cash or card',
       'Split a payment: part card, the rest cash (Split payment at checkout)',
+      'Attach a customer to a sale: search one, or add a new one',
       'Park a sale, then resume it from Parked sales',
       "Change a line's price in the cart",
       'Close the register with a cash count',
@@ -56,8 +57,8 @@ describe('Demo card', () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
-  it('the card makes no claim the demo cannot back: no customers', () => {
+  it('the card makes no claim the demo cannot back: no refunds', () => {
     render(<SessionProvider><DemoScreen /></SessionProvider>);
-    expect(document.body.textContent).not.toMatch(/customer/i);
+    expect(document.body.textContent).not.toMatch(/refund/i);
   });
 });
