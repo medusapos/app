@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
 import type { RxCollection } from 'rxdb';
 import {
-  bindRegister, createHttpCommandTransport, getBoundRegisterId, observeRegister$, useRegisterOutbox, useRegisterSession, type PosOrder, type UseRegisterOutboxResult,
+  bindRegister, createHttpCommandTransport, getBoundRegisterId, observeRegister$, unbindRegister, useRegisterOutbox, useRegisterSession, type PosOrder, type UseRegisterOutboxResult,
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
@@ -16,6 +17,16 @@ import { useSession } from './session-context';
  */
 export const DEFAULT_REGISTERS = [{ id: 'register-1', name: 'Register 1' }];
 
+/** Platform name for register v2 opens until the app has a till-name setting (ADR-078). */
+export function getDeviceName(os: typeof Platform.OS = Platform.OS): string {
+  switch (os) {
+    case 'web': return 'Web till';
+    case 'ios': return 'iOS till';
+    case 'android': return 'Android till';
+    default: return 'Desktop till';
+  }
+}
+
 export type RegisterContextValue = {
   /** The one `useRegisterSession` for the signed-in backend: the sale screen and Job B's count screen share it. */
   register: ReturnType<typeof useRegisterSession>;
@@ -27,6 +38,8 @@ export type RegisterContextValue = {
   registerName: string | null;
   registers: typeof DEFAULT_REGISTERS;
   bind(id: string): Promise<void>;
+  /** Clear this store's binding so the till shows the register picker again. */
+  unbind(): Promise<void>;
   /** The sale screen reports its tender here: counting and closing refuse while a sale is at tender. */
   setTenderInProgress(inProgress: boolean): void;
   /** The app's closes (ADR 0018), kept here so they outlive the cart view that started them (a phone's, #89 review). */
@@ -58,6 +71,7 @@ export function RegisterProvider({ orders, deviceId, children }: { orders: RxCol
   const collections = useMemo(() => orders ? registerCollections(orders) : null, [orders]);
   const registerOutbox = useRegisterOutbox({
     commands: collections && (session?.capabilities?.register ?? 0) >= 1 ? collections.commands : null,
+    sessions: collections?.sessions ?? null,
     transport: () => createHttpCommandTransport({ baseUrl: storeKey, getHeaders: () => authHeaders(tokenRef.current ?? '') }),
     deviceId,
   });
@@ -74,6 +88,7 @@ export function RegisterProvider({ orders, deviceId, children }: { orders: RxCol
   const register = useRegisterSession({
     sessions: collections?.sessions ?? null, movements: collections?.movements ?? null, closures: collections?.closures ?? null,
     commands: collections?.commands ?? null, capabilities: session?.capabilities,
+    deviceName: getDeviceName(),
     orders,
     register: collections?.sessions ?? null,
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
@@ -124,6 +139,9 @@ export function RegisterProvider({ orders, deviceId, children }: { orders: RxCol
     async bind(id) {
       const choice = DEFAULT_REGISTERS.find((entry) => entry.id === id);
       if (collections && choice) await bindRegister(collections.sessions, storeKey, choice);
+    },
+    async unbind() {
+      if (collections) await unbindRegister(collections.sessions, storeKey);
     },
     setTenderInProgress,
     close,

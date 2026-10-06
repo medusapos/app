@@ -5,7 +5,7 @@ import { sessionOpenCommand } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { closeOrderStores, openOrderStore, registerCollections } from '../lib/order-store';
 import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
-import { useRegister } from '../lib/register-context';
+import { getDeviceName, useRegister } from '../lib/register-context';
 import { REGISTER_ID_KEY, saveSession } from '../lib/session';
 import { SessionProvider, useSession } from '../lib/session-context';
 
@@ -90,6 +90,40 @@ it("sends a register.session.open to the store's commands endpoint when the stor
   await waitFor(() => expect(context.registerOutbox.state.pending).toBe(1));
   await act(async () => { answer(); });
   await expectApplied(sent()[0].id);
+});
+
+it('adopts a refused v2 open and unblocks later commands after choosing another register', async () => {
+  fetchImpl.mockImplementationOnce(async (_url, init) => {
+    const batch = JSON.parse(String(init?.body)).commands as RegisterCommandEnvelope[];
+    return new Response(JSON.stringify({ results: batch.map(({ id }) => ({ id, status: 'rejected',
+      error: { code: 'register_session_already_open', message: 'Already open',
+        data: { sessionId: 'other-session', openedBy: 'other@store.test', deviceName: 'Counter till', status: 'open' } },
+    })) }));
+  });
+  await mount({ orderCreate: 3, register: 2 });
+  await act(async () => { await context.bind('register-1'); });
+  await waitFor(() => expect(context.boundRegisterId).toBe('register-1'));
+  await act(async () => { await context.register.actions.openSession({ expectedFloatMinor: null, countedFloatMinor: 10000 }); });
+  await waitFor(() => {
+    expect(context.register.session?.status).toBe('conflict');
+    expect(context.register.conflict).toMatchObject({ sessionId: 'other-session', openedBy: 'other@store.test',
+      deviceName: 'Counter till', takingOver: false });
+  });
+  const sessionId = context.register.session!.id;
+  expect(sent()[0]).toMatchObject({ type: 'register.session.open', version: 2,
+    payload: { sessionId, deviceName: getDeviceName() } });
+  await act(async () => { await context.register.actions.chooseAnotherRegister(); });
+  await waitFor(() => {
+    expect(context.register.session).toBeNull();
+    expect(context.registerOutbox.state.pending).toBe(0);
+  });
+  expect((await registerCollections(outbox.orders!).sessions.findOne(sessionId).exec())?.status).toBe('abandoned');
+  await act(async () => { await context.unbind(); });
+  await waitFor(() => expect(context.boundRegisterId).toBeNull());
+  const freshId = await open();
+  await waitFor(() => expect(sent()).toHaveLength(2));
+  expect(sent()[1]).toMatchObject({ type: 'register.session.open', payload: { sessionId: freshId } });
+  await expectApplied(sent()[1].id);
 });
 
 it('queues and sends nothing for a store without register', async () => {
