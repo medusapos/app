@@ -44,6 +44,7 @@ const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
   variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] };
 const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError('choice_required', 'Choose', choices);
 const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
+  reportNoPosAccess: vi.fn(), signOutNotice: null,
   setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
 const pos = () => screen.findByRole('searchbox');

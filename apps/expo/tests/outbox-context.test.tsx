@@ -10,7 +10,8 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
   ...await importOriginal<typeof import('@tallyui/pos')>(), useOrderOutbox: vi.fn(),
 }));
 const setSavesHold = vi.fn();
-vi.mock('../lib/session-context', () => ({ useSession: () => ({ session: null, setSavesHold }) }));
+const reportNoPosAccess = vi.fn();
+vi.mock('../lib/session-context', () => ({ useSession: () => ({ session: null, setSavesHold, reportNoPosAccess }) }));
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); });
 
@@ -81,5 +82,25 @@ describe('OutboxProvider savesInFlight', () => {
     setSavesHold.mockClear();
     view.unmount();
     expect(setSavesHold.mock.calls).toEqual([[false, false]]);
+  });
+});
+
+describe('OutboxProvider POS access', () => {
+  it('reports a 403 refusal but not other or absent refusals', async () => {
+    let outbox: UseOrderOutboxResult = { orders: null, state: { pending: 0, sending: false }, recent: [],
+      record: vi.fn(), isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), savesInFlight: 0, stuckCommandIds: [] };
+    vi.mocked(useOrderOutbox).mockImplementation(() => outbox);
+    const tree = () => <OutboxProvider>{null}</OutboxProvider>;
+    let view!: ReturnType<typeof render>;
+    await act(async () => { view = render(tree()); });
+    expect(reportNoPosAccess).not.toHaveBeenCalled();
+
+    outbox = { ...outbox, state: { pending: 0, sending: false, refused: { status: 422, reason: 'invalid' } } };
+    await act(async () => { view.rerender(tree()); });
+    expect(reportNoPosAccess).not.toHaveBeenCalled();
+
+    outbox = { ...outbox, state: { pending: 0, sending: false, refused: { status: 403, reason: 'forbidden' } } };
+    await act(async () => { view.rerender(tree()); });
+    expect(reportNoPosAccess).toHaveBeenCalledTimes(1);
   });
 });

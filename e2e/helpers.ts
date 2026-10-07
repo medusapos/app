@@ -45,24 +45,9 @@ export async function resetCspViolations(context: BrowserContext) {
 // the existing specs keep Europe (dk, 25% exclusive). Returns whether the choice screen showed;
 // with `region` null it returns there, without choosing. Then opens the register, unless `register` is false; 'unsynced'
 // opens it without waiting for the store, for a till whose register commands can't reach it (aborted, or no register capability).
-export async function signIn(page: Page, region: string | null = 'Europe', register: boolean | 'unsynced' = true): Promise<boolean> {
-  expect(cspArmedFor, "CSP gate is off: take `test` from './helpers'").toBe(test.info().testId);
-  await watchCsp(page.context());
-  await page.goto('/login');
-  await page.waitForLoadState('networkidle');
-  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
-  await expect(page.getByLabel('Backend URL', { exact: true })).toBeEditable();
-  await expect(async () => {
-    await page.getByLabel('Backend URL', { exact: true }).clear();
-    await page.getByLabel('Backend URL', { exact: true }).fill(backend);
-    await page.getByLabel('Email', { exact: true }).fill(credentials.email);
-    await page.getByLabel('Password', { exact: true }).fill(credentials.password);
-    await expect(page.getByLabel('Backend URL', { exact: true })).toHaveValue(backend, { timeout: 1000 });
-    await expect(page.getByLabel('Email', { exact: true })).toHaveValue(credentials.email, { timeout: 1000 });
-    await expect(page.getByLabel('Password', { exact: true })).toHaveValue(credentials.password, { timeout: 1000 });
-    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled({ timeout: 1000 });
-  }).toPass({ timeout: 20000 });
-  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+// `as` signs in as another user than E2E_EMAIL (e2e/rbac).
+export async function signIn(page: Page, region: string | null = 'Europe', register: boolean | 'unsynced' = true, as = credentials): Promise<boolean> {
+  await submitSignIn(page, as);
   const setUp = page.getByText('Set up this till', { exact: true });
   const hosted = process.env.E2E_BACKEND_URL !== undefined;
   await expect(setUp.or(page.getByText(/Up to date · /))).toBeVisible({ timeout: hosted ? 5 * 60_000 : undefined });
@@ -76,6 +61,27 @@ export async function signIn(page: Page, region: string | null = 'Europe', regis
   }
   if (register) await openRegister(page, undefined, register !== 'unsynced');
   return chose;
+}
+
+// Fills the sign-in form as `as` and submits it, with no wait for what follows.
+export async function submitSignIn(page: Page, as = credentials) {
+  expect(cspArmedFor, "CSP gate is off: take `test` from './helpers'").toBe(test.info().testId);
+  await watchCsp(page.context());
+  await page.goto('/login');
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+  await expect(page.getByLabel('Backend URL', { exact: true })).toBeEditable();
+  await expect(async () => {
+    await page.getByLabel('Backend URL', { exact: true }).clear();
+    await page.getByLabel('Backend URL', { exact: true }).fill(backend);
+    await page.getByLabel('Email', { exact: true }).fill(as.email);
+    await page.getByLabel('Password', { exact: true }).fill(as.password);
+    await expect(page.getByLabel('Backend URL', { exact: true })).toHaveValue(backend, { timeout: 1000 });
+    await expect(page.getByLabel('Email', { exact: true })).toHaveValue(as.email, { timeout: 1000 });
+    await expect(page.getByLabel('Password', { exact: true })).toHaveValue(as.password, { timeout: 1000 });
+    await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeEnabled({ timeout: 1000 });
+  }).toPass({ timeout: 20000 });
+  await page.getByRole('button', { name: 'Sign in', exact: true }).click();
 }
 
 // ADR 0017: paying needs an open register session. Binds this fresh till to Register 1 through the picker and

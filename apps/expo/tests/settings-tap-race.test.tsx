@@ -77,6 +77,7 @@ beforeEach(() => {
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(),
+    reportNoPosAccess: vi.fn(), signOutNotice: null,
     mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],

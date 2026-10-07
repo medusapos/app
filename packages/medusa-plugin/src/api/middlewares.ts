@@ -4,6 +4,7 @@ import type { ConfigModule } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, parseCorsOrigins } from '@medusajs/framework/utils'
 import cors from 'cors'
 import { json } from 'express'
+import { TALLY_POS_USE } from '../policies/tally-pos'
 import { MAX_BODY_BYTES } from './tally/v1/commands/process'
 
 // The commands route skips Medusa's body parsers and parses here, so its over-size answer stays on this
@@ -34,13 +35,19 @@ export default defineMiddlewares({
       bodyParser: false,
       middlewares: [authenticate('user', ['bearer', 'session']), commandsBody],
     },
+    // Policies need a separate entry: sharing one would run the check before authenticate.
+    { matcher: '/tally/v1/commands', methods: ['POST'], policies: [TALLY_POS_USE] },
     { matcher: '/tally/v1/info', middlewares: [tallyCors('GET')] },
     { matcher: '/tally/v1/info', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
+    { matcher: '/tally/v1/info', methods: ['GET'], policies: [TALLY_POS_USE] },
     { matcher: '/tally/v1/registers/:id', middlewares: [tallyCors('GET')] },
     { matcher: '/tally/v1/registers/:id', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
+    { matcher: '/tally/v1/registers/:id', methods: ['GET'], policies: [TALLY_POS_USE] },
     { matcher: '/tally/v1/changes', middlewares: [tallyCors('GET')] },
     { matcher: '/tally/v1/changes', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
+    { matcher: '/tally/v1/changes', methods: ['GET'], policies: [TALLY_POS_USE] },
     { matcher: '/tally/v1/changes/tick', middlewares: [tallyCors('GET')] },
     { matcher: '/tally/v1/changes/tick', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
+    { matcher: '/tally/v1/changes/tick', methods: ['GET'], policies: [TALLY_POS_USE] },
   ],
 })

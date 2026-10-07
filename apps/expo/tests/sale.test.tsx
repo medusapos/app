@@ -87,6 +87,7 @@ beforeEach(() => {
   vi.mocked(fetchStoreSettings).mockReset().mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
+    reportNoPosAccess: vi.fn(), signOutNotice: null,
     setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
   capabilities.mockResolvedValue(undefined);
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());

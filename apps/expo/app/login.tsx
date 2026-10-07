@@ -8,7 +8,7 @@ import { loginErrorMessage } from '../lib/login-errors';
 import { useSession } from '../lib/session-context';
 
 export default function LoginScreen() {
-  const { session, signIn } = useSession();
+  const { session, signIn, signOutNotice } = useSession();
   const [baseUrl, setBaseUrl] = useState(storeConfig.defaultBaseUrl);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -49,7 +49,7 @@ export default function LoginScreen() {
         <TextInput accessibilityLabel="Password" value={password} onChangeText={setPassword}
           secureTextEntry autoCapitalize="none" autoCorrect={false}
           className="rounded-md border border-border px-3 py-2 text-foreground" />
-        {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
+        {error ?? signOutNotice ? <Text className="text-sm text-destructive">{error ?? signOutNotice}</Text> : null}
         <Pressable accessibilityRole="button" disabled={disabled} onPress={submit}
           className={`rounded-md bg-primary px-4 py-3 ${disabled ? 'opacity-50' : ''}`}>
           <Text className="text-center font-semibold text-primary-foreground">Sign in</Text>

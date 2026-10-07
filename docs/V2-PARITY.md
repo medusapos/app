@@ -123,7 +123,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Connect and sign in | Free (FS) | Has | `apps/expo/app/login.tsx` (Medusa admin login); `e2e/demo.spec.ts` "one click on /demo reaches the POS with products" | — |
 | Sign in again without losing sales | Free (FS) | Has | `e2e/strips.spec.ts` "sign-in strip: outbox pauses after three 401s, resumes once signed in again" and "a product pull refused with 401 signs the till out". Shared strip waits on TallyUI#373 (`docs/PLAN.md`, #174 item 4) | TallyUI |
 | Session list and revoke | Free (FS) | N/A | WCPOS lists WordPress sessions. Medusa tokens are stateless JWTs with no session to list or revoke; access ends by removing the user's POS role (at their next sign-in or refresh) or by rotating `jwtSecret` (ADR 0023) | — |
-| Roles and capabilities | Free (PERM) | Partial | Any Medusa admin can sign in; no POS role or capability found in the plugin. Design in ADR 0023 (accepted): Medusa RBAC policies `tally_pos:use` and `tally_pos:approve_variance` | plugin |
+| Roles and capabilities | Free (PERM) | Partial | With Medusa RBAC on, signing in and selling need the plugin's `tally_pos:use` policy. Its `tally-pos-roles` script creates the "POS cashier" and "POS manager" roles, and the till refuses a user without them at sign-in (`e2e/rbac/pos-access.spec.ts`). With RBAC off, any admin can sign in. Left: manager approval through `tally_pos:approve_variance` (ADR 0023, its second PR) | plugin |
 | Switching cashiers | — (WCPOS lacks it too, PERM) | Missing | — | TallyUI |
 | Settings screen | Free (FS) | Partial | Register (till name) and Scanner (`apps/expo/app/settings.tsx`); printer settings wait on TallyUI printing (Receipts and printing row) | app |
 
@@ -145,7 +145,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 3. Order note: waits on TallyUI#520 (`useSale` `setNote`). Then wire `CartNoteInput` (app) and map `order.note` in `tally-order-create` (plugin).
 4. Approval: recorded, not verified; proof design in ADR 0023 (accepted), the second of its two PRs, after a TallyUI ask for register contract 3. A user-exists check is ruled out (front desk, 2026-10-07): it would claim a verification it does not do. The follow-up's shape: the manager authenticates against the store with their own credential (PIN or login, verified server side), the store issues a short-lived single-use approval proof bound to the register session id and the variance amount, the close command carries it, and the plugin verifies it.
 5. Settings screen: register and printer settings (ADR 0016) (app). Till name done (#250); printer settings are TallyUI's.
-6. A POS role or capability for sign-in (plugin). Design in ADR 0023 (accepted), the first of its two PRs.
+6. A POS role or capability for sign-in (plugin). ADR 0023's first PR: the `tally_pos:use` policy, the POS roles script, and the till's 403 handling. Done (#253).
 
 ## Default order
 

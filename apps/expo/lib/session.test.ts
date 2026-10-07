@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
-  clearSession, defaultStorage, isPrivateHost, loadSession, login, LoginError, normalizeBaseUrl,
+  clearSession, defaultStorage, isPrivateHost, loadSession, login, LoginError, NO_POS_ACCESS_MESSAGE, normalizeBaseUrl,
   REFRESH_WINDOW_MS, refreshSession, saveSession, shouldRefresh, tokenExpiresAt,
   type SessionStorage,
 } from './session';
@@ -59,17 +59,59 @@ describe('isPrivateHost', () => {
 });
 
 describe('login', () => {
+  it('rejects an info 403 with no_pos_access and never reads the profile', async () => {
+    const fetchImpl = response({}, 403)
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })));
+    const result = login(session.baseUrl, session.email, 'secret', fetchImpl);
+    await expect(result).rejects.toBeInstanceOf(LoginError);
+    await expect(result).rejects.toMatchObject({ code: 'no_pos_access', message: NO_POS_ACCESS_MESSAGE });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenNthCalledWith(3, `${session.baseUrl}/tally/v1/info`, {
+      method: 'GET', headers: { Authorization: 'Bearer jwt' },
+    });
+    expect(fetchImpl.mock.calls.flat()).not.toContain(`${session.baseUrl}/admin/users/me`);
+  });
+  it('keeps the session and profile after an info 200', async () => {
+    const fetchImpl = response({ user: { first_name: 'Alex' } })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
+      .mockResolvedValueOnce(infoNotFound())
+      .mockResolvedValueOnce(new Response('{}'));
+    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual({ ...signedIn, name: 'Alex' });
+  });
+  it('still signs in after the info probe rejects with a network error', async () => {
+    const fetchImpl = response({ user: { first_name: 'Alex' } })
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
+      .mockResolvedValueOnce(infoNotFound())
+      .mockRejectedValueOnce(new TypeError('offline'));
+    await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual({ ...signedIn, name: 'Alex' });
+  });
+  it('still reads the profile after the info probe times out at three seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetchImpl = response({ user: { first_name: 'Alex' } })
+        .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
+        .mockResolvedValueOnce(infoNotFound())
+        .mockImplementationOnce(() => new Promise<Response>(() => {}));
+      const result = login(session.baseUrl, session.email, 'secret', fetchImpl);
+      await vi.advanceTimersByTimeAsync(2999);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(result).resolves.toEqual({ ...signedIn, name: 'Alex' });
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
+    } finally { vi.useRealTimers(); }
+  });
   it('signs in without a name after a user request hangs for three seconds', async () => {
     vi.useFakeTimers();
     try {
       const fetchImpl = response({ token: 'jwt' })
         .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
         .mockResolvedValueOnce(infoNotFound())
+        .mockResolvedValueOnce(infoNotFound())
         .mockImplementationOnce(() => new Promise<Response>(() => {}));
       const resolved = vi.fn();
       const result = login(session.baseUrl, session.email, 'secret', fetchImpl).then(resolved);
       await vi.advanceTimersByTimeAsync(2999);
-      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(fetchImpl).toHaveBeenCalledTimes(4);
       expect(resolved).not.toHaveBeenCalled();
       await vi.advanceTimersByTimeAsync(1);
       expect(resolved).toHaveBeenCalledWith(signedIn);
@@ -79,11 +121,12 @@ describe('login', () => {
   it('reads the signed-in user name and preserves it in session storage', async () => {
     const fetchImpl = response({ user: { first_name: ' Alex', last_name: 'Shopkeeper ' } })
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
+      .mockResolvedValueOnce(infoNotFound())
       .mockResolvedValueOnce(infoNotFound());
     const result = await login(session.baseUrl, session.email, 'secret', fetchImpl);
     expect(result).toEqual({ ...signedIn, name: 'Alex Shopkeeper' });
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
-    expect(fetchImpl).toHaveBeenNthCalledWith(3, `${session.baseUrl}/admin/users/me`, {
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenNthCalledWith(4, `${session.baseUrl}/admin/users/me`, {
       method: 'GET', headers: { Authorization: 'Bearer jwt' },
     });
     const storage = memoryStorage();
@@ -97,18 +140,20 @@ describe('login', () => {
   ])('still signs in without a name when the user read fails or has no name: %s', async (result) => {
     const fetchImpl = response({ token: 'jwt' });
     fetchImpl.mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' }))).mockResolvedValueOnce(infoNotFound());
+    fetchImpl.mockResolvedValueOnce(infoNotFound());
     if (result instanceof Error) fetchImpl.mockRejectedValueOnce(result);
     else fetchImpl.mockResolvedValueOnce(result);
     await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual(signedIn);
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
   it('still signs in and reads the name when the info endpoint returns 404', async () => {
     const fetchImpl = vi.fn<() => Promise<Response>>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' })))
       .mockResolvedValueOnce(infoNotFound())
+      .mockResolvedValueOnce(infoNotFound())
       .mockResolvedValueOnce(new Response(JSON.stringify({ user: { first_name: 'Alex' } })));
     await expect(login(session.baseUrl, session.email, 'secret', fetchImpl)).resolves.toEqual({ ...signedIn, name: 'Alex' });
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
     expect(fetchImpl).toHaveBeenNthCalledWith(2, `${session.baseUrl}/tally/v1/info`, {
       method: 'GET', headers: { Authorization: 'Bearer jwt' },
     });
@@ -120,6 +165,7 @@ describe('login', () => {
   ])('stores the capabilities the sign-in read: %s', async (info, capabilities) => {
     const fetchImpl = vi.fn<() => Promise<Response>>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' }))).mockResolvedValueOnce(info)
+      .mockResolvedValueOnce(new Response('{}'))
       .mockResolvedValueOnce(new Response('{}'));
     const result = await login(session.baseUrl, session.email, 'secret', fetchImpl);
     expect(result.capabilities).toEqual(capabilities);

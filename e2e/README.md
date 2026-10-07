@@ -197,6 +197,14 @@ reuses an already-running server; stop it yourself before repeating the full
 suite, since the short-sale scenario requires E2E-5 to start at 2. Traces are saved on first retry;
 results and temporary build/pack artifacts are ignored by Git.
 
+## With Medusa RBAC on
+
+`pnpm e2e:rbac` runs `e2e/rbac` against the same throwaway store with RBAC on (ADR 0023): `start.sh` with
+`E2E_RBAC=1` sets `MEDUSA_FF_RBAC=true` (the dev store's `medusa-config.ts` then adds the RBAC module), runs
+the packed plugin's `tally-pos-roles` script, and `seed-e2e-rbac.ts` adds `pos-cashier@tally.test`
+("POS cashier" only) and `no-pos@tally.test` (no roles), both with `e2e-password`. `e2e@tally.test` is
+super admin. It uses the same ports and database as `pnpm e2e`, so run the two one after the other.
+
 ## Against a hosted app and backend
 
 Set `E2E_APP_URL` and `E2E_BACKEND_URL` (both, or the config refuses to load),

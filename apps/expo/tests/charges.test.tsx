@@ -42,6 +42,7 @@ beforeEach(async () => {
     capabilities: { orderCreate: 5, taxRounding: { granularity: 'per_order' as const, mode: 'half_away_from_zero' as const },
       lineTax: { none: false, classes: false } } };
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(),
+    reportNoPosAccess: vi.fn(), signOutNotice: null,
     mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
   capabilities.mockResolvedValue(session.capabilities);
   // Inclusive prices make a €2.00 charge increase the payable total by €2.00.

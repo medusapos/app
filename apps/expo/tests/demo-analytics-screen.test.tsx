@@ -26,6 +26,7 @@ beforeEach(() => {
   signIn.mockReset().mockResolvedValue(undefined);
   vi.mocked(useSession).mockReturnValue({
     session: null, signIn, signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
+    reportNoPosAccess: vi.fn(), signOutNotice: null,
     setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false,
   });
   fetchMock.mockReset().mockImplementation((input, init) => input === DEMO_CAPTURE_URL
