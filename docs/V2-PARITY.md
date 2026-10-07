@@ -41,7 +41,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Fees, shipping, custom lines | Free (FS) | Has | `order.create` v5 (`docs/adr/0021`); `e2e/charges.spec.ts` "a sale with a fee, shipping and a custom item reaches Medusa once at the till's total, with the shipping as a shipping method" | — |
 | Park and resume a sale | Free (RS) | Has | TallyUI `ParkedSales`; `e2e/parked-sales.spec.ts` "park a sale, sell another, resume the first and complete it: both orders reach Medusa once at the till's figures" | — |
 | Several open orders as tabs | 2.0 (FS, RS) | Missing | Parking only | TallyUI |
-| Order note | 2.0 (FS, RS) | Missing | TallyUI 3.8.0 ships `CartNoteInput` and an order `note` field; the app does not use them. Whether the note reaches Medusa through `order.create` was not checked | app, then plugin |
+| Order note | 2.0 (FS, RS) | Missing | TallyUI 3.8.0 ships `CartNoteInput` and an order `note` field; the app does not use them: `useSale` has no `setNote` yet (TallyUI#520). The plugin drops the note too: `tally-order-create/plan.ts` maps only `registerId` and `cashierRef` into the order metadata | TallyUI, then app and plugin |
 | Wide and phone layouts | Free (RS) | Has | Phone below 600 wide (`docs/adr/0009`); `e2e/phone-cart.spec.ts` "at 360 × 740 the lines scroll under pinned totals and pay, and the cart bar counts items" | — |
 | Prevent overselling | Free (FS) | Partial | The till never refuses a sale; the plugin applies it and returns `insufficient_stock` (`docs/adr/0003`, `workflows/tally-order-create/stock.ts`). Nothing warns the cashier before checkout | TallyUI, then app |
 
@@ -101,7 +101,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | A close whose closure write failed | 2.0 (RG) | Has | `e2e/register.spec.ts` "a close whose closure write failed shows TallyUI's Finish closing card, which completes it with the stored count" | — |
 | Take-over by another till | 2.0 (RG) | Has | PR #243 (TallyUI 3.8.0) and PR #245; `e2e/register.spec.ts` "Register 1 open on another till: the conflict card names it, Take over, then a cash sale reaches Medusa" | — |
 | Superseded refusal on the losing till; resume after lost local state | 2.0 (RG) | Has | `e2e/register.spec.ts` "Register 1 taken over by another till: this till's paid in is refused superseded, and it shows the register closed" and "a till that lost its local state opens Register 1 again and resumes its store session, then a cash sale reaches Medusa". TallyUI 3.8.0 has no superseded view of its own: the till shows the open card and the pill reads "Register closed" | — |
-| Approval of an over-variance close | 2.0 (RG) | Partial | The app checks a second admin login (`apps/expo/lib/approval.ts`); `e2e/register.spec.ts` "over the threshold: the approval dialog, its offline refusal, then a manager login approves the close". The plugin stores `approvedBy` as given and does not check it | plugin |
+| Approval of an over-variance close | 2.0 (RG) | Partial | The app checks a second admin login (`apps/expo/lib/approval.ts`); `e2e/register.spec.ts` "over the threshold: the approval dialog, its offline refusal, then a manager login approves the close". The plugin stores `approvedBy` as recorded data: recorded, not verified; proof design in ADR 0018 follow-up | plugin |
 | Reports: today's sales on this register, closure history, X-report, reprint | 2.0 / Pro, still moving (RC, CMP) | Missing | TallyUI 3.8.0 `pos` has `export-csv.ts` and `closure-document.ts`; no reports screen in `apps/expo`. `GET /tally/v1/registers/:id` serves the open session, not a closure history | TallyUI + plugin |
 
 ## Offline and sync
@@ -137,9 +137,9 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 ## App-local gaps
 
 1. Register v2 e2e against plugin 0.2.2: the losing till's `register_session_superseded` refusal for a session opened at contract 2, and resume after lost local state (take-over itself is covered by `e2e/register.spec.ts`). Done (#247).
-2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app). Done (this PR).
-3. Order note: wire `CartNoteInput`, then check the note reaches the Medusa order (app, then plugin).
-4. Approval: the plugin checks `approvedBy` names a real admin (plugin).
+2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app). Done (#248).
+3. Order note: waits on TallyUI#520 (`useSale` `setNote`). Then wire `CartNoteInput` (app) and map `order.note` in `tally-order-create` (plugin).
+4. Approval: recorded, not verified; proof design in ADR 0018 follow-up. A user-exists check is ruled out (front desk, 2026-10-07): it would claim a verification it does not do. The follow-up's shape: the manager authenticates against the store with their own credential (PIN or login, verified server side), the store issues a short-lived single-use approval proof bound to the register session id and the variance amount, the close command carries it, and the plugin verifies it.
 5. Settings screen: register and printer settings (ADR 0016) (app).
 6. A POS role or capability for sign-in (plugin).
 
