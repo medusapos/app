@@ -48,7 +48,7 @@ From the 2026-10-06 walkthrough (`~/agent/handoff/medusapos-demo-walkthrough-202
 | A 14.7 s first sync, with "No products yet." for 5 s | measured (`~/agent/handoff/medusapos-sync-perf-2026-10-06.md`): the app's share is about 30 ms, 68% is demo-server time and 21% sequential price calls. The fixes are TallyUI connector-medusa work plus demo sizing (front desk); "No products yet." is TallyUI's `Catalogue` (Milestone 3) |
 | Settings has two back controls | merged #189 (d33e6d2) |
 | "Send feedback" leaves the app in the same tab | merged #188 (b67e0c5) |
-| The first tile is out of stock after other visitors' sales | the nightly reset covers it; consider resetting more often than nightly |
+| The first tile is out of stock after other visitors' sales | `seed-demo-presentation` keeps the first 48 products by title (the grid's order, `E2E-` fixtures left out) at 25 available or more, and the nightly reset restores that. Live once the front desk reruns the seed and re-snapshots the golden |
 
 ## Milestone 3: what a demo visitor sees (TallyUI's share, reported to the front desk)
 
