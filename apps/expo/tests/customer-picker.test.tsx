@@ -57,6 +57,7 @@ beforeEach(async () => {
   const session = { baseUrl: `https://customers-${crypto.randomUUID()}.test`, email: 'admin@store.test', token: 'jwt',
     capabilities: { orderCreate: 4, taxRounding: { granularity: 'per_order' as const, mode: 'half_away_from_zero' as const } } };
   vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: unauthorized,
+    reportNoPosAccess: vi.fn(), signOutNotice: null,
     mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
   capabilities.mockResolvedValue(session.capabilities);
   storeSettings.mockResolvedValue({ currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 },
