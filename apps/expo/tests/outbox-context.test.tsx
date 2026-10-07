@@ -90,7 +90,7 @@ describe('OutboxProvider POS access', () => {
     let outbox: UseOrderOutboxResult = { orders: null, state: { pending: 0, sending: false }, recent: [],
       record: vi.fn(), isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), savesInFlight: 0, stuckCommandIds: [] };
     vi.mocked(useOrderOutbox).mockImplementation(() => outbox);
-    const tree = () => <OutboxProvider />;
+    const tree = () => <OutboxProvider>{null}</OutboxProvider>;
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(tree()); });
     expect(reportNoPosAccess).not.toHaveBeenCalled();
