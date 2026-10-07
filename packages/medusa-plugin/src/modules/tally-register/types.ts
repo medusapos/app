@@ -1,5 +1,10 @@
 export type RegisterSessionStatus = 'open' | 'counting' | 'closed' | 'superseded'
 
+export type AdmitApprovalResult =
+  | { kind: 'admitted'; id: string }
+  | { kind: 'refused'; code: 'approval_session_unknown' | 'approval_session_closed' | 'approval_rate_limited' }
+export type IssueApprovalResult = { expiresAt: string }
+
 /** A register command's server figures (registers c2b applies them). */
 export interface RegisterCommandResult {
   resumed?: { fromSessionId: string };

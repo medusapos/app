@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import type { EntityManager } from '@medusajs/framework/mikro-orm/postgresql'
 import type { Context } from '@medusajs/framework/types'
 import { InjectManager, MedusaContext, MedusaService } from '@medusajs/framework/utils'
@@ -6,11 +7,21 @@ import { TallyRegisterSession } from './models/tally-register-session'
 import { TallyRegisterSessionAlias } from './models/tally-register-session-alias'
 import { TallyRegisterMovement } from './models/tally-register-movement'
 import { TallyRegisterClosure } from './models/tally-register-closure'
+import { TallyRegisterApproval } from './models/tally-register-approval'
 import type {
   RegisterCommandResult, RegisterCounters, RegisterOutcome, RegisterSessionOpenInput,
   RegisterSessionTransitionInput, RegisterMovementRecordInput, RegisterMovementVoidInput,
-  RegisterClosureSubmitInput, RegisterSessionStatus,
+  RegisterClosureSubmitInput, RegisterSessionStatus, AdmitApprovalResult, IssueApprovalResult,
 } from './types'
+
+// A proof lives for 15 minutes (ADR 0023).
+export const APPROVAL_TTL_MS = 15 * 60 * 1000
+// Failed and pending approvals count for 15 minutes.
+export const APPROVAL_FAILURE_WINDOW_MS = 15 * 60 * 1000
+// A requesting cashier may fail five checks per window.
+export const MAX_APPROVAL_FAILURES_PER_ACTOR = 5
+// A target email may receive ten failed checks per window.
+export const MAX_APPROVAL_FAILURES_PER_EMAIL = 10
 
 const COUNTERS = `json_build_object('lastClosureNumber', r.last_closure_number,
   'perpetualSalesTotalMinor', r.perpetual_sales_total_minor,
@@ -21,7 +32,46 @@ const SESSION_STATE = `select json_build_object('id', s.id, 'status', s.status) 
 
 export default class TallyRegisterModuleService extends MedusaService({
   TallyRegister, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterMovement, TallyRegisterClosure,
+  TallyRegisterApproval,
 }) {
+  @InjectManager()
+  async admitApproval(p: { sessionId: string; variance: Record<string, number>; requestedBy: string; email: string },
+    @MedusaContext() sharedContext: Context = {}): Promise<AdmitApprovalResult> {
+    return (sharedContext.manager as EntityManager).transactional(async (em): Promise<AdmitApprovalResult> => {
+      const session = await this.lockSession(p.sessionId, em)
+      if (!session) return { kind: 'refused', code: 'approval_session_unknown' }
+      if (session.status === 'superseded' || (await em.execute(
+        'select id from tally_register_closure where session_id = ?', [session.id])).length)
+        return { kind: 'refused', code: 'approval_session_closed' }
+      const email = p.email.trim().toLowerCase()
+      await em.execute('select pg_advisory_xact_lock(hashtextextended(?, 0))', [`tally_approval_actor:${p.requestedBy}`])
+      await em.execute('select pg_advisory_xact_lock(hashtextextended(?, 0))', [`tally_approval_email:${email}`])
+      const [actor] = await em.execute(`select count(*) as count from tally_register_approval
+        where requested_by = ? and token_hash is null and created_at > now() - (? * interval '1 millisecond')`,
+      [p.requestedBy, APPROVAL_FAILURE_WINDOW_MS])
+      const [target] = await em.execute(`select count(*) as count from tally_register_approval
+        where target_email = ? and token_hash is null and created_at > now() - (? * interval '1 millisecond')`,
+      [email, APPROVAL_FAILURE_WINDOW_MS])
+      if (Number(actor.count) >= MAX_APPROVAL_FAILURES_PER_ACTOR || Number(target.count) >= MAX_APPROVAL_FAILURES_PER_EMAIL)
+        return { kind: 'refused', code: 'approval_rate_limited' }
+      const id = `apv_${randomUUID()}`
+      await em.execute(`insert into tally_register_approval (id, session_id, variance, requested_by, target_email)
+        values (?, ?, ?::jsonb, ?, ?)`, [id, session.id, JSON.stringify(p.variance), p.requestedBy, email])
+      return { kind: 'admitted', id }
+    })
+  }
+
+  @InjectManager()
+  async issueApproval(id: string, p: { tokenHash: string; approvedBy: string; approvedByName: string },
+    @MedusaContext() sharedContext: Context = {}): Promise<IssueApprovalResult> {
+    return (sharedContext.manager as EntityManager).transactional(async em => {
+      const [row] = await em.execute(`update tally_register_approval set token_hash = ?, approved_by = ?, approved_by_name = ?,
+        expires_at = now() + (? * interval '1 millisecond'), updated_at = now() where id = ? returning expires_at`,
+      [p.tokenHash, p.approvedBy, p.approvedByName, APPROVAL_TTL_MS, id])
+      return { expiresAt: new Date(row.expires_at).toISOString() }
+    })
+  }
+
   @InjectManager()
   async openSession(p: RegisterSessionOpenInput, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {

@@ -10,6 +10,7 @@ export const TallyRegisterClosure = model.define('tally_register_closure', {
   closed_at: model.text(),
   closed_by: model.text().nullable(),
   approved_by: model.text().nullable(),
+  approval_id: model.text().nullable(),
   till_expected: model.json(),
   counted: model.json(),
   expected: model.json().nullable(),
