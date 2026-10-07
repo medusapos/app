@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, test } from './helpers';
 
 // Registers, part A (ADR 0017): a fresh till binds Register 1, opens it with a float of 100.00, takes a cash sale
 // the register counts, records a paid in and undoes it. Part B (ADR 0018): Close register counts the drawer with
@@ -258,5 +258,83 @@ test('Register 1 open on another till: the conflict card names it, Take over, th
     expect(orders[0].total).toBe(total);
   } finally {
     await setInventoryLevel(token, level.inventoryItemId, level.locationId, level.stockedQuantity);
+  }
+});
+
+// ADR-078, the losing side: another till takes over Register 1 from this one. This till's next register command, a paid in
+// sent at contract 1, is refused register_session_superseded, since this till opened its session at contract 2 (#245).
+test('Register 1 taken over by another till: this till\'s paid in is refused superseded, and it shows the register closed', async ({ page }) => {
+  const opens = captureCommands<{ sessionId: string }>(page, 'register.session.open');
+  const movements = captureCommands<{ sessionId: string }>(page, 'register.movement.record');
+  await signIn(page);
+  const sessionId = opens[0].payload.sessionId;
+  const counterSessionId = await openStoreRegister('Counter till', 'register-1', sessionId);
+  await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+  await page.getByTestId('register-panel').getByTestId('register-panel-paid-in').click();
+  const sheet = page.getByTestId('movement-sheet');
+  await sheet.getByTestId('movement-amount').fill('5.00');
+  await sheet.getByTestId('movement-reason').fill('Change for the float');
+  await sheet.getByTestId('movement-confirm').click();
+  await expect.poll(() => movements.map(({ status, code }) => [status, code])).toEqual([['rejected', 'register_session_superseded']]);
+  expect(movements[0].payload.sessionId).toBe(sessionId);
+  // TallyUI 3.8.0 has no superseded view: useRegisterSession's current session skips a superseded one, so RegisterColumn
+  // shows OpenRegisterCard as for a closed register, and the bar's pill reads "Register closed".
+  await expect(page.getByTestId('open-register-card')).toBeVisible();
+  await expect(page.getByTestId('register-bar-pill')).toHaveText('Register closed');
+  await addE2E1(page);
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await expect(page.getByRole('alert')).toHaveText('Open the register to take payment.');
+  await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toHaveCount(0);
+  await shot(page, 'superseded');
+  // The store's register is the Counter till's session, still at its float: the paid in counted nowhere.
+  expect((await storeRegister()).session).toMatchObject({ id: counterSessionId, status: 'open', expected: { cash: 10000 } });
+});
+
+// ADR-078 decision 3: a till that lost its local state opens Register 1 again under a new session id, and the store resumes
+// its live session, because the open carries the same deviceId. TallyUI keeps that id in localStorage (getDeviceId,
+// `medusapos.register_id`) and the register in the SQLite database, so a new browser context given only that key is
+// this till with its database lost. Clearing the whole origin would mint a new device id: another till, not a resume.
+test('a till that lost its local state opens Register 1 again and resumes its store session, then a cash sale reaches Medusa', async ({ page, browser, baseURL }) => {
+  const token = await adminToken();
+  const opens = captureCommands<{ sessionId: string }>(page, 'register.session.open');
+  await signIn(page);
+  const storeSessionId = opens[0].payload.sessionId;
+  const deviceId = await page.evaluate(() => localStorage.getItem('medusapos.register_id'));
+  expect(deviceId).toBeTruthy();
+  await page.close();
+  const context = await browser.newContext({ baseURL, storageState: { cookies: [],
+    origins: [{ origin: new URL(baseURL!).origin, localStorage: [{ name: 'medusapos.register_id', value: deviceId! }] }] } });
+  try {
+    const till = await context.newPage();
+    const reopens = captureCommands<{ sessionId: string }>(till, 'register.session.open');
+    const sales = captureCommands<{ sessionId: string; clientOrderId: string }>(till);
+    // Not signIn's openRegister, which closes the store's session first.
+    await signIn(till, 'Europe', false);
+    await till.getByTestId('register-picker-row-register-1').click();
+    await till.getByTestId('open-register-amount').fill('100.00');
+    await till.getByTestId('open-register-button').click();
+    await expect.poll(() => reopens.map(({ status }) => status)).toEqual(['applied']);
+    expect(reopens[0].payload.sessionId).not.toBe(storeSessionId);
+    await expect(till.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+    await expect(till.getByTestId('register-conflict-card')).toHaveCount(0);
+    await expect(till.getByTestId('open-register-card')).toHaveCount(0);
+    expect((await storeRegister()).session).toMatchObject({ id: storeSessionId, status: 'open', salesCount: 0 });
+    // The suite shares E2E-1 stock, so give back this sale's unit.
+    const level = await inventoryLevel(token, 'E2E-1');
+    try {
+      const total = await sellBySku(till, ['E2E-1'], 'exact');
+      await expect.poll(() => sales.map(({ status }) => status)).toEqual(['applied']);
+      expect(sales[0].payload.sessionId).toBe(reopens[0].payload.sessionId);
+      const orders = (await ordersByClientId(token)).filter(order => order.metadata.tally_client_id === sales[0].payload.clientOrderId);
+      expect(orders).toHaveLength(1);
+      expect(orders[0].total).toBe(total);
+      // The sale, sent under the new local id, counts on the resumed store session through its alias.
+      expect((await storeRegister()).session).toMatchObject({ id: storeSessionId, status: 'open', salesCount: 1 });
+      await shot(till, 'resumed');
+    } finally {
+      await setInventoryLevel(token, level.inventoryItemId, level.locationId, level.stockedQuantity);
+    }
+  } finally {
+    await context.close();
   }
 });
