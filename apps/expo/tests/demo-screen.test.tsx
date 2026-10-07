@@ -37,6 +37,12 @@ afterEach(() => {
 });
 
 describe('Demo card', () => {
+  it('the entry buttons carry demo-enter-cashier and demo-enter-manager testIDs', () => {
+    render(<SessionProvider><DemoScreen /></SessionProvider>);
+    expect(screen.getByTestId('demo-enter-cashier').textContent).toBe('Enter the demo');
+    expect(screen.getByTestId('demo-enter-manager').textContent).toBe('Enter as manager');
+  });
+
   it.each([true, false])('sends demo_opened only with analytics enabled (%s)', (analytics) => {
     storeConfig.analytics = analytics;
     const fetchMock = vi.fn<typeof fetch>((input, init) => input === DEMO_CAPTURE_URL
@@ -65,9 +71,9 @@ describe('Demo card', () => {
   it('About MedusaPOS and Quick start open in a new tab and leave the demo page', () => {
     render(<SessionProvider><DemoScreen /></SessionProvider>);
     fireEvent.click(screen.getByRole('link', { name: 'About MedusaPOS' }));
-    fireEvent.click(screen.getByRole('link', { name: 'Quick start' }));
+    fireEvent.click(screen.getByTestId('demo-quick-start'));
     expect(window.open).toHaveBeenNthCalledWith(1, 'https://medusapos.com', '_blank', 'noopener,noreferrer');
-    expect(window.open).toHaveBeenNthCalledWith(2, 'https://github.com/medusapos/app/blob/main/docs/QUICKSTART.md', '_blank', 'noopener,noreferrer');
+    expect(window.open).toHaveBeenNthCalledWith(2, 'https://medusapos.com/docs/quick-start', '_blank', 'noopener,noreferrer');
     expect(window.open).toHaveBeenCalledTimes(2);
     expect(router.push).not.toHaveBeenCalled();
     expect(router.replace).not.toHaveBeenCalled();

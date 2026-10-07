@@ -4,8 +4,8 @@ import { storeConfig } from './config';
 // Ordinary Medusa admin users on the demo backend, public on purpose;
 // the manager is the second login that approves a register close (ADR 0018).
 export const DEMO_ACCOUNTS = [
-  { label: 'Enter the demo', email: 'cashier@demo.medusapos.com', password: 'demo1234' },
-  { label: 'Enter as manager', email: 'manager@demo.medusapos.com', password: 'demo1234' },
+  { label: 'Enter the demo', email: 'cashier@demo.medusapos.com', password: 'demo1234', testID: 'demo-enter-cashier' },
+  { label: 'Enter as manager', email: 'manager@demo.medusapos.com', password: 'demo1234', testID: 'demo-enter-manager' },
 ] as const;
 
 // The region the demo till is set up in.
@@ -22,7 +22,8 @@ export const DEMO_WHAT_TO_TRY = [
   'Close the register with a cash count',
 ] as const;
 export const DEMO_ABOUT_URL = 'https://medusapos.com';
-export const DEMO_QUICK_START_URL = 'https://github.com/medusapos/app/blob/main/docs/QUICKSTART.md';
+export const DEMO_QUICK_START_URL = 'https://medusapos.com/docs/quick-start';
+export const DEMO_REPO_URL = 'https://github.com/medusapos/app';
 
 export function isDemoAccount(email: string, demo = storeConfig.demo): boolean {
   return demo && DEMO_ACCOUNTS.some((account) => account.email === email.trim().toLowerCase());

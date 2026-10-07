@@ -274,11 +274,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
   });
   const sellableCount = sorted.length;
-  // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the connector name and
+  // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
   const productCount = `${sellableCount.toLocaleString()} ${sellableCount === 1 ? 'product' : 'products'}`;
   const statusText = phone ? `${STATE_LABEL[state]}${error ? ` · ${error}` : ''} · ${productCount}`
-    : `${connector.name} · ${STATE_LABEL[state]} · ${productCount}`
+    : `${settings.storeName.trim() ? settings.storeName : connector.name} · ${STATE_LABEL[state]} · ${productCount}`
       + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
       + (error ? ` · ${error}` : '');
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.

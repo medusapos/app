@@ -47,7 +47,7 @@ export default function DemoScreen() {
         <Text accessibilityRole="header" aria-level={1} className="text-xl font-semibold text-foreground">Medusa POS demo store</Text>
         <Text className="text-foreground">This is a public demo store, data resets nightly.</Text>
         {DEMO_ACCOUNTS.map((account, index) => <View key={account.email} className="gap-2">
-          <Pressable accessibilityRole="button" disabled={signingIn !== null} onPress={() => submit(account.email, account.password)}
+          <Pressable accessibilityRole="button" testID={account.testID} disabled={signingIn !== null} onPress={() => submit(account.email, account.password)}
             className={`w-full min-h-11 rounded-md px-4 py-3 ${index === 0 ? 'bg-primary' : 'border border-border bg-card'} ${signingIn !== null ? 'opacity-50' : ''}`}>
             <Text className={`text-center font-semibold ${index === 0 ? 'text-primary-foreground' : 'text-foreground'}`}>
               {signingIn === account.email ? 'Entering…' : account.label}
@@ -64,7 +64,7 @@ export default function DemoScreen() {
           <Pressable accessibilityRole="link" onPress={() => openDemoUrl(DEMO_ABOUT_URL)} className="min-h-11 justify-center">
             <Text className="text-sm text-foreground">About MedusaPOS</Text>
           </Pressable>
-          <Pressable accessibilityRole="link" onPress={() => openDemoUrl(DEMO_QUICK_START_URL)} className="min-h-11 justify-center">
+          <Pressable accessibilityRole="link" testID="demo-quick-start" onPress={() => openDemoUrl(DEMO_QUICK_START_URL)} className="min-h-11 justify-center">
             <Text className="text-sm text-foreground">Quick start</Text>
           </Pressable>
         </View>

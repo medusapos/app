@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { test } from './helpers';
+import { openRegister, signIn, test } from './helpers';
 
 const products = /Up to date · \d[\d,.  ]* products/;
 const timeout = process.env.E2E_BACKEND_URL !== undefined ? 5 * 60_000 : undefined;
@@ -9,29 +9,103 @@ test('one click on /demo reaches the POS with products', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('pageerror', (error) => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    (window as any).__opened = [];
+    window.open = (u?: string | URL) => { (window as any).__opened.push(String(u)); return null; };
+  });
   await page.goto('/demo');
   await expect(page.getByRole('heading', { name: 'Medusa POS demo store', exact: true })).toBeVisible();
   await expect(page.getByText('cashier@demo.medusapos.com · demo1234', { exact: true })).toBeVisible();
   await expect(page.getByText('manager@demo.medusapos.com · demo1234', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Enter the demo', exact: true }).click();
+  await page.getByTestId('demo-enter-cashier').click();
   await expect(page.getByText(products)).toBeVisible({ timeout });
   await expect(page.getByText('Set up this till', { exact: true })).not.toBeVisible();
+  await expect(page.getByTestId('demo-banner')).toBeVisible();
+  await page.getByTestId('demo-banner-site').click();
+  await page.getByTestId('demo-banner-quick-start').click();
+  await page.getByTestId('demo-banner-github').click();
+  expect(await page.evaluate(() => (window as any).__opened)).toEqual([
+    'https://medusapos.com',
+    'https://medusapos.com/docs/quick-start',
+    'https://github.com/medusapos/app',
+  ]);
+  await page.getByTestId('demo-banner-dismiss').click();
+  await expect(page.getByTestId('demo-banner')).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
+});
+
+test('signed-out demo Quick start opens the docs and keeps What to try visible', async ({ page }) => {
+  await page.addInitScript(() => {
+    (window as any).__opened = [];
+    window.open = (u?: string | URL) => { (window as any).__opened.push(String(u)); return null; };
+  });
+  await page.goto('/demo');
+  await page.getByTestId('demo-quick-start').click();
+  expect(await page.evaluate(() => (window as any).__opened)).toEqual(['https://medusapos.com/docs/quick-start']);
+  for (const item of [
+    'Ring up a sale and take cash or card',
+    'Split a payment: part card, the rest cash (Split payment at checkout)',
+    'Attach a customer to a sale: search one, or add a new one',
+    'Park a sale, then resume it from Parked sales',
+    "Change a line's price in the cart",
+    'Add a fee, shipping or a custom item to a sale (Add charge in the cart)',
+    'Close the register with a cash count',
+  ]) await expect(page.getByText(`• ${item}`, { exact: true })).toBeVisible();
+});
+
+test('signed in as the demo cashier, each What to try action has its control', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByTestId('demo-enter-cashier').click();
+  await expect(page.getByText(products)).toBeVisible({ timeout });
+  await openRegister(page);
+  await expect(page.getByTestId(/^product-tile-/).first()).toBeVisible();
+  await page.getByTestId(/^product-tile-/).first().click();
+  await expect(page.getByTestId('cart-footer')).toBeVisible();
+  await expect(page.getByTestId('register-bar-open-panel')).toBeVisible();
+  await page.getByTestId('register-bar-open-panel').click();
+  await expect(page.getByTestId('register-panel-close')).toBeVisible();
+  await page.getByTestId('register-panel-dismiss').click();
+  await page.getByRole('button', { name: /^Customer: /, exact: true }).click();
+  await expect(page.getByTestId('customer-dialog')).toBeVisible();
+  await expect(page.getByTestId('customer-dialog').getByLabel('Search customers', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('customer-dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add charge', exact: true }).click();
+  await expect(page.getByTestId('charge-form')).toBeVisible();
+  await page.getByText('Price', { exact: true }).click();
+  await expect(page.getByTestId('price-form')).toBeVisible();
+  await expect(page.getByTestId('price-apply')).toBeVisible();
+  await page.getByTestId('price-cancel').click();
+  await expect(page.getByTestId('price-form')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
+  await expect(page.getByTestId('parked-sales-park')).toBeVisible();
+  await page.getByTestId('parked-sales-dismiss').click();
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByRole('button', { name: 'Split payment', exact: true }).click();
+  await expect(page.getByTestId('split-tender-method-card')).toBeVisible();
+  await expect(page.getByTestId('split-tender-method-cash')).toBeVisible();
+  await expect(page.getByTestId('split-tender-add-button')).toBeVisible();
+});
+
+test('a non-demo account does not see the demo banner', async ({ page }) => {
+  await signIn(page);
+  await expect(page.getByTestId('demo-banner')).toHaveCount(0);
 });
 
 test('demo page works at phone width', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/demo');
-  for (const name of ['Enter the demo', 'Enter as manager']) {
-    const button = page.getByRole('button', { name, exact: true });
+  for (const [testID, label] of [['demo-enter-cashier', 'Enter the demo'], ['demo-enter-manager', 'Enter as manager']]) {
+    const button = page.getByTestId(testID);
     await expect(button).toBeVisible();
+    await expect(button).toHaveText(label);
     const box = await button.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   }
-  await page.getByRole('button', { name: 'Enter as manager', exact: true }).click();
+  await page.getByTestId('demo-enter-manager').click();
   await expect(page.getByText(products)).toBeVisible({ timeout });
 });
 
