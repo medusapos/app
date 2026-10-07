@@ -160,11 +160,11 @@ type SalePayload = {
   payments: { method: string }[];
 };
 
-export type PostedCommand<P> = { id: string; type: string; version: number; payload: P; status?: string };
+export type PostedCommand<P> = { id: string; type: string; version: number; payload: P; status?: string; code?: string };
 const isCommandPost = (request: Request) => request.method() === 'POST' && request.url() === `${backend}/tally/v1/commands`;
 
 // Every `type` command the till POSTs to /tally/v1/commands, once per attempt, each with the status the store last
-// answered for its id. The till sends its register facts there too (register >= 1), so sale tests take order.create.
+// answered for its id (and its refusal's `code`). The till sends its register facts there too (register >= 1), so sale tests take order.create.
 export function captureCommands<P>(page: Page, type = 'order.create'): PostedCommand<P>[] {
   const commands: PostedCommand<P>[] = [];
   page.on('request', request => {
@@ -172,8 +172,8 @@ export function captureCommands<P>(page: Page, type = 'order.create'): PostedCom
   });
   page.on('response', async response => {
     if (!isCommandPost(response.request())) return;
-    const { results = [] } = await response.json().catch(() => ({})) as { results?: { id: string; status: string }[] };
-    for (const { id, status } of results) for (const command of commands) if (command.id === id) command.status = status;
+    const { results = [] } = await response.json().catch(() => ({})) as { results?: { id: string; status: string; error?: { code: string } }[] };
+    for (const { id, status, error } of results) for (const command of commands) if (command.id === id) Object.assign(command, { status, code: error?.code });
   });
   return commands;
 }
@@ -208,17 +208,27 @@ async function storeRegisterCommand(type: string, version: number, payload: Reco
   expect((await response.json()).results).toEqual([expect.objectContaining({ status: 'applied' })]);
 }
 
+export type StoreRegisterSession = { id: string; status: string; expected?: { cash: number }; salesCount?: number };
+
+// The store's read of `registerId` (its live session, else the latest opened), or {} when it has none.
+export async function storeRegister(registerId = 'register-1'): Promise<{ session?: StoreRegisterSession }> {
+  const state = await fetch(`${backend}/tally/v1/registers/${registerId}`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
+  return state.status === 404 ? {} : await state.json();
+}
+
 // The store keeps one open session per register (spec-42); this closes the store's open session, as a till would.
 export async function closeStoreRegister(registerId = 'register-1') {
-  const state = await fetch(`${backend}/tally/v1/registers/${registerId}`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
-  const { session } = state.status === 404 ? {} : await state.json() as { session?: { id: string; status: string } };
+  const { session } = await storeRegister(registerId);
   if (!session || session.status === 'closed') return;
   await storeRegisterCommand('register.session.transition', 1, { sessionId: session.id, status: 'closed' });
 }
 
-// Another till (`deviceName`) opens `registerId` at the store with a register v2 open (ADR-078); it must be closed first.
-export async function openStoreRegister(deviceName: string, registerId = 'register-1') {
-  await storeRegisterCommand('register.session.open', 2, { sessionId: crypto.randomUUID(), registerId, countedFloatMinor: 10000, deviceName });
+// Another till (`deviceName`) opens `registerId` at the store with a register v2 open (ADR-078); it must be closed first,
+// unless the open takes over (`supersedes`) its live session. Returns the new session's id.
+export async function openStoreRegister(deviceName: string, registerId = 'register-1', supersedes?: string) {
+  const sessionId = crypto.randomUUID();
+  await storeRegisterCommand('register.session.open', 2, { sessionId, registerId, countedFloatMinor: 10000, deviceName, ...(supersedes ? { supersedes } : {}) });
+  return sessionId;
 }
 
 export async function createAdminCustomer(token: string, email: string, firstName: string, lastName: string): Promise<string> {

@@ -100,7 +100,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Open with float, cash in/out, count, close | 2.0 (RG, CMP) | Has | Register commands v1–2; `e2e/register.spec.ts` "bind, open with a float, a cash sale, a paid in and its Undo, and Close register" (1280×800 and 360×780) | — |
 | A close whose closure write failed | 2.0 (RG) | Has | `e2e/register.spec.ts` "a close whose closure write failed shows TallyUI's Finish closing card, which completes it with the stored count" | — |
 | Take-over by another till | 2.0 (RG) | Has | PR #243 (TallyUI 3.8.0) and PR #245; `e2e/register.spec.ts` "Register 1 open on another till: the conflict card names it, Take over, then a cash sale reaches Medusa" | — |
-| Superseded refusal on the losing till; resume after lost local state | 2.0 (RG) | Partial | Plugin-proven only (`integration-tests/http/registers.spec.ts`, "register v2 open"); no e2e drives the losing till or a resume | app (an e2e) |
+| Superseded refusal on the losing till; resume after lost local state | 2.0 (RG) | Has | `e2e/register.spec.ts` "Register 1 taken over by another till: this till's paid in is refused superseded, and it shows the register closed" and "a till that lost its local state opens Register 1 again and resumes its store session, then a cash sale reaches Medusa". TallyUI 3.8.0 has no superseded view of its own: the till shows the open card and the pill reads "Register closed" | — |
 | Approval of an over-variance close | 2.0 (RG) | Partial | The app checks a second admin login (`apps/expo/lib/approval.ts`); `e2e/register.spec.ts` "over the threshold: the approval dialog, its offline refusal, then a manager login approves the close". The plugin stores `approvedBy` as given and does not check it | plugin |
 | Reports: today's sales on this register, closure history, X-report, reprint | 2.0 / Pro, still moving (RC, CMP) | Missing | TallyUI 3.8.0 `pos` has `export-csv.ts` and `closure-document.ts`; no reports screen in `apps/expo`. `GET /tally/v1/registers/:id` serves the open session, not a closure history | TallyUI + plugin |
 
@@ -136,7 +136,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 
 ## App-local gaps
 
-1. Register v2 e2e against plugin 0.2.2: the losing till's `register_session_superseded` refusal for a session opened at contract 2, and resume after lost local state (take-over itself is covered by `e2e/register.spec.ts`).
+1. Register v2 e2e against plugin 0.2.2: the losing till's `register_session_superseded` refusal for a session opened at contract 2, and resume after lost local state (take-over itself is covered by `e2e/register.spec.ts`). Done (this PR).
 2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app).
 3. Order note: wire `CartNoteInput`, then check the note reaches the Medusa order (app, then plugin).
 4. Approval: the plugin checks `approvedBy` names a real admin (plugin).
