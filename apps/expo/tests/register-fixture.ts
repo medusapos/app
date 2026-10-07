@@ -33,7 +33,7 @@ export function openRegisterFixture({ enabled = true }: { enabled?: boolean } = 
   } as unknown as RegisterContextValue['register'];
   return { register, boundRegisterId: 'register-1', registerName: 'Register 1', registers: DEFAULT_REGISTERS,
     registerOutbox: { state: { pending: 0, sending: false }, flush: vi.fn(async () => {}) },
-    bind: vi.fn(async () => {}), setTenderInProgress: vi.fn(),
+    bind: vi.fn(async () => {}), unbind: vi.fn(async () => {}), setTenderInProgress: vi.fn(),
     close: { run: vi.fn(), shown: null, dismiss: vi.fn(), error: '' } };
 }
 

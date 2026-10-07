@@ -7,6 +7,7 @@ import { RegisterSessionRequiredError, type useRegisterSession, type useSale } f
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
 import { LastClosureSheet, useApprove } from './register-close';
+import { RegisterConflictCard } from './register-conflict';
 
 // RegisterColumn's Finish closing button's nativeID (TallyUI #175).
 const FINISH_CLOSE_BUTTON = 'register-column-finish-close-button';
@@ -75,7 +76,8 @@ export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
   if (boundRegisterId === undefined) return null;
   return <View dataSet={{ print: 'hide' }}>
     <RegisterBar register={register} registerId={boundRegisterId} online={online} registerName={registerName ?? undefined}
-      multiRegister={false} onOpenPanel={onOpenPanel} onPressPill={register.session?.status === 'open' ? onOpenPanel : onGate} className={className} />
+      multiRegister={false} onOpenPanel={register.session?.status === 'conflict' ? onGate : onOpenPanel}
+      onPressPill={register.session?.status === 'open' ? onOpenPanel : onGate} className={className} />
   </View>;
 }
 
@@ -93,7 +95,7 @@ export function RegisterPanelSheet({ currency, store, open, onOpenChange }: {
 
 /**
  * Above the cart until a session is open: the picker while unbound, then the open card, with the cart still
- * usable below. RegisterColumn swaps the cart out wholesale, so it is used only once a session exists, for
+ * usable below. RegisterColumn swaps the cart out wholesale, so it is used only for a non-conflict session, for
  * the count (RegisterCount, ADR 0018) while counting, and for its Finish closing card when a session closed but its
  * closure didn't finish. A close here shows the closure sheet.
  */
@@ -127,11 +129,12 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
   return <View ref={gate} className="flex-1">
     {boundRegisterId === null ? <RegisterPicker registers={registers} onPick={pick} /> : null}
     {boundRegisterId && !session ? <OpenRegisterCard register={register} currency={currency} /> : null}
+    {session?.status === 'conflict' ? <RegisterConflictCard /> : null}
     {refused ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{refused}</Text> : null}
     {/* Why the count's own close failed, above the Finish closing card (which shows only its own run's error). */}
     {session?.status === 'closed' && !register.closing && close.error
       ? <Text testID="close-error" accessibilityRole="alert" className="px-4 pt-3 text-destructive">{close.error}</Text> : null}
-    {boundRegisterId && session ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
+    {boundRegisterId && session && session.status !== 'conflict' ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
       onPick={pick} currency={currency} cartEmpty={cartEmpty}
       countSlot={<RegisterCount register={counting} currency={currency} approve={approve} />}>
       {children}

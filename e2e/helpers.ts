@@ -43,8 +43,9 @@ export async function resetCspViolations(context: BrowserContext) {
 
 // The e2e store has two regions and no default one, so a fresh till shows "Set up this till";
 // the existing specs keep Europe (dk, 25% exclusive). Returns whether the choice screen showed;
-// with `region` null it returns there, without choosing. Then opens the register, unless `register` is false.
-export async function signIn(page: Page, region: string | null = 'Europe', register = true): Promise<boolean> {
+// with `region` null it returns there, without choosing. Then opens the register, unless `register` is false; 'unsynced'
+// opens it without waiting for the store, for a till whose register commands can't reach it (aborted, or no register capability).
+export async function signIn(page: Page, region: string | null = 'Europe', register: boolean | 'unsynced' = true): Promise<boolean> {
   expect(cspArmedFor, "CSP gate is off: take `test` from './helpers'").toBe(test.info().testId);
   await watchCsp(page.context());
   await page.goto('/login');
@@ -73,19 +74,31 @@ export async function signIn(page: Page, region: string | null = 'Europe', regis
   } else {
     await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
   }
-  if (register) await openRegister(page);
+  if (register) await openRegister(page, undefined, register !== 'unsynced');
   return chose;
 }
 
 // ADR 0017: paying needs an open register session. Binds this fresh till to Register 1 through the picker and
 // opens it with `float` through the open card, both above the cart. On a phone they show in the cart view, which
-// the register pill opens even with an empty cart; it then returns to Products.
-export async function openRegister(page: Page, float = '100.00') {
+// the register pill opens even with an empty cart; it then returns to Products. The store keeps one open session per
+// register (spec-42) and every earlier till left Register 1 open there, so this first closes the store's session, then
+// waits for the store to apply this till's open (unless not `synced`): a refused open (ADR-078's conflict) fails here, not in a later sale; a missing open times out in 30 seconds.
+export async function openRegister(page: Page, float = '100.00', synced = true) {
   const phone = (page.viewportSize()?.width ?? 1280) < 600;
+  await closeStoreRegister();
+  const opened = synced && page.waitForResponse(response => isCommandPost(response.request())
+    && (response.request().postDataJSON().commands as PostedCommand<unknown>[]).some(({ type }) => type === 'register.session.open'), { timeout: 30_000 });
   if (phone) await page.getByTestId('register-bar-pill').click();
   await page.getByTestId('register-picker-row-register-1').click();
   await page.getByTestId('open-register-amount').fill(float);
   await page.getByTestId('open-register-button').click();
+  if (opened) {
+    const response = await opened;
+    const opens = (response.request().postDataJSON().commands as PostedCommand<unknown>[]).filter(({ type }) => type === 'register.session.open');
+    const { results = [] } = await response.json() as { results?: { id: string; status: string }[] };
+    const result = results.find(({ id }) => opens.some(open => open.id === id));
+    expect(result?.status, `The store refused this till's register.session.open: ${JSON.stringify(result)}`).toBe('applied');
+  }
   await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   if (phone) await page.getByRole('button', { name: 'Products', exact: true }).click();
@@ -185,19 +198,27 @@ export async function adminToken(): Promise<string> {
   return (await response.json()).token;
 }
 
-// The store keeps one open session per register (spec-42), and every till before this test opened register-1 there
-// and left it open, so a test that asserts its own open is applied first closes the store's session, as a till would.
-export async function closeStoreRegister(registerId = 'register-1') {
-  const headers = { Authorization: `Bearer ${await adminToken()}`, 'Content-Type': 'application/json' };
-  const state = await fetch(`${backend}/tally/v1/registers/${registerId}`, { headers });
-  const { session } = state.status === 404 ? {} : await state.json() as { session?: { id: string; status: string } };
-  if (!session || session.status === 'closed') return;
+// One register command POSTed to the store as another till would (device `e2e`), which the store must apply.
+async function storeRegisterCommand(type: string, version: number, payload: Record<string, unknown>) {
   const at = new Date().toISOString();
-  const response = await fetch(`${backend}/tally/v1/commands`, { method: 'POST', headers: { ...headers, 'X-Tally-Protocol': '1' }, body: JSON.stringify({ commands: [{
-    id: crypto.randomUUID(), type: 'register.session.transition', version: 1, createdAt: at, deviceId: 'e2e', attempt: 1,
-    payload: { sessionId: session.id, status: 'closed', at },
+  const response = await fetch(`${backend}/tally/v1/commands`, { method: 'POST', headers: { Authorization: `Bearer ${await adminToken()}`,
+    'Content-Type': 'application/json', 'X-Tally-Protocol': '1' }, body: JSON.stringify({ commands: [{
+    id: crypto.randomUUID(), type, version, createdAt: at, deviceId: 'e2e', attempt: 1, payload: { ...payload, ...(type === 'register.session.open' ? { openedAt: at } : { at }) },
   }] }) });
   expect((await response.json()).results).toEqual([expect.objectContaining({ status: 'applied' })]);
+}
+
+// The store keeps one open session per register (spec-42); this closes the store's open session, as a till would.
+export async function closeStoreRegister(registerId = 'register-1') {
+  const state = await fetch(`${backend}/tally/v1/registers/${registerId}`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
+  const { session } = state.status === 404 ? {} : await state.json() as { session?: { id: string; status: string } };
+  if (!session || session.status === 'closed') return;
+  await storeRegisterCommand('register.session.transition', 1, { sessionId: session.id, status: 'closed' });
+}
+
+// Another till (`deviceName`) opens `registerId` at the store with a register v2 open (ADR-078); it must be closed first.
+export async function openStoreRegister(deviceName: string, registerId = 'register-1') {
+  await storeRegisterCommand('register.session.open', 2, { sessionId: crypto.randomUUID(), registerId, countedFloatMinor: 10000, deviceName });
 }
 
 export async function createAdminCustomer(token: string, email: string, firstName: string, lastName: string): Promise<string> {
