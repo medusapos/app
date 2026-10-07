@@ -184,13 +184,13 @@ function PricingScreen(props: PricingProps) {
   </TaxProvider>;
 }
 
-function SignedInProducts({ session, signOut, onUnauthorized, onNoPosAccess, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: PricingProps & {
+function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
   const traits = connector.traits.product;
   const { setSaleHold } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
-    useReplicatedProducts(connector, syncContext, onUnauthorized, onNoPosAccess);
+    useReplicatedProducts(connector, syncContext, onUnauthorized);
   const previousToken = useRef(session.token);
   useEffect(() => {
     if (previousToken.current !== session.token) resumePull();

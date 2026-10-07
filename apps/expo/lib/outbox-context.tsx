@@ -1,10 +1,11 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type OutboxState, type UseOrderOutboxResult,
+  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { markBusy, reportStorageStartFailure, storageStartFailureOf } from './live-tab';
 import { openOrderStore } from './order-store';
 import { authHeaders } from './pos-connector';
+import { refusedForPosAccess } from './pos-access';
 import { RegisterProvider } from './register-context';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from './session';
 import { useSession } from './session-context';
@@ -40,8 +41,6 @@ export function useSessionOutbox(session: Session | null, registerId: string): U
 }
 
 const OutboxContext = createContext<UseOrderOutboxResult | null>(null);
-
-export function refusedForPosAccess(state: OutboxState): boolean { return state.refused?.status === 403; }
 
 export function OutboxProvider({ children }: { children: ReactNode }) {
   const { session, setSavesHold, reportNoPosAccess } = useSession();

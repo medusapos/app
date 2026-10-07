@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { refusedForPosAccess } from './outbox-context';
+import { refusedForPosAccess } from './pos-access';
 
 describe('refusedForPosAccess', () => {
   it.each([403, 400, 422, undefined])('recognises only a 403 refusal: %s', (status) => {

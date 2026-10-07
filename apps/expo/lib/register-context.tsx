@@ -7,7 +7,7 @@ import {
 import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { registerCollections, type RegisterCollections } from './order-store';
-import { refusedForPosAccess } from './outbox-context';
+import { refusedForPosAccess } from './pos-access';
 import { authHeaders } from './pos-connector';
 import { defaultStorage } from './session';
 import { useSession } from './session-context';
