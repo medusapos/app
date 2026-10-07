@@ -145,7 +145,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 3. Order note: waits on TallyUI#520 (`useSale` `setNote`). Then wire `CartNoteInput` (app) and map `order.note` in `tally-order-create` (plugin).
 4. Approval: recorded, not verified; proof design in ADR 0023 (accepted), the second of its two PRs, after a TallyUI ask for register contract 3. A user-exists check is ruled out (front desk, 2026-10-07): it would claim a verification it does not do. The follow-up's shape: the manager authenticates against the store with their own credential (PIN or login, verified server side), the store issues a short-lived single-use approval proof bound to the register session id and the variance amount, the close command carries it, and the plugin verifies it.
 5. Settings screen: register and printer settings (ADR 0016) (app). Till name done (#250); printer settings are TallyUI's.
-6. A POS role or capability for sign-in (plugin). ADR 0023's first PR: the `tally_pos:use` policy, the POS roles script, and the till's 403 handling. Done in this PR (number set when it opens).
+6. A POS role or capability for sign-in (plugin). ADR 0023's first PR: the `tally_pos:use` policy, the POS roles script, and the till's 403 handling. Done (#253).
 
 ## Default order
 
