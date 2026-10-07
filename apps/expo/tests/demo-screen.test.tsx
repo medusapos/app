@@ -37,6 +37,12 @@ afterEach(() => {
 });
 
 describe('Demo card', () => {
+  it('the entry buttons carry demo-enter-cashier and demo-enter-manager testIDs', () => {
+    render(<SessionProvider><DemoScreen /></SessionProvider>);
+    expect(screen.getByTestId('demo-enter-cashier').textContent).toBe('Enter the demo');
+    expect(screen.getByTestId('demo-enter-manager').textContent).toBe('Enter as manager');
+  });
+
   it.each([true, false])('sends demo_opened only with analytics enabled (%s)', (analytics) => {
     storeConfig.analytics = analytics;
     const fetchMock = vi.fn<typeof fetch>((input, init) => input === DEMO_CAPTURE_URL
