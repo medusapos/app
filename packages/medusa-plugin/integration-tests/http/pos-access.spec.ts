@@ -1,11 +1,14 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, FeatureFlag, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import tallyPosRoles, { POS_CASHIER_POLICIES, POS_MANAGER_POLICIES } from '../../src/scripts/tally-pos-roles'
 
 jest.setTimeout(180000)
+
+// Register RBAC before the test runner evaluates medusa-config.
+FeatureFlag.setFlag('rbac', true)
 
 medusaIntegrationTestRunner({
   cwd: path.resolve(__dirname, '../plugin-app'),
