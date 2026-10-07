@@ -1,6 +1,6 @@
 # 0023: Who may use the POS, and a verified manager approval (ADR 0018 follow-up)
 
-Status: Proposed
+Status: Accepted
 Date: 2026-10-07
 
 ## Context
@@ -146,7 +146,7 @@ The wire contract is TallyUI's, so register contract 3 is the same on both store
 
 - **The two permissions.** Vendure has core custom permissions: a `PermissionDefinition` in the plugin's configuration, assigned to Vendure roles. vendurepos declares `UseTallyPos` and `ApproveTallyPosVariance`, the same two capabilities, and needs no feature flag or "with RBAC off" branch. Its roles row in its own parity list can close on that.
 - **The manager check.** It uses Vendure's own authentication strategy, server side (the native strategy's credential check), with the same MFA-style refusal if the strategy asks for more.
-- **The rest copies as is:** the opaque proof, its hash and its ledger table, the 15-minute TTL, the per-session failure limit, the closure-time verification and its order, and the contract-1/2 "recorded" rule.
+- **The rest copies as is:** the opaque proof, its hash and its ledger table, the 15-minute TTL, the failure limits per requesting actor (5 in 15 minutes) and per target email (10 in 15 minutes), the closure-time verification and its order, and the contract-1/2 "recorded" rule.
 
 Nothing here reads or depends on vendurepos code. Its worker takes this section as a reference.
 
