@@ -1,7 +1,7 @@
 import type { ExecArgs } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules, ProductStatus } from "@medusajs/framework/utils"
 import {
-  createAndLinkProductOptionsToProductWorkflow, createApiKeysWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
+  createAndLinkProductOptionsToProductWorkflow, createApiKeysWorkflow, createProductCategoriesWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
   createProductVariantsWorkflow, createRegionsWorkflow,
   createSalesChannelsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow,
   createStockLocationsWorkflow, createStoresWorkflow, createTaxRegionsWorkflow,
@@ -113,6 +113,16 @@ export default async function seedE2e({ container }: ExecArgs) {
   const [preference] = await pricing.listPricePreferences({ attribute: "currency_code", value: "eur" })
   if (preference.is_tax_inclusive) await pricing.updatePricePreferences(preference.id, { is_tax_inclusive: false })
   const productService = container.resolve(Modules.PRODUCT)
+  // Two categories for the catalogue's category nav: E2E products 1 and 2 are Drinks, 3 is Food, the rest have none.
+  let categories = await productService.listProductCategories({ name: ["Drinks", "Food"] })
+  const missingCategories = ["Drinks", "Food"].filter(name => !categories.some(category => category.name === name))
+  if (missingCategories.length) {
+    await createProductCategoriesWorkflow(container).run({ input: {
+      product_categories: missingCategories.map(name => ({ name, is_active: true })),
+    } })
+    categories = await productService.listProductCategories({ name: ["Drinks", "Food"] })
+  }
+  const categoryIds = (name: string) => [categories.find(category => category.name === name)!.id]
   const products = await productService.listProducts(
     { handle: ["e2e-1", "e2e-2", "e2e-3", "e2e-4", "e2e-5"] },
     { relations: ["options", "options.values", "variants"] },
@@ -123,6 +133,7 @@ export default async function seedE2e({ container }: ExecArgs) {
   const missingProducts = [2, 3.5, 4.25, 10, 12.99].map((amount, i) => ({
     title: `E2E product ${i + 1}`, handle: `e2e-${i + 1}`, status: ProductStatus.PUBLISHED,
     shipping_profile_id: profile.id, sales_channels: [{ id: channel.id }],
+    ...(i < 3 ? { category_ids: categoryIds(i < 2 ? "Drinks" : "Food") } : {}),
     options: [{ title: "Variant", values: i === 3 ? ["Default", "B"] : ["Default"] }],
     variants: [
       {

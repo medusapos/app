@@ -15,6 +15,7 @@ import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
+import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { withDemoSaleEvent } from '../lib/demo-analytics';
 import { formatDate } from '../lib/format-date';
@@ -311,9 +312,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const catalogue = <View className="flex-1">
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
+    {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined} />
+      onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined}
+      showViewToggle={!phone} showCategoryNav
+      loadViewState={() => phone ? { ...loadCatalogueView(defaultStorage(), session.baseUrl), view: 'grid' }
+        : loadCatalogueView(defaultStorage(), session.baseUrl)}
+      saveViewState={(state) => saveCatalogueView(defaultStorage(), session.baseUrl, state)}
+      onViewStateError={(error) => console.warn('Could not load or save the catalogue view:', error)} />
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).

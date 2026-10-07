@@ -50,7 +50,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Search | Free (FS, RS) | Has | TallyUI `Catalogue`; `e2e/settings.spec.ts` "a saved minChars gates Enter in the Products search: a shorter code stays a search" | — |
-| Grid/table toggle, category navigation | Free (FS, RS) | Missing | TallyUI 3.8.0 `Catalogue` has `showViewToggle` and `showCategoryNav` (both off by default); the app passes neither | app |
+| Grid/table toggle, category navigation | Free (FS, RS) | Has | TallyUI `Catalogue` with `showCategoryNav`, and `showViewToggle` above phone width; the view is kept per store on the device (`apps/expo/lib/catalogue-view.ts`); `e2e/catalogue-view.spec.ts` "a category narrows the catalogue, All products restores it, and the table view survives a reload" and "a phone shows the category nav and no grid/table toggle" | — |
 | Variations: one tile, then pick the variant | Free (RS) | Has | Live variant chooser (`docs/adr/0007`); `e2e/live-stock.spec.ts` "stock change reaches the chooser without a catalogue pull" | — |
 | Browse by tag, brand or shortcut; filter chips | 2.0 (RS) | Missing | No TallyUI component found in 3.8.0 | TallyUI |
 | Region prices | Pro (PRO, store pricing) | Has | `e2e/pricing.spec.ts` "the catalogue shows E2E-1 at Medusa's calculated price for Europe" and "a region change resyncs the catalogue at the new region's price" | — |
@@ -137,7 +137,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 ## App-local gaps
 
 1. Register v2 e2e against plugin 0.2.2: the losing till's `register_session_superseded` refusal for a session opened at contract 2, and resume after lost local state (take-over itself is covered by `e2e/register.spec.ts`).
-2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app).
+2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app). Done (this PR).
 3. Order note: wire `CartNoteInput`, then check the note reaches the Medusa order (app, then plugin).
 4. Approval: the plugin checks `approvedBy` names a real admin (plugin).
 5. Settings screen: register and printer settings (ADR 0016) (app).
