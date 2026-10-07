@@ -88,6 +88,35 @@ creates its `locking` table.
    ```
 
    The POS signs in with that email and password.
+7. Optional: choose who may use the POS. With Medusa's role-based access
+   control (RBAC) off, which is Medusa's default, every admin user can sign
+   in to the POS. To limit it to the people you choose, on Medusa 2.21:
+   1. Turn RBAC on. Both of these are needed: set `MEDUSA_FF_RBAC=true` in
+      your backend's environment, and add the RBAC module to `modules` in
+      `medusa-config.ts`:
+
+      ```ts
+      modules: [{ resolve: '@medusajs/medusa/rbac' }],
+      ```
+
+      Then run `npx medusa db:migrate` and restart the backend.
+   2. Create the POS roles from your backend directory:
+
+      ```sh
+      npx medusa exec ./node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-pos-roles.js
+      ```
+
+      If your project hoists packages to a workspace root, point at the
+      plugin under that root's `node_modules` instead. The script creates
+      "POS cashier" and "POS manager", and is safe to run again. A POS
+      manager can do everything a POS cashier can, and will also approve a
+      cash count that's off once approval ships.
+   3. In Medusa Admin, give each person who uses the till one of those
+      roles. Super admins keep their access, and `npx medusa user` makes a
+      super admin while RBAC is on.
+
+   Anyone without a POS role sees "This account can't use the POS. Ask the
+   store owner for POS access." at sign-in.
 
 ## Sign in
 
@@ -143,6 +172,13 @@ while a rejected order needs investigation.
   location, or set `shippingOptionId` in the plugin options and restart.
 - **Sign-in says "not supported yet":** multi-factor sign-in is not supported;
   use an admin account with email/password sign-in and no MFA.
+- **Sign-in says "This account can't use the POS":** your store has RBAC on
+  and this user has no POS role. Give them "POS cashier" or "POS manager"
+  (step 7 of [Configure your store](#configure-your-store)). If a till is
+  signed out with these words later, the user's POS role was removed.
+- **Products stop updating with a notice that access was refused:** the
+  user's role can't read something the catalogue needs. Run the roles script
+  again (step 7). It adds any missing reads to the existing POS roles.
 - **"Storage stopped … Reload":** rare — the device's local storage worker
   died. Reload the tab; sales already saved are kept.
 - **"Saving is slow…":** a transient note while a save is taking a moment;

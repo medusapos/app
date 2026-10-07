@@ -95,6 +95,9 @@ You'll need:
 
 - A Medusa 2.21 store with the POS plugin installed.
 - An admin user's email and password, without multi-factor authentication (MFA).
+  If your store has Medusa RBAC on, the user also needs the "POS cashier" or
+  "POS manager" role. See QUICKSTART's [Configure your store](QUICKSTART.md#configure-your-store),
+  step 7, for how to turn RBAC on and create those roles.
 - An HTTPS backend URL — see QUICKSTART's ["What you need"](QUICKSTART.md#what-you-need)
   for when plain `http://` is allowed.
 
