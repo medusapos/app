@@ -6,6 +6,7 @@ import { router } from 'expo-router';
 import { DEFAULT_SCANNER_SETTINGS, loadScannerSettings, useScannerSettings } from '../lib/scanner-settings';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
+import { loadTillName, useTillName } from '../lib/till-name';
 import SettingsScreen from '../app/settings';
 
 vi.mock('expo-router', () => ({
@@ -38,6 +39,11 @@ async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
   await act(async () => { view = render(<SessionProvider>{children}</SessionProvider>); });
   return view;
+}
+
+function TillNameReader() {
+  const { tillName } = useTillName(localStorage, baseUrl);
+  return <span aria-label="till name reader">{tillName ?? 'none'}</span>;
 }
 
 function Reader({ label }: { label: string }) {
@@ -86,6 +92,24 @@ describe('SettingsScreen', () => {
     fireEvent.change(screen.getByLabelText('Average time per key (ms)'), { target: { value: '42' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(screen.getByLabelText('reader').textContent).toBe('42');
+  });
+
+  it('the Register section saves the till name through the hook, live for every reader', async () => {
+    await mount(<><SettingsScreen /><TillNameReader /></>);
+    expect(screen.getByText('Register')).toBeTruthy();
+    expect(screen.getByText('Shown to another till that finds this register open or takes it over. Leave empty to use \u201cWeb till\u201d.')).toBeTruthy();
+    fireEvent.change(screen.getByLabelText('Till name'), { target: { value: ' Front counter ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save till name' }));
+    expect(loadTillName(localStorage, baseUrl)).toBe('Front counter');
+    expect(screen.getByLabelText('till name reader').textContent).toBe('Front counter');
+  });
+
+  it('a 65-character till name shows the error and saves nothing', async () => {
+    await mount();
+    fireEvent.change(screen.getByLabelText('Till name'), { target: { value: 'x'.repeat(65) } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save till name' }));
+    expect(screen.getByText('A till name can be at most 64 characters.')).toBeTruthy();
+    expect(loadTillName(localStorage, baseUrl)).toBeNull();
   });
 
   it('the test field reports the average and verdict for a fast input', async () => {

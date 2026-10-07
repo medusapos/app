@@ -121,7 +121,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Sign in again after a 401; session list | Free (FS) | Partial | `e2e/strips.spec.ts` "sign-in strip: outbox pauses after three 401s, resumes once signed in again" and "a product pull refused with 401 signs the till out"; no session list or revoke. Shared strip waits on TallyUI#373 (`docs/PLAN.md`, #174 item 4) | TallyUI |
 | Roles and capabilities | Free (PERM) | Partial | Any Medusa admin can sign in; no POS role or capability found in the plugin | plugin |
 | Switching cashiers | — (WCPOS lacks it too, PERM) | Missing | — | TallyUI |
-| Settings screen | Free (FS) | Partial | Scanner only (`apps/expo/app/settings.tsx`); register and printer settings "land here later (ADR 0016)" | app |
+| Settings screen | Free (FS) | Partial | Register (till name) and Scanner (`apps/expo/app/settings.tsx`); printer settings wait on TallyUI printing (Receipts and printing row) | app |
 
 ## Barcode, tax, stores, language
 
@@ -140,7 +140,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app). Done (#248).
 3. Order note: waits on TallyUI#520 (`useSale` `setNote`). Then wire `CartNoteInput` (app) and map `order.note` in `tally-order-create` (plugin).
 4. Approval: recorded, not verified; proof design in ADR 0018 follow-up. A user-exists check is ruled out (front desk, 2026-10-07): it would claim a verification it does not do. The follow-up's shape: the manager authenticates against the store with their own credential (PIN or login, verified server side), the store issues a short-lived single-use approval proof bound to the register session id and the variance amount, the close command carries it, and the plugin verifies it.
-5. Settings screen: register and printer settings (ADR 0016) (app).
+5. Settings screen: register and printer settings (ADR 0016) (app). Till name done (this PR); printer settings are TallyUI's.
 6. A POS role or capability for sign-in (plugin).
 
 ## Default order
