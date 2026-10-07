@@ -12,6 +12,8 @@ export const TallyRegisterSession = model.define('tally_register_session', {
   superseded_by_device: model.text().nullable(),
   superseded_by_session: model.text().nullable(),
   business_day: model.text().nullable(),
+  // The contract of the open that created the session; null before 0.2.2, read as 1.
+  open_contract: model.number().nullable(),
   opened_at: model.text(),
   opened_by: model.text().nullable(),
   // The migration uses bigint for this integer; results use JSON numeric values.

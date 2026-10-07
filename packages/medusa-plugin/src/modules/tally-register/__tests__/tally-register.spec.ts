@@ -148,13 +148,30 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
         expect(await snapshot()).toEqual(before)
       })
 
-      it('the same commands at contract 1 are refused register_session_closed with no data', async () => {
+      it('the same commands at contract 1 are refused register_session_superseded when the session opened at contract 2', async () => {
         await service.openSession(owner)
         await service.recordMovement(movement)
         await service.openSession(taker)
         const before = await snapshot()
-        const closed = { kind: 'conflict', code: 'register_session_closed' }
         for (const contract of [undefined, 1]) {
+          expect(await service.recordMovement({ ...movement, movementId: randomUUID(), contract })).toEqual(superseded)
+          expect(await service.voidMovement({ ...voidPayload, contract })).toEqual(superseded)
+          for (const status of ['open', 'counting', 'closed'] as const) {
+            expect(await service.transition({ sessionId: first.sessionId, status, at, contract })).toEqual(superseded)
+          }
+          expect(await service.submitClosure({ ...closure(), contract })).toEqual(superseded)
+        }
+        expect(await snapshot()).toEqual(before)
+      })
+
+      it('a session opened at contract 1 is refused register_session_closed with no data at every command contract', async () => {
+        const legacyOwner = { ...first, deviceId: 'device-1' }
+        await service.openSession(legacyOwner)
+        await service.recordMovement(movement)
+        await service.openSession(taker)
+        const before = await snapshot()
+        const closed = { kind: 'conflict', code: 'register_session_closed' }
+        for (const contract of [undefined, 1, 2, 3]) {
           expect(await service.recordMovement({ ...movement, movementId: randomUUID(), contract })).toEqual(closed)
           expect(await service.voidMovement({ ...voidPayload, contract })).toEqual(closed)
           for (const status of ['open', 'counting', 'closed'] as const) {
@@ -162,7 +179,14 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           }
           expect(await service.submitClosure({ ...closure(), contract })).toEqual(closed)
         }
+        for (const contract of [undefined, 2]) expect(await service.openSession({ ...legacyOwner, contract })).toEqual(closed)
         expect(await snapshot()).toEqual(before)
+      })
+
+      it.each([[2, owner], [1, first]] as const)('stores the open contract as %i', async (contract, opening) => {
+        await service.openSession(opening)
+        expect(await sql('select open_contract from tally_register_session where id = ?', [opening.sessionId]))
+          .toEqual([{ open_contract: contract }])
       })
 
       it('a movement, void and closure stored before the take-over still replay ok after it', async () => {
@@ -394,7 +418,7 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           .toEqual([{ id: winner.sessionId }])
       })
 
-      it('an open naming a superseded session is register_session_superseded for v2 and register_session_closed for v1', async () => {
+      it('an open naming a superseded session opened at contract 2 is register_session_superseded whatever the replay contract', async () => {
         await service.openSession(owner)
         await service.openSession(taker)
         const before = await snapshot()
@@ -403,7 +427,10 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           supersededBy: second.openedBy, deviceId: taker.deviceId, deviceName: taker.deviceName,
         } })
         for (const contract of [undefined, 1]) expect(await service.openSession({ ...first, contract }))
-          .toEqual({ kind: 'conflict', code: 'register_session_closed' })
+          .toEqual({ kind: 'conflict', code: 'register_session_superseded', data: {
+            sessionId: first.sessionId, supersededAt: second.openedAt, newSessionId: second.sessionId,
+            supersededBy: second.openedBy, deviceId: taker.deviceId, deviceName: taker.deviceName,
+          } })
         expect(await snapshot()).toEqual(before)
         const anonymous = { ...first, sessionId: randomUUID(), contract: 2, supersedes: second.sessionId, openedBy: undefined }
         await service.openSession(anonymous)

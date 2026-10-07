@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2 — 2026-10-07
+
+- **Fixed:** a command on a session that was taken over is refused `register_session_superseded` (with the take-over data) when that session was opened at register contract 2, whatever the command's own contract; a session opened at contract 1 still gets `register_session_closed`. Needs the new migration (`npx medusa db:migrate`).
+
 ## 0.2.0 — 2026-10-06
 
 - **Breaking (meaning):** `insufficient_stock.quantity` changes from the level's whole shortfall in variant units to the units of this sale that stock did not cover: min(units sold, shortfall in variant units). Selling 1 unit when stock is −1 now reports 1 instead of 2. The warning shape is unchanged.
