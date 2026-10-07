@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, openStoreRegister, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, test } from './helpers';
 
 // Registers, part A (ADR 0017): a fresh till binds Register 1, opens it with a float of 100.00, takes a cash sale
 // the register counts, records a paid in and undoes it. Part B (ADR 0018): Close register counts the drawer with
@@ -248,9 +248,15 @@ test('Register 1 open on another till: the conflict card names it, Take over, th
   await expect(card).toContainText('Counter till');
   await card.getByTestId('register-conflict-take-over').click();
   await expect(card).toHaveCount(0);
-  const total = await sellBySku(page, ['E2E-1'], 'exact');
-  await expect.poll(() => sales.map(({ status }) => status)).toEqual(['applied']);
-  const orders = (await ordersByClientId(token)).filter(order => order.metadata.tally_client_id === sales[0].payload.clientOrderId);
-  expect(orders).toHaveLength(1);
-  expect(orders[0].total).toBe(total);
+  // The suite shares E2E-1 stock, so give back this sale's unit.
+  const level = await inventoryLevel(token, 'E2E-1');
+  try {
+    const total = await sellBySku(page, ['E2E-1'], 'exact');
+    await expect.poll(() => sales.map(({ status }) => status)).toEqual(['applied']);
+    const orders = (await ordersByClientId(token)).filter(order => order.metadata.tally_client_id === sales[0].payload.clientOrderId);
+    expect(orders).toHaveLength(1);
+    expect(orders[0].total).toBe(total);
+  } finally {
+    await setInventoryLevel(token, level.inventoryItemId, level.locationId, level.stockedQuantity);
+  }
 });
