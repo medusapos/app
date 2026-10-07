@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { signIn, test } from './helpers';
+import { openRegister, signIn, test } from './helpers';
 
 const products = /Up to date · \d[\d,.  ]* products/;
 const timeout = process.env.E2E_BACKEND_URL !== undefined ? 5 * 60_000 : undefined;
@@ -52,6 +52,40 @@ test('signed-out demo Quick start opens the docs and keeps What to try visible',
     'Add a fee, shipping or a custom item to a sale (Add charge in the cart)',
     'Close the register with a cash count',
   ]) await expect(page.getByText(`• ${item}`, { exact: true })).toBeVisible();
+});
+
+test('signed in as the demo cashier, each What to try action has its control', async ({ page }) => {
+  await page.goto('/demo');
+  await page.getByRole('button', { name: 'Enter the demo', exact: true }).click();
+  await expect(page.getByText(products)).toBeVisible({ timeout });
+  await openRegister(page);
+  await expect(page.getByTestId(/^product-tile-/).first()).toBeVisible();
+  await page.getByTestId(/^product-tile-/).first().click();
+  await expect(page.getByTestId('cart-footer')).toBeVisible();
+  await expect(page.getByTestId('register-bar-open-panel')).toBeVisible();
+  await page.getByTestId('register-bar-open-panel').click();
+  await expect(page.getByTestId('register-panel-close')).toBeVisible();
+  await page.getByTestId('register-panel-dismiss').click();
+  await page.getByRole('button', { name: /^Customer: /, exact: true }).click();
+  await expect(page.getByTestId('customer-dialog')).toBeVisible();
+  await expect(page.getByTestId('customer-dialog').getByLabel('Search customers', { exact: true })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.getByTestId('customer-dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Add charge', exact: true }).click();
+  await expect(page.getByTestId('charge-form')).toBeVisible();
+  await page.getByText('Price', { exact: true }).click();
+  await expect(page.getByTestId('price-form')).toBeVisible();
+  await expect(page.getByTestId('price-apply')).toBeVisible();
+  await page.getByTestId('price-cancel').click();
+  await expect(page.getByTestId('price-form')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
+  await expect(page.getByTestId('parked-sales-park')).toBeVisible();
+  await page.getByTestId('parked-sales-dismiss').click();
+  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByRole('button', { name: 'Split payment', exact: true }).click();
+  await expect(page.getByTestId('split-tender-method-card')).toBeVisible();
+  await expect(page.getByTestId('split-tender-method-cash')).toBeVisible();
+  await expect(page.getByTestId('split-tender-add-button')).toBeVisible();
 });
 
 test('a non-demo account does not see the demo banner', async ({ page }) => {
