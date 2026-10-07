@@ -4,7 +4,9 @@ import { Redirect, Stack } from 'expo-router';
 import { ProductsBack } from '../components/products-back';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { getDeviceName } from '../lib/register-context';
 import { DEFAULT_SCANNER_SETTINGS, useScannerSettings } from '../lib/scanner-settings';
+import { useTillName } from '../lib/till-name';
 import { averageKeyMs } from '../lib/use-wedge-scan';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
@@ -19,9 +21,35 @@ function Field({ label, help, ...input }: { label: string; help?: string } & Com
 export default function SettingsScreen() {
   const { session } = useSession();
   if (!session) return <Redirect href="/login" />;
-  return <ScannerSection session={session} />;
+  return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
+    <Stack.Screen options={{ title: 'Settings', headerLeft: () => <ProductsBack /> }} />
+    <View className="w-full max-w-md gap-4 self-center">
+      <RegisterSection session={session} />
+      <ScannerSection session={session} />
+    </View>
+  </ScrollView>;
 }
-// Register and printer settings land here later (ADR 0016); Scanner is the first section.
+// Printer settings land here later (ADR 0016), with TallyUI printing.
+function RegisterSection({ session }: { session: Session }) {
+  const { tillName, save } = useTillName(defaultStorage(), session.baseUrl);
+  const [nameInput, setNameInput] = useState(tillName ?? '');
+  const [error, setError] = useState<string | null>(null);
+  function onSave() {
+    try { save(nameInput); setError(null); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
+  }
+  return <>
+    <Text className="text-lg font-semibold text-foreground">Register</Text>
+    <Field accessibilityLabel="Till name" label="Till name" value={nameInput} onChangeText={setNameInput}
+      help={`Shown to another till that finds this register open or takes it over. Leave empty to use “${getDeviceName()}”.`} />
+    {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
+    <View className="flex-row gap-3">
+      <Pressable accessibilityRole="button" accessibilityLabel="Save till name" onPress={onSave} className={`${buttonClass} bg-primary`}>
+        <Text className="font-semibold text-primary-foreground">Save</Text>
+      </Pressable>
+    </View>
+  </>;
+}
 function ScannerSection({ session }: { session: Session }) {
   const { settings, save, reset } = useScannerSettings(defaultStorage(), session.baseUrl);
   const [avgKeyMsInput, setAvgKeyMsInput] = useState(String(settings.avgKeyMs));
@@ -52,9 +80,7 @@ function ScannerSection({ session }: { session: Session }) {
     timing.current.buffer += key; timing.current.lastAt = now;
   }
   const counts = lastScan !== null && lastScan.code.length >= settings.minChars && lastScan.avgMs <= settings.avgKeyMs;
-  return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
-    <Stack.Screen options={{ title: 'Settings', headerLeft: () => <ProductsBack /> }} />
-    <View className="w-full max-w-md gap-4 self-center">
+  return <View className="gap-4 border-t border-border pt-4">
       <Text className="text-lg font-semibold text-foreground">Scanner</Text>
       <Field accessibilityLabel="Average time per key (ms)" label="Average time per key (ms)" help="A scan is faster than typing. Raise this for slow Bluetooth scanners."
         value={avgKeyMsInput} onChangeText={setAvgKeyMsInput} keyboardType="number-pad" />
@@ -74,6 +100,5 @@ function ScannerSection({ session }: { session: Session }) {
         {lastScan ? <Text className="text-sm text-muted-foreground">{`Last scan: ${lastScan.code} · ${lastScan.code.length} characters · average ${Math.round(lastScan.avgMs)} ms per key`}</Text> : null}
         {lastScan ? <Text className={`text-sm ${counts ? 'text-foreground' : 'text-destructive'}`}>{counts ? 'Counts as a scan' : 'Too slow / too short'}</Text> : null}
       </View>
-    </View>
-  </ScrollView>;
+  </View>;
 }

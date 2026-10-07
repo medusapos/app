@@ -121,7 +121,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Sign in again after a 401; session list | Free (FS) | Partial | `e2e/strips.spec.ts` "sign-in strip: outbox pauses after three 401s, resumes once signed in again" and "a product pull refused with 401 signs the till out"; no session list or revoke. Shared strip waits on TallyUI#373 (`docs/PLAN.md`, #174 item 4) | TallyUI |
 | Roles and capabilities | Free (PERM) | Partial | Any Medusa admin can sign in; no POS role or capability found in the plugin | plugin |
 | Switching cashiers | — (WCPOS lacks it too, PERM) | Missing | — | TallyUI |
-| Settings screen | Free (FS) | Partial | Scanner only (`apps/expo/app/settings.tsx`); register and printer settings "land here later (ADR 0016)" | app |
+| Settings screen | Free (FS) | Partial | Register (till name) and Scanner (`apps/expo/app/settings.tsx`); printer settings wait on TallyUI printing (Receipts and printing row) | app |
 
 ## Barcode, tax, stores, language
 
@@ -140,7 +140,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app).
 3. Order note: wire `CartNoteInput`, then check the note reaches the Medusa order (app, then plugin).
 4. Approval: the plugin checks `approvedBy` names a real admin (plugin).
-5. Settings screen: register and printer settings (ADR 0016) (app).
+5. Settings screen: register and printer settings (ADR 0016) (app). Till name done (this PR); printer settings are TallyUI's.
 6. A POS role or capability for sign-in (plugin).
 
 ## Default order

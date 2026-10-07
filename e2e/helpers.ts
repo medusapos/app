@@ -198,14 +198,21 @@ export async function adminToken(): Promise<string> {
   return (await response.json()).token;
 }
 
-// One register command POSTed to the store as another till would (device `e2e`), which the store must apply.
-async function storeRegisterCommand(type: string, version: number, payload: Record<string, unknown>) {
+// One register command POSTed to the store as another till would (device `e2e`); returns the store's result for it.
+async function postStoreRegisterCommand(type: string, version: number, payload: Record<string, unknown>) {
   const at = new Date().toISOString();
   const response = await fetch(`${backend}/tally/v1/commands`, { method: 'POST', headers: { Authorization: `Bearer ${await adminToken()}`,
     'Content-Type': 'application/json', 'X-Tally-Protocol': '1' }, body: JSON.stringify({ commands: [{
     id: crypto.randomUUID(), type, version, createdAt: at, deviceId: 'e2e', attempt: 1, payload: { ...payload, ...(type === 'register.session.open' ? { openedAt: at } : { at }) },
   }] }) });
-  expect((await response.json()).results).toEqual([expect.objectContaining({ status: 'applied' })]);
+  const { results } = await response.json();
+  expect(results).toHaveLength(1);
+  return results[0] as { status: string; error?: { code: string; data?: Record<string, unknown> } };
+}
+
+// As postStoreRegisterCommand, for a command the store must apply.
+async function storeRegisterCommand(type: string, version: number, payload: Record<string, unknown>) {
+  expect(await postStoreRegisterCommand(type, version, payload)).toMatchObject({ status: 'applied' });
 }
 
 export type StoreRegisterSession = { id: string; status: string; expected?: { cash: number }; salesCount?: number };
@@ -229,6 +236,15 @@ export async function openStoreRegister(deviceName: string, registerId = 'regist
   const sessionId = crypto.randomUUID();
   await storeRegisterCommand('register.session.open', 2, { sessionId, registerId, countedFloatMinor: 10000, deviceName, ...(supersedes ? { supersedes } : {}) });
   return sessionId;
+}
+
+// Another till's plain v2 open of `registerId`, expected to be refused because a session is live there; the refusal's
+// data names the live session's till (`deviceName`, ADR 0022 point 4).
+export async function refusedStoreOpen(registerId = 'register-1') {
+  const result = await postStoreRegisterCommand('register.session.open', 2,
+    { sessionId: crypto.randomUUID(), registerId, countedFloatMinor: 10000, deviceName: 'Probe till' });
+  expect(result).toMatchObject({ status: 'rejected', error: { code: 'register_session_already_open' } });
+  return result.error?.data ?? {};
 }
 
 export async function createAdminCustomer(token: string, email: string, firstName: string, lastName: string): Promise<string> {

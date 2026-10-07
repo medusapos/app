@@ -10,6 +10,7 @@ import { registerCollections, type RegisterCollections } from './order-store';
 import { authHeaders } from './pos-connector';
 import { defaultStorage } from './session';
 import { useSession } from './session-context';
+import { useTillName } from './till-name';
 
 /**
  * The registers this till can bind to (ADR 0017): no server supplies a list yet (TallyUI registers c2), so every
@@ -17,7 +18,7 @@ import { useSession } from './session-context';
  */
 export const DEFAULT_REGISTERS = [{ id: 'register-1', name: 'Register 1' }];
 
-/** Platform name for register v2 opens until the app has a till-name setting (ADR-078). */
+/** Platform name for register v2 opens when the till has no name in Settings (ADR-078). */
 export function getDeviceName(os: typeof Platform.OS = Platform.OS): string {
   switch (os) {
     case 'web': return 'Web till';
@@ -85,10 +86,11 @@ export function RegisterProvider({ orders, deviceId, children }: { orders: RxCol
   }, [collections, storeKey]);
   const current = bound?.collections === collections && bound?.storeKey === storeKey ? bound : null;
   const [tenderInProgress, setTenderInProgress] = useState(false);
+  const { tillName } = useTillName(defaultStorage(), storeKey);
   const register = useRegisterSession({
     sessions: collections?.sessions ?? null, movements: collections?.movements ?? null, closures: collections?.closures ?? null,
     commands: collections?.commands ?? null, capabilities: session?.capabilities,
-    deviceName: getDeviceName(),
+    deviceName: tillName ?? getDeviceName(),
     orders,
     register: collections?.sessions ?? null,
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
