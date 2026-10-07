@@ -258,7 +258,7 @@ export default class TallyRegisterModuleService extends MedusaService({
               : Object.keys(row.variance).length !== Object.keys(variance).length
                 || Object.entries(variance).some(([k, v]) => row.variance[k] !== v) ? 'variance_mismatch' : undefined
             if (reason) return { kind: 'conflict', code: 'register_approval_invalid', data: { reason } }
-            approval = row
+            approval = { id: row.id as string, approved_by: row.approved_by as string }
           }
         }
         let [{ counters }] = await em.execute(`${COUNTER_STATE} for update`, [p.registerId])
