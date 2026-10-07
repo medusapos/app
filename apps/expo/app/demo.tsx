@@ -64,7 +64,7 @@ export default function DemoScreen() {
           <Pressable accessibilityRole="link" onPress={() => openDemoUrl(DEMO_ABOUT_URL)} className="min-h-11 justify-center">
             <Text className="text-sm text-foreground">About MedusaPOS</Text>
           </Pressable>
-          <Pressable accessibilityRole="link" onPress={() => openDemoUrl(DEMO_QUICK_START_URL)} className="min-h-11 justify-center">
+          <Pressable accessibilityRole="link" testID="demo-quick-start" onPress={() => openDemoUrl(DEMO_QUICK_START_URL)} className="min-h-11 justify-center">
             <Text className="text-sm text-foreground">Quick start</Text>
           </Pressable>
         </View>
