@@ -101,7 +101,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | A close whose closure write failed | 2.0 (RG) | Has | `e2e/register.spec.ts` "a close whose closure write failed shows TallyUI's Finish closing card, which completes it with the stored count" | — |
 | Take-over by another till | 2.0 (RG) | Has | PR #243 (TallyUI 3.8.0) and PR #245; `e2e/register.spec.ts` "Register 1 open on another till: the conflict card names it, Take over, then a cash sale reaches Medusa" | — |
 | Superseded refusal on the losing till; resume after lost local state | 2.0 (RG) | Has | `e2e/register.spec.ts` "Register 1 taken over by another till: this till's paid in is refused superseded, and it shows the register closed" and "a till that lost its local state opens Register 1 again and resumes its store session, then a cash sale reaches Medusa". TallyUI 3.8.0 has no superseded view of its own: the till shows the open card and the pill reads "Register closed" | — |
-| Approval of an over-variance close | 2.0 (RG) | Partial | The app checks a second admin login (`apps/expo/lib/approval.ts`); `e2e/register.spec.ts` "over the threshold: the approval dialog, its offline refusal, then a manager login approves the close". The plugin stores `approvedBy` as recorded data: recorded, not verified; proof design in ADR 0018 follow-up | plugin |
+| Approval of an over-variance close | 2.0 (RG) | Partial | The app checks a second admin login (`apps/expo/lib/approval.ts`); `e2e/register.spec.ts` "over the threshold: the approval dialog, its offline refusal, then a manager login approves the close". The plugin stores `approvedBy` as recorded data: recorded, not verified; proof design in ADR 0023 (proposed) | plugin |
 | Reports: today's sales on this register, closure history, X-report, reprint | 2.0 / Pro, still moving (RC, CMP) | Missing | TallyUI 3.8.0 `pos` has `export-csv.ts` and `closure-document.ts`; no reports screen in `apps/expo`. `GET /tally/v1/registers/:id` serves the open session, not a closure history | TallyUI + plugin |
 
 ## Offline and sync
@@ -119,7 +119,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 |---|---|---|---|---|
 | Connect and sign in | Free (FS) | Has | `apps/expo/app/login.tsx` (Medusa admin login); `e2e/demo.spec.ts` "one click on /demo reaches the POS with products" | — |
 | Sign in again after a 401; session list | Free (FS) | Partial | `e2e/strips.spec.ts` "sign-in strip: outbox pauses after three 401s, resumes once signed in again" and "a product pull refused with 401 signs the till out"; no session list or revoke. Shared strip waits on TallyUI#373 (`docs/PLAN.md`, #174 item 4) | TallyUI |
-| Roles and capabilities | Free (PERM) | Partial | Any Medusa admin can sign in; no POS role or capability found in the plugin | plugin |
+| Roles and capabilities | Free (PERM) | Partial | Any Medusa admin can sign in; no POS role or capability found in the plugin. Design in ADR 0023 (proposed): Medusa RBAC policies `tally_pos:use` and `tally_pos:approve_variance` | plugin |
 | Switching cashiers | — (WCPOS lacks it too, PERM) | Missing | — | TallyUI |
 | Settings screen | Free (FS) | Partial | Register (till name) and Scanner (`apps/expo/app/settings.tsx`); printer settings wait on TallyUI printing (Receipts and printing row) | app |
 
@@ -139,9 +139,9 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 1. Register v2 e2e against plugin 0.2.2: the losing till's `register_session_superseded` refusal for a session opened at contract 2, and resume after lost local state (take-over itself is covered by `e2e/register.spec.ts`). Done (#247).
 2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app). Done (#248).
 3. Order note: waits on TallyUI#520 (`useSale` `setNote`). Then wire `CartNoteInput` (app) and map `order.note` in `tally-order-create` (plugin).
-4. Approval: recorded, not verified; proof design in ADR 0018 follow-up. A user-exists check is ruled out (front desk, 2026-10-07): it would claim a verification it does not do. The follow-up's shape: the manager authenticates against the store with their own credential (PIN or login, verified server side), the store issues a short-lived single-use approval proof bound to the register session id and the variance amount, the close command carries it, and the plugin verifies it.
-5. Settings screen: register and printer settings (ADR 0016) (app). Till name done (this PR); printer settings are TallyUI's.
-6. A POS role or capability for sign-in (plugin).
+4. Approval: recorded, not verified; proof design in ADR 0023 (proposed), the second of its two PRs, after a TallyUI ask for register contract 3. A user-exists check is ruled out (front desk, 2026-10-07): it would claim a verification it does not do. The follow-up's shape: the manager authenticates against the store with their own credential (PIN or login, verified server side), the store issues a short-lived single-use approval proof bound to the register session id and the variance amount, the close command carries it, and the plugin verifies it.
+5. Settings screen: register and printer settings (ADR 0016) (app). Till name done (#250); printer settings are TallyUI's.
+6. A POS role or capability for sign-in (plugin). Design in ADR 0023 (proposed), the first of its two PRs.
 
 ## Default order
 
