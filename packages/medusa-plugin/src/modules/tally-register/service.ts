@@ -27,9 +27,9 @@ export default class TallyRegisterModuleService extends MedusaService({
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
       const v2 = (p.contract ?? 1) >= 2
       for (let attempt = 0; attempt < 3; attempt++) {
-        const [session] = await em.execute('select id, register_id, status from tally_register_session where id = ?', [p.sessionId])
+        const [session] = await em.execute('select id, register_id, status, open_contract from tally_register_session where id = ?', [p.sessionId])
         if (session) {
-          if (session.status === 'superseded') return v2
+          if (session.status === 'superseded') return (session.open_contract ?? 1) >= 2
             ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
             : { kind: 'conflict', code: 'register_session_closed' }
           if (session.register_id !== p.registerId) return { kind: 'invalid', message: 'session id belongs to another register' }
@@ -68,10 +68,10 @@ export default class TallyRegisterModuleService extends MedusaService({
         }
         await em.execute('insert into tally_register (id) values (?) on conflict do nothing', [p.registerId])
         const inserted = await em.execute(`insert into tally_register_session
-          (id, register_id, store_key, status, business_day, opened_at, opened_by, expected_float_minor, counted_float_minor, opening_variance_minor, device_id, device_name)
-          values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing returning id`,
+          (id, register_id, store_key, status, business_day, opened_at, opened_by, expected_float_minor, counted_float_minor, opening_variance_minor, device_id, device_name, open_contract)
+          values (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?) on conflict do nothing returning id`,
         [p.sessionId, p.registerId, p.storeKey ?? null, p.businessDay ?? null, p.openedAt, p.openedBy ?? null,
-          p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null, p.deviceId ?? null, p.deviceName?.trim() ?? null])
+          p.expectedFloatMinor ?? null, p.countedFloatMinor, p.openingVarianceMinor ?? null, p.deviceId ?? null, p.deviceName?.trim() ?? null, p.contract ?? 1])
         if (inserted.length) return { kind: 'ok', register: { ...(await em.execute(SESSION_STATE, [p.sessionId]))[0], ...(superseded ? { superseded } : {}) } }
       }
       return { kind: 'invalid', message: 'conflicting session is no longer active' }
@@ -89,7 +89,7 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   private async lockSession(sessionId: string, em: EntityManager) {
-    const [session] = await em.execute(`select id, register_id, status from tally_register_session where id = coalesce(
+    const [session] = await em.execute(`select id, register_id, status, open_contract from tally_register_session where id = coalesce(
       (select id from tally_register_session where id = ?),
       (select session_id from tally_register_session_alias where id = ?)) for update`, [sessionId, sessionId])
     return session
@@ -102,7 +102,7 @@ export default class TallyRegisterModuleService extends MedusaService({
       if (!session) return { kind: 'invalid', message: 'unknown session' }
       p = { ...p, sessionId: session.id }
       if (session.status === p.status) return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
-      if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+      if (session.status === 'superseded') return (session.open_contract ?? 1) >= 2
         ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
         : { kind: 'conflict', code: 'register_session_closed' }
       if (session.status === 'closed') return { kind: 'conflict', code: 'register_session_closed' }
@@ -128,7 +128,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         if (existing.session_id !== p.sessionId) return { kind: 'invalid', message: 'movement id belongs to another session' }
         return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
       }
-      if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+      if (session.status === 'superseded') return (session.open_contract ?? 1) >= 2
         ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
         : { kind: 'conflict', code: 'register_session_closed' }
       const [closure] = await em.execute('select id from tally_register_closure where session_id = ?', [p.sessionId])
@@ -154,7 +154,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         }
         return { kind: 'ok', register: (await em.execute(SESSION_STATE, [p.sessionId]))[0] }
       }
-      if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+      if (session.status === 'superseded') return (session.open_contract ?? 1) >= 2
         ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
         : { kind: 'conflict', code: 'register_session_closed' }
       const [closure] = await em.execute('select id from tally_register_closure where session_id = ?', [p.sessionId])
@@ -187,7 +187,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         where id = ? or session_id = ? order by (id = ?) desc`, [p.closureId, p.sessionId, p.closureId])
       if (closure?.id !== p.closureId) {
         if (p.registerId !== session.register_id) return { kind: 'invalid', message: "closure registerId does not match the session's register" }
-        if (session.status === 'superseded') return (p.contract ?? 1) >= 2
+        if (session.status === 'superseded') return (session.open_contract ?? 1) >= 2
           ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
           : { kind: 'conflict', code: 'register_session_closed' }
         if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }

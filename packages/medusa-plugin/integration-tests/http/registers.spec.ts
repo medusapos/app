@@ -435,8 +435,24 @@ medusaIntegrationTestRunner({
         expect(await service.listTallyRegisterMovements({ session_id: opening.payload.sessionId })).toHaveLength(0)
       })
 
-      it('after a take-over, a v1 movement on the superseded session is rejected register_session_closed', async () => {
+      it('after a take-over, a v1 movement on a session opened at v2 is rejected register_session_superseded with the take-over data', async () => {
         const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt })
+        expect((await post([takeover])).data.results[0].status).toBe('applied')
+        const payout = movement(opening.payload.sessionId, 'paid_out', 50)
+        const response = await post([payout])
+        expect(response.status).toBe(200)
+        expect(response.data.results).toEqual([{ id: payout.id, status: 'rejected', error: {
+          code: 'register_session_superseded', message: 'This register session was taken over by another till.',
+          data: { sessionId: opening.payload.sessionId, supersededAt: closedAt, newSessionId: takeover.payload.sessionId,
+            deviceId: takeover.deviceId, deviceName: 'Till B' },
+        } }])
+      })
+
+      it('after a take-over, a v1 movement on a session opened at v1 is rejected register_session_closed', async () => {
+        const opening = open()
         expect((await post([opening])).data.results[0].status).toBe('applied')
         const takeover = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
           supersedes: opening.payload.sessionId, openedAt: closedAt })
