@@ -200,7 +200,7 @@ describe('ProductsScreen catalogue', () => {
       state: 'offline', error: 'Failed to fetch',
     }));
     await mount();
-    expect(screen.getByText('MedusaJS · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
+    expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.textContent))
       .toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Cash', 'Card terminal']);
@@ -216,10 +216,10 @@ describe('ProductsScreen catalogue', () => {
   });
 
   it.each([
-    [undefined, 'MedusaJS · Up to date · 0 products'],
-    [{ count: 0, stale: false }, 'MedusaJS · Up to date · 0 products'],
-    [{ count: 1, stale: false }, 'MedusaJS · Up to date · 0 products · 1 not sold in this channel'],
-    [{ count: 1200, stale: true }, 'MedusaJS · Up to date · 0 products · 1,200 not sold in this channel (last check failed)'],
+    [undefined, 'Test shop · Up to date · 0 products'],
+    [{ count: 0, stale: false }, 'Test shop · Up to date · 0 products'],
+    [{ count: 1, stale: false }, 'Test shop · Up to date · 0 products · 1 not sold in this channel'],
+    [{ count: 1200, stale: true }, 'Test shop · Up to date · 0 products · 1,200 not sold in this channel (last check failed)'],
   ])('shows the unlisted count %j on the status line', async (unlisted, text) => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ unlisted }));
     await mount();
@@ -227,10 +227,10 @@ describe('ProductsScreen catalogue', () => {
   });
 
   it.each([
-    [0, 'MedusaJS · Up to date · 0 products'],
-    [1, 'MedusaJS · Up to date · 1 product'],
-    [2, 'MedusaJS · Up to date · 2 products'],
-    [1234, 'MedusaJS · Up to date · 1,234 products'],
+    [0, 'Test shop · Up to date · 0 products'],
+    [1, 'Test shop · Up to date · 1 product'],
+    [2, 'Test shop · Up to date · 2 products'],
+    [1234, 'Test shop · Up to date · 1,234 products'],
   ])('with %i sellable products the status line reads %j', async (count, text) => {
     const products = Array.from({ length: count }, (_, i) => ({ id: `p${i}`, title: `Product ${i}`, status: 'published',
       variants: [{ id: `p${i}-v`, title: 'One size', sku: `p${i}`, prices: [{ amount: 1, currency_code: 'eur' }] }] }));
@@ -239,6 +239,11 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText(text)).toBeTruthy();
   });
 
+  it('falls back to the connector name when the store name is blank', async () => {
+    vi.mocked(fetchStoreSettings).mockResolvedValue({ ...settings, storeName: '' });
+    await mount();
+    expect(await screen.findByText('MedusaJS · Up to date · 0 products')).toBeTruthy();
+  });
   it('says a held unsupported settings result applies after the sale, not "Offline"', async () => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt', status: 'published',
       variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] }));

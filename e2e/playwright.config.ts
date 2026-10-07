@@ -12,7 +12,7 @@ export default defineConfig({
   testIgnore: ['carryover/**', 'rbac/**'],
   globalTeardown: appUrl ? undefined : './global-teardown.ts',
   workers: 1,
-  // The hosted demo catalogue (~2,000 products) takes ~47 s to sync first and seconds per search, so 90 s can end a hosted test before its sale syncs.
+  // A hosted run crosses the internet to the shared demo backend for sign-in, sync and every sale; its showcase catalogue (about 35 products, #227) syncs in seconds, so the 5 minutes is network headroom, not catalogue size.
   timeout: appUrl ? 5 * 60_000 : 90_000,
   expect: { timeout: 30_000 },
   reporter: isCI() ? [['list'], ['html', { open: 'never' }]] : 'list',
