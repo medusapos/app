@@ -1,6 +1,8 @@
-# WCPOS v2 parity: what the Medusa app has
+# Core POS features: what the Medusa app has
 
-This file lists the features of WCPOS v2 and says how far the MedusaPOS app has each one, so that choosing the next item never needs a ruling. The lane takes the first open row of **Default order** (at the end) unless the front desk says otherwise. Update this file in the PR that changes a row.
+This file lists the core POS features a Medusa merchant expects and says how far the MedusaPOS app has each one, so that choosing the next item never needs a ruling.
+
+**Each row is a user expectation, built Medusa's own way.** WCPOS v2 is the reference for which features a POS needs, and for taste. It is not the spec for how they work: a row is built with Medusa's own pieces (RBAC roles and policies, regions and price lists, sales channels and stock locations, payment providers, promotions, returns, the notification module), never by copying how WCPOS does it on WooCommerce (Paul, 2026-10-07). Where a WooCommerce mechanism has no Medusa meaning, the row says so. The lane takes the first open row of **Default order** (at the end) unless the front desk says otherwise. Update this file in the PR that changes a row.
 
 Read on 2026-10-07:
 - **The app:** medusapos `main` at `88af56c`, `@tallyui/*` 3.8.0 (pinned in `apps/expo/package.json`), plugin 0.2.2 (`packages/medusa-plugin`). `apps/desktop` is a stub (its build script is a TODO); the MVP is web only (`docs/A-TRACK.md`).
@@ -43,7 +45,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Several open orders as tabs | 2.0 (FS, RS) | Missing | Parking only | TallyUI |
 | Order note | 2.0 (FS, RS) | Missing | TallyUI 3.8.0 ships `CartNoteInput` and an order `note` field; the app does not use them: `useSale` has no `setNote` yet (TallyUI#520). The plugin drops the note too: `tally-order-create/plan.ts` maps only `registerId` and `cashierRef` into the order metadata | TallyUI, then app and plugin |
 | Wide and phone layouts | Free (RS) | Has | Phone below 600 wide (`docs/adr/0009`); `e2e/phone-cart.spec.ts` "at 360 × 740 the lines scroll under pinned totals and pay, and the cart bar counts items" | — |
-| Prevent overselling | Free (FS) | Partial | The till never refuses a sale; the plugin applies it and returns `insufficient_stock` (`docs/adr/0003`, `workflows/tally-order-create/stock.ts`). Nothing warns the cashier before checkout | TallyUI, then app |
+| Know before selling what is out of stock | Free (FS) | Partial | The till never refuses a sale; the plugin applies it and returns `insufficient_stock` (`docs/adr/0003`, `workflows/tally-order-create/stock.ts`). Nothing warns the cashier before checkout. Medusa's way: the variant's own `manage_inventory` and `allow_backorder` decide, against the stock location's levels | TallyUI, then app |
 
 ## Products and search
 
@@ -54,7 +56,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Variations: one tile, then pick the variant | Free (RS) | Has | Live variant chooser (`docs/adr/0007`); `e2e/live-stock.spec.ts` "stock change reaches the chooser without a catalogue pull" | — |
 | Browse by tag, brand or shortcut; filter chips | 2.0 (RS) | Missing | No TallyUI component found in 3.8.0 | TallyUI |
 | Region prices | Pro (PRO, store pricing) | Has | `e2e/pricing.spec.ts` "the catalogue shows E2E-1 at Medusa's calculated price for Europe" and "a region change resyncs the catalogue at the new region's price" | — |
-| Stock, price and cost editing | Pro (PRO) | Missing | Not found in `apps/expo` or the plugin | TallyUI + plugin |
+| Fix a stock count or a price at the counter | Pro (PRO) | Missing | Not found in `apps/expo` or the plugin. Medusa Admin already edits both; at the till this means a quick change through Medusa's inventory levels and prices, as the signed-in user's role allows | TallyUI + plugin |
 
 ## Customers
 
@@ -62,7 +64,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 |---|---|---|---|---|
 | Search and attach a customer; guest sales | Free (FS) | Has | TallyUI `CustomerPicker`; `e2e/customers.spec.ts` "a searched customer is linked to the Medusa order" | — |
 | Create a customer at the till | Pro (MS) | Has | `e2e/customers.spec.ts` "a customer created at the till is linked to the Medusa order" | — |
-| Customers management screen | Pro (MS) | Missing | No route in `apps/expo/app` | TallyUI, then app |
+| Look up and edit a customer at the till | Pro (MS) | Missing | No route in `apps/expo/app`. Medusa Admin keeps the full customer screens; the till needs the counter's view of Medusa customers | TallyUI, then app |
 
 ## Checkout and payments
 
@@ -72,8 +74,9 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Card recorded as an external payment | Free (PC) | Has | `e2e/split-tender.spec.ts` (card leg) | — |
 | Split payment | 2.0 (CMP) | Has | TallyUI `SplitTender`; `e2e/split-tender.spec.ts` "a split card-and-cash sale reaches Medusa once at the till's total, with both payments, and the receipt lists both" | — |
 | Offline checkout | 2.0 (CMP) | Has | `e2e/offline.spec.ts` "25 sales, 20 offline, land exactly once" | — |
-| Gateways and terminals (Stripe Terminal, SumUp, Mollie), Tap to Pay | Pro (PRO, PC) | Missing | Not found in TallyUI 3.8.0 or the plugin | TallyUI + plugin |
-| Tips; order status per gateway | Free (FS, PC) | Missing | Not found in TallyUI 3.8.0 or the plugin | TallyUI + plugin |
+| Take a card on a terminal, Tap to Pay | Pro (PRO, PC) | Missing | Not found in TallyUI 3.8.0 or the plugin. Medusa's way: the store's own Medusa payment providers (Stripe and others), not a POS-side gateway list | TallyUI + plugin |
+| Tips | Free (FS, PC) | Missing | Not found in TallyUI 3.8.0 or the plugin | TallyUI + plugin |
+| Order status per gateway | Free (FS, PC) | N/A | A WooCommerce setting. A Medusa order carries its own payment and fulfilment status, which the plugin sets when it captures the till's payments | — |
 | Customer-facing display | Pro (CMP) | Missing | Not found in TallyUI 3.8.0 | TallyUI |
 
 ## Receipts and printing
@@ -81,7 +84,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | On-screen receipt; browser print | Free (FR) | Has | TallyUI `Receipt` and the "Print receipt" button in `apps/expo/app/index.tsx`; receipt checked in `e2e/split-tender.spec.ts` | — |
-| Email receipt (with an offline queue) | Free (FR) | Missing | Not found in TallyUI 3.8.0 or the plugin | TallyUI + plugin |
+| Email receipt (with an offline queue) | Free (FR) | Missing | Not found in TallyUI 3.8.0 or the plugin. Medusa's way: the store's notification module sends it | TallyUI + plugin |
 | Receipt templates, gallery, fiscal mode | Free (FR) | Missing | One fixed layout | TallyUI |
 | Thermal ESC/POS, cloud printing, routing between printers | Free (FR) | Missing | Printer settings "land here later (ADR 0016)" (`apps/expo/app/settings.tsx`) | TallyUI |
 
@@ -90,7 +93,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Order history from the store | Pro (MS) | Partial | `apps/expo/app/orders.tsx` shows `OrdersList` of this till's outbox only. Waiting: TallyUI G7 b3, the `/tally/v1/orders` route spec (issue number to confirm) | TallyUI, then plugin + app |
-| Refunds | Pro (CR, PRO) | Missing | No refund command in plugin 0.2.2; TallyUI 3.8.0 has "no refund model yet" (`use-register-session.ts`). Waiting: TallyUI G7 b3 (issue number to confirm) | TallyUI, then plugin + app |
+| Refunds | Pro (CR, PRO) | Missing | No refund command in plugin 0.2.2; TallyUI 3.8.0 has "no refund model yet" (`use-register-session.ts`). Waiting: TallyUI G7 b3 (issue number to confirm). Medusa's way: its own returns and refund workflows on the order | TallyUI, then plugin + app |
 | Coupons in the cart | 2.0 (CMP, PRO) | Missing | Waiting: TallyUI#500 / #501 (ADR-077; d1, d3a merged; d2 in TallyUI PR #513; d3/d4 in flight). The plugin then needs a mapping: `createOrderWorkflow`'s promotion refresh drops adjustments without an applied promotion code (`workflows/tally-order-create/plan.ts`) | TallyUI, then plugin |
 
 ## Registers, cash and reports
@@ -118,7 +121,8 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Feature | WCPOS tier (source) | Status | Evidence / what is left | Owner of the rest |
 |---|---|---|---|---|
 | Connect and sign in | Free (FS) | Has | `apps/expo/app/login.tsx` (Medusa admin login); `e2e/demo.spec.ts` "one click on /demo reaches the POS with products" | — |
-| Sign in again after a 401; session list | Free (FS) | Partial | `e2e/strips.spec.ts` "sign-in strip: outbox pauses after three 401s, resumes once signed in again" and "a product pull refused with 401 signs the till out"; no session list or revoke. Shared strip waits on TallyUI#373 (`docs/PLAN.md`, #174 item 4) | TallyUI |
+| Sign in again without losing sales | Free (FS) | Has | `e2e/strips.spec.ts` "sign-in strip: outbox pauses after three 401s, resumes once signed in again" and "a product pull refused with 401 signs the till out". Shared strip waits on TallyUI#373 (`docs/PLAN.md`, #174 item 4) | TallyUI |
+| Session list and revoke | Free (FS) | N/A | WCPOS lists WordPress sessions. Medusa tokens are stateless JWTs with no session to list or revoke; access ends by removing the user's POS role (at their next sign-in or refresh) or by rotating `jwtSecret` (ADR 0023) | — |
 | Roles and capabilities | Free (PERM) | Partial | Any Medusa admin can sign in; no POS role or capability found in the plugin. Design in ADR 0023 (accepted): Medusa RBAC policies `tally_pos:use` and `tally_pos:approve_variance` | plugin |
 | Switching cashiers | — (WCPOS lacks it too, PERM) | Missing | — | TallyUI |
 | Settings screen | Free (FS) | Partial | Register (till name) and Scanner (`apps/expo/app/settings.tsx`); printer settings wait on TallyUI printing (Receipts and printing row) | app |
@@ -130,7 +134,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Keyboard-wedge scan, minimum length | Free (BS) | Has | `apps/expo/lib/use-wedge-scan.ts`; `e2e/phone-cart.spec.ts` "a keyboard-wedge scan in the cart view adds a product, and an unknown code alerts without adding one"; `e2e/settings.spec.ts` "a saved minChars gates the wedge scan, and the test-scan field reports its verdict" | — |
 | Camera scan; scan sounds | Free (BS) | Missing | Not found in TallyUI 3.8.0 | TallyUI |
 | Tax per rate | Free (FS) | Has | `Cart` `taxLabel` "VAT n%"; region tax-inclusive prices | — |
-| Multi-store | Pro (PRO) | Partial | One region per till (`StoreSettingsChoiceScreen`); `e2e/pricing.spec.ts` "a fresh till chooses its region; Germany does not cover the Copenhagen location (D1)". No store switching | TallyUI + plugin |
+| Sell for more than one shop or location | Pro (PRO) | Partial | Each till sells on the store's default sales channel and chooses its region and one of that channel's stock locations (`StoreSettingsChoiceScreen`, `apps/expo/lib/store-settings.ts`); `e2e/pricing.spec.ts` "a fresh till chooses its region; Germany does not cover the Copenhagen location (D1)". Medusa's way is one store with several sales channels, regions and stock locations, not several stores. Left: choosing a sales channel other than the default, and switching without re-choosing | TallyUI + plugin |
 | Translations, RTL, store locale | Free / Pro (INT) | Missing | English only | TallyUI |
 | Extension directory, add-ons, Pro upsell | Free / Pro (FS, PRO) | N/A | — | — |
 
