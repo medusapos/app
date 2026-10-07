@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { hasPermission } from '@medusajs/framework'
+import type { IFlagRouter } from '@medusajs/framework/feature-flags'
 import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/framework/http'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import { TALLY_REGISTER_MODULE } from '../../../../modules/tally-register'
@@ -37,14 +38,14 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
       .json({ code: admitted.code, message: messages[admitted.code] })
   }
   const { success, authIdentity, mfaChallenge } = await req.scope.resolve(Modules.AUTH)
-    .authenticate('emailpass', { body: { email, password } })
+    .authenticate('emailpass', { body: { email: email as string, password: password as string } })
   if (mfaChallenge) return res.status(401).json({ code: 'approval_mfa_unsupported',
     message: "This manager's login needs a second step, which the POS can't do yet." })
   if (!success || !authIdentity) return res.status(401).json({ code: 'approval_invalid_credentials',
     message: "The manager's email or password is not correct." })
   const userId = authIdentity.app_metadata?.user_id
   let allowed = typeof userId === 'string' && userId.length > 0
-  if (allowed && req.scope.resolve(ContainerRegistrationKeys.FEATURE_FLAG_ROUTER).isFeatureEnabled('rbac')) {
+  if (allowed && req.scope.resolve<IFlagRouter>(ContainerRegistrationKeys.FEATURE_FLAG_ROUTER).isFeatureEnabled('rbac')) {
     const { data } = await req.scope.resolve(ContainerRegistrationKeys.QUERY).graph({
       entity: 'user', fields: ['rbac_roles.id'], filters: { id: userId },
     })
