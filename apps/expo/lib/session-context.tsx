@@ -4,7 +4,7 @@ import { parseTaxRounding, resolveCapabilities, type ServerCapabilities } from '
 import { exposeE2eHook } from './e2e-debug';
 import { clearProductCache } from './product-cache';
 import {
-  clearSession, defaultStorage, loadSession, login, LoginError, refreshSession,
+  clearSession, defaultStorage, loadSession, login, LoginError, NO_POS_ACCESS_MESSAGE, refreshSession,
   saveSession, shouldRefresh, type Session,
 } from './session';
 
@@ -13,6 +13,8 @@ type SessionContextValue = {
   signIn(baseUrl: string, email: string, password: string): Promise<void>;
   signOut(): void;
   reportUnauthorized(): void;
+  reportNoPosAccess(): void;
+  signOutNotice: string | null;
   /** Merges a fresh capabilities read into the session (ADR-062): an inconclusive `undefined` keeps the stored value. */
   mergeCapabilities(fresh: ServerCapabilities | undefined): void;
   /**
@@ -33,6 +35,7 @@ const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState(() => loadSession(defaultStorage()));
+  const [signOutNotice, setSignOutNotice] = useState<string | null>(null);
   const currentSession = useRef(session);
   const endSession = useCallback(() => {
     const ended = currentSession.current;
@@ -56,6 +59,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [endSession]);
   const signOut = useCallback(() => requestSignOut(false), [requestSignOut]);
   const reportUnauthorized = useCallback(() => requestSignOut(true), [requestSignOut]);
+  const reportNoPosAccess = useCallback(() => {
+    setSignOutNotice(NO_POS_ACCESS_MESSAGE);
+    requestSignOut(true);
+  }, [requestSignOut]);
   const release = useCallback((run: boolean) => {
     const token = deferredToken.current;
     // An unmount (a park, a blocking storage prompt) must not sign out: that would tear down under LiveTabGate's close.
@@ -92,6 +99,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     saveSession(defaultStorage(), next);
     currentSession.current = next;
     setSession(next);
+    setSignOutNotice(null);
   }
   const signedIn = session !== null;
   useEffect(() => {
@@ -117,7 +125,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [signedIn, reportUnauthorized]);
 
   return <SessionContext.Provider value={{ session, signIn, signOut, reportUnauthorized, mergeCapabilities, setSaleHold, setSavesHold,
-    signOutDeferred }}>
+    signOutDeferred, reportNoPosAccess, signOutNotice }}>
     {children}
   </SessionContext.Provider>;
 }

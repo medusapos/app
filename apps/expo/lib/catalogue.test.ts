@@ -47,7 +47,7 @@ describe('catalogue helpers', () => {
 describe('classifyReplicationError', () => {
   it.each([
     [new Error('Medusa API error: 401'), 'unauthorized'],
-    [new Error('Medusa API error: 403'), 'http'],
+    [new Error('Medusa API error: 403'), 'forbidden'],
     [new Error('Medusa API error: 500'), 'http'],
     [new TypeError('Failed to fetch'), 'offline'],
     [new Error('connection lost'), 'offline'],

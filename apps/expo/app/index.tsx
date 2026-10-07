@@ -51,19 +51,19 @@ const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
 export default function ProductsScreen() {
-  const { session, signOut, reportUnauthorized, mergeCapabilities } = useSession();
+  const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
   const lastEmail = useRef<string | undefined>(undefined);
   if (!session) return <Redirect href={isDemoAccount(lastEmail.current ?? '') ? '/demo' : '/login'} />;
   lastEmail.current = session.email;
   return <SettingsScreen key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
-    onCapabilities={mergeCapabilities} />;
+    onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} />;
 }
 
-type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void;
+type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void; onNoPosAccess: () => void;
   onCapabilities: (fresh: ServerCapabilities | undefined) => void };
 
 function SettingsScreen(props: SignedInProps) {
-  const { session, onUnauthorized, onCapabilities } = props;
+  const { session, onUnauthorized, onNoPosAccess, onCapabilities } = props;
   const [connector] = useState(createPosConnector);
   // Once per store (this screen is keyed by it): re-read the order.create capability a restored session was saved with (ADR-062).
   useEffect(() => {
@@ -88,13 +88,14 @@ function SettingsScreen(props: SignedInProps) {
     }).catch((error: Error) => {
       if (!active) return;
       if (error instanceof StoreSettingsError && error.code === 'unauthorized') onUnauthorized();
+      else if (error instanceof StoreSettingsError && error.code === 'forbidden') onNoPosAccess();
       else {
         setError(error.message);
         setOffline(error instanceof StoreSettingsError && error.code === 'unreachable');
       }
     });
     return () => { active = false; };
-  }, [session, onUnauthorized, attempt]);
+  }, [session, onUnauthorized, onNoPosAccess, attempt]);
   if (!settings) return <SettingsMessage text={error ?? 'Loading store settings…'} actions={error ? { Retry: () => setAttempt(attempt + 1) } : {}} />;
   return <PricingScreen {...props} connector={connector} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
 }
@@ -183,13 +184,13 @@ function PricingScreen(props: PricingProps) {
   </TaxProvider>;
 }
 
-function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: PricingProps & {
+function SignedInProducts({ session, signOut, onUnauthorized, onNoPosAccess, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: PricingProps & {
   pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
 }) {
   const traits = connector.traits.product;
   const { setSaleHold } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
-    useReplicatedProducts(connector, syncContext, onUnauthorized);
+    useReplicatedProducts(connector, syncContext, onUnauthorized, onNoPosAccess);
   const previousToken = useRef(session.token);
   useEffect(() => {
     if (previousToken.current !== session.token) resumePull();

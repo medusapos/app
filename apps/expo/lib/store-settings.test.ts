@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { SessionStorage } from './session';
+import { NO_POS_ACCESS_MESSAGE, type SessionStorage } from './session';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import {
   clearCachedSettings, clearSettingsRegion, fetchStoreSettings, loadCachedPricing, loadCachedSettings, loadSettingsChoice,
@@ -41,6 +41,17 @@ function memoryStorage(): SessionStorage {
 }
 
 describe('fetchStoreSettings', () => {
+  it('maps a 403 on admin/stores to forbidden', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 403 }));
+    await expect(fetchStoreSettings(session, fetchImpl)).rejects.toMatchObject({ code: 'forbidden', message: NO_POS_ACCESS_MESSAGE });
+    expect(fetchImpl).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('/admin/stores?'), {
+      headers: { Authorization: 'Bearer jwt' },
+    });
+  });
+  it('still maps a 500 to unreachable', async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 500 }));
+    await expect(fetchStoreSettings(session, fetchImpl)).rejects.toMatchObject({ code: 'unreachable' });
+  });
   it('reads only the store name, default currency and first location, with no tax or price-preference reads', async () => {
     const fetchImpl = fetcher();
     expect(await fetchStoreSettings(session, fetchImpl)).toEqual(settings);

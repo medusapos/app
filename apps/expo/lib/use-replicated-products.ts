@@ -20,10 +20,11 @@ import { exposeE2eHook } from './e2e-debug';
 
 export type SyncState = 'connecting' | 'syncing' | 'synced' | 'error' | 'offline';
 
-export function classifyReplicationError(err: unknown): 'unauthorized' | 'http' | 'offline' {
+export function classifyReplicationError(err: unknown): 'unauthorized' | 'forbidden' | 'http' | 'offline' {
   if (isUnauthorizedError(err)) return 'unauthorized';
   const error = err as { message?: unknown; parameters?: { errors?: { message?: unknown }[] } } | null;
   const message = error?.parameters?.errors?.[0]?.message ?? error?.message;
+  if (message === 'Medusa API error: 403') return 'forbidden';
   return typeof message === 'string' && /^Medusa API error: \d+$/.test(message) ? 'http' : 'offline';
 }
 
@@ -38,6 +39,7 @@ export function useReplicatedProducts(
   connector: TallyConnector,
   context: SyncContext,
   onUnauthorized: () => void,
+  onForbidden?: () => void,
 ) {
   const { baseUrl } = context;
   const [products, setProducts] = useState<any[]>([]);
@@ -101,6 +103,7 @@ export function useReplicatedProducts(
 
     let cancelled = false;
     let unauthorizedReported = false;
+    let forbiddenReported = false;
     const cleanup: Array<() => unknown> = [];
 
     (async () => {
@@ -149,6 +152,10 @@ export function useReplicatedProducts(
           if (!unauthorizedReported && classification === 'unauthorized') {
             unauthorizedReported = true;
             onUnauthorized();
+          }
+          if (!forbiddenReported && classification === 'forbidden') {
+            forbiddenReported = true;
+            onForbidden?.();
           }
         });
 
@@ -274,7 +281,7 @@ export function useReplicatedProducts(
       currentNotice.current = undefined;
       setPullNotice(undefined);
     };
-  }, [connector, baseUrl, context, onUnauthorized, reconcileStock]);
+  }, [connector, baseUrl, context, onUnauthorized, onForbidden, reconcileStock]);
 
   return { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull };
 }

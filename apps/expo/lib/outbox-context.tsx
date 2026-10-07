@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import {
-  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type UseOrderOutboxResult,
+  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type OutboxState, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { markBusy, reportStorageStartFailure, storageStartFailureOf } from './live-tab';
 import { openOrderStore } from './order-store';
@@ -41,8 +41,10 @@ export function useSessionOutbox(session: Session | null, registerId: string): U
 
 const OutboxContext = createContext<UseOrderOutboxResult | null>(null);
 
+export function refusedForPosAccess(state: OutboxState): boolean { return state.refused?.status === 403; }
+
 export function OutboxProvider({ children }: { children: ReactNode }) {
-  const { session, setSavesHold } = useSession();
+  const { session, setSavesHold, reportNoPosAccess } = useSession();
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const outbox = useSessionOutbox(session, registerId);
   // The session's saves hold (ADR 0015): a save abandoned by Continue can still hang in its insert, and RxDB's close
@@ -52,6 +54,8 @@ export function OutboxProvider({ children }: { children: ReactNode }) {
   const saving = outbox.savesInFlight > 0;
   useEffect(() => setSavesHold(saving), [saving, setSavesHold]);
   useEffect(() => () => setSavesHold(false, false), [setSavesHold]);
+  const noPosAccess = refusedForPosAccess(outbox.state);
+  useEffect(() => { if (noPosAccess) reportNoPosAccess(); }, [noPosAccess, reportNoPosAccess]);
   // The register (ADR 0017) lives in this outbox's order store, so its one useRegisterSession sits here too.
   return <OutboxContext.Provider value={outbox}>
     <RegisterProvider orders={outbox.orders} deviceId={registerId}>{children}</RegisterProvider>

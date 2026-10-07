@@ -4,7 +4,7 @@ import { Text } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POS_CONNECTOR_ID } from './pos-connector';
 import { clearProductCache } from './product-cache';
-import { REFRESH_WINDOW_MS, saveSession, type Session } from './session';
+import { NO_POS_ACCESS_MESSAGE, REFRESH_WINDOW_MS, saveSession, type Session } from './session';
 import { SessionProvider, useSession } from './session-context';
 
 vi.mock('./product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
@@ -46,6 +46,36 @@ afterEach(() => {
 });
 
 describe('SessionProvider', () => {
+  it('reportNoPosAccess signs out and sets signOutNotice', async () => {
+    await mount();
+    act(() => context.reportNoPosAccess());
+    expect(context.session).toBeNull();
+    expect(storage.getItem('medusapos.session')).toBeNull();
+    expect(context.signOutNotice).toBe(NO_POS_ACCESS_MESSAGE);
+    expect(clearProductCache).toHaveBeenCalledExactlyOnceWith(POS_CONNECTOR_ID, stored.baseUrl);
+  });
+  it('defers reportNoPosAccess during a saving sale hold', async () => {
+    await mount();
+    act(() => context.setSaleHold('saving'));
+    act(() => context.reportNoPosAccess());
+    expect(context.session).toEqual(stored);
+    expect(context.signOutDeferred).toBe(true);
+    expect(context.signOutNotice).toBe(NO_POS_ACCESS_MESSAGE);
+    expect(storage.removeItem).not.toHaveBeenCalled();
+    act(() => context.setSaleHold(null));
+    expect(context.session).toBeNull();
+    expect(context.signOutDeferred).toBe(false);
+    expect(context.signOutNotice).toBe(NO_POS_ACCESS_MESSAGE);
+  });
+  it('clears signOutNotice after a later successful signIn', async () => {
+    await mount();
+    act(() => context.reportNoPosAccess());
+    expect(context.signOutNotice).toBe(NO_POS_ACCESS_MESSAGE);
+    fetchImpl.mockImplementation(async () => new Response(JSON.stringify({ token: stored.token })));
+    await act(async () => { await context.signIn(stored.baseUrl, stored.email, 'secret'); });
+    expect(context.session?.token).toBe(stored.token);
+    expect(context.signOutNotice).toBeNull();
+  });
   it('restores a stored session without refreshing a far-expiry token', async () => {
     await mount();
     expect(screen.getByText(stored.email)).toBeTruthy();

@@ -1,5 +1,5 @@
 import type { StoreSettings as PricingSettings, StoreSettingsChoice } from '@tallyui/core';
-import type { Session, SessionStorage } from './session';
+import { NO_POS_ACCESS_MESSAGE, type Session, type SessionStorage } from './session';
 import { authHeaders } from './pos-connector';
 
 export type StoreSettings = {
@@ -8,7 +8,7 @@ export type StoreSettings = {
   location: { id: string; name: string; addressLine?: string; countryCode: string };
 };
 export class StoreSettingsError extends Error {
-  constructor(readonly code: 'unauthorized' | 'unreachable' | 'misconfigured', message: string) { super(message); }
+  constructor(readonly code: 'unauthorized' | 'forbidden' | 'unreachable' | 'misconfigured', message: string) { super(message); }
 }
 const CACHE_PREFIX = 'medusapos.settings.';
 // Per store, like the settings cache; signing out clears neither.
@@ -30,6 +30,7 @@ export async function fetchStoreSettings(session: Session, fetchImpl = globalThi
       response = await fetchImpl(`${session.baseUrl}${path}`, { headers: authHeaders(session.token) });
     } catch { throw new StoreSettingsError('unreachable', 'Could not reach the backend.'); }
     if (response.status === 401) throw new StoreSettingsError('unauthorized', 'Please sign in again.');
+    if (response.status === 403) throw new StoreSettingsError('forbidden', NO_POS_ACCESS_MESSAGE);
     if (!response.ok) throw new StoreSettingsError('unreachable', 'Could not read store settings.');
     const body: unknown = await response.json().catch(() => null);
     if (!isRecord(body)) throw new StoreSettingsError('unreachable', 'Invalid store settings response.');

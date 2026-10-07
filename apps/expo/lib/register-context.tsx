@@ -7,6 +7,7 @@ import {
 import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { registerCollections, type RegisterCollections } from './order-store';
+import { refusedForPosAccess } from './outbox-context';
 import { authHeaders } from './pos-connector';
 import { defaultStorage } from './session';
 import { useSession } from './session-context';
@@ -65,7 +66,7 @@ const RegisterContext = createContext<RegisterContextValue | null>(null);
 
 /** Under OutboxProvider, over its open order store, whose database holds the register collections. */
 export function RegisterProvider({ orders, deviceId, children }: { orders: RxCollection<PosOrder> | null; deviceId: string; children: ReactNode }) {
-  const { session } = useSession();
+  const { session, reportNoPosAccess } = useSession();
   const storeKey = session?.baseUrl ?? '';
   const tokenRef = useRef(session?.token);
   tokenRef.current = session?.token;
@@ -77,6 +78,8 @@ export function RegisterProvider({ orders, deviceId, children }: { orders: RxCol
     deviceId,
   });
   const [bound, setBound] = useState<Bound | null>(null);
+  const noPosAccess = refusedForPosAccess(registerOutbox.state);
+  useEffect(() => { if (noPosAccess) reportNoPosAccess(); }, [noPosAccess, reportNoPosAccess]);
   useEffect(() => {
     if (!collections) return;
     const subscription = observeRegister$(collections.sessions).subscribe((document) => setBound({

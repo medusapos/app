@@ -4,7 +4,8 @@ import { authHeaders } from './pos-connector';
 
 /** `capabilities`: the store's `order.create` contract (ADR-062), absent until a read was conclusive. */
 export type Session = { baseUrl: string; email: string; token: string; name?: string; tokenExpiresAt?: number; capabilities?: ServerCapabilities };
-export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error' | 'invalid_url' | 'insecure_url';
+export type LoginErrorCode = 'invalid_credentials' | 'unsupported_account' | 'unreachable' | 'server_error' | 'invalid_url' | 'insecure_url' | 'no_pos_access';
+export const NO_POS_ACCESS_MESSAGE = "This account can't use the POS. Ask the store owner for POS access.";
 export class LoginError extends Error {
   constructor(readonly code: LoginErrorCode, message: string) { super(message); }
 }
@@ -59,6 +60,16 @@ export async function login(baseUrl: string, email: string, password: string, fe
     if (error.status >= 200 && error.status < 300) throw new LoginError('server_error', 'The backend returned no token.');
     throw new LoginError('server_error', `The backend could not sign you in (HTTP ${error.status}).`);
   }
+  let probeTimer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const response = await Promise.race([
+      fetchImpl(`${baseUrl}/tally/v1/info`, { method: 'GET', headers: authHeaders(result.token) }),
+      new Promise<null>((resolve) => { probeTimer = setTimeout(() => resolve(null), 3000); }),
+    ]);
+    if (response?.status === 403) throw new LoginError('no_pos_access', NO_POS_ACCESS_MESSAGE);
+  } catch (error) {
+    if (error instanceof LoginError && error.code === 'no_pos_access') throw error;
+  } finally { clearTimeout(probeTimer); }
   const session: Session = { baseUrl, email, token: result.token };
   if (result.capabilities) session.capabilities = result.capabilities;
   const expiresAt = result.expiresAt !== undefined ? Date.parse(result.expiresAt) : NaN;
