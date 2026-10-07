@@ -26,7 +26,7 @@ The POS does not charge cards itself.
 In your Medusa store's directory, run:
 
 ```sh
-npm install https://github.com/medusapos/app/releases/download/v0.1.0/medusapos-medusa-plugin-0.1.0.tgz
+npm install https://github.com/medusapos/app/releases/download/v0.2.0/medusapos-medusa-plugin-0.2.3.tgz
 ```
 
 Add this entry to the `plugins` list in `medusa-config.ts`, keeping any existing
