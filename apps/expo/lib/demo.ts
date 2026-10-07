@@ -22,7 +22,8 @@ export const DEMO_WHAT_TO_TRY = [
   'Close the register with a cash count',
 ] as const;
 export const DEMO_ABOUT_URL = 'https://medusapos.com';
-export const DEMO_QUICK_START_URL = 'https://github.com/medusapos/app/blob/main/docs/QUICKSTART.md';
+export const DEMO_QUICK_START_URL = 'https://medusapos.com/docs/quick-start';
+export const DEMO_REPO_URL = 'https://github.com/medusapos/app';
 
 export function isDemoAccount(email: string, demo = storeConfig.demo): boolean {
   return demo && DEMO_ACCOUNTS.some((account) => account.email === email.trim().toLowerCase());

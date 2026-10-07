@@ -65,9 +65,9 @@ describe('Demo card', () => {
   it('About MedusaPOS and Quick start open in a new tab and leave the demo page', () => {
     render(<SessionProvider><DemoScreen /></SessionProvider>);
     fireEvent.click(screen.getByRole('link', { name: 'About MedusaPOS' }));
-    fireEvent.click(screen.getByRole('link', { name: 'Quick start' }));
+    fireEvent.click(screen.getByTestId('demo-quick-start'));
     expect(window.open).toHaveBeenNthCalledWith(1, 'https://medusapos.com', '_blank', 'noopener,noreferrer');
-    expect(window.open).toHaveBeenNthCalledWith(2, 'https://github.com/medusapos/app/blob/main/docs/QUICKSTART.md', '_blank', 'noopener,noreferrer');
+    expect(window.open).toHaveBeenNthCalledWith(2, 'https://medusapos.com/docs/quick-start', '_blank', 'noopener,noreferrer');
     expect(window.open).toHaveBeenCalledTimes(2);
     expect(router.push).not.toHaveBeenCalled();
     expect(router.replace).not.toHaveBeenCalled();
