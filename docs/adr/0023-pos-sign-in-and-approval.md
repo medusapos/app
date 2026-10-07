@@ -18,7 +18,8 @@ The till signs in through TallyUI's `medusaAdminUserAuth` connector (`apps/expo/
 **What Medusa 2.21.0 already provides** (read from the published 2.21.0 packages, `@medusajs/medusa`, `framework`, `auth`, `rbac`, `api-key`, `user`):
 
 - **RBAC, behind a feature flag.**
-  - The flag is `rbac` (`MEDUSA_FF_RBAC`), off by default. It loads `@medusajs/rbac`, which is self-hosted, not Cloud-only, and has no docs.medusajs.com page yet. Treat it as a beta.
+  - The flag is `rbac` (`MEDUSA_FF_RBAC`), off by default. The module is `@medusajs/rbac`, which is self-hosted, not Cloud-only, and has no docs.medusajs.com page yet. Treat it as a beta.
+  - **The flag alone does not load the module.** `defineConfig` adds the rbac module only when the flag is already on while `medusa-config` is evaluated, but Medusa registers its own `rbac` flag after reading the config. A store needs both `MEDUSA_FF_RBAC=true` and `{ resolve: '@medusajs/medusa/rbac' }` in `modules`. The env flag is still needed, because the policy check reads it on each request. (Probed under `medusa exec` with `container.hasRegistration('rbac')`: env only, false; module entry, true.)
   - Its tables are roles (`rbac_role`), policies (`rbac_policy`: `resource`, `operation`), role ⇄ policy, role inheritance, and a user ⇄ role link.
   - Its migration seeds `role_super_admin` with `*:*`, and a bundled migration script links every existing user to it.
   - A plugin declares its own policies with `definePolicies({ name, resource, operation })` from `@medusajs/framework/utils`. Custom operations are allowed.
@@ -44,12 +45,12 @@ The till signs in through TallyUI's `medusaAdminUserAuth` connector (`apps/expo/
 | `tally_pos:approve_variance` | May approve a close over the variance threshold. |
 
 - **The check is server side, on every `/tally/v1/*` route.** Each middleware entry adds `policies: [{ resource: 'tally_pos', operation: 'use' }]`, and the route keeps `authenticate('user', ['bearer', 'session'])`. Medusa's router then refuses a token whose roles don't grant it, with 403. That includes `/tally/v1/info`, which the connector reads at sign-in (ADR-062).
-- **At sign-in.** When `/info` answers 403, the app says "This account can't use the POS. Ask the store owner for POS access." and keeps no session. A 403 later, on a command or a pull, signs the till out like a 401, with the same words.
+- **At sign-in.** When `/info` answers 403, the app says "This account can't use the POS. Ask the store owner for POS access." and keeps no session. A 403 later, on an order command, a register command or the store-settings read, signs the till out like a 401, with the same words. A 403 on a product pull does not: TallyUI holds the pull with its `forbidden` notice, because the role lacks a read, which the store fixes, and the cashier keeps selling from the cached catalogue.
 - **A secret API key** has no roles, so with RBAC on it is refused on every `/tally/v1/*` route. With RBAC off it is accepted, as today.
 - **With RBAC off,** the policies are inert and every admin may use the POS, as today. The plugin adds no fallback list. A store that wants POS-only staff turns RBAC on. That is Medusa's own switch, and it also confines those staff in Medusa Admin. A plugin-side list would gate only `/tally/v1/*`, while the same token stays a full admin token for `/admin/*`.
 - **Two roles to start from.** A plugin script, `tally-pos-roles`, creates them idempotently. A store edits or replaces them in Medusa Admin.
   - **"POS cashier"** has `tally_pos:use` plus the read policies the connector's `/admin/*` reads need (products, variants, inventory, store, sales channels, customers, the user's own profile). The sign-in spec pins the exact list with an e2e against a store with the flag on.
-  - **"POS manager"** inherits "POS cashier" and adds `tally_pos:approve_variance`.
+  - **"POS manager"** has the cashier's policies plus `tally_pos:approve_variance`, as one flat list rather than role inheritance, so editing one role never changes the other.
   - `role_super_admin` (`*:*`) already grants both policies, so a store's existing admins keep working.
 - **Revoking access.** Roles live in the token, so removing a role from a signed-in cashier takes effect at their next sign-in or token refresh. That is within a day (ADR 0002: tokens live about a day, and the app refreshes within six hours of expiry). Medusa tokens can't be revoked, so an immediate stop means rotating `jwtSecret`. testers.md says so. The approval below reads roles live, not from a token.
 
@@ -133,7 +134,7 @@ Only the closure command waits on this. The register's other queued commands are
 - **The `/info` contract becomes `register: [1, 2, 3]`.** A till at 1 or 2 sees no change.
 - **With RBAC off,** which is every store today, nothing changes for sign-in: every admin may use the POS and approve. Approvals from a contract-3 till are now verified server side. QUICKSTART.md and testers.md say how to turn RBAC on.
 - **Turning RBAC on** is the store owner's step, with Medusa's own flag:
-  1. Set `MEDUSA_FF_RBAC=true` and run `db:migrate`. That seeds `role_super_admin` and links every existing user to it, so nobody is locked out.
+  1. Set `MEDUSA_FF_RBAC=true`, add `{ resolve: '@medusajs/medusa/rbac' }` to `modules` in `medusa-config`, and run `db:migrate`. That seeds `role_super_admin` and links every existing user to it, so nobody is locked out.
   2. Run `medusa exec tally-pos-roles` to create the two roles.
   3. Move cashiers from super admin to "POS cashier" in Medusa Admin.
 
