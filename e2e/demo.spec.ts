@@ -17,7 +17,7 @@ test('one click on /demo reaches the POS with products', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Medusa POS demo store', exact: true })).toBeVisible();
   await expect(page.getByText('cashier@demo.medusapos.com · demo1234', { exact: true })).toBeVisible();
   await expect(page.getByText('manager@demo.medusapos.com · demo1234', { exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Enter the demo', exact: true }).click();
+  await page.getByTestId('demo-enter-cashier').click();
   await expect(page.getByText(products)).toBeVisible({ timeout });
   await expect(page.getByText('Set up this till', { exact: true })).not.toBeVisible();
   await expect(page.getByTestId('demo-banner')).toBeVisible();
@@ -56,7 +56,7 @@ test('signed-out demo Quick start opens the docs and keeps What to try visible',
 
 test('signed in as the demo cashier, each What to try action has its control', async ({ page }) => {
   await page.goto('/demo');
-  await page.getByRole('button', { name: 'Enter the demo', exact: true }).click();
+  await page.getByTestId('demo-enter-cashier').click();
   await expect(page.getByText(products)).toBeVisible({ timeout });
   await openRegister(page);
   await expect(page.getByTestId(/^product-tile-/).first()).toBeVisible();
@@ -96,15 +96,16 @@ test('a non-demo account does not see the demo banner', async ({ page }) => {
 test('demo page works at phone width', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/demo');
-  for (const name of ['Enter the demo', 'Enter as manager']) {
-    const button = page.getByRole('button', { name, exact: true });
+  for (const [testID, label] of [['demo-enter-cashier', 'Enter the demo'], ['demo-enter-manager', 'Enter as manager']]) {
+    const button = page.getByTestId(testID);
     await expect(button).toBeVisible();
+    await expect(button).toHaveText(label);
     const box = await button.boundingBox();
     expect(box).not.toBeNull();
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(390);
   }
-  await page.getByRole('button', { name: 'Enter as manager', exact: true }).click();
+  await page.getByTestId('demo-enter-manager').click();
   await expect(page.getByText(products)).toBeVisible({ timeout });
 });
 
