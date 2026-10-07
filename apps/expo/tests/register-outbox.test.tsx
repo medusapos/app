@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { closeOrderStores, openOrderStore, registerCollections } from '../lib/order-store';
 import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 import { getDeviceName, useRegister } from '../lib/register-context';
-import { REGISTER_ID_KEY, saveSession } from '../lib/session';
+import { NO_POS_ACCESS_MESSAGE, REGISTER_ID_KEY, saveSession } from '../lib/session';
 import { SessionProvider, useSession } from '../lib/session-context';
 
 let sequence = 0;
@@ -90,6 +90,21 @@ it("sends a register.session.open to the store's commands endpoint when the stor
   await waitFor(() => expect(context.registerOutbox.state.pending).toBe(1));
   await act(async () => { answer(); });
   await expectApplied(sent()[0].id);
+});
+
+it('signs out with the no-POS-access notice when the store refuses a register command with 403', async () => {
+  await mount();
+  fetchImpl.mockImplementation(async (url, init) => {
+    if (new URL(String(url)).pathname === '/tally/v1/commands' && init?.method === 'POST') {
+      return new Response(JSON.stringify({ type: 'forbidden', message: 'Forbidden' }), { status: 403 });
+    }
+    return applied(url, init);
+  });
+  await open();
+  await waitFor(() => {
+    expect(session.session).toBeNull();
+    expect(session.signOutNotice).toBe(NO_POS_ACCESS_MESSAGE);
+  });
 });
 
 it('adopts a refused v2 open and unblocks later commands after choosing another register', async () => {
