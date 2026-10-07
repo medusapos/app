@@ -207,12 +207,12 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results[0].status).toBe('applied')
     })
 
-    it('an unsupported register version is rejected unsupported_version with data.register 2 and is not stored', async () => {
+    it('an unsupported register version is rejected unsupported_version with data.register 3 and is not stored', async () => {
       const opening = open()
-      const response = await post([{ ...opening, version: 3 }])
+      const response = await post([{ ...opening, version: 4 }])
       expect(response.status).toBe(200)
       expect(response.data.results[0]).toMatchObject({ id: opening.id, status: 'rejected', error: {
-        code: 'unsupported_version', data: { register: 2 },
+        code: 'unsupported_version', data: { register: 3 },
       } })
       expect(await ledger.listTallyCommands({ id: opening.id })).toHaveLength(0)
       expect((await post([opening])).data.results[0].status).toBe('applied')
@@ -251,12 +251,13 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results).toEqual([{ ...retry.data.results[0], status: 'duplicate' }])
     })
 
-    it('/info lists order.create 1, 2, 3 and register 1 and 2', async () => {
+    it('/info lists order.create 1, 2, 3, 4, 5 and register 1, 2, 3 with the approval threshold', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2, 3], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
+        registerApproval: { thresholdMinor: 500 },
         lineTax: { none: false, classes: false },
       })
     })

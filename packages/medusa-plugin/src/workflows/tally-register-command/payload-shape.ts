@@ -1,9 +1,9 @@
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
-import type { RegisterClosureSubmitPayload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
+import type { RegisterClosureSubmitPayload, RegisterClosureSubmitV3Payload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
   RegisterSessionOpenPayload, RegisterSessionOpenV2Payload, RegisterSessionTransitionPayload } from '../../modules/tally-register/types'
 
-// Register v1 and v2 fields: exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
-// makes tsc refuse a missing or an extra field. Only the open gains fields in version 2.
+// Register fields: exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
+// makes tsc refuse a missing or an extra field. The open gains fields in v2; the closure gains approval in v3.
 const fields = <T>(record: Record<keyof T, true>) => Object.keys(record)
 const REGISTER_FIELDS = new Map<string, string[]>([
   ['register.session.open', fields<RegisterSessionOpenPayload>({ sessionId: true, registerId: true, storeKey: true,
@@ -23,6 +23,11 @@ const REGISTER_FIELDS = new Map<string, string[]>([
 const OPEN_V2_FIELDS = fields<RegisterSessionOpenV2Payload>({ sessionId: true, registerId: true, storeKey: true,
   businessDay: true, openedAt: true, openedBy: true, expectedFloatMinor: true, countedFloatMinor: true,
   openingVarianceMinor: true, deviceName: true, supersedes: true })
+const CLOSURE_V3_FIELDS = fields<RegisterClosureSubmitV3Payload>({ closureId: true, sessionId: true, registerId: true,
+  number: true, businessDay: true, openedAt: true, closedAt: true, closedBy: true, approvedBy: true, tillExpected: true,
+  counted: true, periodSalesTotalMinor: true, periodRefundsTotalMinor: true, perpetualSalesTotalMinor: true,
+  perpetualRefundsTotalMinor: true, unsyncedCount: true, unsyncedTotalMinor: true, softwareVersion: true, orderIds: true,
+  movementIds: true, approval: true })
 // The only keys of the declared maps counted and tillExpected: PaymentMethodKind (@tallyui/core 2.0.0 src/types/commands.ts:68).
 const PAYMENT_METHODS = Object.keys({ cash: true, external: true } satisfies Record<PaymentMethodKind, true>)
 
@@ -36,7 +41,8 @@ export function registerPayloadErrors(type: string, payload: unknown, version = 
   }
   if (!object(payload)) return ['payload: expected an object']
   for (const key of Object.keys(payload)) {
-    const known = (type === 'register.session.open' && version >= 2 ? OPEN_V2_FIELDS : REGISTER_FIELDS.get(type))?.includes(key) ?? false
+    const known = (type === 'register.session.open' && version >= 2 ? OPEN_V2_FIELDS
+      : type === 'register.closure.submit' && version >= 3 ? CLOSURE_V3_FIELDS : REGISTER_FIELDS.get(type))?.includes(key) ?? false
     if (!known && errors.length < 10) errors.push(`payload.${key}: unknown field for ${type} version ${version}`)
   }
   const string = (field: string, optional = false) => {
@@ -92,6 +98,8 @@ export function registerPayloadErrors(type: string, payload: unknown, version = 
       }
       break
     case 'register.closure.submit':
+      if (version >= 3 && payload.approval !== undefined) check(typeof payload.approval === 'string'
+        && payload.approval.length > 0 && payload.approval.length <= 128, 'approval', 'a non-empty string of at most 128 characters')
       for (const field of ['closureId', 'registerId', 'openedAt', 'closedAt', 'softwareVersion']) string(field)
       for (const field of ['businessDay', 'closedBy', 'approvedBy']) string(field, true)
       integer('number', 1)

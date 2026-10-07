@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { EntityManager } from '@medusajs/framework/mikro-orm/postgresql'
 import type { Context } from '@medusajs/framework/types'
 import { InjectManager, MedusaContext, MedusaService } from '@medusajs/framework/utils'
@@ -230,10 +230,12 @@ export default class TallyRegisterModuleService extends MedusaService({
   @InjectManager()
   async submitClosure(p: RegisterClosureSubmitInput, @MedusaContext() sharedContext: Context = {}): Promise<RegisterOutcome> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<RegisterOutcome> => {
+      const sentSessionId = p.sessionId
+      const v3 = (p.contract ?? 1) >= 3
       const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
       p = { ...p, sessionId: session.id }
-      let [closure] = await em.execute(`select id, register_id, number from tally_register_closure
+      let [closure] = await em.execute(`select id, register_id, number, approval_id from tally_register_closure
         where id = ? or session_id = ? order by (id = ?) desc`, [p.closureId, p.sessionId, p.closureId])
       if (closure?.id !== p.closureId) {
         if (p.registerId !== session.register_id) return { kind: 'invalid', message: "closure registerId does not match the session's register" }
@@ -241,25 +243,48 @@ export default class TallyRegisterModuleService extends MedusaService({
           ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(p.sessionId, { manager: em }))! }
           : { kind: 'conflict', code: 'register_session_closed' }
         if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }
+        let approval: { id: string; approved_by: string } | undefined
+        if (v3) {
+          const variance = Object.fromEntries(Object.entries(p.counted).map(([k, v]) => [k, v - (p.tillExpected[k] ?? 0)]))
+          const thresholdMinor = p.thresholdMinor!
+          const over = Math.abs((p.counted.cash ?? 0) - (p.tillExpected.cash ?? 0)) > thresholdMinor
+          if (p.approval === undefined && over) return { kind: 'conflict', code: 'register_approval_required',
+            data: { sessionId: sentSessionId, thresholdMinor, variance } }
+          if (p.approval !== undefined) {
+            const [row] = await em.execute(`select *, expires_at <= now() as expired from tally_register_approval
+              where token_hash = ? for update`, [createHash('sha256').update(p.approval).digest('hex')])
+            const reason = !row ? 'unknown' : row.used_at ? 'used' : row.expired ? 'expired'
+              : row.session_id !== session.id ? 'session_mismatch'
+              : Object.keys(row.variance).length !== Object.keys(variance).length
+                || Object.entries(variance).some(([k, v]) => row.variance[k] !== v) ? 'variance_mismatch' : undefined
+            if (reason) return { kind: 'conflict', code: 'register_approval_invalid', data: { reason } }
+            approval = row
+          }
+        }
         let [{ counters }] = await em.execute(`${COUNTER_STATE} for update`, [p.registerId])
         const inserted = p.number === counters.lastClosureNumber + 1
           ? await em.execute(`insert into tally_register_closure
             (id, session_id, register_id, number, business_day, opened_at, closed_at, closed_by, approved_by,
              till_expected, counted, period_sales_total_minor, period_refunds_total_minor, perpetual_sales_total_minor,
-             perpetual_refunds_total_minor, unsynced_count, unsynced_total_minor, software_version, order_ids, movement_ids)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb)
+             perpetual_refunds_total_minor, unsynced_count, unsynced_total_minor, software_version, order_ids, movement_ids, approval_id)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
             on conflict do nothing returning id`,
           [p.closureId, p.sessionId, p.registerId, p.number, p.businessDay ?? null, p.openedAt, p.closedAt, p.closedBy ?? null,
-            p.approvedBy ?? null, JSON.stringify(p.tillExpected), JSON.stringify(p.counted), p.periodSalesTotalMinor,
+            approval ? approval.approved_by : p.approvedBy ?? null, JSON.stringify(p.tillExpected), JSON.stringify(p.counted), p.periodSalesTotalMinor,
             p.periodRefundsTotalMinor, p.perpetualSalesTotalMinor, p.perpetualRefundsTotalMinor, p.unsyncedCount,
-            p.unsyncedTotalMinor, p.softwareVersion, JSON.stringify(p.orderIds), JSON.stringify(p.movementIds)]) : []
+            p.unsyncedTotalMinor, p.softwareVersion, JSON.stringify(p.orderIds), JSON.stringify(p.movementIds), approval?.id ?? null]) : []
         if (inserted.length) {
           await em.execute(`update tally_register set last_closure_number = ?,
             perpetual_sales_total_minor = greatest(perpetual_sales_total_minor, ?),
             perpetual_refunds_total_minor = greatest(perpetual_refunds_total_minor, ?), updated_at = now() where id = ?`,
           [p.number, p.perpetualSalesTotalMinor, p.perpetualRefundsTotalMinor, p.registerId])
+          if (approval) {
+            await em.execute(`update tally_register_approval set used_at = now(), used_by_command_id = ?, closure_id = ? where id = ?`,
+              [p.commandId, p.closureId, approval.id])
+            await em.execute('update tally_register_session set approved_by = ?, updated_at = now() where id = ?', [approval.approved_by, session.id])
+          }
         }
-        ;[closure] = await em.execute(`select id, register_id, number from tally_register_closure
+        ;[closure] = await em.execute(`select id, register_id, number, approval_id from tally_register_closure
           where id = ? or session_id = ? order by (id = ?) desc`, [p.closureId, p.sessionId, p.closureId])
         if (closure?.id !== p.closureId) {
           if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }
@@ -268,7 +293,8 @@ export default class TallyRegisterModuleService extends MedusaService({
         }
       }
       const [{ counters }] = await em.execute(COUNTER_STATE, [closure.register_id])
-      return { kind: 'ok', register: { counters, closure: { serverClosureId: closure.id, number: closure.number } } }
+      return { kind: 'ok', register: { counters, closure: { serverClosureId: closure.id, number: closure.number,
+        ...(v3 ? { approvalVerified: closure.approval_id !== null } : {}) } } }
     })
   }
 

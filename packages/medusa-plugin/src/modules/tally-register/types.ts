@@ -14,7 +14,7 @@ export interface RegisterCommandResult {
   /** The register's counters: a floor for the till's own, never lowered. */
   counters?: { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
   /** `register.closure.submit` only. */
-  closure?: { serverClosureId: string; number: number; expected?: Record<string, number>; variance?: Record<string, number> };
+  closure?: { serverClosureId: string; number: number; expected?: Record<string, number>; variance?: Record<string, number>; approvalVerified?: boolean };
 }
 
 export interface RegisterSessionOpenPayload {
@@ -28,7 +28,7 @@ export type RegisterSessionOpenInput = RegisterSessionOpenV2Payload & { deviceId
 export type RegisterSessionTransitionInput = RegisterSessionTransitionPayload & { contract?: number }
 export type RegisterMovementRecordInput = RegisterMovementRecordPayload & { contract?: number }
 export type RegisterMovementVoidInput = RegisterMovementVoidPayload & { contract?: number }
-export type RegisterClosureSubmitInput = RegisterClosureSubmitPayload & { contract?: number }
+export type RegisterClosureSubmitInput = RegisterClosureSubmitV3Payload & { contract?: number; commandId?: string; thresholdMinor?: number }
 
 export interface RegisterSessionTransitionPayload {
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;
@@ -50,6 +50,7 @@ export interface RegisterClosureSubmitPayload {
   unsyncedCount: number; unsyncedTotalMinor: number; softwareVersion: string;
   orderIds: string[]; movementIds: string[];
 }
+export interface RegisterClosureSubmitV3Payload extends RegisterClosureSubmitPayload { approval?: string }
 
 export type RegisterCounters = {
   lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number
@@ -61,6 +62,8 @@ export type RegisterConflictCode =
   | 'register_session_superseded'
   | 'register_closure_exists'
   | 'register_closure_number_invalid'
+  | 'register_approval_required'
+  | 'register_approval_invalid'
 
 export type RegisterOutcome =
   | { kind: 'ok'; register: RegisterCommandResult }

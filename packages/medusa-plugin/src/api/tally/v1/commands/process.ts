@@ -8,7 +8,7 @@ import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayload
 import { envelopeErrors, payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
 import { clientTimeStageErrors, clientTimeUpperBound } from '../../../../workflows/client-time'
 import { lineTaxRefusals, v5DisplayErrors, withoutV5Display } from '../../../../workflows/tally-order-create/v5'
-import { SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
+import { registerVersionAccepted, SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }
@@ -62,14 +62,14 @@ export async function processBatch(
     if (envelope.type !== 'order.create') {
       // Same step order as order.create: replay read, then the version rule, then shape and claim (ADR 0003, 0004).
       const replay = await replayRegisterCommand(container, envelope)
-      if (!replay && !SUPPORTED_REGISTER_VERSIONS.includes(envelope.version)) {
+      if (!replay && !registerVersionAccepted(envelope.version, options)) {
         results.push({ id: envelope.id, status: 'rejected', error: { code: 'unsupported_version',
           message: `register version ${envelope.version} is not supported; this server supports ${SUPPORTED_REGISTER_VERSIONS.join(', ')}`,
           data: { register: Math.max(...SUPPORTED_REGISTER_VERSIONS) },
         } as CommandErrorWithData })
         continue
       }
-      const outcome = replay ?? await executeRegisterCommand(container, envelope, upperBound)
+      const outcome = replay ?? await executeRegisterCommand(container, envelope, upperBound, options)
       if (outcome.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: outcome.id } }
       if (outcome.kind === 'transient') {
         const { id, message } = outcome
