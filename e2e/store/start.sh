@@ -33,6 +33,8 @@ export DATABASE_URL="$(node -e 'const e = process.env; const u = new URL(`postgr
 export TALLY_E2E_PLUGIN=1
 export JWT_SECRET=e2e-jwt-secret COOKIE_SECRET=e2e-cookie-secret
 export STORE_CORS="http://localhost:$APP_PORT" ADMIN_CORS="http://localhost:$APP_PORT" AUTH_CORS="http://localhost:$APP_PORT"
+# E2E_RBAC=1 (e2e/rbac): RBAC on before the migrations, so its tables exist and `medusa user` links role_super_admin.
+if [ "${E2E_RBAC:-}" = 1 ]; then export MEDUSA_FF_RBAC=true; fi
 cd dev/medusa-store/apps/backend
 # The starter migration script seeds its own catalogue; use only our seed.
 npx medusa db:migrate --skip-scripts
@@ -41,4 +43,8 @@ npx medusa exec ./src/scripts/seed-e2e.ts
 npx medusa user -e e2e@tally.test -p e2e-password
 npx medusa user -e cashier@demo.medusapos.com -p demo1234
 npx medusa user -e manager@demo.medusapos.com -p demo1234
+if [ "${E2E_RBAC:-}" = 1 ]; then
+  npx medusa exec ../../node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-pos-roles.js
+  npx medusa exec ./src/scripts/seed-e2e-rbac.ts
+fi
 exec npx medusa develop --port "$BACKEND_PORT"

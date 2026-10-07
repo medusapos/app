@@ -29,7 +29,7 @@ export const POS_MANAGER_POLICIES = [...POS_CASHIER_POLICIES, 'tally_pos:approve
 export default async function tallyPosRoles({ container }: ExecArgs) {
   const logger = container.resolve<Logger>(ContainerRegistrationKeys.LOGGER)
   if (!container.hasRegistration(Modules.RBAC)) {
-    logger.info('tally_pos roles: RBAC is off (set MEDUSA_FF_RBAC=true), nothing to do')
+    logger.info("tally_pos roles: RBAC is off (set MEDUSA_FF_RBAC=true and add { resolve: '@medusajs/medusa/rbac' } to modules in medusa-config), nothing to do")
     return
   }
   try {

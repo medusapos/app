@@ -100,6 +100,14 @@ jobs:
           DB_PASSWORD: postgres
           DB_HOST: localhost
           CI: 'true'
+      # RBAC on (ADR 0023); it runs only when pnpm e2e passed, so a failure's artifacts below are its own.
+      - run: pnpm e2e:rbac
+        working-directory: app
+        env:
+          DB_USERNAME: postgres
+          DB_PASSWORD: postgres
+          DB_HOST: localhost
+          CI: 'true'
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
