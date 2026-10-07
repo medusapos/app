@@ -100,7 +100,11 @@ it('signs out with the no-POS-access notice when the store refuses a register co
     }
     return applied(url, init);
   });
-  await open();
+  await act(async () => { await context.bind('register-1'); });
+  await waitFor(() => expect(context.boundRegisterId).toBe('register-1'));
+  try {
+    await act(async () => { await context.register.actions.openSession({ expectedFloatMinor: null, countedFloatMinor: 10000 }); });
+  } catch {}
   await waitFor(() => {
     expect(session.session).toBeNull();
     expect(session.signOutNotice).toBe(NO_POS_ACCESS_MESSAGE);
