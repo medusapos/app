@@ -3,6 +3,32 @@
 Medusa 2.21 plugin for `POST /tally/v1/commands` to ingest POS orders exactly once.
 This is a standalone npm package outside the pnpm workspace.
 
+## Install
+
+Requires a Medusa 2.21.0 backend (`@medusajs/framework` and `@medusajs/medusa` peer dependencies at 2.21.0) and Node `^20.19.0 || >=22.12.0`.
+
+In the store's backend directory, run:
+
+```sh
+npm install @medusapos/medusa-plugin
+```
+
+Add this entry to the `plugins` list in `medusa-config.ts`, keeping any existing plugins:
+
+```ts
+plugins: [{ resolve: '@medusapos/medusa-plugin', options: {} }]
+```
+
+Then run:
+
+```sh
+npx medusa db:migrate
+```
+
+Restart the backend. Optional `options` (`salesChannelId`, `locationId`, `shippingOptionId`), till setup, and running more than one Medusa instance are covered in the [quickstart](https://github.com/medusapos/app/blob/main/docs/QUICKSTART.md).
+
+## Develop
+
 Run from this directory:
 ```sh
 npm ci

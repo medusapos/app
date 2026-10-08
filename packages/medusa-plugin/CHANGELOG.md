@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.4 — 2026-10-08
+
+- **Added:** an Install section in the README: install from npm, register the plugin, migrate.
+- **Changed:** releases are published from GitHub Actions with npm provenance (trusted publishing). No code changes.
+
 ## 0.2.3 — 2026-10-07
 
 - **Added:** POS access for Medusa RBAC (ADR 0023, part 1, medusapos/app#253). The `tally_pos:use` and `tally_pos:approve_variance` policies; with RBAC on, every `/tally/v1` route requires `tally_pos:use`. With RBAC off, every admin may use the POS, as before.
