@@ -7,7 +7,7 @@ import { exposeE2eHook } from './e2e-debug';
 export type AppStoreDump = {
   rxdbVersion: string;
   stored: { name: string; version: number }[];
-  docs: { pos_orders: object[]; register_sessions: object[]; cash_movements: object[]; closures: object[]; drafts: object[] };
+  docs: { pos_orders: object[]; register_sessions: object[]; cash_movements: object[]; closures: object[]; drafts: object[]; register_commands: object[] };
   register: object | null;
 };
 
@@ -17,10 +17,11 @@ export async function dumpAppStore(baseUrl: string): Promise<AppStoreDump> {
   try {
     const { sessions, movements, closures } = registerCollections(store.orders);
     const drafts = store.orders.database.collections.drafts as RxCollection | undefined;
+    const commands = store.orders.database.collections.register_commands as RxCollection | undefined;
     const collections: Record<keyof AppStoreDump['docs'], RxCollection | undefined> = {
-      pos_orders: store.orders, register_sessions: sessions, cash_movements: movements, closures, drafts,
+      pos_orders: store.orders, register_sessions: sessions, cash_movements: movements, closures, drafts, register_commands: commands,
     };
-    const docs: AppStoreDump['docs'] = { pos_orders: [], register_sessions: [], cash_movements: [], closures: [], drafts: [] };
+    const docs: AppStoreDump['docs'] = { pos_orders: [], register_sessions: [], cash_movements: [], closures: [], drafts: [], register_commands: [] };
     for (const name of Object.keys(collections) as (keyof AppStoreDump['docs'])[]) {
       const collection = collections[name];
       if (!collection) continue;
