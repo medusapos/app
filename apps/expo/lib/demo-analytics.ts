@@ -13,6 +13,12 @@ const API_KEY = 'phc_BhTJzZ7fXMqcD4MiaUJQsQqPkEpu94yoSAthXFBWemvd';
 const SITE = 'demo.medusapos.com';
 const visitId = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
 
+function referringDomain(): string {
+  const referrer = globalThis.document?.referrer;
+  if (!referrer) return '$direct';
+  try { return new URL(referrer).hostname || '$direct'; } catch { return '$direct'; }
+}
+
 export function trackDemoEvent(event: DemoEvent): void {
   if (!storeConfig.analytics) return;
   try {
@@ -20,7 +26,8 @@ export function trackDemoEvent(event: DemoEvent): void {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify({ api_key: API_KEY, event, distinct_id: visitId,
-        properties: { site: SITE, $process_person_profile: false } }),
+        properties: { site: SITE, $process_person_profile: false,
+          ...(event === 'demo_opened' ? { $referring_domain: referringDomain() } : {}) } }),
       credentials: 'omit',
       keepalive: true,
     }).catch(() => {});
