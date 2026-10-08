@@ -14,6 +14,7 @@
   "rewrites": [
     { "source": "/robots.txt", "has": [{ "type": "host", "value": "demo.medusapos.com" }], "destination": "/robots-demo.txt" },
     { "source": "/robots.txt", "has": [{ "type": "host", "value": "app.medusapos.com" }], "destination": "/robots-app.txt" },
+    { "source": "/sitemap.xml", "has": [{ "type": "host", "value": "demo.medusapos.com" }], "destination": "/sitemap-demo.xml" },
     { "source": "/((?!_expo/|assets/|sqlite/|robots\\.txt$|sitemap\\.xml$).*)", "destination": "/index.html" }
   ],
   "headers": [
