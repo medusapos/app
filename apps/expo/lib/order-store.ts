@@ -3,7 +3,6 @@ import {
 } from 'rxdb';
 import { migrateDocumentData } from 'rxdb/plugins/migration-schema';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
-import { getRxStorageDexie } from 'rxdb/plugins/storage-dexie';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
 import {
@@ -103,7 +102,7 @@ async function readLegacyOrders(legacy: RxDatabase, to: RxCollection<PosOrder>):
  * Idempotent, crash-safe copy of any sales in the pre-SQLite Dexie order
  * store into the new one, on every open until the marker is written, then never again
  * (later legacy sales from tabs still on pre-SQLite builds are not carried over).
- * Exported so a unit test can run it directly with memory storages.
+ * Exported so a unit test can run it directly with memory storages; storage may also be passed as a loader.
  *
  * When `legacyExists()` is false it opens and creates nothing. Otherwise
  * every `pos_orders` document is read from the legacy database and migrated
@@ -116,7 +115,7 @@ async function readLegacyOrders(legacy: RxDatabase, to: RxCollection<PosOrder>):
  * warning: the store still opens, and the next open repeats the copy.
  */
 export async function carryOverOrders({ fromStorage, fromName, to, legacyExists }: {
-  fromStorage: RxStorage<any, any>;
+  fromStorage: RxStorage<any, any> | (() => Promise<RxStorage<any, any>>);
   fromName: string;
   to: OrdersDatabase;
   legacyExists: () => Promise<boolean>;
@@ -125,7 +124,8 @@ export async function carryOverOrders({ fromStorage, fromName, to, legacyExists 
     if (await to.getLocal(LEGACY_ORDERS_MARKER)) return;
     if (!(await legacyExists())) return;
     let count = 0;
-    const legacy = await createRxDatabase({ name: fromName, storage: fromStorage, multiInstance: false });
+    const storage = typeof fromStorage === 'function' ? await fromStorage() : fromStorage;
+    const legacy = await createRxDatabase({ name: fromName, storage, multiInstance: false });
     try {
       const docs = await readLegacyOrders(legacy, to.pos_orders);
       if (docs.length) {
@@ -192,7 +192,11 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
         }
         if (onWebStorage) {
           await carryOverOrders({
-            fromStorage: getRxStorageDexie(), fromName: legacyDexieName('orders', baseUrl), to: db,
+            fromStorage: async () => {
+              const { getRxStorageDexie } = await import('rxdb/plugins/storage-dexie');
+              return getRxStorageDexie();
+            },
+            fromName: legacyDexieName('orders', baseUrl), to: db,
             legacyExists: () => legacyOrdersDatabaseExists(legacyDexieName('orders', baseUrl)),
           });
         }
@@ -294,8 +298,10 @@ if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1' && typeof window !== 'undefined') 
       return db.pos_orders.schema.version;
     } finally { await db.close(); }
   };
-  exposeE2eHook('SeedLegacyOrder', (baseUrl: string, order: PosOrder) =>
-    seed(0, legacyDexieName('orders', baseUrl), getRxStorageDexie(), order));
+  exposeE2eHook('SeedLegacyOrder', async (baseUrl: string, order: PosOrder) => {
+    const { getRxStorageDexie } = await import('rxdb/plugins/storage-dexie');
+    return seed(0, legacyDexieName('orders', baseUrl), getRxStorageDexie(), order);
+  });
   exposeE2eHook('SeedV0Order', (baseUrl: string, order: PosOrder) =>
     seed(0, orderDatabaseName(baseUrl), productCacheStorage(), order).finally(terminateWebStorage));
   exposeE2eHook('SeedV1Order', (baseUrl: string, order: PosOrder) =>
