@@ -1,6 +1,6 @@
 {
   "name": "@medusapos/medusa-plugin",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Tally POS commands for Medusa: idempotent order ingestion from offline registers.",
   "license": "MIT",
   "repository": {
