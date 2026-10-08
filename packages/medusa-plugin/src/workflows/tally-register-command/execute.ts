@@ -8,7 +8,9 @@ import { TALLY_REGISTER_MODULE } from '../../modules/tally-register'
 import type TallyRegisterModuleService from '../../modules/tally-register/service'
 import type { RegisterOutcome, RegisterSessionOpenV2Payload, RegisterSessionOpenInput, RegisterSessionTransitionPayload,
   RegisterSessionTransitionInput, RegisterMovementRecordInput, RegisterMovementVoidInput, RegisterClosureSubmitInput,
-  RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterClosureSubmitPayload } from '../../modules/tally-register/types'
+  RegisterMovementRecordPayload, RegisterMovementVoidPayload, RegisterClosureSubmitV3Payload } from '../../modules/tally-register/types'
+import { approvalThresholdMinor } from '../../api/tally/v1/versions'
+import type { TallyPluginOptions } from '../tally-order-create/run'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
 import { envelopeErrors } from '../tally-order-create/payload-shape'
@@ -23,6 +25,8 @@ const conflictMessages = {
   register_session_superseded: 'This register session was taken over by another till.',
   register_closure_exists: 'This session already has a closure.',
   register_closure_number_invalid: 'This closure number is not the next register number.',
+  register_approval_required: 'A manager approval is needed for this variance.',
+  register_approval_invalid: 'This manager approval cannot be used.',
 }
 
 /** Read-only replay before the version and shape checks (ADR 0003, 0004): a recorded id answers as recorded. Never claims. */
@@ -43,7 +47,8 @@ export async function replayRegisterCommand(container: MedusaContainer, command:
   }
 }
 
-export async function executeRegisterCommand(container: MedusaContainer, command: CommandEnvelope<unknown>, upperBound: number): Promise<ExecuteOutcome> {
+export async function executeRegisterCommand(container: MedusaContainer, command: CommandEnvelope<unknown>, upperBound: number,
+  options: TallyPluginOptions = {}): Promise<ExecuteOutcome> {
   const { id, payload } = command
   const errors = [...envelopeErrors(command), ...registerPayloadErrors(command.type, payload, command.version)].slice(0, 10)
   if (errors.length) return { kind: 'result', result: { id, status: 'rejected', error: { code: 'invalid_payload', message: errors.join('; ') } } }
@@ -86,12 +91,13 @@ export async function executeRegisterCommand(container: MedusaContainer, command
         case 'register.session.transition': outcome = await service.transition({ ...(payload as RegisterSessionTransitionPayload), contract: command.version } satisfies RegisterSessionTransitionInput); break
         case 'register.movement.record': outcome = await service.recordMovement({ ...(payload as RegisterMovementRecordPayload), contract: command.version } satisfies RegisterMovementRecordInput); break
         case 'register.movement.void': outcome = await service.voidMovement({ ...(payload as RegisterMovementVoidPayload), contract: command.version } satisfies RegisterMovementVoidInput); break
-        case 'register.closure.submit': outcome = await service.submitClosure({ ...(payload as RegisterClosureSubmitPayload), contract: command.version } satisfies RegisterClosureSubmitInput); break
+        case 'register.closure.submit': outcome = await service.submitClosure({ ...(payload as RegisterClosureSubmitV3Payload),
+          contract: command.version, commandId: command.id, thresholdMinor: approvalThresholdMinor(options) } satisfies RegisterClosureSubmitInput); break
         default: throw new Error('Unknown register command type')
       }
       if (outcome.kind === 'ok') {
         const register = outcome.register
-        const figures = await loadSessionFigures(container, register.session?.id ?? (payload as RegisterClosureSubmitPayload).sessionId)
+        const figures = await loadSessionFigures(container, register.session?.id ?? (payload as RegisterClosureSubmitV3Payload).sessionId)
         if (figures) {
           if (register.session) Object.assign(register.session, { expected: figures.expected, salesCount: figures.salesCount })
           if (register.closure) Object.assign(register.closure, { expected: figures.expected, variance: figures.variance })

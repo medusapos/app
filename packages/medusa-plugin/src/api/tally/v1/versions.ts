@@ -4,8 +4,21 @@ import type { TaxRounding } from '@tallyui/core' with { 'resolution-mode': 'impo
 export const SUPPORTED_ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5]
 // ADR 0021: Medusa cannot preserve per-line exemptions and has no tax classes.
 export const LINE_TAX = { none: false, classes: false }
-// Version 2 adds take-over fields to the open (ADR to follow); the other four commands have the same payload in both versions.
-export const SUPPORTED_REGISTER_VERSIONS: readonly number[] = [1, 2]
+// Version 2 adds take-over fields to the open (ADR to follow).
+// Version 3 adds approval to the closure (ADR 0023); the other commands are unchanged at 3.
+export const SUPPORTED_REGISTER_VERSIONS: readonly number[] = [1, 2, 3]
+// ADR 0023: the default when the option is unset.
+export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
+
+export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
+  const value = options.approvalThresholdMinor
+  return Number.isSafeInteger(value) && value! >= 0 ? value! : DEFAULT_APPROVAL_THRESHOLD_MINOR
+}
+
+export function registerVersionAccepted(version: number, options: { minRegisterContract?: number }): boolean {
+  return SUPPORTED_REGISTER_VERSIONS.includes(version)
+    && (options.minRegisterContract === undefined || version >= options.minRegisterContract)
+}
 
 /**
  * How this store rounds tax, advertised on /info as `taxRounding` (TallyUI #309, ADR-071): once per order, half away from zero.
