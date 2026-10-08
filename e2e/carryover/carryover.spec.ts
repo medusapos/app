@@ -3,7 +3,10 @@ import { readFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { resolve } from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, createAdminCustomer, cspViolations, discount, ordersByClientId, sellBySku, signIn, test } from '../helpers';
+import {
+  addE2E1, adminToken, captureCommands, createAdminCustomer, cspViolations, discount, ordersByClientId, sellBySku, signIn, storeRegister, test,
+  type StoreRegisterSession,
+} from '../helpers';
 import { E2E_RUN } from '../ports';
 
 const root = resolve(__dirname, '../..');
@@ -11,13 +14,18 @@ const backendUrl = `http://localhost:${E2E_RUN.backendPort}`;
 const appUrl = `http://localhost:${E2E_RUN.appPort}`;
 const released = resolve(root, 'e2e/.tmp/carryover/released');
 const current = resolve(root, 'e2e/.tmp/carryover/current');
-// @tallyui/pos 2.0.0 wrote these versions; 3.3.0 migrates orders to v8 with these outputs.
-const RELEASE_EXPECTATIONS: Record<string, {
-  stored: { name: string; version: number }[];
+type Stored = { name: string; version: number }[];
+type Migration = {
+  kind: 'migration'; stored: Stored;
   orderVersion: number; sentVersion: number; discountedSentVersion: number;
   taxRounding: { granularity: string; mode: string };
-}> = {
+};
+// v0.1.0: @tallyui/pos 2.0.0 wrote these versions; 3.3.0 migrates orders to v8 with these outputs.
+// v0.2.0: @tallyui/pos 3.8.0's schemas (src/pos-order/schema.ts, src/register/schemas.ts, src/register/register-commands.ts,
+// src/order/order-drafts.ts) as the app's order-store.ts adds them; the current build stores the same.
+const RELEASE_EXPECTATIONS: Record<string, Migration | { kind: 'identity'; stored: Stored }> = {
   'v0.1.0': {
+    kind: 'migration',
     stored: [
       { name: 'cash_movements', version: 0 }, { name: 'closures', version: 0 },
       { name: 'pos_orders', version: 2 }, { name: 'register_sessions', version: 0 },
@@ -25,12 +33,19 @@ const RELEASE_EXPECTATIONS: Record<string, {
     orderVersion: 8, sentVersion: 1, discountedSentVersion: 2,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
   },
+  'v0.2.0': {
+    kind: 'identity',
+    stored: [
+      { name: 'cash_movements', version: 0 }, { name: 'closures', version: 0 }, { name: 'drafts', version: 0 },
+      { name: 'pos_orders', version: 8 }, { name: 'register_commands', version: 0 }, { name: 'register_sessions', version: 1 },
+    ],
+  },
 };
 // These 3.2.x bases wrote pos_orders v7 and use the v8 identity-migration proof.
 const TALLYUI_32X_BASES = ['c2db7b2b0107505865c51bf6798b296c2c661c25'];
 type Dump = {
   rxdbVersion: string; stored: { name: string; version: number }[];
-  docs: Record<'pos_orders' | 'register_sessions' | 'cash_movements' | 'closures' | 'drafts', Record<string, any>[]>;
+  docs: Record<'pos_orders' | 'register_sessions' | 'cash_movements' | 'closures' | 'drafts' | 'register_commands', Record<string, any>[]>;
   register: { stores: Record<string, { register_id: string; register_name: string }> } | null;
 };
 
@@ -70,6 +85,28 @@ async function dump(page: Page): Promise<Dump> {
   }).__medusaposDumpAppStore(base), backendUrl);
 }
 
+// Closes the register with an exact tile count of `counted` (minor units), then opens the next session with a 50.00 float.
+async function closeExactAndReopen(page: Page, counted: number) {
+  await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+  await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+  const count = page.getByTestId('register-count');
+  await expect(count).toBeVisible();
+  let remaining = counted;
+  for (const face of [50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1]) {
+    for (; remaining >= face; remaining -= face) await count.getByTestId(`den-tile-${face}`).click();
+  }
+  await expect(count.getByTestId('count-amount')).toHaveValue((counted / 100).toFixed(2));
+  await expect(count.getByTestId('count-variance')).toContainText('Exact');
+  await count.getByTestId('count-close').click();
+  const closure = page.getByTestId('closure-sheet');
+  await expect(closure.getByTestId('closure-number')).toHaveText('Closure #1');
+  await closure.getByTestId('closure-done').click();
+  await expect(closure).toHaveCount(0);
+  await page.getByTestId('open-register-amount').fill('50.00');
+  await page.getByTestId('open-register-button').click();
+  await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+}
+
 test('released till documents survive the web storage upgrade intact', async ({ context }) => {
   test.setTimeout(15 * 60_000);
   const releasedRef = JSON.parse(readFileSync(resolve(released, 'BUILD_REF.json'), 'utf8'));
@@ -78,7 +115,9 @@ test('released till documents survive the web storage upgrade intact', async ({ 
   expect(Object.keys(RELEASE_EXPECTATIONS),
     `Update RELEASE_EXPECTATIONS for ${releasedRef.tag} after checking the new release's schema versions and migration outputs.`,
   ).toContain(releasedRef.tag);
-  const migration = RELEASE_EXPECTATIONS[releasedRef.tag];
+  const expected = RELEASE_EXPECTATIONS[releasedRef.tag];
+  test.skip(expected.kind !== 'migration', `${releasedRef.tag} uses the identity carry-over test.`);
+  const migration = expected as Migration;
   let server: ReturnType<typeof serve> | undefined;
   try {
     server = serve(released);
@@ -112,25 +151,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await discount(page, 'line', 'Percent', '10');
       const sale2 = await sellBySku(page, [], 'exact');
       const sale3 = await sellBySku(page, ['E2E-2'], 'external');
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
-      await panel.getByTestId('register-panel-close').click();
-      const count = page.getByTestId('register-count');
-      await expect(count).toBeVisible();
-      const counted = 10000 + Math.round(sale1 * 100) + Math.round(sale2 * 100);
-      let remaining = counted;
-      for (const face of [50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1]) {
-        for (; remaining >= face; remaining -= face) await count.getByTestId(`den-tile-${face}`).click();
-      }
-      await expect(count.getByTestId('count-amount')).toHaveValue((counted / 100).toFixed(2));
-      await expect(count.getByTestId('count-variance')).toContainText('Exact');
-      await count.getByTestId('count-close').click();
-      const closure = page.getByTestId('closure-sheet');
-      await expect(closure.getByTestId('closure-number')).toHaveText('Closure #1');
-      await closure.getByTestId('closure-done').click();
-      await expect(closure).toHaveCount(0);
-      await page.getByTestId('open-register-amount').fill('50.00');
-      await page.getByTestId('open-register-button').click();
-      await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+      await closeExactAndReopen(page, 10000 + Math.round(sale1 * 100) + Math.round(sale2 * 100));
       const sale4 = await sellBySku(page, ['E2E-3'], 10);
       const receiptTotals = [sale1, sale2, sale3, sale4].map(total => Math.round(total * 100));
       expect(new Set(receiptTotals).size).toStrictEqual(4);
@@ -370,6 +391,186 @@ test('a 3.2.x till (pos_orders v7) upgrades to 3.3.0 (v8): sales, split payments
         .toStrictEqual([1, 1, 1]);
       expect(settled.filter(sent => sent.customer_id === customerId
         && !OLD.docs.pos_orders.some(order => sent.metadata.tally_client_id === order.id))).toHaveLength(1);
+      await closeGated(page);
+    });
+  } finally {
+    await server?.stop();
+  }
+});
+
+test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with identical documents: sales, split payments, register history, a parked draft and queued register commands survive, and pending sales sync once', async ({ context }) => {
+  test.setTimeout(15 * 60_000);
+  const releasedRef = JSON.parse(readFileSync(resolve(released, 'BUILD_REF.json'), 'utf8'));
+  test.skip(TALLYUI_32X_BASES.includes(releasedRef.commit), '3.2.x bases use the pos_orders v7 to v8 carry-over test.');
+  const expected = RELEASE_EXPECTATIONS[releasedRef.tag];
+  test.skip(expected?.kind !== 'identity', `${releasedRef.tag} uses the migration carry-over test, which checks RELEASE_EXPECTATIONS.`);
+  const currentRef = JSON.parse(readFileSync(resolve(current, 'BUILD_REF.json'), 'utf8'));
+  const token = await adminToken();
+  const email = `carryover-${crypto.randomUUID()}@example.com`;
+  const customerId = await createAdminCustomer(token, email, 'Ada', 'Lovelace');
+  // The store's read of Register 1: its live session (else the latest opened), that session's sales, and its last closure number.
+  const storeState = async () => {
+    const { session, counters } = await storeRegister() as { session?: StoreRegisterSession; counters?: { lastClosureNumber: number } };
+    return [session?.id, session?.status, session?.salesCount, counters?.lastClosureNumber];
+  };
+  let server: ReturnType<typeof serve> | undefined;
+  try {
+    server = serve(released);
+    await server.ready();
+    const totals = await test.step('A: released build writes three sales, register history, a parked customer draft and queued register commands', async () => {
+      const page = await context.newPage();
+      const voids = captureCommands(page, 'register.movement.void');
+      await signIn(page, 'Europe');
+      const sale1 = await sellBySku(page, ['E2E-1'], 'exact');
+      await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
+      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      const panel = page.getByTestId('register-panel');
+      await panel.getByTestId('register-panel-paid-in').click();
+      const sheet = page.getByTestId('movement-sheet');
+      await sheet.getByTestId('movement-amount').fill('5.00');
+      await sheet.getByTestId('movement-reason').fill('Change for the float');
+      await sheet.getByTestId('movement-confirm').click();
+      await expect(sheet).toHaveCount(0);
+      await panel.getByTestId('register-panel-movements').click();
+      const paidIn = panel.getByText(/^Paid in · .*5[.,]00.* · Change for the float$/);
+      await expect(paidIn).toBeVisible();
+      await panel.getByRole('button', { name: 'Undo', exact: true }).click();
+      await expect(paidIn).toHaveCount(0);
+      // The paid in and its void reach the store before the till goes offline.
+      await expect.poll(() => voids.map(({ status }) => status)).toStrictEqual(['applied']);
+      await panel.getByTestId('register-panel-dismiss').click();
+      await expect(panel).toHaveCount(0);
+
+      await page.route('**/tally/v1/commands', route => route.abort());
+      await addE2E1(page);
+      await discount(page, 'line', 'Percent', '10');
+      const sale2 = await sellBySku(page, [], 'exact');
+      await addE2E1(page);
+      await addE2E1(page);
+      await expect(page.getByText('Total', { exact: true }).locator('..')).toHaveText(/Total\D*5\.00$/);
+      await page.getByRole('button', { name: 'Cash', exact: true }).click();
+      await page.getByRole('button', { name: 'Split payment', exact: true }).click();
+      await expect(page.getByText('Cash Tendered', { exact: true })).toHaveCount(0);
+      await page.getByTestId('split-tender-method-card').click();
+      await page.getByTestId('split-tender-amount').fill('2.00');
+      await page.getByTestId('split-tender-add-button').click();
+      await expect(page.getByTestId('split-tender-summary')).toContainText('Remaining: €3.00');
+      await page.getByTestId('split-tender-method-cash').click();
+      await page.getByTestId('split-tender-amount').fill('5.00');
+      await page.getByTestId('split-tender-add-button').click();
+      await expect(page.getByTestId('split-tender-summary')).toContainText('Change: €2.00');
+      await page.getByTestId('split-tender-complete').click();
+      await expect(page.getByLabel(/^Total: \D*5\.00$/)).toBeVisible();
+      await page.getByRole('button', { name: 'New sale', exact: true }).click();
+      // The 100.00 float, the two cash sales and the split's 3.00 of net cash.
+      await closeExactAndReopen(page, 10000 + Math.round(sale1 * 100) + Math.round(sale2 * 100) + 300);
+      await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
+      await page.getByLabel('Search customers', { exact: true }).fill(email);
+      await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
+      await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
+      await addE2E1(page);
+      await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
+      await page.getByTestId('parked-sales-park').click();
+      await expect(page.getByTestId(/^parked-resume-/)).toHaveCount(1);
+      await page.getByTestId('parked-sales-dismiss').click();
+      await expect(page.getByTestId('cart-empty')).toBeVisible();
+      const receiptTotals = [sale1, sale2, 5].map(total => Math.round(total * 100));
+      expect(new Set(receiptTotals).size).toStrictEqual(3);
+      await page.close();
+      return receiptTotals;
+    });
+
+    const OLD = await test.step('B: released store contains exactly the activity performed', async () => {
+      const page = await context.newPage();
+      const old = await dump(page);
+      await page.close();
+      expect(old.rxdbVersion).toStrictEqual(releasedRef.rxdb);
+      expect(old.stored).toStrictEqual(expected.stored);
+      expect(old.docs.pos_orders).toHaveLength(3);
+      expect(old.docs.pos_orders.map(order => order.totalMinor).sort((a, b) => a - b))
+        .toStrictEqual([...totals].sort((a, b) => a - b));
+      for (const [index, total] of totals.entries()) {
+        const order = old.docs.pos_orders.find(order => order.totalMinor === total)!;
+        expect(order.syncStatus).toStrictEqual(index === 0 ? 'applied' : 'pending');
+        expect(order.payments).toHaveLength(total === 500 ? 2 : 1);
+      }
+      expect(old.docs.register_sessions).toHaveLength(2);
+      const closed = old.docs.register_sessions.filter(session => session.status === 'closed');
+      const open = old.docs.register_sessions.filter(session => session.status === 'open');
+      expect(closed).toHaveLength(1);
+      expect(open).toHaveLength(1);
+      expect(typeof closed[0].closure_id).toStrictEqual('string');
+      expect(open[0].counted_float_minor).toStrictEqual(5000);
+      expect(old.docs.cash_movements).toHaveLength(2);
+      expect(old.docs.cash_movements.map(movement => movement.type).sort()).toStrictEqual(['paid_in', 'void']);
+      const paidIn = old.docs.cash_movements.find(movement => movement.type === 'paid_in')!;
+      const reversal = old.docs.cash_movements.find(movement => movement.type === 'void')!;
+      expect(paidIn.amountMinor).toStrictEqual(500);
+      expect(reversal.voids).toStrictEqual(paidIn.id);
+      expect(old.docs.closures).toHaveLength(1);
+      expect(old.docs.closures[0].number).toStrictEqual(1);
+      expect(old.docs.closures[0].session_id).toStrictEqual(closed[0].id);
+      expect(closed[0].closure_id).toStrictEqual(old.docs.closures[0].id);
+      expect(old.register === null).toStrictEqual(false);
+      expect(old.register!.stores[backendUrl].register_id).toStrictEqual('register-1');
+      expect(old.register!.stores[backendUrl].register_name).toStrictEqual('Register 1');
+      expect(old.docs.drafts).toHaveLength(1);
+      expect([old.docs.drafts[0].customerName, old.docs.drafts[0].itemCount, old.docs.drafts[0].total])
+        .toStrictEqual(['Ada Lovelace', 1, 250]);
+      // Applied before the abort: the first open and the paid in's void. Queued after it: Closure #1 and the next open.
+      const keys = (status: string) => old.docs.register_commands.filter(command => command.syncStatus === status).map(command => command.key);
+      expect(keys('applied')).toContain(`session.open:${closed[0].id}`);
+      expect(keys('applied')).toContain(`movement.void:${reversal.id}`);
+      expect(keys('pending')).toContain(`closure.submit:${closed[0].closure_id}`);
+      expect(keys('pending')).toContain(`session.open:${open[0].id}`);
+      expect(keys('rejected')).toStrictEqual([]);
+      // The store holds only what was applied: the first session, open, with the synced sale.
+      expect(await storeState()).toStrictEqual([closed[0].id, 'open', 1, 0]);
+      return old;
+    });
+
+    await server.stop();
+    server = serve(current);
+    await server.ready();
+    await test.step('C: whole documents equal released documents, with no migration', async () => {
+      const page = await context.newPage();
+      const NEW = await dump(page);
+      await closeGated(page);
+      expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
+      expect(NEW.stored).toStrictEqual(OLD.stored);
+      expect(NEW.docs).toStrictEqual(OLD.docs);
+      expect(NEW.register).toStrictEqual(OLD.register);
+    });
+
+    await test.step('D: upgraded till syncs pending sales once, applies its queued register commands and resumes its parked customer sale', async () => {
+      const page = await context.newPage();
+      await signIn(page, 'Europe', false);
+      await expect(page.getByTestId('open-register-card')).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+      const pending = OLD.docs.pos_orders.filter(order => order.syncStatus === 'pending');
+      await expect.poll(async () => {
+        const orders = await ordersByClientId(token);
+        return pending.map(order => orders.filter(sent => sent.metadata.tally_client_id === order.id).length);
+      }).toStrictEqual([1, 1]);
+      const split = OLD.docs.pos_orders.find(order => order.totalMinor === 500)!;
+      const splitOrder = (await ordersByClientId(token)).find(order => order.metadata.tally_client_id === split.id)!;
+      expect((splitOrder.metadata as { tally_payments: unknown[] }).tally_payments).toHaveLength(2);
+      await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
+      await page.getByTestId(/^parked-resume-/).click();
+      await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
+      const resumed = await sellBySku(page, [], 'exact');
+      expect(resumed).toStrictEqual(2.5);
+      await page.reload();
+      await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
+      const settled = await ordersByClientId(token);
+      expect(OLD.docs.pos_orders.map(order => settled.filter(sent => sent.metadata.tally_client_id === order.id).length))
+        .toStrictEqual([1, 1, 1]);
+      expect(settled.filter(sent => sent.customer_id === customerId
+        && !OLD.docs.pos_orders.some(order => sent.metadata.tally_client_id === order.id))).toHaveLength(1);
+      // The store keeps one open session per register (spec-42): Closure #1 was submitted, the first session closed,
+      // and the live session is the one reopened offline, with the resumed sale.
+      const open = OLD.docs.register_sessions.find(session => session.status === 'open')!;
+      await expect.poll(storeState).toStrictEqual([open.id, 'open', 1, 1]);
       await closeGated(page);
     });
   } finally {
