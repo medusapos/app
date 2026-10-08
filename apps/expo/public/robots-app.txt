@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+# MedusaPOS web app: indexing allowed (the public demo at /demo is meant to be found). No Sitemap line: the sitemap belongs to the demo host (marketing backlog item 89).
