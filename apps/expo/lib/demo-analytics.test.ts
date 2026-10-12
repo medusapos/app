@@ -14,6 +14,7 @@ beforeEach(() => {
 afterEach(() => {
   storeConfig.analytics = originalAnalytics;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe('demo analytics', () => {
@@ -26,9 +27,29 @@ describe('demo analytics', () => {
     expect(body()).toEqual({
       api_key: 'phc_BhTJzZ7fXMqcD4MiaUJQsQqPkEpu94yoSAthXFBWemvd', event: 'demo_opened',
       distinct_id: expect.any(String),
-      properties: { site: 'demo.medusapos.com', $process_person_profile: false },
+      properties: { site: 'demo.medusapos.com', $process_person_profile: false, $referring_domain: '$direct' },
     });
     expect(body().distinct_id.length).toBeGreaterThan(0);
+  });
+
+  it('sends the referrer host for demo_opened', () => {
+    vi.spyOn(document, 'referrer', 'get').mockReturnValue('https://medusapos.com/');
+    trackDemoEvent('demo_opened');
+    expect(body().properties.$referring_domain).toBe('medusapos.com');
+  });
+
+  it('sends only the referrer host without its path or query', () => {
+    vi.spyOn(document, 'referrer', 'get').mockReturnValue('https://docs.medusapos.com/quick-start?utm_source=newsletter#try');
+    trackDemoEvent('demo_opened');
+    expect(body().properties).toEqual({ site: 'demo.medusapos.com', $process_person_profile: false, $referring_domain: 'docs.medusapos.com' });
+    expect(fetchMock.mock.calls[0][1]?.body).not.toContain('quick-start');
+    expect(fetchMock.mock.calls[0][1]?.body).not.toContain('utm_source');
+  });
+
+  it.each(['demo_signed_in', 'demo_sale_completed'] as const)('omits the referrer host for %s', (event) => {
+    vi.spyOn(document, 'referrer', 'get').mockReturnValue('https://medusapos.com/');
+    trackDemoEvent(event);
+    expect(body().properties).toEqual({ site: 'demo.medusapos.com', $process_person_profile: false });
   });
 
   it('reuses the in-memory visit id', () => {
