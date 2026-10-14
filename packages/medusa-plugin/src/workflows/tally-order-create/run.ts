@@ -17,6 +17,10 @@ export type TallyPluginOptions = {
   salesChannelId?: string; locationId?: string; shippingOptionId?: string
   // Opt in to the experimental product change journal; disabled by default.
   experimentalSync?: boolean
+  // Cash variance requiring a manager approval at register contract 3; defaults to 500 minor units.
+  approvalThresholdMinor?: number
+  // Refuse register contracts below this version; unset accepts every supported version.
+  minRegisterContract?: number
 }
 
 export async function runOrderCreate(

@@ -16,6 +16,19 @@ const closure = {
   unsyncedCount: 0, unsyncedTotalMinor: 0, tillExpected: { cash: 150 }, counted: { cash: 150 }, orderIds: ['o'], movementIds: ['m'],
 }
 
+it('accepts an optional approval only on a v3 closure', () => {
+  expect(registerPayloadErrors('register.closure.submit', closure, 3)).toEqual([])
+  for (const approval of ['proof', 'p'.repeat(128)]) {
+    expect(registerPayloadErrors('register.closure.submit', { ...closure, approval }, 3)).toEqual([])
+    for (const version of [1, 2]) expect(registerPayloadErrors('register.closure.submit', { ...closure, approval }, version))
+      .toEqual([`payload.approval: unknown field for register.closure.submit version ${version}`])
+  }
+  for (const approval of ['', 'p'.repeat(129), null, 1]) {
+    expect(registerPayloadErrors('register.closure.submit', { ...closure, approval }, 3))
+      .toEqual(['payload.approval: expected a non-empty string of at most 128 characters'])
+  }
+})
+
 it('a v2 open accepts deviceName and supersedes; a v1 open refuses them as unknown fields for version 1', () => {
   const payload = { ...open, deviceName: '  Till 1  ', supersedes: 'previous-session' }
   expect(registerPayloadErrors('register.session.open', payload, 2)).toEqual([])

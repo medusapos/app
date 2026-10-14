@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { moduleIntegrationTestRunner } from '@medusajs/test-utils'
 import { TALLY_REGISTER_MODULE } from '..'
-import TallyRegisterModuleService from '../service'
+import TallyRegisterModuleService, { MAX_APPROVAL_FAILURES_PER_ACTOR, MAX_APPROVAL_FAILURES_PER_EMAIL } from '../service'
 import type {
   RegisterClosureSubmitPayload, RegisterMovementRecordPayload, RegisterSessionOpenPayload,
 } from '../types'
@@ -869,6 +869,51 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
       } finally {
         await sql('drop trigger delay_closure_insert on tally_register_closure')
         await sql('drop function delay_closure_insert()')
+      }
+    })
+
+    it('the actor lock limits concurrent approval admissions across distinct emails', async () => {
+      const sessions = Array.from({ length: MAX_APPROVAL_FAILURES_PER_ACTOR + 3 }, () => randomUUID())
+      for (const sessionId of sessions) await service.openSession({ ...first, sessionId, registerId: randomUUID() })
+      await sql(`create function delay_approval_insert() returns trigger language plpgsql as $$
+        begin perform pg_sleep(0.2); return new; end $$`)
+      await sql(`create trigger delay_approval_insert before insert on tally_register_approval
+        for each row execute function delay_approval_insert()`)
+      try {
+        const outcomes = await Promise.all(sessions.map((sessionId, i) => service.admitApproval({
+          sessionId, variance: { cash: -100 }, requestedBy: 'cashier', email: `manager-${i}@example.com`,
+        })))
+        expect(outcomes.filter(outcome => outcome.kind === 'admitted')).toHaveLength(MAX_APPROVAL_FAILURES_PER_ACTOR)
+        expect(outcomes.filter(outcome => outcome.kind === 'refused')).toEqual(
+          Array.from({ length: 3 }, () => ({ kind: 'refused', code: 'approval_rate_limited' })),
+        )
+        expect(await sql('select id from tally_register_approval')).toHaveLength(MAX_APPROVAL_FAILURES_PER_ACTOR)
+      } finally {
+        await sql('drop trigger delay_approval_insert on tally_register_approval')
+        await sql('drop function delay_approval_insert()')
+      }
+    })
+
+    it('the email lock limits concurrent approval admissions across distinct actors and normalized emails', async () => {
+      const sessions = Array.from({ length: MAX_APPROVAL_FAILURES_PER_EMAIL + 2 }, () => randomUUID())
+      for (const sessionId of sessions) await service.openSession({ ...first, sessionId, registerId: randomUUID() })
+      await sql(`create function delay_approval_insert() returns trigger language plpgsql as $$
+        begin perform pg_sleep(0.2); return new; end $$`)
+      await sql(`create trigger delay_approval_insert before insert on tally_register_approval
+        for each row execute function delay_approval_insert()`)
+      try {
+        const outcomes = await Promise.all(sessions.map((sessionId, i) => service.admitApproval({
+          sessionId, variance: { cash: -100 }, requestedBy: `cashier-${i}`,
+          email: i % 2 ? '  Manager@Example.COM  ' : 'manager@example.com',
+        })))
+        expect(outcomes.filter(outcome => outcome.kind === 'admitted')).toHaveLength(MAX_APPROVAL_FAILURES_PER_EMAIL)
+        expect(outcomes.filter(outcome => outcome.kind === 'refused')).toEqual(
+          Array.from({ length: 2 }, () => ({ kind: 'refused', code: 'approval_rate_limited' })),
+        )
+        expect(await sql('select id from tally_register_approval')).toHaveLength(MAX_APPROVAL_FAILURES_PER_EMAIL)
+      } finally {
+        await sql('drop trigger delay_approval_insert on tally_register_approval')
+        await sql('drop function delay_approval_insert()')
       }
     })
 

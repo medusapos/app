@@ -120,5 +120,42 @@ medusaIntegrationTestRunner({
       expect(response.data.type).toBe('forbidden')
       expect(response.data.message).toContain('tally_pos:use')
     })
+
+    it.each([
+      ['POS manager', 200], ['POS cashier', 403], ['no roles', 403], ['role_super_admin', 200],
+    ])('a POS cashier requests approval from %s: %i', async (roleName, status) => {
+      await tallyPosRoles({ container, args: [] })
+      const rbac = container.resolve(Modules.RBAC)
+      const [cashierRole] = await rbac.listRbacRoles({ name: 'POS cashier' })
+      const headers = await loginWithRoles([cashierRole.id])
+      const email = `approver-${randomUUID()}@example.com`
+      const password = 'integration-test-password'
+      const user = await container.resolve(Modules.USER).createUsers({ email })
+      const auth = container.resolve(Modules.AUTH)
+      const { authIdentity, error } = await auth.register('emailpass', { body: { email, password } })
+      expect(error).toBeUndefined()
+      await auth.updateAuthIdentities({ id: authIdentity!.id, app_metadata: { user_id: user.id } })
+      if (roleName !== 'no roles') {
+        const roleId = roleName === 'role_super_admin' ? roleName : (await rbac.listRbacRoles({ name: roleName }))[0].id
+        await container.resolve(ContainerRegistrationKeys.LINK).create({
+          [Modules.USER]: { user_id: user.id }, [Modules.RBAC]: { rbac_role_id: roleId },
+        })
+      }
+      const sessionId = randomUUID()
+      const openedAt = '2026-01-01T08:00:00.000Z'
+      const opening = await api.post('/tally/v1/commands', { commands: [{
+        id: randomUUID(), type: 'register.session.open', version: 1, createdAt: openedAt, deviceId: randomUUID(), attempt: 1,
+        payload: { sessionId, registerId: randomUUID(), openedAt, countedFloatMinor: 100 },
+      }] }, { headers })
+      expect(opening.data.results[0].status).toBe('applied')
+      const response = await api.post('/tally/v1/register-approvals', {
+        sessionId, variance: { cash: -20 }, email, password,
+      }, { headers, validateStatus: () => true })
+      expect(response.status).toBe(status)
+      if (status === 200) expect(response.data).toMatchObject({
+        approval: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/), approvedBy: user.id, approvedByName: email,
+      })
+      else expect(response.data).toEqual({ code: 'approval_forbidden', message: "This user can't approve register variances." })
+    })
   },
 })

@@ -140,9 +140,10 @@ medusaIntegrationTestRunner({
       for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
         const response = await info(requestHeaders)
         expect([response.status, response.data]).toEqual([200, {
-          contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2], sync: [1] },
+          contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2, 3], sync: [1] },
           taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
           lineTax: { none: false, classes: false },
+          registerApproval: { thresholdMinor: 500 },
         }])
       }
       expect((await info({})).status).toBe(401)
@@ -156,13 +157,14 @@ medusaIntegrationTestRunner({
       }
     })
 
-    it('/info lists order.create versions 1, 2, 3 and 4', async () => {
+    it('/info lists order.create versions 1, 2, 3, 4 and 5', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4, 5], register: [1, 2, 3], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         lineTax: { none: false, classes: false },
+        registerApproval: { thresholdMinor: 500 },
       })
     })
 

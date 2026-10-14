@@ -59,7 +59,7 @@ try {
   const info = await request('info', '/tally/v1/info')
   check(Array.isArray(info?.contracts?.['order.create']) && info.contracts['order.create'].includes(3),
     'expected order.create contracts to include 3')
-  check(JSON.stringify(info?.contracts?.register) === '[1,2]', 'expected register contracts [1,2]')
+  check(JSON.stringify(info?.contracts?.register) === '[1,2,3]', 'expected register contracts [1,2,3]')
 
   const stores = await request('store-name', '/admin/stores?fields=id,name')
   check(stores?.stores?.[0]?.name === 'Medusa POS demo store', 'expected the demo store name')
