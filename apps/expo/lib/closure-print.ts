@@ -1,7 +1,9 @@
-import type { buildClosureDocument } from '@tallyui/pos';
+import { buildXReportDocument, type buildClosureDocument, type ClosureContext, type RegisterSession } from '@tallyui/pos';
 
 export type ClosureDocument = ReturnType<typeof buildClosureDocument>;
+export type XReportDocument = ReturnType<typeof buildXReportDocument>;
 export const PRINT_FAILED = "Couldn't print the Z report. Try again.";
+export const X_PRINT_FAILED = "Couldn't print the X report. Try again.";
 export const PRINT_FRAME_ID = 'closure-print-frame';
 // Lets the frame lay out before the dialog.
 const PRINT_SETTLE_MS = 50;
@@ -55,28 +57,59 @@ export function closureReportHtml(document: ClosureDocument): string {
 </main></body></html>`;
 }
 
-export async function printHtml(html: string): Promise<void> {
-  if (typeof document === 'undefined') throw new Error(PRINT_FAILED);
+export function xReportHtml(document: XReportDocument, salesCount: number): string {
+  const { store, register, closure: x, order } = document;
+  const row = (label: unknown, value: unknown) => `<tr><th scope="row">${escapeHtml(label)}</th><td>${escapeHtml(value)}</td></tr>`;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>X report</title><style>${STYLE}</style></head>
+<body><main class="x-report">
+  <header><h1>${escapeHtml(store.name)}</h1>${typeof store.address === 'string' && store.address ? `<p>${escapeHtml(store.address)}</p>` : ''}</header>
+  <h2>X report</h2>
+  <p class="note">Not a closure. The register stays open.</p>
+  <table class="rows"><tbody>
+    ${register.name ? row('Register', register.name) : ''}
+    ${row('Opened', x.opened_at.datetime)}
+    ${row('Sales', `${salesCount} ${salesCount === 1 ? 'sale' : 'sales'}`)}
+    ${row('Opening float', x.breakdowns.opening_float.counted_display)}
+  </tbody></table>
+  ${x.tenders.map((tender) => `<section class="tender"><h3>${escapeHtml(tender.label)}</h3><table class="rows"><tbody>
+    ${row('Expected', tender.expected_display)}
+  </tbody></table></section>`).join('')}
+  <footer><p>Printed ${escapeHtml(order.printed.datetime)}</p></footer>
+</main></body></html>`;
+}
+
+export function printXReport(input: {
+  session: RegisterSession; expected: Record<string, number>; salesCount: number; registerName: string | null; context: ClosureContext;
+}): Promise<void> {
+  return printHtml(xReportHtml(buildXReportDocument(input.session, {
+    ...input.context, expected: input.expected, breakdowns: { register_name: input.registerName ?? '' },
+  }), input.salesCount), { title: 'X report', failed: X_PRINT_FAILED });
+}
+
+export async function printHtml(html: string, options: { title?: string; failed?: string } = {}): Promise<void> {
+  const { title = 'Z report', failed = PRINT_FAILED } = options;
+  if (typeof document === 'undefined') throw new Error(failed);
   try {
     document.getElementById(PRINT_FRAME_ID)?.remove();
     const frame = document.createElement('iframe');
     frame.id = PRINT_FRAME_ID;
-    frame.title = 'Z report';
+    frame.title = title;
     frame.setAttribute('aria-hidden', 'true');
     frame.tabIndex = -1;
     frame.style.cssText = 'position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0';
     document.body.appendChild(frame);
     const doc = frame.contentDocument;
-    if (!doc) throw new Error(PRINT_FAILED);
+    if (!doc) throw new Error(failed);
     doc.open();
     doc.write(html);
     doc.close();
     await new Promise<void>((resolve) => setTimeout(resolve, PRINT_SETTLE_MS));
-    if (!frame.contentWindow) throw new Error(PRINT_FAILED);
+    if (!frame.contentWindow) throw new Error(failed);
     frame.contentWindow.focus();
     frame.contentWindow.print();
   } catch (error) {
-    console.warn('Could not print the Z report:', error);
-    throw new Error(PRINT_FAILED);
+    console.warn(`Could not print the ${title}:`, error);
+    throw new Error(failed);
   }
 }

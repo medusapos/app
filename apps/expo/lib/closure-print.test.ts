@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildClosureDocument, formatClosureDate, TAX_ROUNDING_MIXED_NOTE, type Closure, type ClosureContext } from '@tallyui/pos';
-import { closureReportHtml, printHtml, PRINT_FAILED, PRINT_FRAME_ID } from './closure-print';
+import { buildClosureDocument, buildXReportDocument, formatClosureDate, TAX_ROUNDING_MIXED_NOTE, type Closure, type ClosureContext, type RegisterSession } from '@tallyui/pos';
+import { closureReportHtml, printHtml, printXReport, xReportHtml, PRINT_FAILED, PRINT_FRAME_ID, X_PRINT_FAILED } from './closure-print';
 
 function row(overrides: Partial<Closure> = {}): Closure {
   return {
@@ -127,6 +127,64 @@ describe('closureReportHtml', () => {
   });
 });
 
+function session(overrides: Partial<RegisterSession> = {}): RegisterSession {
+  return {
+    id: 's1', register_id: 'register-1', store_key: 'https://shop.test', status: 'open',
+    opened_at_gmt: '2026-09-11T08:00:00Z', expected_float_minor: 10000,
+    counted_float_minor: 10000, opening_variance_minor: 0, ...overrides,
+  };
+}
+
+describe('xReportHtml', () => {
+  const xContext = { ...context, expected: { cash: 18000, card: 12000 }, breakdowns: { register_name: 'Main register' } };
+  const row = (scope: ParentNode, label: string) => Array.from(scope.querySelectorAll('tr'))
+    .find((tr) => tr.querySelector('th')?.textContent === label)?.querySelector('td')?.textContent;
+
+  it('prints the store, the register, the opened time, sales so far and the float', () => {
+    const page = parse(xReportHtml(buildXReportDocument(session(), xContext), 3));
+    expect(page.querySelector('h1')?.textContent).toBe('Test shop');
+    expect(page.querySelector('h2')?.textContent).toBe('X report');
+    expect(page.title).toBe('X report');
+    expect(page.querySelector('p.note')?.textContent).toBe('Not a closure. The register stays open.');
+    expect(row(page, 'Register')).toBe('Main register');
+    expect(row(page, 'Opened')).toBe(formatClosureDate('2026-09-11T08:00:00Z', { timezone: 'UTC', locale: 'en-GB' }).datetime);
+    expect(row(page, 'Sales')).toBe('3 sales');
+    expect(row(page, 'Opening float')).toBe('€100.00');
+    expect(page.querySelector('main.x-report')).not.toBeNull();
+  });
+
+  it('prints expected per tender and no count, variance or closure number', () => {
+    const html = xReportHtml(buildXReportDocument(session(), xContext), 3);
+    const page = parse(html);
+    const tenders = Array.from(page.querySelectorAll('section.tender'));
+    expect(tenders).toHaveLength(2);
+    expect(tenders.map((tender) => tender.querySelector('h3')?.textContent)).toEqual(['Cash', 'Card']);
+    expect(row(tenders[0], 'Expected')).toBe('€180.00');
+    expect(row(tenders[1], 'Expected')).toBe('€120.00');
+    for (const label of ['Counted', 'Variance', 'Closed']) expect(row(page, label)).toBeUndefined();
+    expect(html).not.toContain('Closure #');
+  });
+
+  it('says "1 sale" and leaves out an empty register name', () => {
+    const page = parse(xReportHtml(buildXReportDocument(session(), { ...xContext, breakdowns: { register_name: '' } }), 1));
+    expect(row(page, 'Sales')).toBe('1 sale');
+    expect(row(page, 'Register')).toBeUndefined();
+  });
+
+  it('escapes the values it prints', () => {
+    const name = '<img src=x onerror=alert(1)>';
+    const html = xReportHtml(buildXReportDocument(session(), {
+      ...xContext, store: { name }, breakdowns: { register_name: '<script>x</script>' },
+    }), 3);
+    const page = parse(html);
+    expect(page.querySelector('img')).toBeNull();
+    expect(page.querySelector('script')).toBeNull();
+    expect(page.querySelector('h1')?.textContent).toBe(name);
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('<script');
+  });
+});
+
 describe('printHtml', () => {
   afterEach(() => {
     document.getElementById(PRINT_FRAME_ID)?.remove();
@@ -166,5 +224,21 @@ describe('printHtml', () => {
     const frame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
     vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => { throw new Error('boom'); });
     await expect(done).rejects.toThrow(PRINT_FAILED);
+  });
+
+  it('prints the X report with its own title and failure message', async () => {
+    const input = { session: session(), expected: { cash: 500 }, salesCount: 0, registerName: 'Main register', context };
+    const done = printXReport(input);
+    const frame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
+    expect(frame.title).toBe('X report');
+    const print = vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => {});
+    await done;
+    expect(print).toHaveBeenCalledOnce();
+    expect(frame.contentDocument!.querySelector('h2')?.textContent).toBe('X report');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failed = printXReport(input);
+    const secondFrame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
+    vi.spyOn(secondFrame.contentWindow!, 'print').mockImplementation(() => { throw new Error('boom'); });
+    await expect(failed).rejects.toThrow(X_PRINT_FAILED);
   });
 });

@@ -4,6 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { buildClosureDocument, exportCsv, minorToDecimal, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { ProductsBack } from '../components/products-back';
 import { closureContext } from '../components/register-close';
+import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
 import { useRegister } from '../lib/register-context';
@@ -21,11 +22,13 @@ const Row = ({ label, value, testID }: { label: string; value: ReactNode; testID
 export default function ReportsScreen() {
   const { session } = useSession();
   const { orders } = useOutboxContext();
-  const { boundRegisterId, registers } = useRegister();
+  const { boundRegisterId, registers, register, registerName } = useRegister();
   const [today] = useState(() => localDay(new Date()));
   const [sales, setSales] = useState<PosOrder[]>([]);
   const [closures, setClosures] = useState<Closure[]>([]);
   const [exportError, setExportError] = useState(false);
+  const [xBusy, setXBusy] = useState(false);
+  const [xError, setXError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!orders) return;
@@ -68,6 +71,23 @@ export default function ReportsScreen() {
             {`${summary.leftOutCount} ${summary.leftOutCount === 1 ? 'order' : 'orders'} in another currency left out`}
           </Text> : null}
         </> : null}
+      {Platform.OS === 'web' && ctx && register.session?.status === 'open' ? <>
+        <Pressable testID="reports-x-print" accessibilityRole="button" disabled={xBusy}
+          className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
+          onPress={async () => {
+            setXBusy(true);
+            setXError(null);
+            try {
+              await printXReport({ session: register.session!, expected: register.expected,
+                salesCount: register.salesCount, registerName, context: ctx });
+            } catch (error) {
+              setXError(error instanceof Error ? error.message : X_PRINT_FAILED);
+            } finally { setXBusy(false); }
+          }}>
+          <Text className="text-foreground">{xBusy ? 'Printing…' : 'Print X report'}</Text>
+        </Pressable>
+        {xError ? <Text testID="reports-x-print-error" accessibilityRole="alert">{xError}</Text> : null}
+      </> : null}
       <Text testID="closures-heading" className="text-lg font-semibold text-foreground">Closures</Text>
       {orders !== null && ctx ? <>
         {rows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text> : rows.map((row) => {
