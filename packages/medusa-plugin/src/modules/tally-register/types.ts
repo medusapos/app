@@ -52,6 +52,19 @@ export interface RegisterClosureSubmitPayload {
 }
 export interface RegisterClosureSubmitV3Payload extends RegisterClosureSubmitPayload { approval?: string }
 
+/** A stored closure as closureHistory reads it: the submitted record plus its session's store, device and opener. */
+export interface StoredClosure {
+  id: string; session_id: string; register_id: string; number: number
+  business_day: string | null; opened_at: string; closed_at: string
+  closed_by: string | null; approved_by: string | null; approval_id: string | null
+  till_expected: Record<string, number>; counted: Record<string, number>
+  period_sales_total_minor: number; period_refunds_total_minor: number
+  perpetual_sales_total_minor: number; perpetual_refunds_total_minor: number
+  unsynced_count: number; unsynced_total_minor: number; software_version: string
+  order_ids: string[]; movement_ids: string[]
+  store_key: string | null; device_name: string | null; opened_by: string | null
+}
+
 export type RegisterCounters = {
   lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number
 }
