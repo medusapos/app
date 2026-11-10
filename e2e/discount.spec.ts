@@ -27,10 +27,12 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
   await signIn(page);
-  // The plugin advertises order.create [1, 2, 3, 4, 5] (ADR 0021), register 1, 2 and 3 (ADR 0022, ADR 0023) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0).
+  // The plugin advertises order.create [1, 2, 3, 4, 5] (ADR 0021), register 1, 2 and 3 (ADR 0022, ADR 0023) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0)
+  // and its registerApproval, the plugin's default approvalThresholdMinor of 500 (ADR 0023; parsed since TallyUI 3.13.0, ADR-082).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
   expect(await capabilities(page)).toEqual({ orderCreate: 5, register: 3,
-    taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false } });
+    taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
+    registerApproval: { thresholdMinor: 500 } });
   await addE2E1(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '10');

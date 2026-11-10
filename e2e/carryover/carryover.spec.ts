@@ -398,7 +398,7 @@ test('a 3.2.x till (pos_orders v7) upgrades to 3.3.0 (v8): sales, split payments
   }
 });
 
-test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with identical documents: sales, split payments, register history, a parked draft and queued register commands survive, and pending sales sync once', async ({ context }) => {
+test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with pos_orders moving to schema v11 and its documents unchanged: sales, split payments, register history, a parked draft and queued register commands survive, and pending sales sync once', async ({ context }) => {
   test.setTimeout(15 * 60_000);
   const releasedRef = JSON.parse(readFileSync(resolve(released, 'BUILD_REF.json'), 'utf8'));
   test.skip(TALLYUI_32X_BASES.includes(releasedRef.commit), '3.2.x bases use the pos_orders v7 to v8 carry-over test.');
@@ -532,12 +532,13 @@ test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with identical documents: 
     await server.stop();
     server = serve(current);
     await server.ready();
-    await test.step('C: whole documents equal released documents, with no migration', async () => {
+    await test.step('C: pos_orders moves to schema v11 and whole documents equal released documents', async () => {
       const page = await context.newPage();
       const NEW = await dump(page);
       await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
-      expect(NEW.stored).toStrictEqual(OLD.stored);
+      // TallyUI 3.13.0's identity migrations 9-11 move pos_orders to v11; nothing else in stored changes.
+      expect(NEW.stored).toStrictEqual(OLD.stored.map(entry => entry.name === 'pos_orders' ? { ...entry, version: 11 } : entry));
       expect(NEW.docs).toStrictEqual(OLD.docs);
       expect(NEW.register).toStrictEqual(OLD.register);
     });
