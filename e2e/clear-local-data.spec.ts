@@ -5,6 +5,8 @@ import { signIn, test } from './helpers';
 // databases and every medusapos. key before anything opens, and lands on sign-in.
 test.use({ viewport: { width: 360, height: 740 } });
 
+const takeOver = 'The till is open. Its session stays open on your server: after the reset, open this register again and choose Take over.';
+
 const local = (page: Page) => page.evaluate(async () => {
   const root = await navigator.storage.getDirectory();
   return {
@@ -25,6 +27,11 @@ test('Clear all local data wipes the device and returns to sign-in', async ({ pa
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
   await page.getByTestId('clear-local-data').click();
   await expect(page.getByTestId('clear-local-data-warning')).toHaveText('Nothing is waiting to be sent, so your server already has your sales.');
+  // signIn left the till open, so the dialog names it and asks for the typed word.
+  await expect(page.getByTestId('clear-local-data-warning-1')).toHaveText(takeOver);
+  await expect(page.getByTestId('clear-local-data-confirm')).toBeDisabled();
+  await page.getByTestId('clear-local-data-word').fill('CLEAR');
+  await expect(page.getByTestId('clear-local-data-confirm')).toBeEnabled();
   await page.getByTestId('clear-local-data-confirm').click();
 
   await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
@@ -35,4 +42,25 @@ test('Clear all local data wipes the device and returns to sign-in', async ({ pa
   expect(newId).not.toBe(oldId);
 
   await signIn(page);
+});
+
+test('after a wipe the open server session is taken over, not lost', async ({ page }) => {
+  await signIn(page);
+  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByTestId('clear-local-data').click();
+  await page.getByTestId('clear-local-data-word').fill('CLEAR');
+  await page.getByTestId('clear-local-data-confirm').click();
+  await expect(page.getByLabel('Email', { exact: true })).toBeVisible();
+
+  // Not openRegister: it would close the server session first. The new device id's open is refused.
+  await signIn(page, 'Europe', false);
+  await page.getByTestId('register-bar-pill').click();
+  await page.getByTestId('register-picker-row-register-1').click();
+  await page.getByTestId('open-register-amount').fill('100.00');
+  await page.getByTestId('open-register-button').click();
+  const card = page.getByTestId('register-conflict-card');
+  await expect(card).toBeVisible();
+  await card.getByTestId('register-conflict-take-over').click();
+  await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+  await expect(card).toHaveCount(0);
 });

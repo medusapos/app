@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  CLEAR_FLAG_KEY, clearAllLocalData, isClearPending, requestClearLocalData, unsentWarning,
+  CLEAR_FLAG_KEY, clearAllLocalData, clearWarnings, isClearPending, requestClearLocalData,
 } from './clear-local-data';
 
 function fakeStorage(entries: Record<string, string> = {}) {
@@ -87,9 +87,24 @@ describe('clearAllLocalData', () => {
     expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it('words the unsent warning as v2 does', () => {
-    expect(unsentWarning(0)).toBe('Nothing is waiting to be sent, so your server already has your sales.');
-    expect(unsentWarning(1)).toBe('1 change on this device has never reached your server and will be permanently lost. It may be a completed sale that exists only on this device.');
-    expect(unsentWarning(3)).toBe('3 changes on this device have never reached your server and will be permanently lost. They may include completed sales that exist only on this device.');
+  it('names everything unsent and an open till', () => {
+    const nothing = 'Nothing is waiting to be sent, so your server already has your sales.';
+    const salesNote = 'Unsent sales may be completed sales that exist only on this device.';
+    const tillNote = 'Till entries are till opens, pay ins and outs, and closures.';
+    const lost = 'never reached your server and will be permanently lost.';
+    const risk = (sales: number, tillEntries: number, tillOpen: boolean, registerContract: number) =>
+      clearWarnings({ sales, tillEntries, tillOpen, registerContract });
+    expect(risk(0, 0, false, 3)).toEqual({ lines: [nothing], atRisk: false });
+    expect(risk(1, 0, false, 3)).toEqual({ lines: [`1 sale on this device has ${lost}`, salesNote], atRisk: true });
+    expect(risk(2, 3, false, 3)).toEqual({ lines: [`2 sales and 3 till entries on this device have ${lost}`, salesNote, tillNote], atRisk: true });
+    expect(risk(0, 1, false, 3)).toEqual({ lines: [`1 till entry on this device has ${lost}`, tillNote], atRisk: true });
+    expect(risk(0, 0, true, 3)).toEqual({ lines: [nothing,
+      'The till is open. Its session stays open on your server: after the reset, open this register again and choose Take over.'], atRisk: true });
+    expect(risk(0, 0, true, 1)).toEqual({ lines: [nothing,
+      "The till is open. Its session stays open on your server, and this device can't take it over after the reset. Close the till first."], atRisk: true });
+    expect(risk(0, 0, true, 0)).toEqual({ lines: [nothing,
+      "The till is open. This store doesn't keep till records, so its cash record (float, pay ins and outs) will be lost."], atRisk: true });
+    expect(risk(0, 0, false, 0)).toEqual({ lines: [nothing,
+      "This store doesn't keep till records, so this device's till history will be lost."], atRisk: false });
   });
 });

@@ -59,9 +59,39 @@ export function defaultClearDeps(): ClearDeps {
   return { storage: globalThis.localStorage, opfsRoot: () => navigator.storage.getDirectory(), idb: globalThis.indexedDB };
 }
 
-// WCPOS v2's copy (as CLEAR_BODY).
-export function unsentWarning(count: number): string {
-  if (count === 0) return 'Nothing is waiting to be sent, so your server already has your sales.';
-  if (count === 1) return '1 change on this device has never reached your server and will be permanently lost. It may be a completed sale that exists only on this device.';
-  return `${count} changes on this device have never reached your server and will be permanently lost. They may include completed sales that exist only on this device.`;
+export type ClearRisk = {
+  /** Sales not on the server: order outbox pending + rejected + saves in flight. */
+  sales: number;
+  /** Till entries not on the server: registerOutbox.state.pending. */
+  tillEntries: number;
+  /** register.session status is 'open' or 'counting'. */
+  tillOpen: boolean;
+  /** session.capabilities.register, or 0 when absent. */
+  registerContract: number;
+};
+export const CLEAR_CONFIRM_WORD = 'CLEAR';
+
+const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+// The open server session is safe: after the wipe this device has a new id, so its open is refused and Take over
+// supersedes the old session, recording superseded_by_device. Contract 1 has no take-over, so the dialog says close first.
+export function clearWarnings(risk: ClearRisk): { lines: string[]; atRisk: boolean } {
+  const { sales, tillEntries, tillOpen, registerContract } = risk;
+  const parts = [sales ? counted(sales, 'sale', 'sales') : '', tillEntries ? counted(tillEntries, 'till entry', 'till entries') : '']
+    .filter(Boolean);
+  const lines = [parts.length === 0
+    ? 'Nothing is waiting to be sent, so your server already has your sales.'
+    : `${parts.join(' and ')} on this device ${sales + tillEntries === 1 ? 'has' : 'have'} never reached your server and will be permanently lost.`];
+  if (sales > 0) lines.push('Unsent sales may be completed sales that exist only on this device.');
+  if (tillEntries > 0) lines.push('Till entries are till opens, pay ins and outs, and closures.');
+  if (tillOpen) {
+    lines.push(registerContract >= 2
+      ? 'The till is open. Its session stays open on your server: after the reset, open this register again and choose Take over.'
+      : registerContract === 1
+        ? "The till is open. Its session stays open on your server, and this device can't take it over after the reset. Close the till first."
+        : "The till is open. This store doesn't keep till records, so its cash record (float, pay ins and outs) will be lost.");
+  } else if (registerContract === 0) {
+    lines.push("This store doesn't keep till records, so this device's till history will be lost.");
+  }
+  return { lines, atRisk: sales + tillEntries > 0 || tillOpen };
 }
