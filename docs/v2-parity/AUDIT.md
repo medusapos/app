@@ -58,11 +58,16 @@ v2 (WCPOS 2.0.0 checkout journey, tablet, light, regular scale; copied from the 
 
 | Step | v2 | MedusaPOS |
 |---|---|---|
-| Start a sale | ![](screenshots/v2/tablet-1-start-guest-sale.png) | ![](screenshots/medusapos/sale.png) |
-| Product in cart | ![](screenshots/v2/tablet-2-add-product.png) | ![](screenshots/medusapos/cart.png) |
-| Check out | ![](screenshots/v2/tablet-4-check-out.png) | ![](screenshots/medusapos/tender.png) |
-| Cash taken | ![](screenshots/v2/tablet-5-take-cash.png) | ![](screenshots/medusapos/split-tender.png) |
-| Paid | ![](screenshots/v2/tablet-6-see-paid.png) | ![](screenshots/medusapos/receipt.png) |
+| Start a sale | ![](screenshots/v2/tablet-1-start-guest-sale.png) | ![](screenshots/medusapos/05-sale-screen-empty-cart.png) |
+| Product in cart | ![](screenshots/v2/tablet-2-add-product.png) | ![](screenshots/medusapos/06-sale-grid-cart-2-lines.png) |
+| Check out | ![](screenshots/v2/tablet-4-check-out.png) | not captured yet |
+| Cash taken | ![](screenshots/v2/tablet-5-take-cash.png) | not captured yet |
+| Paid | ![](screenshots/v2/tablet-6-see-paid.png) | not captured yet |
+| Check out (phone) | ![](screenshots/v2/phone-4-check-out.png) | not captured yet |
+
+Other MedusaPOS screens captured (no v2 pair in the capture run): [sign in](screenshots/medusapos/01-login.png), [till setup, region](screenshots/medusapos/02-till-setup-region.png), [register picker](screenshots/medusapos/03-register-picker.png), [open with a float](screenshots/medusapos/04-register-open-card-float.png), [catalogue table view](screenshots/medusapos/07-catalogue-table-view.png), [variant chooser](screenshots/medusapos/08-variant-chooser.png), [customer picker](screenshots/medusapos/09-customer-picker.png), [new customer](screenshots/medusapos/10-customer-new-form.png), [line discount](screenshots/medusapos/11-line-discount-dialog.png), [parked sales, empty](screenshots/medusapos/12-parked-sales-empty.png), [parked sales, one](screenshots/medusapos/13-parked-sales-one.png).
+
+The capture run stopped after Resume on a parked sale (the scripted run hung there), so tender, receipt, orders, settings, register movements, close and phone are still to capture. Whether Resume itself hangs is unchecked.
 
 ## Build now (app or plugin, no TU wait)
 
