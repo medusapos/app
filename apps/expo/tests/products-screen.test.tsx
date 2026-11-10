@@ -203,7 +203,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.textContent))
-      .toEqual(['Orders', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Cash', 'Card terminal']);
+      .toEqual(['Orders', 'Reports', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Cash', 'Card terminal']);
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
     expect(screen.getByText('€12.50 × 1').parentElement!.parentElement!.textContent).toBe('Apple€12.50 × 1€12.50');
@@ -579,15 +579,16 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     // Held: disabled in place, described by the tender's lock message, and a press signs nothing out.
     const signOut = screen.getByRole('button', { name: 'Sign out', description: SALE_SAVING });
     expect(signOut.getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getAllByRole('button').slice(0, 3).map((button) => button.textContent)).toEqual(['Orders', 'Settings', 'Sign out']);
+    expect(screen.getAllByRole('button').slice(0, 4).map((button) => button.textContent)).toEqual(['Orders', 'Reports', 'Settings', 'Sign out']);
     fireEvent.click(signOut);
     expect(signedOut()).toBe(false);
     expect(router.replace).not.toHaveBeenCalled();
     expect(screen.queryByText('redirect:/login')).toBeNull();
-    // Orders and Settings stay live: they push onto the stack, over the mounted sale.
+    // Orders, Reports and Settings stay live: they push onto the stack, over the mounted sale.
     fireEvent.click(screen.getByRole('button', { name: 'Orders' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
     fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
-    expect(vi.mocked(router.push).mock.calls).toEqual([['/orders'], ['/settings']]);
+    expect(vi.mocked(router.push).mock.calls).toEqual([['/orders'], ['/reports'], ['/settings']]);
 
     if (settles === 'stored') {
       await act(async () => { save(); });
