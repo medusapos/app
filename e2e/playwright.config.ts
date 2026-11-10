@@ -9,7 +9,7 @@ const appLocalUrl = `http://localhost:${E2E_RUN.appPort}`;
 
 export default defineConfig({
   testDir: '.',
-  testIgnore: ['carryover/**', 'rbac/**'],
+  testIgnore: ['carryover/**', 'rbac/**', '*.test.ts'],
   globalTeardown: appUrl ? undefined : './global-teardown.ts',
   workers: 1,
   // A hosted run crosses the internet to the shared demo backend for sign-in, sync and every sale; its showcase catalogue (about 35 products, #227) syncs in seconds, so the 5 minutes is network headroom, not catalogue size.
