@@ -256,6 +256,14 @@ TallyUI registers c2 syncs a till's drawer to the store: sessions, cash movement
 
 **The naming trap:** `order.create`'s `registerId`, stored as order metadata `tally_register_id`, is the **till's device id** (ADR 0017). The register commands, the `tally_register` tables and `/tally/v1/registers/{id}` mean the **drawer**. Never join the two.
 
+## Receipt email
+
+`POST /tally/v1/orders/:id/receipt-email` with `{ email, saveToBilling? }` emails a receipt; `id` is the Medusa order id the till received as `serverRefs.orderId`, and only till orders are accepted. `saveToBilling` is accepted but not applied yet (`savedToBilling: false`).
+It sends through the Notification Module on channel `email` with template `tally-pos-receipt`; the store maps that id to its provider's template.
+Template `data` contains `order` (money in minor units) and `posTotals` (the till's `tally_pos_totals`).
+Responses: 202 accepted; 400 `invalid_payload`; 404 `order_not_found`; 502 `receipt_email_failed`; 503 `receipt_email_unavailable`.
+A store needs a Notification Module provider on channel `email`. For a dev store, add this to `defineConfig` (the local provider logs instead of sending): `modules: [{ resolve: '@medusajs/medusa/notification', options: { providers: [{ resolve: '@medusajs/medusa/notification-local', id: 'local', options: { name: 'Local Notification Provider', channels: ['email'] } }] } }]`
+
 ## Experimental sync (G4)
 
 This is a change journal and two read routes for TallyUI's G4 sync experiment. The design is [ADR 0020](../../docs/adr/0020-medusa-side-of-g4-sync.md), and the event evidence is the [G4 events spike](../../docs/spikes/g4-medusa-events.md). **It's experimental and unversioned:** the route shapes and the `sync: [1]` capability may change without a version bump until TallyUI's G2 names the driver interface. **It's off by default.**
