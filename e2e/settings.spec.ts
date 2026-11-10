@@ -121,3 +121,43 @@ test('opening /settings directly by URL still lands back on Products', async ({ 
   await page.getByRole('button', { name: 'Products', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
 });
+
+test('Theme: Dark puts the dark class on <html> and its tokens, the first frame after a reload is dark, and System follows the browser', async ({ page }) => {
+  await page.emulateMedia({ colorScheme: 'light' });
+  await signIn(page, 'Europe', false);
+  const html = page.locator('html');
+  await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Dark', exact: true }).click();
+  await expect(page.getByTestId('settings-theme-dark')).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('settings-theme-light')).toHaveAttribute('aria-pressed', 'false');
+  await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
+  await expect(html).not.toHaveClass(/(^|\s)light(\s|$)/);
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim())).toBe('#0d1117');
+  expect(await page.evaluate(() => localStorage.getItem('medusapos.theme'))).toBe('dark');
+
+  await page.addInitScript(() => {
+    const themeFrames = (window as Window & { themeFrames: string[] }).themeFrames = [];
+    let frames = 0;
+    function record() {
+      if (document.getElementById('splash') === null) themeFrames.push(document.documentElement.className);
+      frames += 1;
+      if (frames < 600) requestAnimationFrame(record);
+    }
+    requestAnimationFrame(record);
+  });
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
+  const themeFrames = await page.evaluate(() => (window as Window & { themeFrames: string[] }).themeFrames);
+  expect(themeFrames.length).toBeGreaterThan(0);
+  expect(themeFrames.some((classes) => /(^|\s)light(\s|$)/.test(classes))).toBe(false);
+
+  await page.getByRole('button', { name: 'System', exact: true }).click();
+  await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
+  await page.getByRole('button', { name: 'Light', exact: true }).click();
+  await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
+  expect(await page.evaluate(() => localStorage.getItem('medusapos.theme'))).toBe('light');
+});
