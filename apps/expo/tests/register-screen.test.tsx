@@ -15,6 +15,7 @@ import ProductsScreen from '../app/index';
 import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
+import { PRINT_FAILED, PRINT_FRAME_ID } from '../lib/closure-print';
 import { openOrderStore, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { capabilities } from './pos-connector-mock';
@@ -209,6 +210,69 @@ describe('the register on the sale screen', () => {
 
 // Registers part B (ADR 0018): the count, the closure sheet, the last closure's figures and the approval gate.
 describe('closing the register', () => {
+  it("on the web, the closure sheet's Print the Z report prints the closure in a frame, not the app", async () => {
+    document.getElementById(PRINT_FRAME_ID)?.remove();
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await closeWith(await startCount(), '100.00');
+    const sheet = within(await screen.findByTestId('closure-sheet'));
+    const appPrint = vi.spyOn(window, 'print').mockImplementation(() => {});
+    await act(async () => { fireEvent.click(sheet.getByTestId('closure-print')); });
+    const frame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
+    const print = vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => {});
+    await waitFor(() => {
+      expect(print).toHaveBeenCalledOnce();
+      expect(appPrint).not.toHaveBeenCalled();
+      expect(frame.contentDocument!.querySelector('h2')?.textContent).toBe('Z report · Closure #1');
+      expect(frame.contentDocument!.querySelector('h1')?.textContent).toBe('Test shop');
+      const registerRow = Array.from(frame.contentDocument!.querySelectorAll('tr')).find((tr) => tr.querySelector('th')?.textContent === 'Register');
+      expect(registerRow?.querySelector('td')?.textContent).toBe('Register 1');
+      expect(sheet.queryByTestId('closure-print-error')).toBeNull();
+      expect(sheet.getByTestId('closure-print').textContent).toBe('Print the Z report');
+    });
+    appPrint.mockRestore();
+  });
+
+  it("the last closure's Print the Z report prints that closure", async () => {
+    document.getElementById(PRINT_FRAME_ID)?.remove();
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await closeWith(await startCount(), '100.00');
+    await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+    const sheet = within(await screen.findByTestId('last-closure'));
+    await act(async () => { fireEvent.click(sheet.getByTestId('last-closure-print')); });
+    const frame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
+    const print = vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => {});
+    await waitFor(() => {
+      expect(print).toHaveBeenCalledOnce();
+      expect(frame.contentDocument!.querySelector('h2')?.textContent).toBe('Z report · Closure #1');
+      const salesRow = Array.from(frame.contentDocument!.querySelectorAll('tr')).find((tr) => tr.querySelector('th')?.textContent === 'Sales');
+      expect(salesRow?.querySelector('td')?.textContent).toBe(sheet.getByTestId('last-closure-sales').textContent);
+      expect(sheet.getByTestId('last-closure-print').textContent).toBe('Print the Z report');
+    });
+  });
+
+  it('a failed print shows why under the last closure, and the sheet stays open', async () => {
+    document.getElementById(PRINT_FRAME_ID)?.remove();
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await closeWith(await startCount(), '100.00');
+    await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+    const sheet = within(await screen.findByTestId('last-closure'));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    await act(async () => { fireEvent.click(sheet.getByTestId('last-closure-print')); });
+    const frame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
+    vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => { throw new Error('boom'); });
+    await waitFor(() => {
+      expect(sheet.getByTestId('last-closure-print-error').textContent).toBe(PRINT_FAILED);
+      expect(screen.getByTestId('last-closure')).toBeTruthy();
+      expect(sheet.getByTestId('last-closure-print').textContent).toBe('Print the Z report');
+    });
+    warn.mockRestore();
+  });
+
   const PASSWORD = 'manager-secret-7';
   const TOKEN = 'approver-token-xyz';
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });

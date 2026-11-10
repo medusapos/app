@@ -363,7 +363,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
       {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
       <RegisterPanelSheet currency={pricing.currency} store={receiptStore} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
-      <RegisterClosedSheet currency={pricing.currency} />
+      <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
         open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />
       {connector.searchCustomers && <Dialog open={customerOpen} onOpenChange={setCustomerOpen}>
