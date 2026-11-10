@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createOrderBuilder, finalizeOrder, type Closure, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, type Closure, type PosOrder, type RegisterSession } from '@tallyui/pos';
 import ReportsScreen from '../app/reports';
 import { closureContext } from '../components/register-close';
+import { X_PRINT_FAILED } from '../lib/closure-print';
 import { openOrderStore, closeOrderStores, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
@@ -47,13 +48,22 @@ beforeEach(async () => {
     requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false),
   });
   vi.mocked(useRegister).mockReturnValue({ boundRegisterId: 'register-1',
-    registers: [{ id: 'register-1', name: 'Register 1' }] } as ReturnType<typeof useRegister>);
+    registers: [{ id: 'register-1', name: 'Register 1' }],
+    register: { session: null, expected: {}, salesCount: 0 }, registerName: 'Register 1' } as ReturnType<typeof useRegister>);
 });
 afterEach(async () => { cleanup(); await closeOrderStores(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 function mount(signedIn = true) {
   if (signedIn) saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
   render(<SessionProvider><ReportsScreen /></SessionProvider>);
+}
+function openRegister(status: RegisterSession['status'] = 'open') {
+  vi.mocked(useRegister).mockReturnValue({ boundRegisterId: 'register-1',
+    registers: [{ id: 'register-1', name: 'Register 1' }], registerName: 'Register 1',
+    register: { session: { id: 's1', register_id: 'register-1', store_key: baseUrl, status,
+      opened_at_gmt: '2026-09-11T08:00:00Z', expected_float_minor: 1000, counted_float_minor: 1000, opening_variance_minor: 0 },
+      expected: { cash: 2500 }, salesCount: 2 },
+  } as unknown as ReturnType<typeof useRegister>);
 }
 function order(totalMinor: number, method: 'cash' | 'external', overrides: Partial<PosOrder> = {}): PosOrder {
   const builder = createOrderBuilder({ currency: overrides.currency ?? 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
@@ -124,5 +134,50 @@ describe('ReportsScreen', () => {
   it('redirects to login without a session', () => {
     mount(false);
     expect(screen.getByText('redirect:/login')).toBeTruthy();
+  });
+
+  it('shows Print X report only while the register session is open', () => {
+    document.getElementById('closure-print-frame')?.remove();
+    mount();
+    expect(screen.queryByTestId('reports-x-print')).toBeNull();
+    cleanup();
+    openRegister();
+    mount();
+    expect(screen.getByTestId('reports-x-print').textContent).toBe('Print X report');
+    cleanup();
+    openRegister('counting');
+    mount();
+    expect(screen.queryByTestId('reports-x-print')).toBeNull();
+  });
+
+  it('Print X report prints the open session in a frame', async () => {
+    document.getElementById('closure-print-frame')?.remove();
+    openRegister();
+    mount();
+    fireEvent.click(screen.getByTestId('reports-x-print'));
+    const frame = document.getElementById('closure-print-frame') as HTMLIFrameElement;
+    const print = vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => {});
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    const page = frame.contentDocument!;
+    const row = (scope: ParentNode, label: string) => Array.from(scope.querySelectorAll('tr'))
+      .find((tr) => tr.querySelector('th')?.textContent === label)?.querySelector('td')?.textContent;
+    expect(page.querySelector('h2')?.textContent).toBe('X report');
+    expect(row(page, 'Register')).toBe('Register 1');
+    expect(row(page, 'Sales')).toBe('2 sales');
+    const cash = Array.from(page.querySelectorAll('section.tender')).find((tender) => tender.querySelector('h3')?.textContent === 'Cash');
+    expect(row(cash!, 'Expected')).toBe('€25.00');
+    expect(screen.getByTestId('reports-x-print').textContent).toBe('Print X report');
+  });
+
+  it('a failed X report print says why', async () => {
+    document.getElementById('closure-print-frame')?.remove();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    openRegister();
+    mount();
+    fireEvent.click(screen.getByTestId('reports-x-print'));
+    const frame = document.getElementById('closure-print-frame') as HTMLIFrameElement;
+    vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => { throw new Error('boom'); });
+    expect((await screen.findByTestId('reports-x-print-error')).textContent).toBe(X_PRINT_FAILED);
+    warn.mockRestore();
   });
 });
