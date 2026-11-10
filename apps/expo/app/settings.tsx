@@ -44,6 +44,9 @@ function StoreSection({ session }: { session: Session }) {
     <SettingsRow label="Currency" className="border-t border-border" action={
       <Text testID="settings-store-currency" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.currency || UNKNOWN}</Text>
     } />
+    <SettingsRow label="Region" className="border-t border-border" action={
+      <Text testID="settings-store-region" className="max-w-40 text-right text-sm text-foreground">{held.settings?.regions?.find((region) => region.id === held.pricing?.pricingContext?.region_id)?.name || UNKNOWN}</Text>
+    } />
     <SettingsRow label="Prices include tax" className="border-t border-border" action={
       <Text testID="settings-store-prices-include-tax" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.pricesIncludeTax === true ? 'Yes' : held.pricing?.pricesIncludeTax === false ? 'No' : UNKNOWN}</Text>
     } />
@@ -52,6 +55,9 @@ function StoreSection({ session }: { session: Session }) {
         <Text testID="settings-store-location" className="max-w-40 text-right text-sm text-foreground">{held.settings?.location.name || UNKNOWN}</Text>
         {held.settings?.location.addressLine ? <Text testID="settings-store-location-address" className="text-right text-xs text-muted-foreground">{held.settings.location.addressLine}</Text> : null}
       </View>
+    } />
+    <SettingsRow label="Sales channel" className="border-t border-border" action={
+      <Text testID="settings-store-sales-channel" className="max-w-40 text-right text-sm text-foreground">{held.settings?.salesChannel?.name || UNKNOWN}</Text>
     } />
   </SettingsGroup>;
 }
