@@ -72,6 +72,18 @@ describe('clearAllLocalData', () => {
     }
   });
 
+  it('refuses before deleting anything when the browser cannot list its databases', async () => {
+    const { storage, data, removeItem } = fakeStorage(appKeys());
+    const { opfsRoot, removeEntry } = fakeOpfs();
+    const { deleteDatabase } = fakeIdb([]);
+    await expect(clearAllLocalData({ storage, opfsRoot, idb: { deleteDatabase } as unknown as IDBFactory }))
+      .rejects.toThrow("This browser can't list its databases");
+    expect(removeEntry).not.toHaveBeenCalled();
+    expect(deleteDatabase).not.toHaveBeenCalled();
+    expect(removeItem).not.toHaveBeenCalled();
+    expect(data.get(CLEAR_FLAG_KEY)).toBe('1');
+  });
+
   it('runs only on the exact flag', () => {
     expect(isClearPending(null)).toBe(false);
     expect(isClearPending(fakeStorage().storage)).toBe(false);
@@ -90,10 +102,10 @@ describe('clearAllLocalData', () => {
   it('names everything unsent and an open till', () => {
     const nothing = 'Nothing is waiting to be sent, so your server already has your sales.';
     const salesNote = 'Unsent sales may be completed sales that exist only on this device.';
-    const tillNote = 'Till entries are till opens, pay ins and outs, and closures.';
+    const tillNote = 'Till entries are till opens, pay ins and outs, and closures, including any your server refused.';
     const lost = 'never reached your server and will be permanently lost.';
     const risk = (sales: number, tillEntries: number, tillOpen: boolean, registerContract: number) =>
-      clearWarnings({ sales, tillEntries, tillOpen, registerContract });
+      clearWarnings({ sales, parked: 0, tillEntries, localClosures: 0, tillOpen, registerContract });
     expect(risk(0, 0, false, 3)).toEqual({ lines: [nothing], atRisk: false });
     expect(risk(1, 0, false, 3)).toEqual({ lines: [`1 sale on this device has ${lost}`, salesNote], atRisk: true });
     expect(risk(2, 3, false, 3)).toEqual({ lines: [`2 sales and 3 till entries on this device have ${lost}`, salesNote, tillNote], atRisk: true });
@@ -101,10 +113,39 @@ describe('clearAllLocalData', () => {
     expect(risk(0, 0, true, 3)).toEqual({ lines: [nothing,
       'The till is open. Its session stays open on your server: after the reset, open this register again and choose Take over.'], atRisk: true });
     expect(risk(0, 0, true, 1)).toEqual({ lines: [nothing,
-      "The till is open. Its session stays open on your server, and this device can't take it over after the reset. Close the till first."], atRisk: true });
+      "The till is open, and this store's MedusaPOS plugin can't hand an open session to another device. Close the register first: "
+      + 'open the register panel and choose Close register. If you reset now, the session stays open on your server and no till '
+      + 'can close it until whoever runs your Medusa server updates the MedusaPOS plugin; then open this register again and choose '
+      + 'Take over.'], atRisk: true });
     expect(risk(0, 0, true, 0)).toEqual({ lines: [nothing,
       "The till is open. This store doesn't keep till records, so its cash record (float, pay ins and outs) will be lost."], atRisk: true });
-    expect(risk(0, 0, false, 0)).toEqual({ lines: [nothing,
-      "This store doesn't keep till records, so this device's till history will be lost."], atRisk: false });
+    expect(risk(0, 0, false, 0)).toEqual({ lines: [nothing], atRisk: false });
+  });
+
+  const base = { sales: 0, parked: 0, tillEntries: 0, localClosures: 0, tillOpen: false, registerContract: 3 };
+  it('counts parked sales', () => {
+    expect(clearWarnings({ ...base, parked: 1 })).toEqual({ lines: [
+      '1 parked sale on this device has never reached your server and will be permanently lost.',
+      'Parked sales are kept only on this device.'], atRisk: true });
+    expect(clearWarnings({ ...base, sales: 2, parked: 1, tillEntries: 3 }).lines[0])
+      .toBe('2 sales, 1 parked sale and 3 till entries on this device have never reached your server and will be permanently lost.');
+  });
+
+  it('treats a count not read yet as lost', () => {
+    for (const key of ['sales', 'parked', 'tillEntries', 'localClosures'] as const) {
+      const { lines, atRisk } = clearWarnings({ ...base, [key]: null });
+      expect(lines).toEqual(["Can't tell yet what is unsent on this device, so treat it as lost."]);
+      expect(atRisk).toBe(true);
+    }
+  });
+
+  it('counts the till history of a store without till records', () => {
+    const closed = { ...base, registerContract: 0 };
+    expect(clearWarnings({ ...closed, localClosures: 2 })).toEqual({ lines: [
+      'Nothing is waiting to be sent, so your server already has your sales.',
+      "This store doesn't keep till records, so this device's till history (2 till closures) will be lost."], atRisk: true });
+    expect(clearWarnings({ ...closed, localClosures: 1 }).lines[1]).toContain('(1 till closure)');
+    expect(clearWarnings({ ...closed, localClosures: 0 })).toEqual({
+      lines: ['Nothing is waiting to be sent, so your server already has your sales.'], atRisk: false });
   });
 });

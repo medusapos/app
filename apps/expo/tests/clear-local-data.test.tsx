@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 // Settings › Danger zone › Clear all local data: the startup gate and the confirm dialog.
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { createOrderBuilder, finalizeOrder } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClearLocalDataGate, ClearLocalDataSection } from '../components/clear-local-data';
 import { CLEAR_FLAG_KEY, clearAllLocalData, reloadPage } from '../lib/clear-local-data';
+import { draftsCollection, openOrderStore, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
@@ -16,9 +18,10 @@ vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/register-context', () => ({ useRegister: vi.fn() }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 
-// Only the fields the dialog reads.
-function setOutbox(pending: number, rejected: number, savesInFlight: number) {
-  vi.mocked(useOutboxContext).mockReturnValue({ state: { pending, rejected, sending: false }, savesInFlight } as ReturnType<typeof useOutboxContext>);
+// Only the fields the dialog reads; `orders` is a real (memory) order store's, or null while it opens.
+let store: Awaited<ReturnType<typeof openOrderStore>> | undefined;
+function setOutbox(pending: number, rejected: number, savesInFlight: number, orders = store?.orders ?? null) {
+  vi.mocked(useOutboxContext).mockReturnValue({ state: { pending, rejected, sending: false }, savesInFlight, orders } as ReturnType<typeof useOutboxContext>);
 }
 function setTill({ pending = 0, status = 'closed', capabilities = { orderCreate: 5, register: 3 } }: {
   pending?: number; status?: string; capabilities?: { orderCreate: number; register?: number };
@@ -77,18 +80,40 @@ describe('ClearLocalDataGate', () => {
     vi.mocked(clearAllLocalData).mockRejectedValue(new Error('held'));
     await act(async () => { gate(); });
     expect(screen.getByTestId('clear-local-data-failed').textContent).toBe("Reset didn't finish");
+    expect(screen.getByText('Some local data may already be deleted.')).toBeTruthy();
     expect(reloadPage).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('clear-local-data-retry'));
     expect(reloadPage).toHaveBeenCalledTimes(1);
     expect(screen.queryByText('app')).toBeNull();
     expect(stored.get(CLEAR_FLAG_KEY)).toBe('1');
   });
+
+  it('Cancel reset leaves a failed clear: the flag goes and the app reloads', async () => {
+    stored.set(CLEAR_FLAG_KEY, '1');
+    stored.set('medusapos.session', '{}');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(clearAllLocalData).mockRejectedValue(new Error('held'));
+    await act(async () => { gate(); });
+    fireEvent.click(screen.getByTestId('clear-local-data-cancel-reset'));
+    expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
+    expect(stored.get('medusapos.session')).toBe('{}');
+    expect(reloadPage).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('ClearLocalDataSection', () => {
-  const section = async () => {
+  beforeEach(async () => {
+    store = await openOrderStore(`https://clear-${crypto.randomUUID()}.test`);
+    setOutbox(0, 0, 0);
+  });
+  afterEach(async () => { cleanup(); await store?.close(); store = undefined; });
+  const unknown = "Can't tell yet what is unsent on this device, so treat it as lost.";
+  const warning = () => screen.getByTestId('clear-local-data-warning').textContent;
+  // The counts are live queries, so the lines settle once each has emitted.
+  const section = async (settle = true) => {
     await act(async () => { render(<><ClearLocalDataSection /><PortalHost /></>); });
     await act(async () => { fireEvent.click(screen.getByTestId('clear-local-data')); });
+    if (settle) await waitFor(() => expect(warning()).not.toBe(unknown));
   };
 
   const confirm = async () => { await act(async () => { fireEvent.click(screen.getByTestId('clear-local-data-confirm')); }); };
@@ -97,13 +122,62 @@ describe('ClearLocalDataSection', () => {
   };
   const line = (n: number) => screen.queryByTestId(`clear-local-data-warning-${n}`)?.textContent;
   const takeOver = 'The till is open. Its session stays open on your server: after the reset, open this register again and choose Take over.';
+  const at = '2026-11-10T09:00:00.000Z';
+  const commands = (...statuses: ('pending' | 'applied' | 'rejected')[]) => registerCollections(store!.orders).commands.bulkInsert(
+    statuses.map((syncStatus, seq) => ({ key: `movement.record:${seq}`, registerId: 'register-1', seq, commandId: `command-${seq}`,
+      type: 'register.movement.record' as const, version: 1, payload: {}, createdAt: at, updatedAt: at, syncStatus })));
+  const sales = (...statuses: ('pending' | 'applied' | 'rejected')[]) => store!.orders.bulkInsert(statuses.map((syncStatus, i) => {
+    const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+    builder.addLine({ productId: 'shirt', name: 'Shirt', unitPrice: { amount: 100, currency: 'EUR' } });
+    builder.addPayment({ method: 'cash', amountMinor: 100 });
+    return { ...finalizeOrder(builder.getSnapshot()), id: `order-${i}`, createdAt: at, syncStatus };
+  }));
+  const lockedUntilClear = async () => {
+    await confirm();
+    expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
+    await type('CLEAR');
+    await confirm();
+    expect(stored.get(CLEAR_FLAG_KEY)).toBe('1');
+  };
 
-  it('counts the till outbox apart from sales', async () => {
-    setOutbox(2, 1, 1);
-    setTill({ pending: 3 });
+  it('counts unsent till entries apart from sales', async () => {
+    setOutbox(0, 0, 1);
+    await sales('pending', 'pending', 'rejected', 'applied');
+    await commands('pending', 'pending', 'pending', 'applied');
     await section();
-    expect(screen.getByTestId('clear-local-data-warning').textContent)
-      .toBe('4 sales and 3 till entries on this device have never reached your server and will be permanently lost.');
+    expect(warning()).toBe('4 sales and 3 till entries on this device have never reached your server and will be permanently lost.');
+  });
+
+  it('counts unsent sales from the order store, not the outbox state', async () => {
+    setOutbox(0, 0, 0);
+    await sales('pending', 'rejected');
+    await section();
+    expect(warning()).toBe('2 sales on this device have never reached your server and will be permanently lost.');
+    await lockedUntilClear();
+  });
+
+  it('counts a till entry the server refused, which the register outbox does not', async () => {
+    setTill({ pending: 0 });
+    await commands('rejected');
+    await section();
+    expect(warning()).toBe('1 till entry on this device has never reached your server and will be permanently lost.');
+    expect(line(1)).toBe('Till entries are till opens, pay ins and outs, and closures, including any your server refused.');
+    await lockedUntilClear();
+  });
+
+  it('names a parked sale and needs the typed word', async () => {
+    await draftsCollection(store!.orders)!.insert({ id: 'draft-1', data: '{}', itemCount: 1, total: 250, parkedAt: at });
+    await section();
+    expect(warning()).toBe('1 parked sale on this device has never reached your server and will be permanently lost.');
+    expect(line(1)).toBe('Parked sales are kept only on this device.');
+    await lockedUntilClear();
+  });
+
+  it('an order store still opening is treated as lost', async () => {
+    setOutbox(0, 0, 0, null);
+    await section(false);
+    expect(warning()).toBe(unknown);
+    await lockedUntilClear();
   });
 
   it('an open till warns and needs the typed word', async () => {
@@ -136,7 +210,7 @@ describe('ClearLocalDataSection', () => {
 
     setTill({ status: 'closed', capabilities: { orderCreate: 5 } });
     await section();
-    expect(line(1)).toBe("This store doesn't keep till records, so this device's till history will be lost.");
+    expect(line(1)).toBeUndefined();
     expect(screen.queryByTestId('clear-local-data-word')).toBeNull();
     await confirm();
     expect(stored.get(CLEAR_FLAG_KEY)).toBe('1');

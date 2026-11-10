@@ -8,8 +8,8 @@ export const OPFS_POOL_DIR = '.tallyui';
 // The pre-SQLite Dexie databases (lib/product-cache.ts, lib/order-store.ts).
 export const LEGACY_IDB_PREFIX = 'rxdb-dexie-medusapos_';
 
-// WCPOS v2's copy (monorepo main, packages/core/src/contexts/translations/locales/en/core.json).
-export const CLEAR_BODY = 'Everything stored on this device is deleted and downloaded again from your server.';
+export const CLEAR_BODY = "Your products, customers and orders are downloaded again from your server. This device's own settings are "
+  + 'reset: the till name, scanner settings and other device choices, and you sign in again.';
 
 type ClearDeps = { storage: Storage; opfsRoot: () => Promise<FileSystemDirectoryHandle>; idb: IDBFactory };
 
@@ -38,6 +38,8 @@ function deleteDatabase(idb: IDBFactory, name: string): Promise<void> {
 
 /** Deletes the OPFS pool, the legacy databases and every app key; the flag goes last, so a failure retries. */
 export async function clearAllLocalData(deps: ClearDeps): Promise<void> {
+  // Never skip the legacy sweep: the wipe drops the carry-over marker, so kept Dexie orders would come back as unsent.
+  if (typeof deps.idb.databases !== 'function') throw new Error("This browser can't list its databases, so nothing was deleted.");
   try {
     await (await deps.opfsRoot()).removeEntry(OPFS_POOL_DIR, { recursive: true });
   } catch (error) {
@@ -59,11 +61,16 @@ export function defaultClearDeps(): ClearDeps {
   return { storage: globalThis.localStorage, opfsRoot: () => navigator.storage.getDirectory(), idb: globalThis.indexedDB };
 }
 
+// Each count is null until it is read: unknown is at risk, never zero.
 export type ClearRisk = {
   /** Sales not on the server: order outbox pending + rejected + saves in flight. */
-  sales: number;
-  /** Till entries not on the server: registerOutbox.state.pending. */
-  tillEntries: number;
+  sales: number | null;
+  /** Parked sales: every `drafts` document, as TallyUI's useParkedSales lists them. */
+  parked: number | null;
+  /** register_commands not applied: pending, or refused by the server. */
+  tillEntries: number | null;
+  /** The local `closures` documents; 0 unless registerContract is 0. */
+  localClosures: number | null;
   /** register.session status is 'open' or 'counting'. */
   tillOpen: boolean;
   /** session.capabilities.register, or 0 when absent. */
@@ -76,22 +83,31 @@ const counted = (n: number, one: string, many: string) => `${n} ${n === 1 ? one 
 // The open server session is safe: after the wipe this device has a new id, so its open is refused and Take over
 // supersedes the old session, recording superseded_by_device. Contract 1 has no take-over, so the dialog says close first.
 export function clearWarnings(risk: ClearRisk): { lines: string[]; atRisk: boolean } {
-  const { sales, tillEntries, tillOpen, registerContract } = risk;
-  const parts = [sales ? counted(sales, 'sale', 'sales') : '', tillEntries ? counted(tillEntries, 'till entry', 'till entries') : '']
-    .filter(Boolean);
-  const lines = [parts.length === 0
-    ? 'Nothing is waiting to be sent, so your server already has your sales.'
-    : `${parts.join(' and ')} on this device ${sales + tillEntries === 1 ? 'has' : 'have'} never reached your server and will be permanently lost.`];
+  const { tillOpen, registerContract } = risk;
+  const unknown = [risk.sales, risk.parked, risk.tillEntries, risk.localClosures].some((n) => n === null);
+  const [sales, parked, tillEntries, closures] = [risk.sales ?? 0, risk.parked ?? 0, risk.tillEntries ?? 0, risk.localClosures ?? 0];
+  const parts = [sales ? counted(sales, 'sale', 'sales') : '', parked ? counted(parked, 'parked sale', 'parked sales') : '',
+    tillEntries ? counted(tillEntries, 'till entry', 'till entries') : ''].filter(Boolean);
+  const listed = parts.length > 1 ? `${parts.slice(0, -1).join(', ')} and ${parts.at(-1)}` : parts[0];
+  const lines = [unknown
+    ? "Can't tell yet what is unsent on this device, so treat it as lost."
+    : !listed
+      ? 'Nothing is waiting to be sent, so your server already has your sales.'
+      : `${listed} on this device ${sales + parked + tillEntries === 1 ? 'has' : 'have'} never reached your server and will be permanently lost.`];
   if (sales > 0) lines.push('Unsent sales may be completed sales that exist only on this device.');
-  if (tillEntries > 0) lines.push('Till entries are till opens, pay ins and outs, and closures.');
+  if (parked > 0) lines.push('Parked sales are kept only on this device.');
+  if (tillEntries > 0) lines.push('Till entries are till opens, pay ins and outs, and closures, including any your server refused.');
   if (tillOpen) {
     lines.push(registerContract >= 2
       ? 'The till is open. Its session stays open on your server: after the reset, open this register again and choose Take over.'
       : registerContract === 1
-        ? "The till is open. Its session stays open on your server, and this device can't take it over after the reset. Close the till first."
+        ? "The till is open, and this store's MedusaPOS plugin can't hand an open session to another device. Close the register "
+          + 'first: open the register panel and choose Close register. If you reset now, the session stays open on your server '
+          + 'and no till can close it until whoever runs your Medusa server updates the MedusaPOS plugin; then open this '
+          + 'register again and choose Take over.'
         : "The till is open. This store doesn't keep till records, so its cash record (float, pay ins and outs) will be lost.");
-  } else if (registerContract === 0) {
-    lines.push("This store doesn't keep till records, so this device's till history will be lost.");
+  } else if (registerContract === 0 && closures > 0) {
+    lines.push(`This store doesn't keep till records, so this device's till history (${counted(closures, 'till closure', 'till closures')}) will be lost.`);
   }
-  return { lines, atRisk: sales + tillEntries > 0 || tillOpen };
+  return { lines, atRisk: unknown || sales + parked + tillEntries + closures > 0 || tillOpen };
 }

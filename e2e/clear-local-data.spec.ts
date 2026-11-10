@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { signIn, test } from './helpers';
+import { addE2E1, signIn, test } from './helpers';
 
 // Settings › Danger zone › Clear all local data (WCPOS v2's): the reload wipes the OPFS pool, the legacy Dexie
 // databases and every medusapos. key before anything opens, and lands on sign-in.
@@ -63,4 +63,30 @@ test('after a wipe the open server session is taken over, not lost', async ({ pa
   await card.getByTestId('register-conflict-take-over').click();
   await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
   await expect(card).toHaveCount(0);
+});
+
+test.describe('with a parked sale', () => {
+  // parked-sales.spec.ts's park steps, at its wide layout.
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('the dialog names the parked sale and Confirm waits for CLEAR', async ({ page }) => {
+    await signIn(page);
+    await addE2E1(page);
+    await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
+    await page.getByTestId('parked-sales-park').click();
+    await expect(page.getByTestId(/^parked-resume-/)).toHaveCount(1);
+    await page.getByTestId('parked-sales-dismiss').click();
+    await expect(page.getByTestId('cart-empty')).toBeVisible();
+
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await page.getByTestId('clear-local-data').click();
+    await expect(page.getByTestId('clear-local-data-warning'))
+      .toHaveText('1 parked sale on this device has never reached your server and will be permanently lost.');
+    await expect(page.getByTestId('clear-local-data-warning-1')).toHaveText('Parked sales are kept only on this device.');
+    await expect(page.getByTestId('clear-local-data-confirm')).toBeDisabled();
+    await page.getByTestId('clear-local-data-word').fill('CLEA');
+    await expect(page.getByTestId('clear-local-data-confirm')).toBeDisabled();
+    await page.getByTestId('clear-local-data-word').fill('CLEAR');
+    await expect(page.getByTestId('clear-local-data-confirm')).toBeEnabled();
+  });
 });
