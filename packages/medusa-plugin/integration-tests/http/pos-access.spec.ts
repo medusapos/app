@@ -47,6 +47,7 @@ medusaIntegrationTestRunner({
       const headers = await loginWithRoles([])
       for (const url of [
         '/tally/v1/info', '/tally/v1/registers/reg_x', '/tally/v1/changes', '/tally/v1/changes/tick',
+        '/tally/v1/registers/reg_x/closures',
       ]) {
         const response = await api.get(url, { headers, validateStatus: () => true })
         expect(response.status).toBe(403)

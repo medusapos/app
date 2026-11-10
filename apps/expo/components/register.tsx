@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Text, View } from 'react-native';
+import { Platform, Text, View } from 'react-native';
 import {
   ClosureSheet, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';
 import { RegisterSessionRequiredError, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
-import { LastClosureSheet, useApprove } from './register-close';
+import { LastClosureSheet, printClosure, useApprove } from './register-close';
 import { RegisterConflictCard } from './register-conflict';
 
 // RegisterColumn's Finish closing button's nativeID (TallyUI #175).
@@ -146,9 +146,12 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
 /**
  * TallyUI's ClosureSheet for the closure a close through the app resolved with (it shows "Approved by …" itself,
  * #174), until Done. Mounted by the sale screen, not the gate, so a phone's cart view closing doesn't lose it.
+ * On the web it passes `onPrint`, which prints the Z report.
  */
-export function RegisterClosedSheet({ currency }: { currency: string }) {
+export function RegisterClosedSheet({ currency, store }: { currency: string; store: { name: string; address?: string } }) {
   const { register, close } = useRegister();
   if (!close.shown || register.lastClosure?.id !== close.shown) return null;
-  return <ClosureSheet register={register} currency={currency} onDone={close.dismiss} />;
+  const closure = register.lastClosure;
+  return <ClosureSheet register={register} currency={currency} onDone={close.dismiss}
+    onPrint={Platform.OS === 'web' ? () => printClosure(closure, currency, store) : undefined} />;
 }

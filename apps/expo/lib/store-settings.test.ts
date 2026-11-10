@@ -10,6 +10,8 @@ const session = { baseUrl: 'http://localhost:9000', email: 'admin@tally.test', t
 const settings: StoreSettings = {
   storeName: 'Default Store', currency: 'EUR',
   location: { id: 'loc_1', name: 'European Warehouse', addressLine: 'Street 1, Copenhagen', countryCode: 'dk' },
+  salesChannel: { id: 'sc_1', name: 'Shop floor' },
+  regions: [{ id: 'reg_de', name: 'Germany' }, { id: 'reg_eu', name: 'Europe' }],
 };
 const pricing: PricingSettings = {
   currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 190000, reduced: 70000 },
@@ -20,10 +22,11 @@ function resources(): Record<string, unknown>[] {
     { stores: [{ name: 'Default Store', default_sales_channel_id: 'sc_1', supported_currencies: [
       { currency_code: 'usd', is_default: false }, { currency_code: 'eur', is_default: true },
     ] }] },
-    { sales_channel: { stock_locations: [
+    { sales_channel: { id: 'sc_1', name: 'Shop floor', stock_locations: [
       { id: 'loc_1', name: 'European Warehouse', address: { country_code: 'DK', city: 'Copenhagen', address_1: 'Street 1' } },
       { id: 'loc_2', name: 'Other Warehouse', address: { country_code: 'DE' } },
     ] } },
+    { regions: [{ id: 'reg_de', name: 'Germany', currency_code: 'eur' }, { id: 'reg_eu', name: 'Europe', currency_code: 'eur' }] },
   ];
 }
 function fetcher(bodies = resources()) {
@@ -52,13 +55,42 @@ describe('fetchStoreSettings', () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 500 }));
     await expect(fetchStoreSettings(session, fetchImpl)).rejects.toMatchObject({ code: 'unreachable' });
   });
-  it('reads only the store name, default currency and first location, with no tax or price-preference reads', async () => {
+  it('reads the store name, default currency, first location, sales channel and region names, with no tax or price-preference reads', async () => {
     const fetchImpl = fetcher();
     expect(await fetchStoreSettings(session, fetchImpl)).toEqual(settings);
     expect(fetchImpl.mock.calls).toEqual([
       '/admin/stores?fields=id,name,default_sales_channel_id,supported_currencies.currency_code,supported_currencies.is_default',
       '/admin/sales-channels/sc_1?fields=id,name,stock_locations.id,stock_locations.name,stock_locations.address.*',
+      '/admin/regions?limit=1000&fields=id,name',
     ].map((path) => [`${session.baseUrl}${path}`, { headers: { Authorization: 'Bearer jwt' } }]));
+  });
+  it('leaves the sales channel out when it has no name', async () => {
+    const bodies = resources();
+    const { name: _, ...channel } = bodies[1].sales_channel as Record<string, unknown>;
+    bodies[1] = { sales_channel: channel };
+    const result = await fetchStoreSettings(session, fetcher(bodies));
+    expect(result.salesChannel).toBeUndefined();
+    expect(result).not.toHaveProperty('salesChannel');
+    expect(result.storeName).toBe('Default Store');
+  });
+  it.each([500, 401])('opens without region names when the regions read answers %s', async (status) => {
+    const fetchImpl = fetcher(resources().slice(0, 2));
+    fetchImpl.mockResolvedValueOnce(new Response(null, { status }));
+    const result = await fetchStoreSettings(session, fetchImpl);
+    expect(result).not.toHaveProperty('regions');
+    expect(result.salesChannel).toEqual(settings.salesChannel);
+    expect(result.location).toEqual(settings.location);
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+  it('opens without region names when the regions body has no array', async () => {
+    const bodies = resources();
+    bodies[2] = { regions: 'reg_de' };
+    expect(await fetchStoreSettings(session, fetcher(bodies))).not.toHaveProperty('regions');
+  });
+  it('keeps only region entries with a string id and name', async () => {
+    const bodies = resources();
+    bodies[2] = { regions: [{ id: 'reg_de', name: 'Germany' }, { id: 42, name: 'Bad' }, { id: 'reg_x' }, null] };
+    expect((await fetchStoreSettings(session, fetcher(bodies))).regions).toEqual([{ id: 'reg_de', name: 'Germany' }]);
   });
   it.each([0, 1])('maps a 401 at resource %s to unauthorized', async (index) => {
     const fetchImpl = fetcher(resources().slice(0, index));
@@ -98,6 +130,26 @@ describe('fetchStoreSettings', () => {
 });
 
 describe('settings cache', () => {
+  it('loads an older entry without the sales channel and region names', () => {
+    const storage = memoryStorage();
+    const { salesChannel: _, regions: __, ...older } = settings;
+    storage.setItem(`medusapos.settings.${session.baseUrl}`, JSON.stringify(older));
+    const loaded = loadCachedSettings(storage, session.baseUrl);
+    expect(loaded).toEqual(older);
+    expect(loaded).not.toHaveProperty('salesChannel');
+    expect(loaded).not.toHaveProperty('regions');
+  });
+  it.each([
+    { salesChannel: { id: 'sc_1' } }, { salesChannel: 'sc_1' },
+    { regions: 'reg_de' }, { regions: [{ id: 'reg_de' }] }, { regions: [null] },
+  ])('drops a malformed sales channel or region names but keeps the entry %j', (override) => {
+    const storage = memoryStorage();
+    storage.setItem(`medusapos.settings.${session.baseUrl}`, JSON.stringify({ ...settings, ...override }));
+    const loaded = loadCachedSettings(storage, session.baseUrl);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.storeName).toBe('Default Store');
+    expect(loaded).not.toHaveProperty(Object.keys(override)[0]);
+  });
   it('round-trips and clears independently per backend', () => {
     const storage = memoryStorage();
     const otherUrl = 'https://other.test';

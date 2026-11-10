@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ScrollView, View, useWindowDimensions } from 'react-native';
+import { Platform, ScrollView, View, useWindowDimensions } from 'react-native';
 import { getLocales } from 'expo-localization';
 import { Button, Dialog, DialogContent, DialogTitle, Input, Label, Text } from '@tallyui/components';
 import { formatMoney, minorUnitDigits, moneyFromDecimalString } from '@tallyui/core';
-import { buildClosureDocument, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
+import { buildClosureDocument, type Closure, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
 import { APPROVAL_TIMEOUT_MS, ApprovalError, rememberApprover, requestApproval, type Approval } from '../lib/approval';
+import { closureReportHtml, printHtml, PRINT_FAILED } from '../lib/closure-print';
 import { defaultStorage } from '../lib/session';
 
 type Register = ReturnType<typeof useRegisterSession>;
@@ -120,6 +121,10 @@ export function closureContext(currency: string, store: { name: string; address?
   };
 }
 
+export function printClosure(closure: Closure, currency: string, store: { name: string; address?: string }): Promise<void> {
+  return printHtml(closureReportHtml(buildClosureDocument(closure, closureContext(currency, store))));
+}
+
 const Row = ({ label, value, testID }: { label: string; value: ReactNode; testID?: string }) =>
   <View className="min-h-11 flex-row items-center justify-between gap-3">
     <Text className="shrink-0 text-muted-foreground">{label}</Text>
@@ -135,11 +140,24 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
 }) {
   const { height } = useWindowDimensions();
   const closure = register.lastClosure;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   if (!open || !closure) return null;
   const { closure: z, fiscal } = buildClosureDocument(closure, closureContext(currency, store));
   const approver = z.approved_by ? String(z.breakdowns.labels.approved_by_name || z.approved_by) : null;
   const unsynced = z.unsynced_count;
   const movements = z.breakdowns.movements;
+  const print = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await printClosure(closure, currency, store);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : PRINT_FAILED);
+    } finally {
+      setBusy(false);
+    }
+  };
   return <Dialog open onOpenChange={onOpenChange}>
     <DialogContent testID="last-closure" className="flex-col overflow-hidden" style={{ maxHeight: Math.max(280, height - 64) }}>
       <DialogTitle>{`Last closure · Closure #${fiscal.receipt_number}`}</DialogTitle>
@@ -165,6 +183,12 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
           {`${unsynced} ${unsynced === 1 ? 'sale' : 'sales'} not sent yet · ${z.unsynced_total_display}`}</Text> : null}
         {approver ? <Text testID="last-closure-approved-by" className="min-h-11">{`Approved by ${approver}`}</Text> : null}
       </ScrollView>
+      {Platform.OS === 'web' ? <>
+        {error ? <Text testID="last-closure-print-error" accessibilityRole="alert" className="text-destructive">{error}</Text> : null}
+        <Button testID="last-closure-print" className="min-h-11" disabled={busy} onPress={print}>
+          <Text>{busy ? 'Printing…' : 'Print the Z report'}</Text>
+        </Button>
+      </> : null}
       <Button testID="last-closure-done" variant="outline" className="min-h-11" onPress={() => onOpenChange(false)}><Text>Done</Text></Button>
     </DialogContent>
   </Dialog>;

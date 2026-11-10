@@ -126,6 +126,10 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await count.getByTestId('count-close').click();
       const closureSheet = page.getByTestId('closure-sheet');
       await expect(closureSheet.getByTestId('closure-number')).toHaveText('Closure #1');
+      await closureSheet.getByTestId('closure-print').click();
+      await expect(page.frameLocator('#closure-print-frame').locator('h2')).toHaveText('Z report · Closure #1');
+      await expect(closureSheet.getByTestId('closure-print')).toHaveText('Print the Z report');
+      await expect(closureSheet.getByTestId('closure-print-error')).toHaveCount(0);
       await expect(closureSheet.getByTestId('closure-counted-cash')).toHaveText(new RegExp(`^Counted ${money(counted).source.slice(1, -1)}$`));
       await expect(page.getByTestId('approval-dialog')).toHaveCount(0);
       await expect(page.getByTestId('closure-approved-by')).toHaveCount(0);
