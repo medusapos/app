@@ -1,6 +1,6 @@
 # Core POS features: what the Medusa app has
 
-This file lists the core POS features a Medusa merchant expects and says how far the MedusaPOS app has each one, so that choosing the next item never needs a ruling.
+See `docs/v2-parity/AUDIT.md` (2026-11-10) for the gap map against WCPOS 2.0.0. This file lists the core POS features a Medusa merchant expects and says how far the MedusaPOS app has each one, so that choosing the next item never needs a ruling.
 
 **Each row is a user expectation, built Medusa's own way.** WCPOS v2 is the reference for which features a POS needs, and for taste. It is not the spec for how they work: a row is built with Medusa's own pieces (RBAC roles and policies, regions and price lists, sales channels and stock locations, payment providers, promotions, returns, the notification module), never by copying how WCPOS does it on WooCommerce (Paul, 2026-10-07). Where a WooCommerce mechanism has no Medusa meaning, the row says so. The lane takes the first open row of **Default order** (at the end) unless the front desk says otherwise. Update this file in the PR that changes a row.
 
@@ -104,7 +104,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | A close whose closure write failed | 2.0 (RG) | Has | `e2e/register.spec.ts` "a close whose closure write failed shows TallyUI's Finish closing card, which completes it with the stored count" | — |
 | Take-over by another till | 2.0 (RG) | Has | PR #243 (TallyUI 3.8.0) and PR #245; `e2e/register.spec.ts` "Register 1 open on another till: the conflict card names it, Take over, then a cash sale reaches Medusa" | — |
 | Superseded refusal on the losing till; resume after lost local state | 2.0 (RG) | Has | `e2e/register.spec.ts` "Register 1 taken over by another till: this till's paid in is refused superseded, and it shows the register closed" and "a till that lost its local state opens Register 1 again and resumes its store session, then a cash sale reaches Medusa". TallyUI 3.8.0 has no superseded view of its own: the till shows the open card and the pill reads "Register closed" | — |
-| Approval of an over-variance close | 2.0 (RG) | Partial | The app checks a second admin login (`apps/expo/lib/approval.ts`); `e2e/register.spec.ts` "over the threshold: the approval dialog, its offline refusal, then a manager login approves the close". The plugin stores `approvedBy` as recorded data: recorded, not verified; proof design in ADR 0023 (accepted) | plugin |
+| Approval of an over-variance close | 2.0 (RG) | Partial | Plugin 0.3.0 (#254) issues and verifies a single-use proof (`POST /tally/v1/register-approvals`, register contract 3). The till still sends contract-2 commands with a second admin login (`apps/expo/lib/approval.ts`): recorded, not verified, until TallyUI builds a contract-3 `closure.submit` with `approval` | TallyUI, then app |
 | Reports: today's sales on this register, closure history, X-report, reprint | 2.0 / Pro, still moving (RC, CMP) | Missing | TallyUI 3.8.0 `pos` has `export-csv.ts` and `closure-document.ts`; no reports screen in `apps/expo`. `GET /tally/v1/registers/:id` serves the open session, not a closure history | TallyUI + plugin |
 
 ## Offline and sync
@@ -123,7 +123,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Connect and sign in | Free (FS) | Has | `apps/expo/app/login.tsx` (Medusa admin login); `e2e/demo.spec.ts` "one click on /demo reaches the POS with products" | — |
 | Sign in again without losing sales | Free (FS) | Has | `e2e/strips.spec.ts` "sign-in strip: outbox pauses after three 401s, resumes once signed in again" and "a product pull refused with 401 signs the till out". Shared strip waits on TallyUI#373 (`docs/PLAN.md`, #174 item 4) | TallyUI |
 | Session list and revoke | Free (FS) | N/A | WCPOS lists WordPress sessions. Medusa tokens are stateless JWTs with no session to list or revoke; access ends by removing the user's POS role (at their next sign-in or refresh) or by rotating `jwtSecret` (ADR 0023) | — |
-| Roles and capabilities | Free (PERM) | Partial | With Medusa RBAC on, signing in and selling need the plugin's `tally_pos:use` policy. Its `tally-pos-roles` script creates the "POS cashier" and "POS manager" roles, and the till refuses a user without them at sign-in (`e2e/rbac/pos-access.spec.ts`). With RBAC off, any admin can sign in. Left: manager approval through `tally_pos:approve_variance` (ADR 0023, its second PR) | plugin |
+| Roles and capabilities | Free (PERM) | Has | With Medusa RBAC on, signing in and selling need the plugin's `tally_pos:use` policy. Its `tally-pos-roles` script creates the "POS cashier" and "POS manager" roles, and the till refuses a user without them at sign-in (`e2e/rbac/pos-access.spec.ts`). With RBAC off, any admin can sign in. `tally_pos:approve_variance` landed with #254 | plugin |
 | Switching cashiers | — (WCPOS lacks it too, PERM) | Missing | — | TallyUI |
 | Settings screen | Free (FS) | Partial | Register (till name) and Scanner (`apps/expo/app/settings.tsx`); printer settings wait on TallyUI printing (Receipts and printing row) | app |
 
