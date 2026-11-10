@@ -3,6 +3,7 @@ import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { buildClosureDocument, exportCsv, minorToDecimal, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { ProductsBack } from '../components/products-back';
+import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext } from '../components/register-close';
 import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -115,6 +116,7 @@ export default function ReportsScreen() {
           </Pressable>
           {exportError ? <Text testID="closures-export-error" accessibilityRole="alert">Export failed. Try again.</Text> : null}
         </> : null}
+        {boundRegisterId ? <EarlierClosures session={session} registerId={boundRegisterId} today={today} ctx={ctx} /> : null}
       </> : null}
     </View>
   </ScrollView>;
