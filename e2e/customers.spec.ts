@@ -22,7 +22,7 @@ test('a searched customer is linked to the Medusa order', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
   await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-  await page.getByLabel('Search customers', { exact: true }).fill(email);
+  await page.getByTestId('customer-picker-search').fill(email);
   await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
   await payCash(page);

@@ -68,7 +68,7 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.getByTestId('register-panel-dismiss').click();
   await page.getByRole('button', { name: /^Customer: /, exact: true }).click();
   await expect(page.getByTestId('customer-dialog')).toBeVisible();
-  await expect(page.getByTestId('customer-dialog').getByLabel('Search customers', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('customer-dialog').getByTestId('customer-picker-search')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('customer-dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Add charge', exact: true }).click();

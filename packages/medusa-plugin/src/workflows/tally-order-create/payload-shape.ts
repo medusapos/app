@@ -7,10 +7,11 @@ import type { OrderCreateFee, OrderCreateShipping, OrderCreateCustomLine } from 
 // fiscal-figures.ts). Each value is
 // the version that added the field; Record<keyof T, number> makes tsc refuse a missing or an extra field.
 const since = <T>(fields: Record<keyof T, number>) => new Map<string, number>(Object.entries(fields))
-const TOP_FIELDS = since<OrderCreatePayloadV3 & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
+// Versions 6 and 7's fields (@tallyui/core 3.10-3.13) are left out: this server accepts up to 5, so they stay unknown.
+const TOP_FIELDS = since<Omit<OrderCreatePayloadV3, 'coupons' | 'note'> & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
   subtotalMinor: 1, taxMinor: 1, totalMinor: 1, payments: 1, customer: 1, registerId: 1, cashierRef: 1, locationId: 1,
   discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3, fees: 5, shipping: 5 })
-const LINE_FIELDS = since<OrderCreateLine & { custom?: OrderCreateCustomLine }>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
+const LINE_FIELDS = since<Omit<OrderCreateLine, 'regularUnitPriceMinor' | 'attributes' | 'anyAttributes'> & { custom?: OrderCreateCustomLine }>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
   taxInclusive: 1, discountMinor: 2, custom: 5 })
 const FEE_FIELDS = since<OrderCreateFee>({ clientFeeId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5 })
 const SHIPPING_FIELDS = since<OrderCreateShipping>({ clientShippingId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5, methodId: 5 })
