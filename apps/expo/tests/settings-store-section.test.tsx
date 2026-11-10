@@ -23,6 +23,10 @@ const held: StoreSettings = {
   storeName: 'Test shop', currency: 'USD',
   location: { id: 'sloc_1', name: 'Copenhagen shop', addressLine: 'Nørregade 1, Copenhagen', countryCode: 'dk' },
 };
+const named: StoreSettings = {
+  ...held, salesChannel: { id: 'sc_pos', name: 'Shop floor' },
+  regions: [{ id: 'reg_dk', name: 'Denmark' }, { id: 'reg_eu', name: 'Europe' }],
+};
 const pricing: PricingSettings = {
   currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 250000 },
   pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_secret_test' },
@@ -85,6 +89,44 @@ describe('SettingsScreen Store section', () => {
     expect(screen.queryByText('USD')).toBeNull();
   });
 
+  it("shows the till's region and the sales channel by name", async () => {
+    saveCachedSettings(localStorage, baseUrl, named);
+    saveCachedPricing(localStorage, baseUrl, pricing);
+    await mount();
+    const region = screen.getByTestId('settings-store-region');
+    const channel = screen.getByTestId('settings-store-sales-channel');
+    expect(region.textContent).toBe('Europe');
+    expect(channel.textContent).toBe('Shop floor');
+    expect(screen.queryByText(/reg_eu/)).toBeNull();
+    expect(screen.queryByText(/sc_pos/)).toBeNull();
+    expect(screen.queryByText(/pk_secret_test/)).toBeNull();
+    expect(screen.getByTestId('settings-store-currency').compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(region.compareDocumentPosition(screen.getByTestId('settings-store-prices-include-tax')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('settings-store-location').compareDocumentPosition(channel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('an older cache without names shows — for Region and Sales channel', async () => {
+    saveCachedSettings(localStorage, baseUrl, held);
+    saveCachedPricing(localStorage, baseUrl, pricing);
+    await mount();
+    expect(screen.getByTestId('settings-store-region').textContent).toBe('—');
+    expect(screen.getByTestId('settings-store-sales-channel').textContent).toBe('—');
+    expect(screen.getByTestId('settings-store-name').textContent).toBe('Test shop');
+  });
+
+  it("a region the till's pricing does not name shows —", async () => {
+    saveCachedSettings(localStorage, baseUrl, { ...named, regions: [{ id: 'reg_dk', name: 'Denmark' }] });
+    saveCachedPricing(localStorage, baseUrl, pricing);
+    await mount();
+    expect(screen.getByTestId('settings-store-region').textContent).toBe('—');
+    cleanup();
+    const { pricingContext: _, ...withoutContext } = pricing;
+    saveCachedSettings(localStorage, baseUrl, named);
+    saveCachedPricing(localStorage, baseUrl, withoutContext);
+    await mount();
+    expect(screen.getByTestId('settings-store-region').textContent).toBe('—');
+  });
+
   it('prices that exclude tax show No', async () => {
     saveCachedPricing(localStorage, baseUrl, { ...pricing, pricesIncludeTax: false });
     await mount();
@@ -93,7 +135,7 @@ describe('SettingsScreen Store section', () => {
 
   it('with nothing cached, every Store row shows —', async () => {
     await mount();
-    for (const id of ['settings-store-name', 'settings-store-currency', 'settings-store-prices-include-tax', 'settings-store-location']) {
+    for (const id of ['settings-store-name', 'settings-store-currency', 'settings-store-region', 'settings-store-prices-include-tax', 'settings-store-location', 'settings-store-sales-channel']) {
       expect(screen.getByTestId(id).textContent).toBe('—');
     }
     expect(screen.queryByTestId('settings-store-location-address')).toBeNull();

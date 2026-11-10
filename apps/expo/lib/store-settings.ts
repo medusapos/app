@@ -6,6 +6,8 @@ export type StoreSettings = {
   storeName: string;
   currency: string;
   location: { id: string; name: string; addressLine?: string; countryCode: string };
+  salesChannel?: { id: string; name: string };
+  regions?: { id: string; name: string }[];
 };
 export class StoreSettingsError extends Error {
   constructor(readonly code: 'unauthorized' | 'forbidden' | 'unreachable' | 'misconfigured', message: string) { super(message); }
@@ -61,10 +63,21 @@ export async function fetchStoreSettings(session: Session, fetchImpl = globalThi
   }
   const countryCode = address.country_code.toLowerCase();
   const addressLine = [address.address_1, address.city].filter((part) => typeof part === 'string' && part).join(', ') || undefined;
+  const salesChannel = channel.sales_channel;
+  let regions: StoreSettings['regions'];
+  // Region names are for display (Settings), so a failed read never blocks the till.
+  try {
+    const body = await request('/admin/regions?limit=1000&fields=id,name');
+    if (Array.isArray(body.regions)) regions = body.regions.flatMap((entry) =>
+      isRecord(entry) && typeof entry.id === 'string' && typeof entry.name === 'string' ? [{ id: entry.id, name: entry.name }] : []);
+  } catch {}
   // Tax, tax inclusivity and the sale currency come from TallyUI's store settings (TV4), not from here.
   return {
     storeName: store.name, currency,
     location: { id: location.id, name: location.name, addressLine, countryCode },
+    ...(isRecord(salesChannel) && typeof salesChannel.id === 'string' && typeof salesChannel.name === 'string' && salesChannel.name
+      ? { salesChannel: { id: salesChannel.id, name: salesChannel.name } } : {}),
+    ...(regions !== undefined && { regions }),
   };
 }
 
@@ -77,9 +90,16 @@ export function loadCachedSettings(storage: SessionStorage | null, baseUrl: stri
     if (!isRecord(location) || typeof location.id !== 'string' || typeof location.name !== 'string'
       || typeof location.countryCode !== 'string'
       || (location.addressLine !== undefined && typeof location.addressLine !== 'string')) return null;
+    const salesChannel = value.salesChannel;
+    const regions = Array.isArray(value.regions) && value.regions.every((entry) =>
+      isRecord(entry) && typeof entry.id === 'string' && typeof entry.name === 'string')
+      ? value.regions.map(({ id, name }) => ({ id, name })) : undefined;
     return {
       storeName: value.storeName, currency: value.currency,
       location: { id: location.id, name: location.name, countryCode: location.countryCode, addressLine: location.addressLine },
+      ...(isRecord(salesChannel) && typeof salesChannel.id === 'string' && typeof salesChannel.name === 'string'
+        ? { salesChannel: { id: salesChannel.id, name: salesChannel.name } } : {}),
+      ...(regions !== undefined && { regions }),
     };
   } catch { return null; }
 }
