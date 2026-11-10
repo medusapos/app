@@ -36,17 +36,20 @@ function deleteDatabase(idb: IDBFactory, name: string): Promise<void> {
   });
 }
 
-/** Deletes the OPFS pool, the legacy databases and every app key; the flag goes last, so a failure retries. */
+/**
+ * Deletes the legacy databases, then the OPFS pool, then every app key; the flag goes last, so a failure retries.
+ * Legacy first: the carry-over marker lives in the pool, so a failure (then Cancel reset) before the pool goes keeps it.
+ */
 export async function clearAllLocalData(deps: ClearDeps): Promise<void> {
   // Never skip the legacy sweep: the wipe drops the carry-over marker, so kept Dexie orders would come back as unsent.
   if (typeof deps.idb.databases !== 'function') throw new Error("This browser can't list its databases, so nothing was deleted.");
+  for (const { name } of await deps.idb.databases()) {
+    if (name?.startsWith(LEGACY_IDB_PREFIX)) await deleteDatabase(deps.idb, name);
+  }
   try {
     await (await deps.opfsRoot()).removeEntry(OPFS_POOL_DIR, { recursive: true });
   } catch (error) {
     if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error;
-  }
-  for (const { name } of await deps.idb.databases()) {
-    if (name?.startsWith(LEGACY_IDB_PREFIX)) await deleteDatabase(deps.idb, name);
   }
   const keys: string[] = [];
   for (let i = 0; i < deps.storage.length; i++) {

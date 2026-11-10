@@ -1,7 +1,28 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createRxDatabase, type RxCollection, type RxDatabase } from 'rxdb';
+import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
+import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
+import { addPosOrderCollection, createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import {
   CLEAR_FLAG_KEY, clearAllLocalData, clearWarnings, isClearPending, requestClearLocalData,
 } from './clear-local-data';
+import { carryOverOrders, orderDatabaseName } from './order-store';
+
+// As order-store.test.ts's helpers: a memory order database, and one finalized sale.
+const memoryStorage = () => wrappedValidateAjvStorage({ storage: getRxStorageMemory() });
+async function memoryOrdersDb(name: string, localDocuments = false) {
+  const db = await createRxDatabase<{ pos_orders: RxCollection<PosOrder> }>({
+    name, storage: memoryStorage(), multiInstance: false, localDocuments,
+  });
+  await addPosOrderCollection(db as unknown as RxDatabase);
+  return db;
+}
+function sale(): PosOrder {
+  const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+  builder.addLine({ productId: 'shirt', variantId: 'blue', name: 'Blue shirt', unitPrice: { amount: 1200, currency: 'EUR' } });
+  builder.addPayment({ method: 'cash', amountMinor: 1200 });
+  return finalizeOrder(builder.getSnapshot());
+}
 
 function fakeStorage(entries: Record<string, string> = {}) {
   const data = new Map(Object.entries(entries));
@@ -69,6 +90,42 @@ describe('clearAllLocalData', () => {
       await expect(clearAllLocalData({ storage, opfsRoot: fakeOpfs().opfsRoot, idb: fakeIdb([]).idb, ...deps })).rejects.toThrow(message);
       expect(data.get(CLEAR_FLAG_KEY)).toBe('1');
       expect(data.has('medusapos.session')).toBe(true);
+    }
+  });
+
+  it('a failed old-database delete, then Cancel reset: no order comes back as unsent', async () => {
+    const name = orderDatabaseName('https://clear-cancel.test');
+    const fromName = 'medusapos_orders_clear_cancel';
+    const legacyExists = async () => true;
+    const order = sale();
+    // The legacy store still holds the order as it was before it synced.
+    const legacy = await memoryOrdersDb(fromName);
+    await legacy.pos_orders.insert({ ...order, syncStatus: 'pending' });
+    await legacy.close();
+    // The new store: the order has synced since it was copied, and the carry-over marker is written.
+    const before = await memoryOrdersDb(name, true);
+    await before.pos_orders.insert({ ...order, syncStatus: 'applied' });
+    await carryOverOrders({ fromStorage: memoryStorage(), fromName, to: before, legacyExists });
+    expect(await before.getLocal('legacy-orders-migrated')).not.toBeNull();
+
+    const { storage, data } = fakeStorage(appKeys());
+    // Removing the OPFS pool removes the new database; the legacy delete is blocked by another tab.
+    const { opfsRoot } = fakeOpfs(vi.fn(async () => { await before.remove(); }));
+    const { idb } = fakeIdb([`rxdb-dexie-${fromName}--0--pos_orders`], 'onblocked');
+    await expect(clearAllLocalData({ storage, opfsRoot, idb })).rejects.toThrow('A legacy database is still open in another tab.');
+    if (!before.closed) await before.close(); // The reload closes whatever is still open.
+
+    // Cancel reset drops the flag; the app's next open reopens the store and runs the carry-over.
+    data.delete(CLEAR_FLAG_KEY);
+    const after = await memoryOrdersDb(name, true);
+    try {
+      await carryOverOrders({ fromStorage: memoryStorage(), fromName, to: after, legacyExists });
+      const statuses = (await after.pos_orders.find().exec()).map((doc) => doc.syncStatus);
+      expect(statuses.filter((status) => status === 'pending' || status === 'rejected')).toEqual([]);
+      expect(statuses).toEqual(['applied']);
+    } finally {
+      await after.remove();
+      await (await memoryOrdersDb(fromName)).remove();
     }
   });
 
