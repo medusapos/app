@@ -130,6 +130,15 @@ export function defaultStorage(): SessionStorage | null {
   try { return globalThis.localStorage ?? null; } catch { return null; }
 }
 
+/**
+ * The store's `registerApproval` (ADR-082 d3): `thresholdMinor` a non-negative safe integer, or `undefined`. A local
+ * copy of the check in `@tallyui/core`'s `parseInfoCapabilities`, because core doesn't export its parser.
+ */
+export function parseRegisterApproval(value: unknown): { thresholdMinor: number } | undefined {
+  const thresholdMinor = isRecord(value) && !Array.isArray(value) ? value.thresholdMinor : undefined;
+  return typeof thresholdMinor === 'number' && Number.isSafeInteger(thresholdMinor) && thresholdMinor >= 0 ? { thresholdMinor } : undefined;
+}
+
 export function loadSession(storage: SessionStorage | null): Session | null {
   try {
     const value: unknown = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null');
@@ -142,6 +151,8 @@ export function loadSession(storage: SessionStorage | null): Session | null {
           ...(typeof value.capabilities.register === 'number' && Number.isSafeInteger(value.capabilities.register) && value.capabilities.register >= 1
             ? { register: value.capabilities.register } : {}),
           ...(parseTaxRounding(value.capabilities.taxRounding) ? { taxRounding: parseTaxRounding(value.capabilities.taxRounding) } : {}),
+          ...(parseRegisterApproval(value.capabilities.registerApproval)
+            ? { registerApproval: parseRegisterApproval(value.capabilities.registerApproval) } : {}),
         } : undefined };
   } catch { return null; }
 }

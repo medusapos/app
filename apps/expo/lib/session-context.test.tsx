@@ -151,6 +151,22 @@ describe('SessionProvider', () => {
     act(() => context.mergeCapabilities({ ...fresh }));
     expect(context.session).toBe(updated);
   });
+  it.each([
+    ['added', { orderCreate: 3, register: 3 }, { orderCreate: 3, register: 3, registerApproval: { thresholdMinor: 500 } }],
+    ['changed', { orderCreate: 3, register: 3, registerApproval: { thresholdMinor: 500 } },
+      { orderCreate: 3, register: 3, registerApproval: { thresholdMinor: 1000 } }],
+    ['removed', { orderCreate: 3, register: 3, registerApproval: { thresholdMinor: 500 } }, { orderCreate: 3, register: 3 }],
+  ] as const)('a fresh registerApproval updates the session (%s)', async (_how, kept, fresh) => {
+    await mount({ ...stored, capabilities: kept });
+    const before = context.session;
+    act(() => context.mergeCapabilities(fresh));
+    expect(context.session).not.toBe(before);
+    expect(context.session?.capabilities).toEqual(fresh);
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(fresh);
+    const updated = context.session;
+    act(() => context.mergeCapabilities(structuredClone(fresh)));
+    expect(context.session).toBe(updated);
+  });
   it.each(['signOut', 'reportUnauthorized'] as const)('%s clears state, storage and this backend cache', async (action) => {
     await mount();
     act(() => context[action]());

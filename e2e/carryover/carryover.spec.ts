@@ -22,7 +22,8 @@ type Migration = {
 };
 // v0.1.0: @tallyui/pos 2.0.0 wrote these versions; 3.3.0 migrates orders to v8 with these outputs.
 // v0.2.0: @tallyui/pos 3.8.0's schemas (src/pos-order/schema.ts, src/register/schemas.ts, src/register/register-commands.ts,
-// src/order/order-drafts.ts) as the app's order-store.ts adds them; the current build stores the same.
+// src/order/order-drafts.ts) as the app's order-store.ts adds them; the current build stores the same, except pos_orders,
+// which moves to v11 (TallyUI 3.13.0).
 const RELEASE_EXPECTATIONS: Record<string, Migration | { kind: 'identity'; stored: Stored }> = {
   'v0.1.0': {
     kind: 'migration',

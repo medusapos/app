@@ -308,6 +308,20 @@ describe('session storage', () => {
     storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: 3, register } }));
     expect(loadSession(storage)?.capabilities).toEqual({ orderCreate: 3 });
   });
+  it('a saved session keeps registerApproval across a reload', () => {
+    const storage = memoryStorage();
+    for (const thresholdMinor of [0, 500]) {
+      const saved = { ...session, capabilities: { orderCreate: 3, register: 3, registerApproval: { thresholdMinor } } };
+      saveSession(storage, saved);
+      expect(loadSession(storage)).toEqual(saved);
+    }
+  });
+  it.each([{ thresholdMinor: -1 }, { thresholdMinor: 1.5 }, { thresholdMinor: '500' }, { thresholdMinor: Number.MAX_SAFE_INTEGER + 1 },
+    {}, [500], null, 500])('a malformed registerApproval is dropped (%j)', (registerApproval) => {
+    const storage = memoryStorage();
+    storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: 3, register: 3, registerApproval } }));
+    expect(loadSession(storage)?.capabilities).toEqual({ orderCreate: 3, register: 3 });
+  });
   it('drops malformed stored taxRounding', () => {
     const storage = memoryStorage();
     storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: 3, taxRounding: { mode: 'x' } } }));
