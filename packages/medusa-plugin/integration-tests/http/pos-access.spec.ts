@@ -55,6 +55,9 @@ medusaIntegrationTestRunner({
       const response = await api.post('/tally/v1/commands', { commands: [] }, { headers, validateStatus: () => true })
       expect(response.status).toBe(403)
       expect(response.data).toMatchObject({ type: 'forbidden', message: 'Forbidden' })
+      const receipt = await api.post('/tally/v1/orders/order_x/receipt-email', { email: 'buyer@example.com' }, { headers, validateStatus: () => true })
+      expect(receipt.status).toBe(403)
+      expect(receipt.data).toMatchObject({ type: 'forbidden', message: 'Forbidden' })
     })
 
     it('role_super_admin may use the POS', async () => {
