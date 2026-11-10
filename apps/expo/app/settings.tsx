@@ -2,6 +2,7 @@ import { useRef, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { SettingsGroup, SettingsRow } from '@tallyui/components';
+import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ProductsBack } from '../components/products-back';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -31,6 +32,7 @@ export default function SettingsScreen() {
       <StoreSection session={session} />
       <RegisterSection session={session} />
       <ScannerSection session={session} />
+      <ClearLocalDataSection />
     </View>
   </ScrollView>;
 }
