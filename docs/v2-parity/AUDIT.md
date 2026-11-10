@@ -19,7 +19,7 @@ Each row is a feature a merchant expects, built Medusa's way (Paul, 2026-10-07):
 | 5 | Cart editing: keypad qty, tap-to-edit, swipe, line sort (`scr/pos/cart/table.tsx`) | Partial | TU `Cart` qty, remove, `canEditPrice`, discount chips | **TU** `@tallyui/components` `Cart`: keypad, line sort setting | — |
 | 6 | Add menu: misc product, fee, shipping, quick discount (`scr/pos/cart/add-*.tsx`) | Has | `order.create` v5 (`docs/adr/0021`), `e2e/charges.spec.ts`, `e2e/discount.spec.ts` | Quick-discount keys setting: **TU** | — |
 | 7 | Coupons in cart (`scr/pos/cart/add-coupon*.tsx`) | Missing | `plan.ts` sends no promotion codes | **TU** coupon entry (TallyUI#500/#501); **plugin** apply Medusa promotion codes in `workflows/tally-order-create` | — (needs TU's payload) |
-| 8 | Order sheet: note, meta, void, print, sync (`scr/pos/cart/order-sheet.tsx`) | Missing | TU `OrderBuilder.setNote` and `CartNoteInput` exist; `useSale` has no `setNote` (TallyUI#520); plugin drops the note | **TU** `@tallyui/pos` `useSale().setNote`; **plugin** map `order.note` in `tally-order-create/plan.ts`; **app** `CartNoteInput` | Plugin note mapping (U4) |
+| 8 | Order sheet: note, meta, void, print, sync (`scr/pos/cart/order-sheet.tsx`) | Missing | TU `OrderBuilder.setNote` and `CartNoteInput` exist; `useSale` has no `setNote` (TallyUI#520); plugin drops the note | **TU** `@tallyui/pos` `useSale().setNote`; **TU** `@tallyui/core` `OrderCreatePayload.note` (a new order.create version: `payload-shape.ts` refuses unknown fields); then **plugin** accept that version and map the note in `tally-order-create/plan.ts`; **app** `CartNoteInput` | — (payload type is TU's) |
 | 9 | Customer in cart: search, guest, create (`scr/pos/cart/add-customer.tsx`) | Has | TU `CustomerPicker`; `e2e/customers.spec.ts` | Default customer setting: **app** | — |
 | 10 | Totals and tax display, itemized/single (`scr/pos/cart/totals.tsx`) | Has | `Cart` `taxLabel`; region tax-inclusive prices | — | — |
 | 11 | Tender pane: tiles, keypad, quick amounts, split ledger, change, void legs, cash rounding (`scr/pos/checkout/tender`) | Partial | TU `Tender` / `SplitTender`, "Split payment" toggle; `e2e/split-tender.spec.ts`. No keypad pane or leg void; card is `external` only | **TU** `@tallyui/components` tender pane redraw, `@tallyui/pos` cash rounding | — |
@@ -71,7 +71,6 @@ Top down by what a merchant sees. Each is one spec, one PR.
 - **U1** Z and X print: pass `ClosureSheet` `onPrint`, add "Print X report" to the register panel (app).
 - **U2** `/reports` route: today's sales on this register from the outbox, closures list via `selectClosureRows`, CSV via `exportCsv` (app).
 - **U3** `GET /tally/v1/registers/:id/closures` with paging (plugin).
-- **U4** Map `order.note` into the Medusa order in `tally-order-create` (plugin).
 - **U5** Theme: System / Light / Dark setting on TU's dark tokens (app).
 - **U6** `POST /tally/v1/orders/:id/receipt-email` through the notification module (plugin).
 - **U7** Settings redraw on TU `SettingsLayout`, with Store and Danger zone sections (app).
@@ -80,7 +79,7 @@ Top down by what a merchant sees. Each is one spec, one PR.
 
 - `@tallyui/theme`: scale tokens + provider (Auto/Compact/Regular/Spacious), font families, theme presets.
 - `@tallyui/pos` `register-commands`: contract-3 `closure.submit` with `approval`.
-- `@tallyui/pos` `useSale().setNote` (TallyUI#520).
+- `@tallyui/pos` `useSale().setNote` (TallyUI#520) and `@tallyui/core` `OrderCreatePayload.note` in a new order.create version.
 - `@tallyui/pos` `useSale` multi-order + `@tallyui/components` cart tabs.
 - `@tallyui/connector-medusa` `listOrders` + the `/tally/v1/orders` contract; `emailReceipt`; `updateCustomer` (with `@tallyui/core` `Connector.updateCustomer`).
 - `@tallyui/pos` refund model and `refund.create` command.
