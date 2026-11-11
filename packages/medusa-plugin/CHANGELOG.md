@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- **Fixed:** the store's automatic promotions no longer apply to POS orders: the order keeps the till's figures, including on the resume path after a crash (#290). Admin draft orders still get them. A dropped automatic promotion leaves no order–promotion link and no campaign budget usage.
+- Orders already stored with an automatic promotion, below what the till charged, are left alone: correcting them is the store owner's call. #295 lists how to find them.
+
 ## 0.3.0 — 2026-10-07
 
 - **Added:** `POST /tally/v1/register-approvals` with `{ sessionId, variance, email, password }`: a manager signs in at the till and gets a single-use proof valid for 15 minutes, bound to that session and variance. Under RBAC the manager needs `tally_pos:approve_variance` (0.2.3). Failed attempts are limited per requesting user and per manager email (429 `approval_rate_limited`). An account that needs MFA is refused `approval_mfa_unsupported`.

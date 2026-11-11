@@ -122,6 +122,10 @@ export const takeBackStockWorkflow = createWorkflow('tally-take-back-stock', fun
   takeBackStockStep(input.orderId)
   return new WorkflowResponse(undefined)
 })
+export const dropPromotionAdjustmentsWorkflow = createWorkflow('tally-resume-drop-promotion-adjustments', function (input: { orderId: string }) {
+  dropPromotionAdjustmentsStep(input.orderId)
+  return new WorkflowResponse(undefined)
+})
 
 // In Medusa 2.21, when().then() re-registers a step renamed by .config({ name }) under its pre-rename handler, which
 // loses its compensation, so we never rename a step inside when: each fulfilment group runs as its own workflow (ADR 0003).
