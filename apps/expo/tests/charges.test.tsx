@@ -73,7 +73,9 @@ async function start() {
 async function totalMinor() {
   await act(async () => { click('Cash'); });
   click('Split payment');
-  const total = within(screen.getByTestId('split-tender-summary')).getByText(/^Total: /);
+  // TallyUI 3.14.0's tender pane heads an unpaid sale with its Total.
+  expect(screen.getByTestId('tender-headline').textContent).toMatch(/^Total/);
+  const total = screen.getByTestId('tender-balance');
   const amount = Math.round(Number(total.textContent!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
   click('Back');
   return amount;

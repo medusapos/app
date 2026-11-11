@@ -4,7 +4,7 @@ import { getLocales } from 'expo-localization';
 import { Button, Dialog, DialogContent, DialogTitle, Input, Label, Text } from '@tallyui/components';
 import { formatMoney, minorUnitDigits, moneyFromDecimalString } from '@tallyui/core';
 import { buildClosureDocument, type Closure, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
-import { APPROVAL_TIMEOUT_MS, ApprovalError, rememberApprover, requestApproval, type Approval } from '../lib/approval';
+import { APPROVAL_TIMEOUT_MS, ApprovalError, rememberApprover, requestApproval, requestStoreApproval, type Approval } from '../lib/approval';
 import { closureReportHtml, printHtml, PRINT_FAILED } from '../lib/closure-print';
 import { defaultStorage } from '../lib/session';
 
@@ -15,15 +15,35 @@ export const APPROVE_OFFLINE = 'Connect to approve, or count again.';
 export const APPROVE_CONTEXT = "This count is over the threshold. A manager's admin login approves it.";
 const APPROVE_FAILED = "Couldn't check the approval. Try again.";
 
+/** The dialog's approver; store-verified (ADR 0023), also the store's proof and the variance it was issued for. */
+export type DialogApproval = Approval & { approval?: string; approvedVariance?: Record<string, number> };
+/** What Approve sends the email and password to; without one, ADR 0018's second login. */
+export type ApprovalRequest = (email: string, password: string, signal: AbortSignal) => Promise<DialogApproval>;
+
 /**
- * RegisterCount's `approve` (ADR 0018, option b): opens "Manager approval" and resolves with the approver, or null
- * on Cancel. `dialog` must be rendered by the caller.
+ * The store-verified request (ADR 0023): posts `sessionId` and the variance `variance()` reads at Approve to the store's
+ * approval route with the cashier's token, and resolves the store's proof, its approver and that variance.
+ */
+export function storeApproval(baseUrl: string, token: string, sessionId: string,
+  variance: () => Promise<Record<string, number>>): ApprovalRequest {
+  return async (email, password, signal) => {
+    const sent = await variance();
+    const { approvedBy, approvedByName, approval } = await requestStoreApproval(baseUrl, token,
+      { sessionId, variance: sent, email, password }, { signal, timeoutMs: APPROVAL_TIMEOUT_MS });
+    return { approvedBy, approvedByName, approval, approvedVariance: sent };
+  };
+}
+
+/**
+ * Opens "Manager approval" (ADR 0018, option b) and resolves with the approver, or null on Cancel. `request` makes it
+ * store-verified (ADR 0023); `reachable: false` shows only its offline line. `dialog` must be rendered by the caller.
  */
 export function useApprove(baseUrl: string, online: boolean) {
-  const [pending, setPending] = useState<((result: Approval | null) => void) | null>(null);
-  const approve = () => new Promise<Approval | null>((resolve) => setPending(() => resolve));
-  const dialog = pending ? <ApprovalDialog baseUrl={baseUrl} online={online}
-    onResult={(result) => { setPending(null); pending(result); }} /> : null;
+  const [pending, setPending] = useState<{ resolve: (result: DialogApproval | null) => void; request?: ApprovalRequest; reachable: boolean } | null>(null);
+  const approve = (request?: ApprovalRequest, reachable = true) =>
+    new Promise<DialogApproval | null>((resolve) => setPending({ resolve, request, reachable }));
+  const dialog = pending ? <ApprovalDialog baseUrl={baseUrl} online={online && pending.reachable} request={pending.request}
+    onResult={(result) => { setPending(null); pending.resolve(result); }} /> : null;
   return { approve, dialog };
 }
 
@@ -31,7 +51,9 @@ export function useApprove(baseUrl: string, online: boolean) {
  * The "Manager approval" dialog. `onResult` fires exactly once: with the approver, or `null` on Cancel, Escape or
  * the dialog closing. Cancel works while a request is in flight: it aborts it, and a late answer is ignored.
  */
-export function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string; online: boolean; onResult: (result: Approval | null) => void }) {
+export function ApprovalDialog({ baseUrl, online, request: send, onResult }: {
+  baseUrl: string; online: boolean; request?: ApprovalRequest; onResult: (result: DialogApproval | null) => void;
+}) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -40,7 +62,7 @@ export function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string;
   const busyRef = useRef(false);
   const request = useRef<AbortController | null>(null);
   const settled = useRef(false);
-  const finish = (result: Approval | null) => {
+  const finish = (result: DialogApproval | null) => {
     if (settled.current) return;
     settled.current = true;
     request.current?.abort();
@@ -65,7 +87,8 @@ export function ApprovalDialog({ baseUrl, online, onResult }: { baseUrl: string;
     setPassword('');
     const controller = request.current = new AbortController();
     try {
-      const approval = await requestApproval(baseUrl, email.trim(), secret, { signal: controller.signal, timeoutMs: APPROVAL_TIMEOUT_MS });
+      const approval = send ? await send(email.trim(), secret, controller.signal)
+        : await requestApproval(baseUrl, email.trim(), secret, { signal: controller.signal, timeoutMs: APPROVAL_TIMEOUT_MS });
       // A late answer after Cancel never approves (and is never kept).
       if (settled.current || controller.signal.aborted) return;
       rememberApprover(defaultStorage(), baseUrl, approval.approvedBy, approval.approvedByName);

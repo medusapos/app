@@ -3,10 +3,10 @@ import { Platform, Text, View } from 'react-native';
 import {
   ClosureSheet, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';
-import { RegisterSessionRequiredError, type useRegisterSession, type useSale } from '@tallyui/pos';
+import { RegisterSessionRequiredError, type ApprovalNeeded, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
-import { LastClosureSheet, printClosure, useApprove } from './register-close';
+import { LastClosureSheet, printClosure, storeApproval, useApprove } from './register-close';
 import { RegisterConflictCard } from './register-conflict';
 
 // RegisterColumn's Finish closing button's nativeID (TallyUI #175).
@@ -81,16 +81,30 @@ export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
   </View>;
 }
 
-/** The register panel (movements with Undo, Close register), opened from the control; between sessions, the last closure's figures. */
-export function RegisterPanelSheet({ currency, store, open, onOpenChange }: {
-  currency: string; store: { name: string; address?: string }; open: boolean; onOpenChange: (open: boolean) => void;
+/**
+ * The register panel (movements with Undo, Close register), opened from the control; between sessions, the last
+ * closure's figures, unless the store refused a closure's approval: then the panel, whose card asks a manager again.
+ */
+export function RegisterPanelSheet({ currency, store, online, open, onOpenChange }: {
+  currency: string; store: { name: string; address?: string }; online: boolean; open: boolean; onOpenChange: (open: boolean) => void;
 }) {
   const { register, registerName } = useRegister();
-  if (!register.session && register.lastClosure) {
+  const { session: signedIn } = useSession();
+  const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online);
+  if (!register.session && register.lastClosure && !register.approvalNeeded) {
     return <LastClosureSheet register={register} currency={currency} store={store} open={open} onOpenChange={onOpenChange} />;
   }
-  return <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
-    onOpenChange={onOpenChange} />;
+  // ADR 0023: the store's new proof for the refused closure's session and variance; not live at the store, offline.
+  const reapprove = async (needed: ApprovalNeeded) => {
+    const result = await approve(signedIn && needed.liveAtStore
+      ? storeApproval(signedIn.baseUrl, signedIn.token, needed.sessionId, async () => needed.variance) : undefined, needed.liveAtStore);
+    return result?.approval ? { approvedBy: result.approvedBy, approval: result.approval } : null;
+  };
+  return <>
+    <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
+      onOpenChange={onOpenChange} reapprove={reapprove} />
+    {dialog}
+  </>;
 }
 
 /**
@@ -120,6 +134,12 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
   }, [focus.key, focus.handled]);
   const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online);
   const session = register.session;
+  // ADR 0023: store-verified at register contract 3 with the store's registerApproval while the store holds the
+  // session; otherwise ADR 0018's second login, with no proof.
+  const capabilities = signedIn?.capabilities;
+  const storeVerified = (capabilities?.register ?? 0) >= 3 && capabilities?.registerApproval != null && register.liveAtStore;
+  const approveCount = ({ counted }: { counted: Record<string, number> }) => approve(storeVerified && signedIn && session
+    ? storeApproval(signedIn.baseUrl, signedIn.token, session.id, () => register.actions.closureVariance(counted)) : undefined);
   // Both closes go through the provider's close flow, so its sheet and masking outlive this gate (a phone's cart view).
   const counting = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, true) } };
   // A session closed but whose closure didn't finish (a restart mid-close, #88 review) gets RegisterColumn's own
@@ -136,7 +156,7 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
       ? <Text testID="close-error" accessibilityRole="alert" className="px-4 pt-3 text-destructive">{close.error}</Text> : null}
     {boundRegisterId && session && session.status !== 'conflict' ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
       onPick={pick} currency={currency} cartEmpty={cartEmpty}
-      countSlot={<RegisterCount register={counting} currency={currency} approve={approve} />}>
+      countSlot={<RegisterCount register={counting} currency={currency} approve={approveCount} />}>
       {children}
     </RegisterColumn> : children}
     {dialog}

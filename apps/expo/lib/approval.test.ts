@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { APPROVAL_TIMEOUT_MS, ApprovalError, loadApprovers, rememberApprover, requestApproval } from './approval';
+import { APPROVAL_TIMEOUT_MS, ApprovalError, loadApprovers, rememberApprover, requestApproval, requestStoreApproval } from './approval';
 import type { SessionStorage } from './session';
 
 const baseUrl = 'https://store.test';
@@ -80,6 +80,80 @@ describe('requestApproval', () => {
     controller.abort();
     expect(await result).toMatchObject({ code: 'cancelled' });
     expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+});
+
+describe('requestStoreApproval', () => {
+  const ask = { sessionId: 'sess_1', variance: { cash: -1200 }, email: 'mia@store.test', password: 'secret-pw' };
+  const route = (answer: () => Response | Promise<Response>) => vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => answer());
+  const proof = { approval: 'proof-abc', approvedBy: 'user_mgr', approvedByName: 'Mia Manager', expiresAt: '2026-11-10T19:00:00.000Z' };
+  const storeRequest = (fetch: ReturnType<typeof route>, options: { signal?: AbortSignal; timeoutMs?: number } = {}) =>
+    requestStoreApproval(`${baseUrl}/`, 'cashier-token', ask, { fetchImpl: fetch as unknown as typeof globalThis.fetch, ...options });
+
+  it("posts the session, variance and credentials to the approval route with the cashier's token", async () => {
+    const fetch = route(() => json(proof));
+    await expect(storeRequest(fetch)).resolves.toEqual(proof);
+    expect(fetch).toHaveBeenCalledOnce();
+    const [url, init] = fetch.mock.calls[0];
+    expect(String(url)).toBe(`${baseUrl}/tally/v1/register-approvals`);
+    expect(String(url)).not.toContain('secret-pw');
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toStrictEqual(ask);
+    const headers = new Headers(init?.headers);
+    expect(headers.get('Authorization')).toBe('Bearer cashier-token');
+    expect(headers.get('Content-Type')).toBe('application/json');
+    expect(init?.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  const failed = "Couldn't check the approval. Try again.";
+  it.each([
+    [401, { code: 'approval_invalid_credentials', message: "The manager's email or password is not correct." }, 'invalid', "That email and password didn't work."],
+    [401, { code: 'approval_mfa_unsupported', message: 'Needs a second step.' }, 'failed', 'Needs a second step.'],
+    [403, { code: 'approval_forbidden', message: "This user can't approve register variances." }, 'failed', "This user can't approve register variances."],
+    [409, { code: 'approval_session_unknown', message: 'This register session is not known to the store.' }, 'failed', 'This register session is not known to the store.'],
+    [409, { code: 'approval_session_closed', message: 'This register session is already closed.' }, 'failed', 'This register session is already closed.'],
+    [429, { code: 'approval_rate_limited', message: 'Too many failed approvals.' }, 'failed', 'Too many failed approvals.'],
+    [403, { code: 'approval_forbidden' }, 'failed', failed],
+    [429, { code: 'approval_rate_limited', message: 42 }, 'failed', failed],
+    [400, { code: 'invalid_payload', message: 'sessionId: expected a string' }, 'failed', failed],
+    [401, { message: 'Unauthorized' }, 'failed', failed],
+    [500, { code: 'unknown_error', message: 'An unknown error occurred.' }, 'failed', failed],
+  ])("maps each refusal code to the dialog's message (%i %j)", async (status, body, code, message) => {
+    await expect(storeRequest(route(() => json(body, status)))).rejects.toEqual(new ApprovalError(code as ApprovalError['code'], message));
+  });
+
+  it('maps a network failure to offline', async () => {
+    await expect(storeRequest(route(() => { throw new TypeError('Failed to fetch'); }))).rejects.toMatchObject({ code: 'offline' });
+  });
+
+  it.each([
+    [{ approvedBy: 'user_mgr', approvedByName: 'Mia' }], [{ approval: 'proof-abc', approvedByName: 'Mia' }],
+    [{ approval: '', approvedBy: 'user_mgr' }], [{ approval: 'proof-abc', approvedBy: 7 }], [null], ['not an object'],
+  ])('a malformed approval answer fails (%j)', async (body) => {
+    await expect(storeRequest(route(() => json(body)))).rejects.toEqual(new ApprovalError('failed', failed));
+  });
+
+  it('cancel aborts the request', async () => {
+    const fetch = route(() => new Promise<Response>(() => {}));
+    const controller = new AbortController();
+    const result = storeRequest(fetch, { signal: controller.signal }).catch((error: unknown) => error);
+    await vi.waitFor(() => expect(fetch).toHaveBeenCalled());
+    controller.abort();
+    expect(await result).toMatchObject({ code: 'cancelled' });
+    expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+
+  it('a request that never answers fails as offline', async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = route(() => new Promise<Response>(() => {}));
+      const result = storeRequest(fetch).catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS - 1);
+      expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await result).toMatchObject({ code: 'offline' });
+      expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
+    } finally { vi.useRealTimers(); }
   });
 });
 

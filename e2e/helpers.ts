@@ -137,19 +137,13 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
   }
   if (cash === 'external') {
     await page.getByRole('button', { name: 'Card terminal', exact: true }).click();
+    const pane = await tenderPane(page);
     await page.getByLabel('Terminal reference', { exact: true }).fill('e2e-offline-terminal');
-    await page.getByRole('button', { name: 'Payment approved on terminal', exact: true }).click();
+    if (pane) await page.getByTestId('tender-complete').click();
+    else await page.getByRole('button', { name: 'Payment approved on terminal', exact: true }).click();
   } else {
     await page.getByRole('button', { name: 'Cash', exact: true }).click();
-    const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
-    const amount = tender.locator('input');
-    if (cash === 'exact') {
-      // The first quick amount is the exact total, followed by rounded amounts.
-      await tender.locator('[tabindex="0"]').first().click();
-      await amount.fill(await amount.inputValue());
-    } else {
-      await amount.fill(cash.toFixed(2));
-    }
+    await tenderCash(page, cash);
     await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   }
   const newSale = page.getByRole('button', { name: 'New sale', exact: true });
@@ -158,6 +152,67 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
   const total = Number(receiptText.replace(/[^\d.,]/g, '').replace(',', '.'));
   await newSale.click();
   return total;
+}
+
+// Which tender is on screen once Cash or Card terminal is tapped: true for TallyUI 3.14.0's tender pane (the current
+// build), false for the released build's TallyUI 3.8.0 tender (Cash Tendered, or Payment approved on terminal), which
+// carryover step A drives through these same helpers. Read from what is visible, never a build flag: the helpers
+// serve both builds in one run, and only the screen says which one is loaded.
+export async function tenderPane(page: Page): Promise<boolean> {
+  const pane = page.getByTestId('tender-pane');
+  const released = page.getByText('Cash Tendered', { exact: true })
+    .or(page.getByRole('button', { name: 'Payment approved on terminal', exact: true }));
+  await expect(pane.or(released).first()).toBeVisible();
+  return pane.isVisible();
+}
+
+// Enters cash on the open cash tender, up to (not including) Complete sale. Numeric cash is in EUR major units.
+// The pane takes it as a leg: its Exact chip, or the amount keyed in (no decimal key: digits shift in from the right),
+// then Take. The released tender's path is the one sellBySku has always taken.
+export async function tenderCash(page: Page, cash: 'exact' | number) {
+  if (await tenderPane(page)) {
+    if (cash === 'exact') await page.getByTestId('tender-quick-exact').click();
+    else {
+      const keypad = page.getByTestId('tender-keypad');
+      await keypad.getByRole('button', { name: 'Clear', exact: true }).click();
+      for (const digit of cash.toFixed(2).replace(/\D/g, '')) await keypad.getByRole('button', { name: digit, exact: true }).click();
+    }
+    await page.getByTestId('tender-take').click();
+    await expect(page.getByTestId('tender-complete')).toBeEnabled();
+    return;
+  }
+  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
+  const amount = tender.locator('input');
+  if (cash === 'exact') {
+    // The first quick amount is the exact total, followed by rounded amounts.
+    await tender.locator('[tabindex="0"]').first().click();
+    await amount.fill(await amount.inputValue());
+  } else {
+    await amount.fill(cash.toFixed(2));
+  }
+}
+
+// The cart's totals row named `label` (Subtotal, Discount, Total, …), in its footer: TallyUI 3.14.0's cart also heads
+// its columns Qty, Item, Price and Total.
+export function cartTotalRow(page: Page, label: string) {
+  return page.getByTestId('cart-footer').getByText(label, { exact: true }).locator('..');
+}
+
+// The cart's item for the line named `name` (TallyUI 3.14.0): its CartLine row, discount chips and actions (Discount,
+// Price). Found from the line's own Remove button (actions root > flex-1 > button row > Remove), so neither a product
+// tile of the same name nor the Price column head matches.
+export function cartLine(page: Page, name: string) {
+  return page.getByRole('button', { name: `Remove ${name}`, exact: true }).locator('../../../..');
+}
+
+// The line's CartLine row, its cells in column order: quantity, name, unit price (hidden on a phone), total.
+export function cartLineRow(page: Page, name: string) {
+  return cartLine(page, name).locator(':scope > div').first();
+}
+
+// The line's quantity cell, the row's first.
+export function cartLineQuantity(page: Page, name: string) {
+  return cartLineRow(page, name).locator(':scope > div').first();
 }
 
 type SalePayload = {
@@ -223,10 +278,20 @@ async function storeRegisterCommand(type: string, version: number, payload: Reco
 
 export type StoreRegisterSession = { id: string; status: string; expected?: { cash: number }; salesCount?: number };
 
-// The store's read of `registerId` (its live session, else the latest opened), or {} when it has none.
-export async function storeRegister(registerId = 'register-1'): Promise<{ session?: StoreRegisterSession }> {
+export type StoreRegisterCounters = { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
+
+// The store's read of `registerId` (its live session, else the latest opened, and the register's counters), or {} when it has none.
+export async function storeRegister(registerId = 'register-1'): Promise<{ session?: StoreRegisterSession; counters?: StoreRegisterCounters }> {
   const state = await fetch(`${backend}/tally/v1/registers/${registerId}`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
   return state.status === 404 ? {} : await state.json();
+}
+
+// The number the store takes for `registerId`'s next closure, as its closure sheet names it ("Closure #n"): a till
+// adopts the store's counters from its applied register commands (TallyUI #651), so a fresh till's first closure
+// follows every earlier till's, not #1. Read once this till's open is applied and before it closes.
+export async function nextStoreClosure(registerId = 'register-1') {
+  const { counters } = await storeRegister(registerId);
+  return `Closure #${(counters?.lastClosureNumber ?? 0) + 1}`;
 }
 
 // The store keeps one open session per register (spec-42); this closes the store's open session, as a till would.

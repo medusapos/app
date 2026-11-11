@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, test } from './helpers';
+import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, tenderCash, test } from './helpers';
 
 // TallyUI #146: RxDB 16.21.1's query cache could leave a sale inserted while the outbox's pending read was
 // in flight out of that read for good, so it sat "Waiting to sync" until the app restarted. Here the
@@ -35,10 +35,7 @@ test('two cash sales in quick succession both reach Medusa once, with no reload'
   await search.press('Enter');
   await expect(search).toHaveValue('');
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
-  const amount = tender.locator('input');
-  await tender.locator('[tabindex="0"]').first().click();
-  await amount.fill(await amount.inputValue());
+  await tenderCash(page, 'exact');
   // No wait between the second sale's completion and the first sale's send.
   await Promise.all([page.getByRole('button', { name: 'Complete sale', exact: true }).click(), releaseFirst()]);
   await page.getByRole('button', { name: 'New sale', exact: true }).click();

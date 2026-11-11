@@ -29,9 +29,9 @@ const receiptStore = { name: 'Shop', address: undefined };
 const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
 function discount(opener: string, type: 'Percent' | 'Amount', value: string) {
-  // The line action has no button role; scope its text to the line, away from the totals row.
+  // The line action has no button role; scope its text to the line, away from the totals row. TallyUI 3.14.0 wraps the line's quantity and Remove buttons, one level deeper, in its actions row.
   if (opener === 'Discount') {
-    const line = within(screen.getByRole('button', { name: 'Remove Shirt' }).parentElement!.parentElement!);
+    const line = within(screen.getByRole('button', { name: 'Remove Shirt' }).parentElement!.parentElement!.parentElement!);
     fireEvent.click(line.getByText(opener));
   } else click(opener);
   click(type);

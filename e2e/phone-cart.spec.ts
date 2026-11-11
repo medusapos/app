@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, discount, sellBySku, signIn, test } from './helpers';
+import { addE2E1, cartLineQuantity, cartTotalRow, discount, sellBySku, signIn, tenderCash, test } from './helpers';
 
 // The sale screen on a phone (ADR 0009): below 600 px a cart bar opens the cart at full height, its lines and
 // order discount scroll, and the totals and pay buttons stay pinned. Sells only E2E-1 and E2E-2.
@@ -32,7 +32,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
   await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, \D*3\.88$/);
   await bar.click();
-  const total = page.getByText('Total', { exact: true }).locator('..');
+  const total = cartTotalRow(page, 'Total');
   const cash = page.getByRole('button', { name: 'Cash', exact: true });
   const card = page.getByRole('button', { name: 'Card terminal', exact: true });
   for (const target of [page.getByText('E2E product 1', { exact: true }), total, cash, card]) await expect(target).toBeInViewport();
@@ -62,8 +62,7 @@ test('a sign-out requested during a stuck save waits, and its note fits beside S
   await addE2E1(page);
   await page.getByRole('button', { name: /^Open cart, / }).click();
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
-  await tender.locator('[tabindex="0"]').first().click();
+  await tenderCash(page, 'exact');
   // A stuck save: the order's insert waits before its write (an E2E debug hook; a dead storage worker would stop
   // the sale's register stamp first, ADR 0017).
   await page.evaluate(() => (window as unknown as { __medusaposHoldOrderInserts: () => void }).__medusaposHoldOrderInserts());
@@ -100,27 +99,27 @@ test('a keyboard-wedge scan in the cart view adds a product, and an unknown code
   // A tapped Pressable keeps focus in Chromium and activates on Enter; the scan's Enter must not also press it
   // (review follow-up). Tap "+" (E2E-1 to quantity 2), then scan without clicking anything else.
   await page.getByRole('button', { name: 'Increase E2E product 1', exact: true }).click();
-  await expect(page.getByText(/× 2$/)).toHaveCount(1);
+  await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await page.keyboard.type('E2E-2', { delay: 10 });
   await page.keyboard.press('Enter');
   await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
-  await expect(page.getByText(/× 2$/)).toHaveCount(1);
-  await expect(page.getByText(/× 1$/)).toHaveCount(1);
+  await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
+  await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
 
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.type('ZZZ-NOPE', { delay: 10 });
   await page.keyboard.press('Enter');
   await expect(page.getByRole('alert')).toHaveText('No product matches "ZZZ-NOPE"');
-  await expect(page.getByText(/× 2$/)).toHaveCount(1);
-  await expect(page.getByText(/× 1$/)).toHaveCount(1);
+  await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
+  await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
 
   await page.getByText('Discount', { exact: true }).first().click();
   await page.getByRole('button', { name: 'Amount', exact: true }).click();
   await page.getByLabel('Discount value', { exact: true }).pressSequentially('0.10', { delay: 10 });
   await page.getByLabel('Discount value', { exact: true }).press('Enter');
-  await expect(page.getByText(/× 2$/)).toHaveCount(1);
-  await expect(page.getByText(/× 1$/)).toHaveCount(1);
+  await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
+  await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
 
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(0);
 });

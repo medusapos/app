@@ -13,6 +13,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
+import { cartLine, cartLineCells } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
 vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
@@ -35,7 +36,7 @@ const add = () => fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 const drafts = () => draftsCollection(store.orders)!;
 const row = (label: string) => within(screen.getByTestId('cart-footer')).getByText(label).parentElement!.textContent;
 beforeEach(async () => {
-  setWindowWidth(1280);
+  setWindowWidth(1280, 800);
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -82,14 +83,15 @@ async function park() {
   await screen.findAllByTestId(/^parked-resume-/);
 }
 function price(value = '10.00') {
-  fireEvent.click(screen.getByText('Price', { exact: true }));
+  // The line's Price action, not TallyUI 3.14.0's Price column head.
+  fireEvent.click(within(cartLine('Shirt')).getByText('Price', { exact: true }));
   fireEvent.change(screen.getByLabelText('Price value'), { target: { value } });
   fireEvent.change(screen.getByLabelText('Reason (optional)'), { target: { value: 'Shelf price' } });
   fireEvent.click(screen.getByTestId('price-apply'));
 }
 async function complete() {
   await act(async () => { fireEvent.click(button('Card terminal')); });
-  await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+  await act(async () => { fireEvent.click(button('Complete sale')); });
   await waitFor(() => expect(record).toHaveBeenCalledOnce());
   return record.mock.calls[0][0];
 }
@@ -103,11 +105,11 @@ it('parks the cart from the Parked sales sheet, starts an empty sale, and resume
   expect(screen.getByTestId('cart-empty')).toBeTruthy();
   expect(row('Total')).toBe('Total€0.00');
   add();
-  expect(screen.getByText('€12.00 × 1')).toBeTruthy();
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   fireEvent.click(button('Remove Shirt'));
   fireEvent.click(button('Parked sales (1)'));
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
-  expect(screen.getByText('€12.00 × 2')).toBeTruthy();
+  expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
   expect(row('Total')).toBe('Total€30.00');
   expect(await drafts().find().exec()).toHaveLength(0);
   expect(record).not.toHaveBeenCalled();
@@ -116,7 +118,7 @@ it('parks the cart from the Parked sales sheet, starts an empty sale, and resume
 it('a parked sale resumed after a catalogue price change is re-priced to today\'s price, with TallyUI\'s Prices changed note', async () => {
   const view = await mount();
   add();
-  expect(screen.getByText('€12.00 × 1')).toBeTruthy();
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   await park();
   const replicated = vi.mocked(useReplicatedProducts).mock.results.at(-1)!.value;
   const product = replicated.products[0];
@@ -124,7 +126,7 @@ it('a parked sale resumed after a catalogue price change is re-priced to today\'
     variants: [{ ...product.variants[0], prices: [{ amount: 15, currency_code: 'eur' }] }] }] });
   view.rerender(<><ProductsScreen /><PortalHost /></>);
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
-  expect(screen.getByText('€15.00 × 1').parentElement!.parentElement!.textContent).toBe('Shirt€15.00 × 1€15.00');
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€15.00', '€15.00']);
   expect([row('Subtotal'), row('VAT 25%'), row('Total')]).toEqual(['Subtotal€15.00', 'VAT 25%€3.75', 'Total€18.75']);
   expect(screen.getByText("Prices changed since this sale was parked: 1 line updated to today's price.")).toBeTruthy();
 });
@@ -137,7 +139,7 @@ it('a variant no longer in the catalogue keeps its parked price on resume', asyn
   view.rerender(<><ProductsScreen /><PortalHost /></>);
   expect(screen.queryByTestId('product-tile-Shirt')).toBeNull();
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
-  expect(screen.getByText('€12.00 × 1')).toBeTruthy();
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   expect(row('Total')).toBe('Total€15.00');
   expect(screen.queryByText(/Prices changed/)).toBeNull();
 });
@@ -145,7 +147,7 @@ it('a variant no longer in the catalogue keeps its parked price on resume', asyn
 it('an unchanged catalogue resumes at the same prices with no Prices changed note', async () => {
   await mount(); add(); await park();
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
-  expect(screen.getByText('€12.00 × 1')).toBeTruthy();
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   expect(row('Total')).toBe('Total€15.00');
   expect(screen.queryByText(/Prices changed/)).toBeNull();
 });
@@ -184,7 +186,9 @@ it('the Price action on a line changes its unit price, and the line and total fo
   fireEvent.change(screen.getByLabelText('Discount value'), { target: { value: '10' } });
   fireEvent.click(button('Apply'));
   price();
-  expect(screen.getByText('€10.00 × 2').parentElement!.parentElement!.textContent).toBe('Shirt€10.00 × 2€20.00');
+  // TallyUI 3.14.0's Price cell strikes the regular price through ahead of the new unit price.
+  expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00€10.00', '€20.00']);
+  expect(within(cartLine('Shirt')).getByLabelText('Regular price €12.00')).toBeTruthy();
   expect([row('Subtotal'), row('Discount'), row('VAT 25%'), row('Total')])
     .toEqual(['Subtotal€20.00', 'Discount−€2.00', 'VAT 25%€4.50', 'Total€22.50']);
 });
