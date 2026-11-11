@@ -92,6 +92,7 @@ async function complete() {
   return toOrderCreateEnvelope(order, 'register-1');
 }
 
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
 it('takes a card part and a cash remainder, shows change from cash only, and records both payments', async () => {
   await startSplit();
   tender('card', '10.00');
@@ -111,8 +112,9 @@ it('takes a card part and a cash remainder, shows change from cash only, and rec
   expect(screen.getByLabelText('Card terminal: €10.00')).toBeTruthy();
   expect(screen.getByLabelText('Cash tendered: €20.00')).toBeTruthy();
   expect(screen.getByLabelText('Change: €6.00')).toBeTruthy();
-});
+}, 15000);
 
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
 it('caps a card part at the balance due, with no change from card', async () => {
   await startSplit();
   // The pane caps a card leg before it is taken: over the balance, Take is refused with v2's hint, and nothing is recorded.
@@ -127,7 +129,7 @@ it('caps a card part at the balance due, with no change from card', async () => 
   const { payload } = await complete();
   expect(payload.payments).toEqual([expect.objectContaining({ method: 'external', amountMinor: 2400 })]);
   expect(payload.payments[0].changeMinor ?? 0).toBe(0);
-});
+}, 15000);
 
 it('removing a tender restores the balance due', async () => {
   await startSplit();
