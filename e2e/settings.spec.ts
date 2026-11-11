@@ -149,8 +149,9 @@ test('Theme: Dark puts the dark class on <html> and its tokens, the first frame 
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
   await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
+  // The next animation frame may not have run yet, so wait for the first recorded frame.
+  await expect.poll(() => page.evaluate(() => (window as Window & { themeFrames: string[] }).themeFrames.length)).toBeGreaterThan(0);
   const themeFrames = await page.evaluate(() => (window as Window & { themeFrames: string[] }).themeFrames);
-  expect(themeFrames.length).toBeGreaterThan(0);
   expect(themeFrames.some((classes) => /(^|\s)light(\s|$)/.test(classes))).toBe(false);
 
   await page.getByRole('button', { name: 'System', exact: true }).click();
