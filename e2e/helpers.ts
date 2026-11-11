@@ -278,10 +278,20 @@ async function storeRegisterCommand(type: string, version: number, payload: Reco
 
 export type StoreRegisterSession = { id: string; status: string; expected?: { cash: number }; salesCount?: number };
 
-// The store's read of `registerId` (its live session, else the latest opened), or {} when it has none.
-export async function storeRegister(registerId = 'register-1'): Promise<{ session?: StoreRegisterSession }> {
+export type StoreRegisterCounters = { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
+
+// The store's read of `registerId` (its live session, else the latest opened, and the register's counters), or {} when it has none.
+export async function storeRegister(registerId = 'register-1'): Promise<{ session?: StoreRegisterSession; counters?: StoreRegisterCounters }> {
   const state = await fetch(`${backend}/tally/v1/registers/${registerId}`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
   return state.status === 404 ? {} : await state.json();
+}
+
+// The number the store takes for `registerId`'s next closure, as its closure sheet names it ("Closure #n"): a till
+// adopts the store's counters from its applied register commands (TallyUI #651), so a fresh till's first closure
+// follows every earlier till's, not #1. Read once this till's open is applied and before it closes.
+export async function nextStoreClosure(registerId = 'register-1') {
+  const { counters } = await storeRegister(registerId);
+  return `Closure #${(counters?.lastClosureNumber ?? 0) + 1}`;
 }
 
 // The store keeps one open session per register (spec-42); this closes the store's open session, as a till would.

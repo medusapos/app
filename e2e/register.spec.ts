@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -88,6 +88,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       // Spec-42: the register sync reaches the store; the open is applied, for the session the sale was taken in.
       await expect.poll(() => [opens.map(({ status }) => status), sales.map(({ status }) => status)]).toEqual([['applied'], ['applied']]);
       expect(opens[0].payload.sessionId).toBe(sales[0].payload.sessionId);
+      const closure = await nextStoreClosure();
       if (phone) {
         // Products with the register open: the short status line and "Register ›" share one row.
         await expect(page.getByTestId('catalogue-status-row').getByText(/^Up to date · 5 products$/)).toBeVisible();
@@ -134,9 +135,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await shot(page, 'count');
       await count.getByTestId('count-close').click();
       const closureSheet = page.getByTestId('closure-sheet');
-      await expect(closureSheet.getByTestId('closure-number')).toHaveText('Closure #1');
+      await expect(closureSheet.getByTestId('closure-number')).toHaveText(closure);
       await closureSheet.getByTestId('closure-print').click();
-      await expect(page.frameLocator('#closure-print-frame').locator('h2')).toHaveText('Z report · Closure #1');
+      await expect(page.frameLocator('#closure-print-frame').locator('h2')).toHaveText(`Z report · ${closure}`);
       await expect(closureSheet.getByTestId('closure-print')).toHaveText('Print the Z report');
       await expect(closureSheet.getByTestId('closure-print-error')).toHaveCount(0);
       await expect(closureSheet.getByTestId('closure-counted-cash')).toHaveText(new RegExp(`^Counted ${money(counted).source.slice(1, -1)}$`));
@@ -153,7 +154,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       // The last closure's figures, from the frozen closure.
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
       const figures = page.getByTestId('last-closure');
-      await expect(figures.getByRole('heading')).toHaveText('Last closure · Closure #1');
+      await expect(figures.getByRole('heading')).toHaveText(`Last closure · ${closure}`);
       await expect(figures.getByTestId('last-closure-sales')).toHaveText(money(total));
       await expect(figures.getByTestId('last-closure-float')).toHaveText(money(100));
       await expect(figures.getByTestId('last-closure-expected-cash')).toHaveText(money(counted));
@@ -169,6 +170,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
 
     test('a close whose closure write failed shows TallyUI\'s Finish closing card, which completes it with the stored count', async ({ page }) => {
       await signIn(page);
+      const closure = await nextStoreClosure();
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
       await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
       const count = page.getByTestId('register-count');
@@ -187,7 +189,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await shot(page, 'finish-close');
       await finish.getByTestId('register-column-finish-close-button').click();
       const sheet = page.getByTestId('closure-sheet');
-      await expect(sheet.getByTestId('closure-number')).toHaveText('Closure #1');
+      await expect(sheet.getByTestId('closure-number')).toHaveText(closure);
       await expect(sheet.getByTestId('closure-counted-cash')).toHaveText(/^Counted €?\s?100[.,]00\s?€?$/);
       await sheet.getByTestId('closure-done').click();
       await expect(page.getByTestId('open-register-amount')).toHaveValue('100.00');
@@ -196,6 +198,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
 
     test('over the threshold: the approval dialog, its offline refusal, then a manager login approves the close', async ({ page }) => {
       await signIn(page);
+      const closure = await nextStoreClosure();
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
       await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
       const count = page.getByTestId('register-count');
@@ -227,7 +230,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await dialog.getByTestId('approval-password').fill(credentials.password);
       await dialog.getByTestId('approval-approve').click();
       const sheet = page.getByTestId('closure-sheet');
-      await expect(sheet.getByTestId('closure-number')).toHaveText('Closure #1');
+      await expect(sheet.getByTestId('closure-number')).toHaveText(closure);
       // TallyUI's ClosureSheet shows the approver itself (#174).
       await expect(sheet.getByTestId('closure-approved-by')).toHaveText(/^Approved by \S/);
       const approvedBy = await sheet.getByTestId('closure-approved-by').textContent();
