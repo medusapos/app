@@ -1,6 +1,6 @@
 # Till coupons are Medusa promotion codes, priced by the store
 
-Status: Proposed
+Status: Accepted (front desk ruling 2026-11-11, decisions 1–3 with the conditions marked "desk condition")
 Date: 2026-11-11
 Supersedes: ADR 0024 decision 3 (the blanket `coupon_invalid` refusal)
 
@@ -56,18 +56,38 @@ The research behind this ADR, with file and line references into Medusa 2.21.0 a
   - have the sum of its line amounts within half a minor unit of `discountMinor + discountTaxMinor` in the lines' mode. That is ADR 0012's tolerance.
 
   Any failure means `coupon_invalid`, before an order exists.
+- **The order carries what the cashier tendered on** (desk condition, 2026-11-11). The order is refused with `coupon_invalid` and its store code before the ledger claim, and is never stored at a total other than the one charged, when re-pricing gives a different amount because:
+  - the promotion was edited since the preview: `amount_mismatch`;
+  - it expired or was deactivated: `not_active`;
+  - its rules no longer match: `not_applicable`;
+  - its limit or budget was reached: `limit_reached` or `budget_exceeded`.
 - **The write.** Inside `tallyOrderCreateWorkflow`, the #290 step becomes `tally-promotion-adjustments`. After dropping the automatic promotions' adjustments, it:
-  - adds one line-item adjustment per priced line, with `code`, `promotion_id`, `amount`, and `is_tax_inclusive` from the line's mode;
+  - adds one line-item adjustment per priced line, with `code`, `promotion_id`, `amount`, and `is_tax_inclusive` from the line's mode. The amounts are the till's, as matched in the pre-flight, never a fresh price;
   - links the order to each promotion (Medusa's order–promotion link);
   - runs `registerUsageStep`, whose `revertUsage` compensation undoes the usage if a later step fails.
 
+  The same step also runs on the resume path (`resume.ts`) before a draft that is still a draft is converted, so a crash between create and convert can't leave Medusa's prices on the order (#291 review).
+
   `createOrderWorkflow` still gets no `promo_codes`. Its refresh would re-price from the order's gross item subtotals, ignoring the till's discounts, and would replace these adjustments.
-- **A race.** `registerUsage` throwing `NOT_ALLOWED` (a limit reached or a budget used up since the pre-flight) maps to a new error class, which `execute.ts` turns into `coupon_invalid`. The workflow rolls back, so no order is left behind.
+- **A race.** A use can be taken between the pre-flight and the write. That is the one refusal raised after the claim, and the only thing atomic enough to catch it is `registerUsage` itself, inside the workflow.
+  - `registerUsage` throwing `NOT_ALLOWED` maps to a new error class.
+  - `execute.ts` turns it into `coupon_invalid` with `limit_reached` or `budget_exceeded`, the same path a `StoreConfigurationError` takes today.
+  - The workflow rolls back, and the ledger records the command as `rejected`.
+  - No order and no payment are stored, so this condition still holds: nothing is ever stored at a total other than the one charged.
+- **Usage is registered exactly once per order** (desk condition, 2026-11-11).
+  - The ledger claim on the command id means a replay of an applied command returns the recorded result without running the workflow, so it can't register again.
+  - A transient failure after `registerUsageStep` compensates with `revertUsage` before the command is retried, so the retry registers once.
+  - The implementation's integration tests prove both: the same command sent twice, and a failure injected after the step followed by a retry. Each must leave the promotion's usage at 1.
+- **Cancel and refund don't return the use** (desk condition, 2026-11-11). This matches Medusa's own flow.
+  - In Medusa 2.21.0, `revertUsage` runs only as the compensation of `registerUsageStep` inside `completeCartWorkflow`.
+  - `cancelOrderWorkflow`, returns and refunds never revert promotion usage. No core-flows file other than `register-usage.js` and `complete-cart.js` references it.
+  - So a cancelled or refunded POS order keeps its use, like a storefront order. That includes the plugin's own cancel in `scripts/tally-ledger-resolve.ts`.
+  - If Medusa later reverts usage on cancel, POS orders follow through the same workflow, and this ADR is revisited.
 
 **Why:** Medusa stays the source of truth for rules, usage and budgets (the Medusa way), and the order carries real promotion links and usage. The till's figures remain the fiscal record, checked against the store's own computation, never silently replaced.
 
 ### 3. The first cut covers standard promotions that target items
-Promotions of type `buyget`, and promotions targeting `shipping_methods` or the whole `order`, are refused at preview and at create with `not_applicable`. The message is "This coupon can't be used at the till yet".
+Promotions of type `buyget`, and promotions targeting `shipping_methods` or the whole `order`, are refused at preview and at create with `not_applicable`. The message is "This coupon can't be used at the till yet". The cashier sees it at preview, and on the refused order if one slipped through.
 - TallyUI #709 carries per-line amounts only, so a shipping-method coupon has nowhere to go.
 - Buy-get pricing is still per-line, but it needs its own test of quantities and of which items are free.
 
