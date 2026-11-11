@@ -155,6 +155,41 @@ A stock refusal from Medusa is treated as a race and retried, never a rejection.
 Known limit: a channel with several stock locations may reserve at another location than
 the sale's; the dev store has one. See [the stock ADR](../../docs/adr/0003-offline-sale-stock.md).
 
+### Automatic promotions and POS orders stored before the fix
+
+A POS order keeps the till's figures: the store's automatic promotions are dropped from it
+(#290). Admin draft orders still get them. A dropped promotion leaves no link from the order
+to the promotion and no campaign budget usage.
+
+Plugin releases up to 0.3.0 kept those promotions on POS orders. On a store with an active
+automatic promotion, each POS order was stored below what the till charged, and Admin shows
+the store owing the buyer the difference. **The plugin leaves those orders alone.** Correcting
+a stored order is the store owner's accounting decision: an order edit, or a note against
+the difference. There are three ways to find them (#295):
+
+- **The ledger.** The sale's `tally_command.result` has a `warnings` entry with code
+  `total_mismatch` whose `expectedMinor` is above `serverMinor`, usually next to a
+  `figures_mismatch`. `result.serverRefs.orderId` names the order.
+- **Admin.** A POS order that was paid in full at the till shows a pending difference in the
+  buyer's favour.
+- **The database** (read only). A POS order has `tally_pos_totals` in its metadata. It is
+  affected when a live adjustment on one of its lines or shipping methods carries a
+  `promotion_id`; the till's own adjustments never do.
+
+```sql
+SELECT DISTINCT o.id, o.display_id, o.created_at
+FROM "order" o
+LEFT JOIN order_item oi ON oi.order_id = o.id AND oi.deleted_at IS NULL
+LEFT JOIN order_line_item_adjustment la
+  ON la.item_id = oi.item_id AND la.deleted_at IS NULL AND la.promotion_id IS NOT NULL
+LEFT JOIN order_shipping os ON os.order_id = o.id AND os.deleted_at IS NULL
+LEFT JOIN order_shipping_method_adjustment sa
+  ON sa.shipping_method_id = os.shipping_method_id AND sa.deleted_at IS NULL AND sa.promotion_id IS NOT NULL
+WHERE o.deleted_at IS NULL AND o.metadata ? 'tally_pos_totals'
+  AND (la.id IS NOT NULL OR sa.id IS NOT NULL)
+ORDER BY o.created_at;
+```
+
 ## Command execution
 
 `executeOrderCreate(container, command, options?)` in `workflows/tally-order-create` fingerprints
