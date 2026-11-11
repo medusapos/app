@@ -193,7 +193,7 @@ export async function runOrderCreate(
   }
   const { data: [order] } = await query.graph({
     entity: 'order', fields: ['id', 'display_id', 'total', 'raw_total', 'raw_tax_total', 'raw_discount_subtotal', 'metadata', 'customer_id',
-      ...((command.version as number) === 5 ? ['items.metadata', 'items.raw_subtotal', 'shipping_methods.raw_subtotal'] : [])], filters: { id: orderId },
+      ...(command.version >= 5 ? ['items.metadata', 'items.raw_subtotal', 'shipping_methods.raw_subtotal'] : [])], filters: { id: orderId },
   })
   if (order.metadata?.tally_stock_topups) {
     const topUps = order.metadata.tally_stock_topups as StockTopUp[]
@@ -210,7 +210,7 @@ export async function runOrderCreate(
   }
   const serverMinor = majorToMinor(order.raw_total.value, currencyDecimals(payload.currency))
   const serverTax = majorToMinor(order.raw_tax_total.value, currencyDecimals(payload.currency))
-  const chargesNet = (command.version as number) === 5 ? majorToMinor(MathBN.sum(0,
+  const chargesNet = command.version >= 5 ? majorToMinor(MathBN.sum(0,
     ...order.items.filter(item => item.metadata?.tally_fee_uuid).map(item => item.raw_subtotal.value),
     ...order.shipping_methods.map(method => method.raw_subtotal.value)
   ).toString(), currencyDecimals(payload.currency)) : 0

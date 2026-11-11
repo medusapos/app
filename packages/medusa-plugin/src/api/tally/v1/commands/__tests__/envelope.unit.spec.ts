@@ -94,11 +94,11 @@ describe('validateBatch', () => {
     })
   })
 
-  it('rejects unsupported version 6 after the replay read and before shape checks or ledger claim', async () => {
-    const outcome = await processBatch(container, [{ ...command, version: 6, payload: { display: {} } } as never], {})
+  it('rejects unsupported version 8 after the replay read and before shape checks or ledger claim', async () => {
+    const outcome = await processBatch(container, [{ ...command, version: 8, payload: { display: {} } } as never], {})
     expect(outcome).toEqual({ status: 200, body: { results: [{ id: command.id, status: 'rejected', error: {
-      code: 'unsupported_version', message: 'order.create version 6 is not supported; this server supports 1, 2, 3, 4, 5',
-      data: { orderCreate: 5 },
+      code: 'unsupported_version', message: 'order.create version 8 is not supported; this server supports 1, 2, 3, 4, 5, 6, 7',
+      data: { orderCreate: 7 },
     } }] } })
   })
 

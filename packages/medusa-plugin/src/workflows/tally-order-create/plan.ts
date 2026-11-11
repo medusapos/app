@@ -26,7 +26,9 @@ export type PlanContext = {
 export type DraftOrderItemInput = {
   variant_id?: string; title?: string; variant_sku?: string; quantity: number; unit_price: string; is_tax_inclusive: boolean
   requires_shipping?: boolean; is_discountable?: boolean
-  metadata: { tally_line_uuid?: string; tally_fee_uuid?: string }
+  metadata: { tally_line_uuid?: string; tally_fee_uuid?: string
+    /** Version 6 recorded line fields, kept as sent (ADR 0024); none changes a price. */
+    tally_regular_unit_price_minor?: number; tally_attributes?: Record<string, string>; tally_any_attributes?: string[] }
   /** Only on a discounted line: one adjustment of its discountMinor, net at v4, own-mode below v4. */
   // No code: createOrderWorkflow's promotion refresh deletes every adjustment whose code is not an applied promotion.
   adjustments?: Array<{ amount: string; description: 'POS discount'; is_tax_inclusive: boolean }>
@@ -56,7 +58,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
   { ok: true; plan: OrderCreatePlan } | { ok: false; rejection: Rejection } {
   const v3 = payload as OrderCreatePayloadV3
   const v5 = payload as OrderCreatePayload & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }
-  const fees = orderCreateVersion === 5 ? v5.fees ?? [] : [], shipping = orderCreateVersion === 5 ? v5.shipping ?? [] : []
+  const fees = orderCreateVersion >= 5 ? v5.fees ?? [] : [], shipping = orderCreateVersion >= 5 ? v5.shipping ?? [] : []
   if (payload.lines.length === 0) {
     return { ok: false, rejection: { code: 'invalid_quantity', message: 'Invalid lines: must not be empty' } }
   }
@@ -131,6 +133,8 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
         no_notification: true,
         metadata: {
           tally_client_id: payload.clientOrderId,
+          // Version 7: the sale's note, shown in Medusa Admin's order Metadata (ADR 0024).
+          ...(payload.note !== undefined ? { tally_note: payload.note } : {}),
           tally_created_at: payload.createdAt,
           tally_command_id: ctx.commandId,
           tally_payments: payload.payments,
@@ -170,7 +174,10 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
           unit_price: minorToMajor(line.unitPriceMinor, decimals),
           // A line's own tax mode wins; absent means the order's (ADR-038 amendment).
           is_tax_inclusive: line.taxInclusive ?? payload.pricesIncludeTax,
-          metadata: { tally_line_uuid: line.clientLineId },
+          metadata: { tally_line_uuid: line.clientLineId,
+            ...(line.regularUnitPriceMinor !== undefined ? { tally_regular_unit_price_minor: line.regularUnitPriceMinor } : {}),
+            ...(line.attributes !== undefined ? { tally_attributes: { ...line.attributes } } : {}),
+            ...(line.anyAttributes !== undefined ? { tally_any_attributes: [...line.anyAttributes] } : {}) },
           // Version 4 discounts are net in every line mode; earlier versions use the item's mode (ADR-062).
           ...(line.discountMinor !== undefined ? { adjustments: [{ amount: minorToMajor(line.discountMinor, decimals),
             description: 'POS discount' as const, is_tax_inclusive: orderCreateVersion >= 4 ? false : line.taxInclusive ?? payload.pricesIncludeTax }] } : {}),

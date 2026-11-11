@@ -2,7 +2,7 @@ import { expect, type Page, type Response } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, cartLineRow, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
 import { E2E_RUN } from './ports';
 
-// Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5] at GET /tally/v1/info,
+// Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5, 6, 7] at GET /tally/v1/info,
 // and a discounted sale without charges or custom lines goes out as version 4, with one net "POS discount" adjustment per line.
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
@@ -27,10 +27,10 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
   await signIn(page);
-  // The plugin advertises order.create [1, 2, 3, 4, 5] (ADR 0021), register 1, 2 and 3 (ADR 0022, ADR 0023) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0)
+  // The plugin advertises order.create [1, 2, 3, 4, 5, 6, 7] (ADR 0021), register 1, 2 and 3 (ADR 0022, ADR 0023) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0)
   // and its registerApproval, the plugin's default approvalThresholdMinor of 500 (ADR 0023; parsed since TallyUI 3.13.0, ADR-082).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
-  expect(await capabilities(page)).toEqual({ orderCreate: 5, register: 3,
+  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
     registerApproval: { thresholdMinor: 500 } });
   await addE2E1(page);

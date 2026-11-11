@@ -560,6 +560,47 @@ it('v5: a custom line becomes a variant-less item titled custom.name, with its d
   })))).toEqual([[{ id: '0', quantity: 2 }]])
 })
 
+describe('order.create v6 and v7 (ADR 0024)', () => {
+  const plan = (sale: OrderCreatePayload, version: number) => {
+    const result = planOrderCreate(sale, ctx, version)
+    if (!result.ok) throw new Error('Expected a plan')
+    return result.plan
+  }
+
+  it('v7 puts the note on the draft order metadata as tally_note; without a note there is no tally_note key', () => {
+    expect(plan({ ...payload, note: 'Gift wrap, please' }, 7).draftOrder.metadata.tally_note).toBe('Gift wrap, please')
+    expect(plan(payload, 7).draftOrder.metadata).not.toHaveProperty('tally_note')
+    expect(plan(payload, 5).draftOrder.metadata).not.toHaveProperty('tally_note')
+  })
+
+  it('v6 keeps a line\'s recorded fields, as copies, on its item metadata beside tally_line_uuid, and prices it as before', () => {
+    const sale = { ...payload, lines: [{ ...payload.lines[0], regularUnitPriceMinor: 900,
+      attributes: { Size: 'M', Colour: 'Blue' }, anyAttributes: ['Colour'] }, payload.lines[1]] }
+    const items = plan(sale, 6).draftOrder.items
+    expect(items[0].metadata).toEqual({ tally_line_uuid: 'line_1', tally_regular_unit_price_minor: 900,
+      tally_attributes: { Size: 'M', Colour: 'Blue' }, tally_any_attributes: ['Colour'] })
+    expect(items[1].metadata).toEqual({ tally_line_uuid: 'line_2' })
+    const { metadata: _, ...priced } = items[0]
+    const { metadata: __, ...before } = plan(payload, 5).draftOrder.items[0]
+    expect(priced).toEqual(before)
+    sale.lines[0].attributes!.Size = 'L'
+    sale.lines[0].anyAttributes!.push('Size')
+    expect(items[0].metadata).toMatchObject({ tally_attributes: { Size: 'M' }, tally_any_attributes: ['Colour'] })
+  })
+
+  it.each([6, 7])('a v%i plan with a fee and shipping has the same items and shipping methods as the same payload at v5', version => {
+    const sale = { ...payload,
+      fees: [{ clientFeeId: 'fee_1', name: 'Bag', amountMinor: 20, taxStatus: 'taxable' as const, taxMinor: 3 }],
+      shipping: [{ clientShippingId: 'shipping_1', name: 'Delivery', amountMinor: 500, taxStatus: 'taxable' as const, taxMinor: 80 }],
+    }
+    const v5 = plan(sale, 5).draftOrder, later = plan({ ...sale, ...(version === 7 ? { note: 'n' } : {}) }, version).draftOrder
+    expect(v5.items).toHaveLength(3)
+    expect(later.items).toEqual(v5.items)
+    expect(later.shipping_methods).toEqual(v5.shipping_methods)
+    expect(later.metadata.tally_pos_totals).toEqual(v5.metadata.tally_pos_totals)
+  })
+})
+
 it.each(['fees', 'shipping'])('v5: validates integer amounts on %s', field => {
   for (const amountMinor of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1]) {
     const result = planOrderCreate({ ...payload, [field]: [{ amountMinor }] }, ctx, 5)

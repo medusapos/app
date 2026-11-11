@@ -8,8 +8,8 @@ describe('TAX_ROUNDING', () => {
   })
 })
 
-it('order.create versions include 5 and lineTax is { none: false, classes: false }', () => {
-  expect(SUPPORTED_ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5])
+it('order.create versions include 7 and lineTax is { none: false, classes: false }', () => {
+  expect(SUPPORTED_ORDER_CREATE_VERSIONS).toEqual([1, 2, 3, 4, 5, 6, 7])
   expect(LINE_TAX).toEqual({ none: false, classes: false })
 })
 
