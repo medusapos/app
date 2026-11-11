@@ -347,6 +347,22 @@ describe('versions 6 and 7 (ADR 0024)', () => {
       .toEqual(['payload.lines[0].attributes: expected no NUL character'])
   })
 
+  it('bounds an attributes name at 255 characters', () => {
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, attributes: { ['n'.repeat(255)]: 'M', Colour: 'Blue' } }] }, 6)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, attributes: { ['n'.repeat(256)]: 'M', Colour: 'Blue' } }] }, 6))
+      .toEqual(['payload.lines[0].attributes: expected at most 255 characters'])
+  })
+
+  it('refuses a lone surrogate, before the replay read as well, and accepts a valid pair', () => {
+    expect(payloadShapeErrors({ ...payload, note: 'a\uD83D' }, 7)).toEqual(['payload.note: expected well-formed text'])
+    expect(payloadNulErrors({ ...payload, note: 'a\uD83D' })).toEqual(['payload.note: expected well-formed text'])
+    const lowSurrogate = { ...payload, lines: [{ ...payload.lines[0], title: '\uDE00b' }] }
+    expect(payloadShapeErrors(lowSurrogate, 7)).toEqual(['payload.lines[0].title: expected well-formed text'])
+    expect(payloadNulErrors(lowSurrogate)).toEqual(['payload.lines[0].title: expected well-formed text'])
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...payload.lines[0], title: 'cof😀fee' }] }, 7)).toEqual([])
+    expect(payloadNulErrors({ ...payload, lines: [{ ...payload.lines[0], title: 'cof😀fee' }] })).toEqual([])
+  })
+
   it.each([[['Pattern']], [['Colour', 'Pattern']], [[1]], ['Colour'], [null]])('refuses anyAttributes %j, not an array of names in attributes', anyAttributes => {
     expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, anyAttributes }] }, 6))
       .toEqual(['payload.lines[0].anyAttributes: expected an array of names in attributes'])

@@ -4,7 +4,7 @@ import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import { Cart, CartBar, CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, ParkedSales, Receipt, SplitTender, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
-import { ConnectorProvider, ConnectorUnauthorizedError, ORDER_NOTE_MAX, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
+import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
@@ -17,6 +17,7 @@ import {
 import { StripHeightContext } from '../components/store-refused';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
+import { clampNote } from '../lib/note-text';
 import { withDemoSaleEvent } from '../lib/demo-analytics';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
@@ -336,7 +337,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       </Pressable>
     </View>
     <CartNoteInput key={sale.order.id} value={sale.order.note ?? ''}
-      onChangeText={(text) => sale.setNote(text.slice(0, ORDER_NOTE_MAX))} />
+      onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
   </RegisterGate>;

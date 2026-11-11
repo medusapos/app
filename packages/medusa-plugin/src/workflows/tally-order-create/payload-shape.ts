@@ -15,6 +15,8 @@ const LINE_FIELDS = since<OrderCreateLine & { custom?: OrderCreateCustomLine }>(
   taxInclusive: 1, discountMinor: 2, custom: 5, regularUnitPriceMinor: 6, attributes: 6, anyAttributes: 6 })
 // @tallyui/core's ORDER_NOTE_MAX (TallyUI ADR-083), in UTF-16 units; kept here because the plugin imports core as types only.
 const ORDER_NOTE_MAX = 1000
+// In u mode a valid surrogate pair is one code point, so only an unpaired surrogate matches.
+const LONE_SURROGATE = /\p{Cs}/u
 const FEE_FIELDS = since<OrderCreateFee>({ clientFeeId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5 })
 const SHIPPING_FIELDS = since<OrderCreateShipping>({ clientShippingId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5, methodId: 5 })
 const CUSTOM_FIELDS = since<OrderCreateCustomLine>({ name: 5, sku: 5, taxClass: 5, taxStatus: 5 })
@@ -160,6 +162,7 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   return [...errors, ...payloadStringErrors(payload, true)].slice(0, 10)
 }
 
+// Reports ill-formed text (a lone surrogate) as well as NUL.
 export function payloadNulErrors(payload: unknown): string[] {
   return payloadStringErrors(payload, false)
 }
@@ -179,9 +182,9 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
       for (const key of field === 'lines' ? ['clientLineId', 'variantId', 'title'] : ['clientPaymentId', 'method', 'reference']) {
         fields.push([`${field}[${index}].${key}`, item?.[key], 255])
       }
-      // Version 6 attributes: names are NUL-checked, values bounded at 255 (ADR 0024).
+      // Version 6 attributes: names and values are both bounded at 255 (ADR 0024).
       const attributes = field === 'lines' && typeof item?.attributes === 'object' && item.attributes !== null ? item.attributes : {}
-      for (const [name, text] of Object.entries(attributes)) fields.push([`lines[${index}].attributes`, name, 0], [`lines[${index}].attributes.${name}`, text, 255])
+      for (const [name, text] of Object.entries(attributes)) fields.push([`lines[${index}].attributes`, name, 255], [`lines[${index}].attributes.${name}`, text, 255])
     }
   }
   const errors: string[] = []
@@ -199,6 +202,7 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
     if (typeof text !== 'string') continue
     if (bounds && max && text.length > max) errors.push(`payload.${path}: expected at most ${max} characters`)
     if (text.includes('\0')) errors.push(`payload.${path}: expected no NUL character`)
+    if (LONE_SURROGATE.test(text)) errors.push(`payload.${path}: expected well-formed text`)
   }
   return errors.slice(0, 10)
 }
