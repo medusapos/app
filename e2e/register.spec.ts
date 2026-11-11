@@ -2,6 +2,15 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, test } from './helpers';
+import { E2E_RUN } from './ports';
+
+const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
+// The store's closure history row for `sessionId`'s closure (closure-history.ts), read with the e2e admin token.
+async function storeClosure(sessionId: string): Promise<{ sessionId: string; approvalVerified: boolean } | undefined> {
+  const response = await fetch(`${backend}/tally/v1/registers/register-1/closures`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
+  const { closures = [] } = await response.json() as { closures?: { sessionId: string; approvalVerified: boolean }[] };
+  return closures.find((closure) => closure.sessionId === sessionId);
+}
 
 // Registers, part A (ADR 0017): a fresh till binds Register 1, opens it with a float of 100.00, takes a cash sale
 // the register counts, records a paid in and undoes it. Part B (ADR 0018): Close register counts the drawer with
@@ -199,7 +208,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await shot(page, 'count-over');
 
       // The sign-in can't reach the backend: connect or count again, with only Cancel.
-      await page.route('**/auth/user/emailpass', (route) => route.abort('internetdisconnected'));
+      // At contract 3 the approval goes to the store's route (ADR 0023).
+      await page.route('**/tally/v1/register-approvals', (route) => route.abort('internetdisconnected'));
       await dialog.getByTestId('approval-email').fill(credentials.email);
       await dialog.getByTestId('approval-password').fill(credentials.password);
       await dialog.getByTestId('approval-approve').click();
@@ -209,7 +219,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await dialog.getByTestId('approval-cancel').click();
       await expect(count.getByTestId('count-manager-line')).toHaveText('Approval was not granted. The count is unchanged.');
       await expect(count.getByTestId('count-amount')).toHaveValue('90.00');
-      await page.unroute('**/auth/user/emailpass');
+      await page.unroute('**/tally/v1/register-approvals');
 
       // Self-approval: the e2e admin approves with their own login (ADR 0018).
       await count.getByTestId('count-close').click();
@@ -233,6 +243,58 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       // The password was never put in the page's address or its storage.
       const kept = await page.evaluate(() => JSON.stringify({ href: location.href, local: { ...localStorage }, session: { ...sessionStorage } }));
       expect(kept).not.toContain(credentials.password);
+    });
+
+    // Counts €10.00 short and approves in the dialog as the e2e admin (`dialog`), from the panel's Close register.
+    async function closeOverThreshold(page: Page) {
+      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+      const count = page.getByTestId('register-count');
+      await count.getByTestId('count-amount').fill('90.00');
+      await count.getByTestId('count-close').click();
+      await approveInDialog(page);
+    }
+    async function approveInDialog(page: Page) {
+      const dialog = page.getByTestId('approval-dialog');
+      await dialog.getByTestId('approval-email').fill(credentials.email);
+      await dialog.getByTestId('approval-password').fill(credentials.password);
+      await dialog.getByTestId('approval-approve').click();
+      await expect(dialog).toHaveCount(0);
+    }
+
+    test('over the threshold at contract 3: the store verifies the manager\'s approval', async ({ page }) => {
+      await signIn(page);
+      const { session } = await storeRegister();
+      const approvals = captureCommands<unknown>(page, 'register.closure.submit');
+      const route = page.waitForResponse((response) => response.url().endsWith('/tally/v1/register-approvals'));
+      await closeOverThreshold(page);
+      expect((await route).status()).toBe(200);
+      await expect(page.getByTestId('closure-sheet').getByTestId('closure-number')).toHaveText(/^Closure #\d+$/);
+      await expect.poll(() => approvals.map(({ status }) => status), { timeout: 30_000 }).toContain('applied');
+      expect((await storeClosure(session!.id))?.approvalVerified).toBe(true);
+    });
+
+    test('a closure the store refuses for its approval: the card asks again, and the new approval is accepted', async ({ page }) => {
+      await signIn(page);
+      const { session } = await storeRegister();
+      const submits = captureCommands<unknown>(page, 'register.closure.submit');
+      // One well-formed answer with a proof the store never issued: the store refuses the closure.
+      await page.route('**/tally/v1/register-approvals', (route) => route.fulfill({ status: 200, contentType: 'application/json',
+        body: JSON.stringify({ approval: 'bogus-proof', approvedBy: 'user_bogus', approvedByName: 'Nobody', expiresAt: new Date(Date.now() + 60_000).toISOString() }) }),
+      { times: 1 });
+      await closeOverThreshold(page);
+      await page.getByTestId('closure-sheet').getByTestId('closure-done').click();
+      await expect.poll(() => submits.map(({ code }) => code), { timeout: 30_000 }).toContain('register_approval_invalid');
+      await page.unroute('**/tally/v1/register-approvals');
+
+      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      const card = page.getByTestId('register-panel').getByTestId('register-panel-reapproval');
+      await expect(card).toBeVisible();
+      await shot(page, 'reapproval-card');
+      await card.getByTestId('register-panel-reapprove').click();
+      await approveInDialog(page);
+      await expect(card).toHaveCount(0);
+      await expect.poll(async () => (await storeClosure(session!.id))?.approvalVerified, { timeout: 30_000 }).toBe(true);
     });
   });
 }
