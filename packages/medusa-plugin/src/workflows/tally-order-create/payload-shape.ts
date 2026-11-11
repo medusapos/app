@@ -187,17 +187,19 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
       for (const [name, text] of Object.entries(attributes)) fields.push([`lines[${index}].attributes`, name, 255], [`lines[${index}].attributes.${name}`, text, 255])
     }
   }
-  // Version 3 receipt strings: plan.ts stores them in tally_pos_totals, the receipt email reads them back.
+  // Version 3 receipt strings: plan.ts stores them in tally_pos_totals, the receipt email reads them back. Discount ids,
+  // labels and tax codes get no length cap: neither the till nor Medusa (tax_rate.code is unbounded text) has one.
   const display = value.display as Record<string, unknown> | null | undefined, lines = display?.lines, rates = value.taxByRate
+  // display.currency and display.lines[].clientLineId keep 255 safely: each must equal a capped payload field (fiscal-figures.ts).
   fields.push(['display.currency', display?.currency, 255])
   for (const [index, line] of (Array.isArray(lines) ? lines : []).entries()) {
     fields.push([`display.lines[${index}].clientLineId`, line?.clientLineId, 255])
     for (const [at, item] of (Array.isArray(line?.discounts) ? line.discounts : []).entries()) {
       const path = `display.lines[${index}].discounts[${at}]`
-      fields.push([`${path}.discountId`, item?.discountId, 64], [`${path}.label`, item?.label, 255])
+      fields.push([`${path}.discountId`, item?.discountId, 0], [`${path}.label`, item?.label, 0])
     }
   }
-  for (const [index, rate] of (Array.isArray(rates) ? rates : []).entries()) fields.push([`taxByRate[${index}].code`, rate?.code, 64])
+  for (const [index, rate] of (Array.isArray(rates) ? rates : []).entries()) fields.push([`taxByRate[${index}].code`, rate?.code, 0])
   const errors: string[] = []
   for (const field of ['fees', 'shipping', 'lines']) {
     if (!Array.isArray(value[field])) continue

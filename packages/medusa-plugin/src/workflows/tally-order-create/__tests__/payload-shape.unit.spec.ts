@@ -389,9 +389,9 @@ describe('version 3 receipt strings (#292)', () => {
   const receipt: [string, number, Set][] = [
     ['display.currency', 255, (value, text) => { value.display.currency = text }],
     ['display.lines[0].clientLineId', 255, (value, text) => { value.display.lines[0].clientLineId = text }],
-    ['display.lines[0].discounts[0].discountId', 64, (value, text) => { value.display.lines[0].discounts[0].discountId = text }],
-    ['display.lines[0].discounts[0].label', 255, (value, text) => { value.display.lines[0].discounts[0].label = text }],
-    ['taxByRate[0].code', 64, (value, text) => { value.taxByRate[0].code = text }],
+    ['display.lines[0].discounts[0].discountId', 0, (value, text) => { value.display.lines[0].discounts[0].discountId = text }],
+    ['display.lines[0].discounts[0].label', 0, (value, text) => { value.display.lines[0].discounts[0].label = text }],
+    ['taxByRate[0].code', 0, (value, text) => { value.taxByRate[0].code = text }],
   ]
   const withText = (set: Set, text: string) => {
     const value = structuredClone(v3Golden.payload)
@@ -419,10 +419,15 @@ describe('version 3 receipt strings (#292)', () => {
     expect(payloadNulErrors(withText(set, 'cof😀fee'))).toEqual([])
   })
 
-  it.each(receipt)('bounds %s at %i characters in the shape check only', (field, max, set) => {
+  it.each(receipt.filter(([, max]) => max))('bounds %s at %i characters in the shape check only', (field, max, set) => {
     expect(payloadShapeErrors(withText(set, 'x'.repeat(max + 1)), 3)).toEqual([`payload.${field}: expected at most ${max} characters`])
     expect(payloadNulErrors(withText(set, 'x'.repeat(max + 1)))).toEqual([])
     expect(payloadShapeErrors(withText(set, 'x'.repeat(max)), 3)).toEqual([])
+  })
+
+  it.each(receipt.filter(([, max]) => !max))('caps no length of %s: neither the till nor Medusa does', (_field, _max, set) => {
+    expect(payloadShapeErrors(withText(set, 'x'.repeat(1000)), 3)).toEqual([])
+    expect(payloadNulErrors(withText(set, 'x'.repeat(1000)))).toEqual([])
   })
 
   it.each([{ display: 'EUR', taxByRate: 'VAT' }, { display: { lines: [null, 'x', { discounts: [null, 5] }] }, taxByRate: [null, 5] }])(

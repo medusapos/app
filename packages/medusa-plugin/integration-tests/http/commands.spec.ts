@@ -1862,6 +1862,26 @@ medusaIntegrationTestRunner({
       } })
     })
 
+    it('a v3 discounted sale with a 300-character discount label and tax code applies with no warnings and stores both intact (#294)', async () => {
+      const base = command()
+      const label = 'L'.repeat(300), code = 'C'.repeat(300)
+      const payload: OrderCreatePayloadV3 = { ...base.payload, subtotalMinor: 756, taxMinor: 144, totalMinor: 900, discountMinor: 100,
+        lines: [{ ...base.payload.lines[0], variantId: data.variantB, discountMinor: 100 }],
+        payments: [{ ...base.payload.payments[0], amountMinor: 900 }],
+        display: { currency: 'EUR', exponent: 2, taxInclusive: true, subtotalMinor: 1000, discountMinor: 100, taxMinor: 144, totalMinor: 900,
+          orderDiscountMinor: 0, lines: [{ clientLineId: base.payload.lines[0].clientLineId, amountMinor: 900,
+            discounts: [{ discountId: 'd', label, amountMinor: 100 }] }] },
+        taxByRate: [{ ratePpm: 190000, code, netMinor: 756, taxMinor: 144, grossMinor: 900 }],
+      }
+      const response = await post([{ ...base, version: 3, payload }])
+      expect(response.status).toBe(200)
+      expect(response.data.results[0]).toMatchObject({ status: 'applied', serverRefs: { totalMinor: 900 } })
+      expect(response.data.results[0].warnings).toBeUndefined()
+      const [order] = await liveOrders(payload.clientOrderId)
+      expect(order.metadata.tally_pos_totals.display.lines[0].discounts[0].label).toBe(label)
+      expect(order.metadata.tally_pos_totals.taxByRate[0].code).toBe(code)
+    })
+
     it('an unknown customerId is applied as a guest sale with customer_ignored, and the replay repeats it', async () => {
       const payload: OrderCreatePayloadV3 = { ...command().payload, customer: { customerId: 'cus_unknown' } }
       const sale = { ...command(), version: 3, payload }
