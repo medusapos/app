@@ -1,5 +1,6 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, ordersByClientId, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test,
+  type PostedCommand } from './helpers';
 
 // The sale's note (v2 parity row 8, ADR 0024): CartNoteInput in the cart, kept with a parked sale, shown on the
 // receipt and sent as order.create v7's `note`, which the store keeps as the order's metadata.tally_note. Sells only E2E-1.
@@ -24,10 +25,26 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
       await expect(page.getByRole('button', { name: 'New sale', exact: true })).toBeVisible();
     };
+    // The suite shares E2E-1 stock (as register.spec.ts does): read its level before each test sells anything, and
+    // give it back after, once every sale the test sent has applied, so no sale lands late in a later spec and the
+    // restore can't come before the decrement. Restored also when the test fails.
+    let token: string;
+    let level: Awaited<ReturnType<typeof inventoryLevel>>;
+    let commands: PostedCommand<Sale>[];
+    test.beforeEach(async ({ page }) => {
+      token = await adminToken();
+      level = await inventoryLevel(token, 'E2E-1');
+      commands = captureCommands<Sale>(page);
+    });
+    test.afterEach(async () => {
+      try {
+        await expect.poll(() => commands.every(({ status }) => status === 'applied')).toBe(true);
+      } finally {
+        await setInventoryLevel(token, level.inventoryItemId, level.locationId, level.stockedQuantity);
+      }
+    });
 
     test('a note added in the cart reaches the receipt and the Medusa order', async ({ page }) => {
-      const token = await adminToken();
-      const commands = captureCommands<Sale>(page);
       await signIn(page);
       await addE2E1(page);
       await openCart(page);
@@ -54,7 +71,6 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     });
 
     test('a note stays with a parked sale and goes with it when resumed', async ({ page }) => {
-      const commands = captureCommands<Sale>(page);
       await signIn(page);
       await addE2E1(page);
       await openCart(page);
@@ -85,7 +101,6 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     });
 
     test('a sale with no note goes at its base version, with no note', async ({ page }) => {
-      const commands = captureCommands<Sale>(page);
       await signIn(page);
       await addE2E1(page);
       await openCart(page);
