@@ -7,12 +7,14 @@ import type { OrderCreateFee, OrderCreateShipping, OrderCreateCustomLine } from 
 // fiscal-figures.ts). Each value is
 // the version that added the field; Record<keyof T, number> makes tsc refuse a missing or an extra field.
 const since = <T>(fields: Record<keyof T, number>) => new Map<string, number>(Object.entries(fields))
-// Versions 6 and 7's fields (@tallyui/core 3.10-3.13) are left out: this server accepts up to 5, so they stay unknown.
-const TOP_FIELDS = since<Omit<OrderCreatePayloadV3, 'coupons' | 'note'> & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
+// Versions 6 and 7 (@tallyui/core 3.17.0, ADR 0024): coupons and the recorded line fields at 6, the note at 7.
+const TOP_FIELDS = since<OrderCreatePayloadV3 & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
   subtotalMinor: 1, taxMinor: 1, totalMinor: 1, payments: 1, customer: 1, registerId: 1, cashierRef: 1, locationId: 1,
-  discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3, fees: 5, shipping: 5 })
-const LINE_FIELDS = since<Omit<OrderCreateLine, 'regularUnitPriceMinor' | 'attributes' | 'anyAttributes'> & { custom?: OrderCreateCustomLine }>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
-  taxInclusive: 1, discountMinor: 2, custom: 5 })
+  discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3, fees: 5, shipping: 5, coupons: 6, note: 7 })
+const LINE_FIELDS = since<OrderCreateLine & { custom?: OrderCreateCustomLine }>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
+  taxInclusive: 1, discountMinor: 2, custom: 5, regularUnitPriceMinor: 6, attributes: 6, anyAttributes: 6 })
+// @tallyui/core's ORDER_NOTE_MAX (TallyUI ADR-083), in UTF-16 units; kept here because the plugin imports core as types only.
+const ORDER_NOTE_MAX = 1000
 const FEE_FIELDS = since<OrderCreateFee>({ clientFeeId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5 })
 const SHIPPING_FIELDS = since<OrderCreateShipping>({ clientShippingId: 5, name: 5, amountMinor: 5, taxStatus: 5, taxClass: 5, taxMinor: 5, methodId: 5 })
 const CUSTOM_FIELDS = since<OrderCreateCustomLine>({ name: 5, sku: 5, taxClass: 5, taxStatus: 5 })
@@ -79,6 +81,13 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
       if (isLines && item.taxInclusive !== undefined) {
         check(typeof item.taxInclusive === 'boolean', `${path}.taxInclusive`, 'a boolean')
       }
+      // Version 6's recorded line fields (ADR 0024); attribute value bounds and NUL are payloadStringErrors' job.
+      const { regularUnitPriceMinor: regular, attributes, anyAttributes }: Record<string, unknown> = isLines ? item : {}
+      if (regular !== undefined) check(Number.isSafeInteger(regular) && (regular as number) >= 0, `${path}.regularUnitPriceMinor`, 'a non-negative safe integer')
+      if (attributes !== undefined) check(object(attributes) && Object.values(attributes).every(value => typeof value === 'string'),
+        `${path}.attributes`, 'an object of strings')
+      if (anyAttributes !== undefined) check(Array.isArray(anyAttributes) && anyAttributes.every(name => typeof name === 'string'
+        && object(attributes) && Object.prototype.hasOwnProperty.call(attributes, name)), `${path}.anyAttributes`, 'an array of names in attributes')
       for (const key of isLines ? ['quantity', 'unitPriceMinor'] : ['amountMinor']) number(item[key], `${path}.${key}`)
       if (!isLines) {
         for (const key of ['tenderedMinor', 'changeMinor']) {
@@ -143,6 +152,11 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   for (const field of ['registerId', 'cashierRef', 'locationId']) {
     if (payload[field] !== undefined) check(typeof payload[field] === 'string', field, 'a string')
   }
+  if (payload.coupons !== undefined) check(Array.isArray(payload.coupons), 'coupons', 'an array')
+  if (payload.note !== undefined) {
+    check(typeof payload.note === 'string' && payload.note.length > 0 && payload.note.length <= ORDER_NOTE_MAX,
+      'note', `a string of 1 to ${ORDER_NOTE_MAX} characters`)
+  }
   return [...errors, ...payloadStringErrors(payload, true)].slice(0, 10)
 }
 
@@ -156,7 +170,8 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
   const fields: [string, unknown, number][] = ['clientOrderId', 'createdAt', 'currency', 'registerId', 'cashierRef', 'locationId']
     .map(key => [key, value[key], 255])
   const customer = value.customer as Record<string, unknown> | null | undefined
-  fields.push(['customer.email', customer?.email, 254], ['customer.customerId', customer?.customerId, 0], ['sessionId', value.sessionId, 0])
+  fields.push(['customer.email', customer?.email, 254], ['customer.customerId', customer?.customerId, 0], ['sessionId', value.sessionId, 0],
+    ['note', value.note, 0])
   for (const field of ['lines', 'payments']) {
     const items = value[field]
     if (!Array.isArray(items)) continue
@@ -164,6 +179,9 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
       for (const key of field === 'lines' ? ['clientLineId', 'variantId', 'title'] : ['clientPaymentId', 'method', 'reference']) {
         fields.push([`${field}[${index}].${key}`, item?.[key], 255])
       }
+      // Version 6 attributes: names are NUL-checked, values bounded at 255 (ADR 0024).
+      const attributes = field === 'lines' && typeof item?.attributes === 'object' && item.attributes !== null ? item.attributes : {}
+      for (const [name, text] of Object.entries(attributes)) fields.push([`lines[${index}].attributes`, name, 0], [`lines[${index}].attributes.${name}`, text, 255])
     }
   }
   const errors: string[] = []

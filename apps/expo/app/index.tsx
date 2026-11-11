@@ -3,8 +3,8 @@ import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-na
 import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
-import { Cart, CartBar, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, ParkedSales, Receipt, SplitTender, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
-import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
+import { Cart, CartBar, CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, ParkedSales, Receipt, SplitTender, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
+import { ConnectorProvider, ConnectorUnauthorizedError, ORDER_NOTE_MAX, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
@@ -335,6 +335,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <Text className="text-foreground">Parked sales{parked.length ? ` (${parked.length})` : ''}</Text>
       </Pressable>
     </View>
+    <CartNoteInput key={sale.order.id} value={sale.order.note ?? ''}
+      onChangeText={(text) => sale.setNote(text.slice(0, ORDER_NOTE_MAX))} />
     <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
   </RegisterGate>;

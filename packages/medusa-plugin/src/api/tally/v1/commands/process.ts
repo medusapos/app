@@ -117,14 +117,19 @@ export async function processBatch(
     // Shape rules, with the fields this version or the envelope doesn't know (ruling 17): after the replay read, unstored, before the claim.
     const errors = [...envelopeErrors(command), ...payloadShapeErrors(payload, command.version)]
     if (!errors.length && v3 && display !== undefined && taxByRate !== undefined) {
-      errors.push(...fiscalFiguresErrors((command.version as number) === 5 ? withoutV5Display(payload) : payload))
-      if ((command.version as number) === 5) errors.push(...v5DisplayErrors(payload as unknown as Record<string, unknown>))
+      errors.push(...fiscalFiguresErrors(command.version >= 5 ? withoutV5Display(payload, command.version) : payload))
+      if (command.version >= 5) errors.push(...v5DisplayErrors(payload as unknown as Record<string, unknown>, command.version))
     }
     if (errors.length) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
       continue
     }
-    const refusals = (command.version as number) === 5 ? lineTaxRefusals(payload as unknown as Record<string, unknown>) : []
+    // ADR 0024: version 6 coupons are instructions this store can't apply yet, so a non-empty list is refused before the claim.
+    if ([payload.coupons, payload.display?.coupons].some(coupons => Array.isArray(coupons) && coupons.length > 0)) {
+      results.push({ id: command.id, status: 'rejected', error: { code: 'coupon_invalid', message: 'this store does not apply till coupons yet' } })
+      continue
+    }
+    const refusals = command.version >= 5 ? lineTaxRefusals(payload as unknown as Record<string, unknown>) : []
     if (refusals.length) {
       const { reason, path } = refusals[0]
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload',

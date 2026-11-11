@@ -1,7 +1,7 @@
 import type { TaxRounding } from '@tallyui/core' with { 'resolution-mode': 'import' }
 
 // The order.create versions this plugin accepts: /info advertises them and processBatch enforces them (one source).
-export const SUPPORTED_ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5]
+export const SUPPORTED_ORDER_CREATE_VERSIONS: readonly number[] = [1, 2, 3, 4, 5, 6, 7]
 // ADR 0021: Medusa cannot preserve per-line exemptions and has no tax classes.
 export const LINE_TAX = { none: false, classes: false }
 // Version 2 adds take-over fields to the open (ADR to follow).

@@ -338,7 +338,7 @@ export async function createAdminCustomer(token: string, email: string, firstNam
 }
 
 export type AdminOrder = {
-  id: string; display_id: number; metadata: { tally_client_id?: string }; total: number;
+  id: string; display_id: number; metadata: { tally_client_id?: string; tally_note?: string }; total: number;
   status: string; payment_status: string; customer_id: string | null;
   payment_collections: { amount: number; status: string }[];
   items: { quantity: number; variant_id: string }[];

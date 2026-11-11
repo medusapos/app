@@ -26,12 +26,14 @@ export function lineTaxRefusals(payload: Record<string, unknown>): Array<{ path:
   return refusals
 }
 
-export function v5DisplayErrors(payload: Record<string, unknown>): string[] {
+/** The display rows of version 5 and up: fees and shipping, and from version 6 coupons (ADR 0024). */
+export function v5DisplayErrors(payload: Record<string, unknown>, version = 5): string[] {
   const errors: string[] = [], display = payload.display as Record<string, unknown> | undefined
   if (!display) return errors
   const check = (valid: boolean, path: string, expected: string) => {
     if (!valid) errors.push(`payload.${path}: expected ${expected}`)
   }
+  if (version >= 6 && display.coupons !== undefined) check(Array.isArray(display.coupons), 'display.coupons', 'an array')
   for (const field of ['fees', 'shipping']) {
     const items = display[field], id = field === 'fees' ? 'clientFeeId' : 'clientShippingId'
     if (items === undefined) continue
@@ -53,8 +55,10 @@ export function v5DisplayErrors(payload: Record<string, unknown>): string[] {
   return errors
 }
 
-export function withoutV5Display<T extends { display?: object }>(payload: T): T {
+export function withoutV5Display<T extends { display?: object }>(payload: T, version = 5): T {
   if (payload.display === undefined) return { ...payload }
-  const { fees, shipping, ...display } = payload.display as Record<string, unknown>
+  const { fees, shipping, coupons, ...display } = payload.display as Record<string, unknown>
+  // Below version 6, display.coupons stays for fiscalFiguresErrors to refuse as an unknown key.
+  if (version < 6 && coupons !== undefined) display.coupons = coupons
   return { ...payload, display }
 }

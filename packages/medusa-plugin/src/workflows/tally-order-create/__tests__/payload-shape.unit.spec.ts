@@ -298,3 +298,71 @@ it('checks v5 containers, required fields and unknown shipping and custom keys',
     'payload.lines[0].custom.name: expected a non-empty string', "payload.lines[0].custom.taxStatus: expected 'taxable' or 'none'",
   ])
 })
+
+describe('versions 6 and 7 (ADR 0024)', () => {
+  it('accepts a note at version 7, up to 1000 UTF-16 units, and refuses it below 7 as a later field', () => {
+    expect(payloadShapeErrors({ ...payload, note: 'Gift wrap, please' }, 7)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, note: 'x'.repeat(1000) }, 7)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, note: '😀'.repeat(500) }, 7)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, note: 'Gift wrap, please' }, 5)).toEqual(['payload.note: requires version 7'])
+    expect(payloadShapeErrors({ ...payload, note: 'Gift wrap, please' }, 6)).toEqual(['payload.note: requires version 7'])
+  })
+
+  it.each([['an empty', ''], ['a 1001-unit', 'x'.repeat(1001)], ['a 1002-unit emoji', '😀'.repeat(501)], ['a number', 5], ['a null', null]])(
+    'refuses %s note', (_, note) => {
+      expect(payloadShapeErrors({ ...payload, note }, 7)).toEqual(['payload.note: expected a string of 1 to 1000 characters'])
+    })
+
+  it('refuses a NUL note, before the replay read as well', () => {
+    expect(payloadShapeErrors({ ...payload, note: 'gift\0wrap' }, 7)).toEqual(['payload.note: expected no NUL character'])
+    expect(payloadNulErrors({ ...payload, note: 'gift\0wrap' })).toEqual(['payload.note: expected no NUL character'])
+  })
+
+  const recorded = { ...payload.lines[0], regularUnitPriceMinor: 1200, attributes: { Size: 'M', Colour: 'Blue' }, anyAttributes: ['Colour'] }
+
+  it('accepts the recorded line fields from version 6, and names them "requires version 6" below it', () => {
+    expect(payloadShapeErrors({ ...payload, lines: [recorded] }, 6)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, lines: [recorded], note: 'n' }, 7)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, regularUnitPriceMinor: 0, attributes: {}, anyAttributes: [] }] }, 6)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, lines: [recorded] }, 5)).toEqual(['payload.lines[0].regularUnitPriceMinor: requires version 6',
+      'payload.lines[0].attributes: requires version 6', 'payload.lines[0].anyAttributes: requires version 6'])
+  })
+
+  it.each([-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '1200', null])('refuses regularUnitPriceMinor %p', regularUnitPriceMinor => {
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, regularUnitPriceMinor }] }, 6))
+      .toEqual(['payload.lines[0].regularUnitPriceMinor: expected a non-negative safe integer'])
+  })
+
+  it('bounds an attributes value at 255 characters, and refuses a non-string value, a non-object and NUL', () => {
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, attributes: { Size: 'x'.repeat(255), Colour: 'Blue' } }] }, 6)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, attributes: { Size: 'x'.repeat(256), Colour: 'Blue' } }] }, 6))
+      .toEqual(['payload.lines[0].attributes.Size: expected at most 255 characters'])
+    for (const attributes of [{ Size: 1 }, ['M'], 'M', null]) {
+      expect(payloadShapeErrors({ ...payload, lines: [{ ...payload.lines[0], attributes }] }, 6))
+        .toEqual(['payload.lines[0].attributes: expected an object of strings'])
+    }
+    expect(payloadNulErrors({ ...payload, lines: [{ ...recorded, attributes: { Size: 'M\0', Colour: 'Blue' } }] }))
+      .toEqual(['payload.lines[0].attributes.Size: expected no NUL character'])
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...payload.lines[0], attributes: { 'Si\0ze': 'M' } }] }, 6))
+      .toEqual(['payload.lines[0].attributes: expected no NUL character'])
+  })
+
+  it.each([[['Pattern']], [['Colour', 'Pattern']], [[1]], ['Colour'], [null]])('refuses anyAttributes %j, not an array of names in attributes', anyAttributes => {
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...recorded, anyAttributes }] }, 6))
+      .toEqual(['payload.lines[0].anyAttributes: expected an array of names in attributes'])
+  })
+
+  it('refuses anyAttributes on a line without attributes', () => {
+    const { attributes, ...line } = recorded
+    expect(payloadShapeErrors({ ...payload, lines: [line] }, 6))
+      .toEqual(['payload.lines[0].anyAttributes: expected an array of names in attributes'])
+  })
+
+  it('accepts coupons as an array from version 6, refuses them at version 5 as a later field, and refuses a non-array', () => {
+    const coupons = [{ code: 'SAVE10', couponId: 'c1', discountMinor: 100, discountTaxMinor: 0 }]
+    expect(payloadShapeErrors({ ...payload, coupons }, 6)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, coupons: [] }, 7)).toEqual([])
+    expect(payloadShapeErrors({ ...payload, coupons }, 5)).toEqual(['payload.coupons: requires version 6'])
+    for (const value of [{}, 'SAVE10', null]) expect(payloadShapeErrors({ ...payload, coupons: value }, 6)).toEqual(['payload.coupons: expected an array'])
+  })
+})
