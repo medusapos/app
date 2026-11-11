@@ -26,6 +26,7 @@ import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../l
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { openTestRegister } from './register-fixture';
 import { setWindowWidth } from './window-width';
+import { cartLineCells, tenderLegs } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
@@ -57,7 +58,7 @@ let store: Awaited<ReturnType<typeof openOrderStore>>;
 let record: ReturnType<typeof vi.fn<(order: PosOrder) => Promise<void>>>;
 
 beforeEach(async () => {
-  setWindowWidth(1280);
+  setWindowWidth(1280, 800);
   const data = storageData = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -145,9 +146,7 @@ describe('the register on the sale screen', () => {
       const search = screen.getByRole('searchbox');
       fireEvent.change(search, { target: { value: 'BLUE' } });
       fireEvent.keyDown(search, { key: 'Enter' });
-      const line = within(screen.getByText('€12.00 × 2').parentElement!.parentElement!);
-      expect(line.getByText('Shirt')).toBeTruthy();
-      expect(line.getByText('€24.00')).toBeTruthy();
+      expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
       for (const method of ['Cash', 'Card terminal']) {
         await act(async () => { fireEvent.click(button(method)); });
         expect(screen.getByRole('alert').textContent).toBe(OPEN_TO_PAY);
@@ -165,7 +164,7 @@ describe('the register on the sale screen', () => {
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
     expect(screen.queryByRole('alert')).toBeNull();
-    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
     expect(record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionId: session.id, totalMinor: 1500 }));
     expect(record.mock.calls[0][0]).not.toHaveProperty('lateSessionId');
     await act(async () => { fireEvent.click(button('New sale')); });
@@ -461,7 +460,7 @@ describe('closing the register', () => {
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
-    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
     await act(async () => { fireEvent.click(button('New sale')); });
     await closeWith(await startCount(), '105.00');
     await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
@@ -498,7 +497,7 @@ describe('closing the register', () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
-    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Payment approved on terminal' })); });
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
     await act(async () => { fireEvent.click(button('New sale')); });
     await closeWith(await startCount(), '100.00');
     await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
@@ -812,7 +811,7 @@ describe('the tender gate', () => {
       openedBy: 'admin@store.test', businessDay: { year: 2026, month: 9, day: 28 }, storeKey: baseUrl });
     fireEvent.click(button('Card terminal'));
     await screen.findByRole('button', { name: 'Open register panel' });
-    const approve = await screen.findByRole('button', { name: 'Payment approved on terminal' });
+    const approve = await screen.findByRole('button', { name: 'Complete sale' });
     await act(async () => { fireEvent.click(approve); });
     await waitFor(() => expect(record).toHaveBeenCalledOnce());
     expect(record.mock.calls[0][0].sessionId).toBe(opened.id);
@@ -827,7 +826,7 @@ describe('the tender gate', () => {
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(button('Card terminal')); });
-    const approve = await screen.findByRole('button', { name: 'Payment approved on terminal' });
+    const approve = await screen.findByRole('button', { name: 'Complete sale' });
     // A close lands under the tender (as a server close or another path could): saleSession goes undefined.
     await act(async () => { await (await sessions().findOne(session.id).exec())!.incrementalPatch({ status: 'closed' }); });
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Open register panel' })).toBeNull());
@@ -866,9 +865,12 @@ describe('the tender gate', () => {
       fireEvent.click(button('Card terminal'));
       fireEvent.click(button('Cash'));
     });
-    expect(await screen.findByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
+    // TallyUI 3.14.0's one pane serves both methods: a card tender is its one captured Card terminal leg and the
+    // card's Terminal reference box; a cash tender would open with no leg.
+    await screen.findByTestId('tender-pane');
+    expect(tenderLegs()).toEqual(['Card terminal €15.00']);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
-    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Payment approved on terminal' })).toBeTruthy();
+    expect(tenderLegs()).toEqual(['Card terminal €15.00']);
+    expect(screen.getByRole('textbox', { name: 'Terminal reference' })).toBeTruthy();
   });
 });

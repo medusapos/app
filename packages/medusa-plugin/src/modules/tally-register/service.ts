@@ -11,7 +11,7 @@ import { TallyRegisterApproval } from './models/tally-register-approval'
 import type {
   RegisterCommandResult, RegisterCounters, RegisterOutcome, RegisterSessionOpenInput,
   RegisterSessionTransitionInput, RegisterMovementRecordInput, RegisterMovementVoidInput,
-  RegisterClosureSubmitInput, RegisterSessionStatus, AdmitApprovalResult, IssueApprovalResult,
+  RegisterClosureSubmitInput, RegisterSessionStatus, AdmitApprovalResult, IssueApprovalResult, StoredClosure,
 } from './types'
 
 // A proof lives for 15 minutes (ADR 0023).
@@ -337,5 +337,32 @@ export default class TallyRegisterModuleService extends MedusaService({
         order by (status in ('open','counting')) desc, opened_at desc limit 1`, [registerId])
       return { ...register, ...(session ? { session } : {}) }
     })
+  }
+
+  @InjectManager()
+  async closureHistory(registerId: string, page: { limit: number; before?: number; from?: string; to?: string },
+    @MedusaContext() sharedContext: Context = {}): Promise<{ closures: StoredClosure[]; more: boolean } | null> {
+    const em = sharedContext.manager as EntityManager
+    const [register] = await em.execute('select id from tally_register where id = ?', [registerId])
+    if (!register) return null
+    const { limit, before, from, to } = page
+    const clauses = ['c.register_id = ?', 'c.deleted_at is null']
+    const bindings: (string | number)[] = [registerId]
+    if (before !== undefined) { clauses.push('c.number < ?'); bindings.push(before) }
+    if (from !== undefined) { clauses.push('coalesce(c.business_day, substr(c.opened_at, 1, 10)) >= ?'); bindings.push(from) }
+    if (to !== undefined) { clauses.push('coalesce(c.business_day, substr(c.opened_at, 1, 10)) <= ?'); bindings.push(to) }
+    const rows = await em.execute<{ closure: StoredClosure }[]>(`select json_build_object(
+      'id', c.id, 'session_id', c.session_id, 'register_id', c.register_id, 'number', c.number,
+      'business_day', c.business_day, 'opened_at', c.opened_at, 'closed_at', c.closed_at,
+      'closed_by', c.closed_by, 'approved_by', c.approved_by, 'approval_id', c.approval_id,
+      'till_expected', c.till_expected, 'counted', c.counted,
+      'period_sales_total_minor', c.period_sales_total_minor, 'period_refunds_total_minor', c.period_refunds_total_minor,
+      'perpetual_sales_total_minor', c.perpetual_sales_total_minor, 'perpetual_refunds_total_minor', c.perpetual_refunds_total_minor,
+      'unsynced_count', c.unsynced_count, 'unsynced_total_minor', c.unsynced_total_minor, 'software_version', c.software_version,
+      'order_ids', c.order_ids, 'movement_ids', c.movement_ids,
+      'store_key', s.store_key, 'device_name', s.device_name, 'opened_by', s.opened_by) as closure
+      from tally_register_closure c left join tally_register_session s on s.id = c.session_id
+      where ${clauses.join(' and ')} order by c.number desc limit ?`, [...bindings, limit + 1])
+    return { closures: rows.slice(0, limit).map(r => r.closure), more: rows.length > limit }
   }
 }

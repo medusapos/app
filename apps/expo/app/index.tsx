@@ -347,6 +347,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <Pressable accessibilityRole="button" onPress={() => router.push('/orders')} className="min-h-11 justify-center">
           <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>
         </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => router.push('/reports')} className="min-h-11 justify-center">
+          <Text className="text-foreground">Reports</Text>
+        </Pressable>
         <Pressable accessibilityRole="button" onPress={() => router.push('/settings')} className="min-h-11 justify-center">
           <Text className="text-foreground">Settings</Text>
         </Pressable>
@@ -362,7 +365,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
       {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
-      <RegisterPanelSheet currency={pricing.currency} store={receiptStore} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
+      <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={state !== 'offline'} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
         open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />

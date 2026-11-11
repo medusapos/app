@@ -948,6 +948,72 @@ medusaIntegrationTestRunner({
       expect((await api.get(url, { validateStatus: () => true })).status).toBe(401)
     })
 
+    describe('closure history', () => {
+      async function closeDay(opening: ReturnType<typeof open>, number: number, businessDay?: string) {
+        const submission = closure(opening.payload, number)
+        if (businessDay !== undefined) submission.payload.businessDay = businessDay
+        const response = await post([opening, close(opening.payload.sessionId), submission])
+        expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'applied'])
+        return submission
+      }
+
+      it('GET /tally/v1/registers/{id}/closures lists closures newest first with the stored figures and pages with limit and before; 404 unknown register, 400 bad limit, 401 without auth', async () => {
+        const registerId = randomUUID()
+        const session1 = open(registerId)
+        Object.assign(session1.payload, { storeKey: 'store-a', openedBy: 'user_opener' })
+        const closure1 = await closeDay(session1, 1)
+        await closeDay(open(registerId), 2)
+        await closeDay(open(registerId), 3)
+        await closeDay(open(), 1)
+        const url = `/tally/v1/registers/${registerId}/closures`
+        const read = await api.get(url, { headers: { ...headers, Origin: 'http://localhost' } })
+        expect(read.status).toBe(200)
+        expect(read.headers['access-control-allow-origin']).toBe('http://localhost')
+        expect(read.headers['access-control-allow-credentials']).toBe('true')
+        expect(read.data.more).toBe(false)
+        expect(read.data.closures.map(c => c.number)).toEqual([3, 2, 1])
+        expect(read.data.closures[2]).toEqual({
+          closureId: closure1.payload.closureId, sessionId: session1.payload.sessionId, registerId, number: 1,
+          openedAt, closedAt, openedBy: 'user_opener', storeKey: 'store-a', approvalVerified: false,
+          tillExpected: { cash: 1100 }, counted: { cash: 1100 }, periodSalesTotalMinor: 1000, periodRefundsTotalMinor: 0,
+          perpetualSalesTotalMinor: 1000, perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0,
+          softwareVersion: '1.0', orderIds: [], movementIds: [],
+        })
+        const firstPage = await api.get(`${url}?limit=2`, { headers })
+        expect(firstPage.data.closures.map(c => c.number)).toEqual([3, 2])
+        expect(firstPage.data.more).toBe(true)
+        const secondPage = await api.get(`${url}?limit=2&before=2`, { headers })
+        expect(secondPage.data.closures.map(c => c.number)).toEqual([1])
+        expect(secondPage.data.more).toBe(false)
+        const unknown = await api.get(`/tally/v1/registers/${randomUUID()}/closures`, { headers, validateStatus: () => true })
+        expect(unknown.status).toBe(404)
+        expect(unknown.data).toEqual({ message: 'Unknown register' })
+        const badLimit = await api.get(`${url}?limit=0`, { headers, validateStatus: () => true })
+        expect(badLimit.status).toBe(400)
+        expect(badLimit.data).toEqual({ message: 'limit must be an integer from 1 to 100' })
+        expect((await api.get(url, { validateStatus: () => true })).status).toBe(401)
+      })
+
+      it('GET /tally/v1/registers/{id}/closures filters by business day with from and to, inclusive; a closure without businessDay counts on its openedAt date', async () => {
+        const registerId = randomUUID()
+        await closeDay(open(registerId), 1)
+        await closeDay(open(registerId), 2, '2026-01-02')
+        await closeDay(open(registerId), 3, '2026-01-03')
+        const url = `/tally/v1/registers/${registerId}/closures`
+        const day = await api.get(`${url}?from=2026-01-02&to=2026-01-02`, { headers })
+        expect(day.data.closures.map(c => c.number)).toEqual([2])
+        expect(day.data.closures[0].businessDay).toBe('2026-01-02')
+        const from = await api.get(`${url}?from=2026-01-02`, { headers })
+        expect(from.data.closures.map(c => c.number)).toEqual([3, 2])
+        const to = await api.get(`${url}?to=2026-01-01`, { headers })
+        expect(to.data.closures.map(c => c.number)).toEqual([1])
+        expect(to.data.closures[0]).not.toHaveProperty('businessDay')
+        const reversed = await api.get(`${url}?from=2026-01-03&to=2026-01-02`, { headers, validateStatus: () => true })
+        expect(reversed.status).toBe(400)
+        expect(reversed.data).toEqual({ message: 'from must not be after to' })
+      })
+    })
+
     it('a state-dependent refusal is invalid_payload and is not stored, so a resend after the fix applies', async () => {
       const opening = open()
       const recording = movement(opening.payload.sessionId, 'paid_in', 50)

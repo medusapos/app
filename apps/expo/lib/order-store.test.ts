@@ -239,7 +239,7 @@ const rawOlder = (databaseName: string, from: Origin) => getRxStorageMemory().cr
 
 /**
  * A database written at version `from` holding `orders`, plus `invalid` written beneath RxDB (as
- * an unvalidated production build could have): it fails version 8's validation, so a validating
+ * an unvalidated production build could have): it fails version 11's validation, so a validating
  * open's migration stops with DM4.
  */
 async function seedOlder(from: Origin, name: string, orders: PosOrder[], invalid?: PosOrder) {
@@ -275,17 +275,17 @@ const olderSale = (from: Origin): PosOrder => {
   return { ...order, ...(from === 1 ? { sessionId: 'session-1' } : {}) } as PosOrder;
 };
 /**
- * An older order as the version-8 open leaves it: TallyUI's version-5 and version-6 migrations record
+ * An older order as the version-11 open leaves it: TallyUI's version-5 and version-6 migrations record
  * its `sentVersion` (its content version, 1 for these sales; #300) and the default `taxRounding` (#318).
- * Versions 7 and 8 are identities: older orders keep having no `saleId` (ADR-072), fees or shipping.
+ * Versions 7 to 11 are identities: older orders keep having no `saleId` (ADR-072), fees, shipping or coupons.
  */
 const migrated = (order: PosOrder): PosOrder =>
   ({ ...order, sentVersion: 1, taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
-// Valid at the older version when it was written, but not at version 8 (an unknown syncStatus).
+// Valid at the older version when it was written, but not at version 11 (an unknown syncStatus).
 const invalidSale = (from: Origin = 0) => ({ ...olderSale(from), syncStatus: 'queued' }) as unknown as PosOrder;
 const byId = (a: { id: string }, b: { id: string }) => a.id.localeCompare(b.id);
 
-describe.each([0, 1] as const)('pos_orders schema v%i to v8', (from) => {
+describe.each([0, 1] as const)('pos_orders schema v%i to v11', (from) => {
   it(`reopens a version-${from} order store through openOrderStore: the pending order is there, as TallyUI migrates it`, async () => {
     const url = `https://v${from}-store.test`;
     const name = orderDatabaseName(url);
@@ -295,10 +295,10 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v8', (from) => {
     expect(await olderDocuments(from, name, [pending.id])).toEqual([original]);
     const store = await openOrderStore(url);
     try {
-      expect(store.orders.schema.version).toBe(8);
+      expect(store.orders.schema.version).toBe(11);
       const found = (await store.orders.findOne(pending.id).exec())?.toJSON();
       // Byte for byte the order that was stored plus what versions 5 and 6 record, and no other field added.
-      // Versions 7 and 8 are identities, so `saleId`, fees and shipping stay absent.
+      // Versions 7 to 11 are identities, so `saleId`, fees, shipping and coupons stay absent.
       expect(found).toStrictEqual(migrated(original));
       for (const added of ADDED_SINCE_V1.filter((key) => !(key in migrated(original)))) expect(found).not.toHaveProperty(added);
       // The outbox's own query still finds it.
@@ -333,14 +333,14 @@ describe.each([0, 1] as const)('pos_orders schema v%i to v8', (from) => {
     await writeRawOlder(from, name, fixed);
     const store = await openOrderStore(url);
     try {
-      expect(store.orders.schema.version).toBe(8);
+      expect(store.orders.schema.version).toBe(11);
       expect((await store.orders.find().exec()).map((doc) => doc.toJSON()).sort(byId)).toEqual([pending, fixed].map(migrated).sort(byId));
     } finally { await store.close(); }
     expect(await olderDocuments(from, name, [pending.id, invalid.id])).toEqual([]);
   });
 });
 
-it('reopens a version-7 order store (TallyUI 3.2.x) through openOrderStore: the pending order and its payments are there at version 8', async () => {
+it('reopens a version-7 order store (TallyUI 3.2.x) through openOrderStore: the pending order and its payments are there at version 11', async () => {
   const url = 'https://v7-split-store.test';
   const name = orderDatabaseName(url);
   const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
@@ -353,7 +353,7 @@ it('reopens a version-7 order store (TallyUI 3.2.x) through openOrderStore: the 
   expect(await olderDocuments(7, name, [pending.id])).toStrictEqual([original]);
   const store = await openOrderStore(url);
   try {
-    expect(store.orders.schema.version).toBe(8);
+    expect(store.orders.schema.version).toBe(11);
     const found = (await store.orders.findOne(pending.id).exec())?.toJSON();
     expect(found).toStrictEqual(original);
     expect(found?.payments).toHaveLength(2);
@@ -393,7 +393,7 @@ it('a parked draft written at 3.2.x resumes at 3.3.0', async () => {
   } finally { await db.close(); }
   const store = await openOrderStore(url);
   try {
-    expect(store.orders.schema.version).toBe(8);
+    expect(store.orders.schema.version).toBe(11);
     const drafts = draftsCollection(store.orders)!;
     expect(drafts.schema.version).toBe(0);
     const found = (await drafts.findOne(saved.id).exec(true)).toJSON();
@@ -548,13 +548,13 @@ describe('carryOverOrders', () => {
     await to.remove();
   });
 
-  it.each([0, 1] as const)('carries over a pending order from a version-%i legacy source through the version-8 open', async (from) => {
+  it.each([0, 1] as const)('carries over a pending order from a version-%i legacy source through the version-11 open', async (from) => {
     const fromName = `legacy-carry-v${from}`;
     const pending = olderSale(from);
     const original = structuredClone(pending);
     await seedOlder(from, fromName, [pending]);
     const to = await memoryOrdersDb(`target-carry-v${from}`, true);
-    expect(to.pos_orders.schema.version).toBe(8);
+    expect(to.pos_orders.schema.version).toBe(11);
     await carryOverOrders({ fromStorage: memoryStorage(), fromName, to, legacyExists });
     expect((await to.pos_orders.find().exec()).map((doc) => doc.toJSON())).toStrictEqual([migrated(original)]);
     expect((await to.getLocal('legacy-orders-migrated'))?.toJSON().data).toMatchObject({ count: 1 });
@@ -596,9 +596,9 @@ describe('carryOverOrders', () => {
     }
   });
 
-  // The legacy store is read, never migrated in place, so no DM4: the new store refuses the order v8 rejects, and the
+  // The legacy store is read, never migrated in place, so no DM4: the new store refuses the order v11 rejects, and the
   // read-back keeps the marker absent on failure (M3), so the next open retries the copy.
-  it.each([0, 1] as const)('an order v8 refuses keeps the version-%i legacy source and writes no marker; after a fix, the next carry-over copies the rest once', async (from) => {
+  it.each([0, 1] as const)('an order v11 refuses keeps the version-%i legacy source and writes no marker; after a fix, the next carry-over copies the rest once', async (from) => {
     const fromName = `legacy-carry-dm4-v${from}`;
     const pending = olderSale(from);
     const invalid = invalidSale(from);

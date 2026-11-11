@@ -9,7 +9,7 @@ const appLocalUrl = `http://localhost:${E2E_RUN.appPort}`;
 
 export default defineConfig({
   testDir: '.',
-  testIgnore: ['carryover/**', 'rbac/**'],
+  testIgnore: ['carryover/**', 'rbac/**', '*.test.ts'],
   globalTeardown: appUrl ? undefined : './global-teardown.ts',
   workers: 1,
   // A hosted run crosses the internet to the shared demo backend for sign-in, sync and every sale; its showcase catalogue (about 35 products, #227) syncs in seconds, so the 5 minutes is network headroom, not catalogue size.
@@ -22,20 +22,21 @@ export default defineConfig({
   // older code; the derived ports and database are unique to this checkout, so it is always its own.
   webServer: appUrl ? undefined : [
     {
-      command: 'bash e2e/store/start.sh', cwd: '..',
+      command: 'node e2e/server-watchdog.mjs & bash e2e/store/start.sh', cwd: '..',
       url: `${backendUrl}/health`, timeout: 600_000,
       reuseExistingServer: !isCI() && process.env.E2E_REUSE === '1',
       env: {
         E2E_BACKEND_PORT: String(E2E_RUN.backendPort),
         E2E_APP_PORT: String(E2E_RUN.appPort),
         E2E_DATABASE: E2E_RUN.database,
+        E2E_RUNNER_PID: String(process.pid),
       },
     },
     {
-      command: `EXPO_PUBLIC_MEDUSA_URL=${backendUrl} EXPO_PUBLIC_E2E_DEBUG=1 EXPO_PUBLIC_DEMO=1 CI=1 EXPO_NO_TELEMETRY=1 pnpm --filter @medusapos/expo build:web --clear && node e2e/serve.mjs`,
+      command: `node e2e/server-watchdog.mjs & EXPO_PUBLIC_MEDUSA_URL=${backendUrl} EXPO_PUBLIC_E2E_DEBUG=1 EXPO_PUBLIC_DEMO=1 CI=1 EXPO_NO_TELEMETRY=1 pnpm --filter @medusapos/expo build:web --clear && node e2e/serve.mjs`,
       cwd: '..', url: appLocalUrl, timeout: 300_000,
       reuseExistingServer: !isCI() && process.env.E2E_REUSE === '1',
-      env: { E2E_APP_PORT: String(E2E_RUN.appPort) },
+      env: { E2E_APP_PORT: String(E2E_RUN.appPort), E2E_RUNNER_PID: String(process.pid) },
     },
   ],
 });

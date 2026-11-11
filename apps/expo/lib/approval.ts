@@ -30,8 +30,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * `signal` (the dialog's Cancel) aborts both requests and rejects with `cancelled`; after `timeoutMs` they are
  * aborted and it rejects as `offline`. Either way it settles then, even if a request ignores its signal.
  */
-export async function requestApproval(baseUrl: string, email: string, password: string, { signal, fetchImpl = globalThis.fetch,
-  timeoutMs = APPROVAL_TIMEOUT_MS }: { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number } = {}): Promise<Approval> {
+export function requestApproval(baseUrl: string, email: string, password: string, options: ApprovalOptions = {}): Promise<Approval> {
+  return settleApproval((fetchWith) => approve(baseUrl, email, password, fetchWith), options);
+}
+
+type ApprovalOptions = { signal?: AbortSignal; fetchImpl?: typeof fetch; timeoutMs?: number };
+export type StoreApproval = Approval & { approval: string; expiresAt?: string };
+export type StoreApprovalRequest = { sessionId: string; variance: Record<string, number>; email: string; password: string };
+const APPROVE_FAILED = "Couldn't check the approval. Try again.";
+// The route's refusals whose own `message` the dialog shows (ADR 0023, `POST /tally/v1/register-approvals`).
+const STORE_REFUSALS = ['approval_mfa_unsupported', 'approval_forbidden', 'approval_session_unknown', 'approval_session_closed',
+  'approval_rate_limited'];
+
+/**
+ * The store-verified approval (ADR 0023): posts the session, its variance and the manager's credentials to the
+ * plugin's route with the cashier's token, and resolves the store's opaque proof and the approver. As in
+ * `requestApproval`, the password goes only in the POST body and nothing here stores, logs or returns it.
+ */
+export function requestStoreApproval(baseUrl: string, token: string, { sessionId, variance, email, password }: StoreApprovalRequest,
+  options: ApprovalOptions = {}): Promise<StoreApproval> {
+  return settleApproval(async (fetchWith) => {
+    let response: Response;
+    try {
+      response = await fetchWith(`${baseUrl.trim().replace(/\/+$/, '')}/tally/v1/register-approvals`, { method: 'POST',
+        headers: { ...authHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, variance, email, password }) });
+    } catch { throw new ApprovalError('offline', 'Could not reach the backend.'); }
+    const body: unknown = await response.json().catch(() => null);
+    const answer = isRecord(body) ? body : {};
+    if (!response.ok) {
+      if (response.status === 401 && answer.code === 'approval_invalid_credentials') throw new ApprovalError('invalid', "That email and password didn't work.");
+      const own = STORE_REFUSALS.includes(answer.code as string) && typeof answer.message === 'string' ? answer.message : '';
+      throw new ApprovalError('failed', own || APPROVE_FAILED);
+    }
+    const { approval, approvedBy, approvedByName, expiresAt } = answer;
+    if (typeof approval !== 'string' || !approval || typeof approvedBy !== 'string' || !approvedBy) throw new ApprovalError('failed', APPROVE_FAILED);
+    return { approval, approvedBy, approvedByName: typeof approvedByName === 'string' && approvedByName ? approvedByName : email,
+      ...(typeof expiresAt === 'string' ? { expiresAt } : {}) };
+  }, options);
+}
+
+// Both approvals' abort, timeout and Cancel, as `requestApproval` describes them.
+async function settleApproval<T>(run: (fetchWith: typeof fetch) => Promise<T>, { signal, fetchImpl = globalThis.fetch,
+  timeoutMs = APPROVAL_TIMEOUT_MS }: ApprovalOptions): Promise<T> {
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, timeoutMs);
@@ -46,7 +86,7 @@ export async function requestApproval(baseUrl: string, email: string, password: 
   aborted.catch(() => {}); // Settled by the race below, or not at all once the request has won it.
   const fetchWith = ((input, init) => fetchImpl(input, { ...init, signal: controller.signal })) as typeof fetch;
   try {
-    return await Promise.race([approve(baseUrl, email, password, fetchWith), aborted]);
+    return await Promise.race([run(fetchWith), aborted]);
   } catch (error) {
     if (controller.signal.aborted) throw await aborted.catch((reason: unknown) => reason);
     throw error;

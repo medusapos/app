@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, ordersByClientId, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, cartTotalRow, ordersByClientId, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -12,20 +12,26 @@ test('a split card-and-cash sale reaches Medusa once at the till\'s total, with 
   await signIn(page);
   await addE2E1(page);
   await addE2E1(page);
-  const tillTotal = page.getByText('Total', { exact: true }).locator('..');
+  const tillTotal = cartTotalRow(page, 'Total');
   await expect(tillTotal).toHaveText(/Total\D*5\.00$/);
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
   await page.getByRole('button', { name: 'Split payment', exact: true }).click();
-  await expect(page.getByText('Cash Tendered', { exact: true })).toHaveCount(0);
-  await page.getByTestId('split-tender-method-card').click();
-  await page.getByTestId('split-tender-amount').fill('2.00');
-  await page.getByTestId('split-tender-add-button').click();
-  await expect(page.getByTestId('split-tender-summary')).toContainText('Remaining: €3.00');
-  await page.getByTestId('split-tender-method-cash').click();
-  await page.getByTestId('split-tender-amount').fill('5.00');
-  await page.getByTestId('split-tender-add-button').click();
-  await expect(page.getByTestId('split-tender-summary')).toContainText('Change: €2.00');
+  await expect(page.getByRole('button', { name: 'Single payment', exact: true })).toBeVisible();
+  // TallyUI 3.14.0's tender pane: pick a method, key the leg in (digits shift in from the right), Take.
+  const keypad = page.getByTestId('tender-keypad');
+  const key = async (amount: string) => {
+    await keypad.getByRole('button', { name: 'Clear', exact: true }).click();
+    for (const digit of amount.replace(/\D/g, '')) await keypad.getByRole('button', { name: digit, exact: true }).click();
+  };
+  await page.getByTestId('tender-method-external').click();
+  await key('2.00');
+  await page.getByTestId('tender-take').click();
+  await expect(page.getByTestId('tender-headline')).toHaveText(/^Remaining€3\.00/);
+  await page.getByTestId('tender-method-cash').click();
+  await key('5.00');
+  await page.getByTestId('tender-take').click();
+  await expect(page.getByTestId('tender-change')).toHaveText('Change €2.00');
   const applied = page.waitForResponse(async (response) => {
     const request = response.request();
     if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
@@ -33,7 +39,7 @@ test('a split card-and-cash sale reaches Medusa once at the till\'s total, with 
     return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
       result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
   });
-  await page.getByTestId('split-tender-complete').click();
+  await page.getByTestId('tender-complete').click();
   await expect(page.getByLabel(/^Total: \D*5\.00$/)).toBeVisible();
   await expect(page.getByLabel(/^Card terminal: \D*2\.00$/)).toBeVisible();
   await expect(page.getByLabel(/^Cash tendered: \D*5\.00$/)).toBeVisible();

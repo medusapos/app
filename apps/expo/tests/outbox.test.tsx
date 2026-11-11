@@ -602,7 +602,7 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     await waitFor(() => expect(screen.queryByTestId('open-register-card')).toBeNull());
     fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
     fireEvent.click(button('Card terminal'));
-    await screen.findByRole('button', { name: 'Payment approved on terminal' });
+    await screen.findByRole('button', { name: 'Complete sale' });
     return view;
   }
   /** Makes the next store insert write `stored(doc)` and then reject; resolves to the order the sale handed over. */
@@ -617,7 +617,7 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
       });
     });
   }
-  const approve = () => act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+  const approve = () => act(async () => { fireEvent.click(button('Complete sale')); });
   const signOutDisabled = () => button('Sign out').getAttribute('aria-disabled') === 'true';
 
   it('offers Continue once isStored confirms an order whose insert wrote and then threw; Continue starts a new sale, with one order and one command', async () => {

@@ -4,7 +4,7 @@ import { parseTaxRounding, resolveCapabilities, type ServerCapabilities } from '
 import { exposeE2eHook } from './e2e-debug';
 import { clearProductCache } from './product-cache';
 import {
-  clearSession, defaultStorage, loadSession, login, LoginError, NO_POS_ACCESS_MESSAGE, refreshSession,
+  clearSession, defaultStorage, loadSession, login, LoginError, NO_POS_ACCESS_MESSAGE, parseRegisterApproval, refreshSession,
   saveSession, shouldRefresh, type Session,
 } from './session';
 
@@ -88,6 +88,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Unchanged keeps the session's identity, so nothing that depends on it re-runs.
     if (!current || (capabilities?.orderCreate === current.capabilities?.orderCreate &&
       capabilities?.register === current.capabilities?.register &&
+      parseRegisterApproval(capabilities?.registerApproval)?.thresholdMinor ===
+        parseRegisterApproval(current.capabilities?.registerApproval)?.thresholdMinor &&
       JSON.stringify(parseTaxRounding(capabilities?.taxRounding)) === JSON.stringify(parseTaxRounding(current.capabilities?.taxRounding)))) return;
     const next = { ...current, capabilities };
     saveSession(defaultStorage(), next);

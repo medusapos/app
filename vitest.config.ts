@@ -26,7 +26,7 @@ export default defineConfig({
     },
   },
   test: {
-    include: ['apps/**/*.test.{ts,tsx}', 'packages/**/*.test.{ts,tsx}'],
+    include: ['apps/**/*.test.{ts,tsx}', 'packages/**/*.test.{ts,tsx}', 'e2e/*.test.ts'],
     exclude: ['**/node_modules/**', 'dev/**', 'packages/medusa-plugin/**'],
     passWithNoTests: true,
     setupFiles: ['apps/expo/tests/setup-storage.ts'],

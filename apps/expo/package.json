@@ -18,14 +18,14 @@
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@sqlite.org/sqlite-wasm": "3.53.4-build1",
-    "@tallyui/components": "3.8.0",
-    "@tallyui/connector-medusa": "3.8.0",
-    "@tallyui/core": "3.8.0",
-    "@tallyui/database": "3.8.0",
-    "@tallyui/pos": "3.8.0",
-    "@tallyui/primitives": "3.8.0",
-    "@tallyui/storage-sqlite": "3.8.0",
-    "@tallyui/theme": "3.8.0",
+    "@tallyui/components": "3.16.0",
+    "@tallyui/connector-medusa": "3.16.0",
+    "@tallyui/core": "3.16.0",
+    "@tallyui/database": "3.16.0",
+    "@tallyui/pos": "3.16.0",
+    "@tallyui/primitives": "3.16.0",
+    "@tallyui/storage-sqlite": "3.16.0",
+    "@tallyui/theme": "3.16.0",
     "expo": "~54.0.0",
     "expo-linking": "~8.0.11",
     "expo-localization": "~17.0.9",
@@ -45,6 +45,7 @@
     "uniwind": "^1.2.2"
   },
   "devDependencies": {
+    "@types/mustache": "4.2.6",
     "@types/react": "^19.1.0",
     "esbuild": "0.27.3",
     "typescript": "~5.8.3"

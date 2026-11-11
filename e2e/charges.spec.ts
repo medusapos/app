@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, ordersByClientId, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, cartTotalRow, ordersByClientId, signIn, tenderCash, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -24,12 +24,10 @@ test('a sale with a fee, shipping and a custom item reaches Medusa once at the t
     await form.getByLabel('Amount', { exact: true }).fill(amount);
     await form.getByRole('button', { name: 'Apply', exact: true }).click();
   }
-  const tillTotal = page.getByText('Total', { exact: true }).locator('..');
+  const tillTotal = cartTotalRow(page, 'Total');
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
-  await tender.locator('[tabindex="0"]').first().click();
-  await tender.locator('input').fill((totalMinor / 100).toFixed(2));
+  await tenderCash(page, totalMinor / 100);
   const applied = page.waitForResponse(async (response) => {
     const request = response.request();
     if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;

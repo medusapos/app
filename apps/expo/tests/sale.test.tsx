@@ -4,7 +4,7 @@ import { useContext } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { catalogueEntries, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import { catalogueEntries, countsTowardPaid, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { Cart, Receipt, Tender } from '@tallyui/components';
 import { OutboxStrip, StripHeightContext } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
@@ -17,6 +17,7 @@ import ProductsScreen from '../app/index';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
+import { cartLineCells, keyIn, take, tenderBalance, tenderEntry } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
@@ -72,11 +73,11 @@ function SaleView({ onSaleCompleted, with: shown = pricing }: HarnessProps) {
 }
 const money = (amount: number) => formatMoney({ amount, currency: settings.currency });
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
-const typeCash = (value: string) => fireEvent.change(within(screen.getByText('Cash Tendered').parentElement!).getByRole('textbox'), { target: { value } });
+const captured = () => sale.order.payments.filter(countsTowardPaid);
 function addSaleLines() { act(() => { sale.add(entries[0], traits); sale.add(entries[1], traits); sale.add(entries[0], traits); }); }
 
 beforeEach(() => {
-  setWindowWidth(1280);
+  setWindowWidth(1280, 0);
   vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -124,6 +125,7 @@ describe('sale', () => {
   });
 
   it('merges variants and displays builder quantities, unit prices, line totals and order totals', () => {
+    setWindowWidth(1280, 800); // the cart's Price column needs a window 480 or more high
     render(<SaleHarness />);
     addSaleLines();
     const expected = createOrderBuilder({ currency: settings.currency, taxContext });
@@ -132,9 +134,7 @@ describe('sale', () => {
     const order = expected.getSnapshot();
     expect(sale.order.lineItems.map((line) => line.quantity)).toEqual([2, 1]);
     for (const line of order.lineItems) {
-      const group = within(screen.getByText(line.name).parentElement!.parentElement!);
-      expect(group.getByText(`${money(line.unitPriceMinor)} × ${line.quantity}`).textContent).toBe(`${money(line.unitPriceMinor)} × ${line.quantity}`);
-      expect(group.getByText(money(line.netMinor)!).textContent).toBe(money(line.netMinor));
+      expect(cartLineCells(line.name)).toEqual([String(line.quantity), line.name, money(line.unitPriceMinor), money(line.netMinor)]);
     }
     const footer = within(screen.getByTestId('cart-footer'));
     expect(footer.getByText('Subtotal').parentElement!.textContent).toBe(`Subtotal${money(order.subtotalMinor)}`);
@@ -166,13 +166,13 @@ describe('sale', () => {
     const before = sale.order;
     expect(before.totalMinor).toBe(4375);
     click('Cash');
-    const cash = within(screen.getByText('Cash Tendered').parentElement!);
-    expect(cash.getByText(money(before.totalMinor)!).textContent).toBe(money(4375));
-    expect(screen.getByText(`Balance due: ${money(before.totalMinor)}`).textContent).toBe(`Balance due: ${money(4375)}`);
-    typeCash('50');
-    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('50');
+    expect(screen.getByTestId('tender-quick-exact').textContent).toBe(`Exact ${money(4375)}`);
+    expect(tenderBalance()).toBe(money(4375));
+    keyIn('50.00');
+    expect(tenderEntry()).toBe(money(5000));
+    take();
     expect(sale.order.changeDueMinor).toBe(625);
-    expect(screen.getByText('Change Due').parentElement!.textContent).toBe(`Change Due${money(sale.order.changeDueMinor)}`);
+    expect(screen.getByTestId('tender-change').textContent).toBe(`Change ${money(sale.order.changeDueMinor)}`);
     await act(async () => { click('Complete sale'); });
     expect(sale.stage.kind).toBe('receipt');
     expect(screen.getByLabelText(`Change: ${money(625)}`)).toBeTruthy();
@@ -207,10 +207,10 @@ describe('sale', () => {
     render(<SaleHarness onSaleCompleted={completed} />);
     addSaleLines();
     click('Cash');
-    const cash = within(screen.getByText('Cash Tendered').parentElement!);
-    typeCash('10');
-    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('10');
-    expect(screen.getByText(`Balance due: ${money(sale.order.balanceDueMinor)}`)).toBeTruthy();
+    keyIn('10.00');
+    take();
+    expect(screen.getByTestId(`tender-leg-${sale.order.payments[0].id}`).textContent).toContain(money(1000));
+    expect(tenderBalance()).toBe(money(sale.order.balanceDueMinor));
     expect(screen.getByRole('button', { name: 'Complete sale' }).getAttribute('aria-disabled')).toBe('true');
     const tender = sale.order.payments[0];
     await act(async () => { await sale.complete(); });
@@ -218,14 +218,17 @@ describe('sale', () => {
     expect(sale.stage).toEqual({ kind: 'tender', method: 'cash' });
     expect(sale.order.payments).toEqual([tender]);
     expect(completed).not.toHaveBeenCalled();
-    typeCash('20');
-    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('20');
-    expect(sale.order.payments).toHaveLength(1);
-    expect(sale.order.payments[0].amountMinor).toBe(2000);
-    typeCash('50');
-    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('50');
-    expect(sale.order.payments).toHaveLength(1);
-    expect(sale.order.payments[0].amountMinor).toBe(5000);
+    // The pane replaces an amount by cancelling the leg (it stays on the ledger as voided and is never sent) and taking another.
+    fireEvent.click(screen.getByTestId(`tender-leg-${tender.id}-void`));
+    keyIn('20.00');
+    take();
+    expect(captured()).toHaveLength(1);
+    expect(captured()[0].amountMinor).toBe(2000);
+    fireEvent.click(screen.getByTestId(`tender-leg-${captured()[0].id}-void`));
+    keyIn('50.00');
+    take();
+    expect(captured()).toHaveLength(1);
+    expect(captured()[0].amountMinor).toBe(5000);
     expect(sale.error).toBeNull();
     click('Back');
     expect(sale.stage.kind).toBe('cart');
@@ -237,10 +240,10 @@ describe('sale', () => {
     render(<SaleHarness />);
     addSaleLines();
     click('Cash');
-    const cash = within(screen.getByText('Cash Tendered').parentElement!);
-    // The first quick-cash control offers the exact total.
-    fireEvent.click(cash.getByText(money(sale.order.totalMinor)!));
-    expect((cash.getByRole('textbox') as HTMLInputElement).value).toBe('43.75');
+    // The first quick-cash chip offers the exact total.
+    fireEvent.click(screen.getByTestId('tender-quick-exact'));
+    expect(tenderEntry()).toBe(money(4375));
+    take();
     expect(sale.order.payments).toHaveLength(1);
     expect(sale.order.payments[0].amountMinor).toBe(sale.order.totalMinor);
     expect(sale.order.balanceDueMinor).toBe(0);
@@ -264,7 +267,7 @@ describe('sale', () => {
     expect(sale.order.payments[0]).toMatchObject({ method: 'external', amountMinor: sale.order.totalMinor });
     fireEvent.change(screen.getByRole('textbox', { name: 'Terminal reference' }), { target: { value: 'A1B2' } });
     expect(sale.order.payments).toHaveLength(1);
-    await act(async () => { click('Payment approved on terminal'); });
+    await act(async () => { click('Complete sale'); });
     expect(screen.getByLabelText(`Card terminal: ${money(4375)} · A1B2`)).toBeTruthy();
     expect(completed.mock.calls[0][0].payments).toEqual([expect.objectContaining({ method: 'external', amountMinor: 4375, reference: 'A1B2' })]);
     expect(document.querySelectorAll('#pos-print-style')).toHaveLength(1);
@@ -327,7 +330,7 @@ describe('sale', () => {
     expect(sale.stage).toEqual({ kind: 'tender', method: 'external' });
     expect(sale.order).toBe(before);
     expect(sale.idle).toBe(false);
-    await act(async () => { click('Payment approved on terminal'); });
+    await act(async () => { click('Complete sale'); });
     expect(completed).toHaveBeenCalledOnce();
     expect(completed.mock.calls[0][0]).toMatchObject({ pricesIncludeTax: false, subtotalMinor: 1000, taxMinor: 250, totalMinor: 1250,
       lines: [expect.objectContaining({ netMinor: 1000, taxLines: [expect.objectContaining({ ratePpm: 250000 })] })],
