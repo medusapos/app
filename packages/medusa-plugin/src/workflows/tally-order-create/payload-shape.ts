@@ -187,6 +187,17 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
       for (const [name, text] of Object.entries(attributes)) fields.push([`lines[${index}].attributes`, name, 255], [`lines[${index}].attributes.${name}`, text, 255])
     }
   }
+  // Version 3 receipt strings: plan.ts stores them in tally_pos_totals, the receipt email reads them back.
+  const display = value.display as Record<string, unknown> | null | undefined, lines = display?.lines, rates = value.taxByRate
+  fields.push(['display.currency', display?.currency, 255])
+  for (const [index, line] of (Array.isArray(lines) ? lines : []).entries()) {
+    fields.push([`display.lines[${index}].clientLineId`, line?.clientLineId, 255])
+    for (const [at, item] of (Array.isArray(line?.discounts) ? line.discounts : []).entries()) {
+      const path = `display.lines[${index}].discounts[${at}]`
+      fields.push([`${path}.discountId`, item?.discountId, 64], [`${path}.label`, item?.label, 255])
+    }
+  }
+  for (const [index, rate] of (Array.isArray(rates) ? rates : []).entries()) fields.push([`taxByRate[${index}].code`, rate?.code, 64])
   const errors: string[] = []
   for (const field of ['fees', 'shipping', 'lines']) {
     if (!Array.isArray(value[field])) continue

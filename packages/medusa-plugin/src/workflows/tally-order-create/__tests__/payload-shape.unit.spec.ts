@@ -3,6 +3,7 @@ import { payloadNulErrors, payloadShapeErrors } from '../payload-shape'
 import { clientTimeStageErrors } from '../../client-time'
 import feeGolden from '../__fixtures__/order-create-v5-fee.json'
 import shippingGolden from '../__fixtures__/order-create-v5-shipping-custom.json'
+import v3Golden from '../__fixtures__/order-create-v3.json'
 
 const payload: OrderCreatePayload = {
   clientOrderId: 'order_1', createdAt: '2026-09-23T10:00:00Z', currency: 'EUR', pricesIncludeTax: true,
@@ -381,4 +382,52 @@ describe('versions 6 and 7 (ADR 0024)', () => {
     expect(payloadShapeErrors({ ...payload, coupons }, 5)).toEqual(['payload.coupons: requires version 6'])
     for (const value of [{}, 'SAVE10', null]) expect(payloadShapeErrors({ ...payload, coupons: value }, 6)).toEqual(['payload.coupons: expected an array'])
   })
+})
+
+describe('version 3 receipt strings (#292)', () => {
+  type Set = (value: any, text: string) => void
+  const receipt: [string, number, Set][] = [
+    ['display.currency', 255, (value, text) => { value.display.currency = text }],
+    ['display.lines[0].clientLineId', 255, (value, text) => { value.display.lines[0].clientLineId = text }],
+    ['display.lines[0].discounts[0].discountId', 64, (value, text) => { value.display.lines[0].discounts[0].discountId = text }],
+    ['display.lines[0].discounts[0].label', 255, (value, text) => { value.display.lines[0].discounts[0].label = text }],
+    ['taxByRate[0].code', 64, (value, text) => { value.taxByRate[0].code = text }],
+  ]
+  const withText = (set: Set, text: string) => {
+    const value = structuredClone(v3Golden.payload)
+    set(value, text)
+    return value
+  }
+
+  it('the golden v3 payload has no shape or NUL errors', () => {
+    expect(payloadShapeErrors(v3Golden.payload, 3)).toEqual([])
+    expect(payloadNulErrors(v3Golden.payload)).toEqual([])
+  })
+
+  it.each(receipt)('refuses NUL in %s, before the replay read as well', (field, _max, set) => {
+    const value = withText(set, 'a\0b')
+    expect(payloadShapeErrors(value, 3)).toEqual([`payload.${field}: expected no NUL character`])
+    expect(payloadNulErrors(value)).toEqual([`payload.${field}: expected no NUL character`])
+  })
+
+  it.each(receipt)('refuses a lone surrogate in %s, and accepts a valid pair', (field, _max, set) => {
+    for (const text of ['a\uD83D', '\uDE00b']) {
+      expect(payloadShapeErrors(withText(set, text), 3)).toEqual([`payload.${field}: expected well-formed text`])
+      expect(payloadNulErrors(withText(set, text))).toEqual([`payload.${field}: expected well-formed text`])
+    }
+    expect(payloadShapeErrors(withText(set, 'cof😀fee'), 3)).toEqual([])
+    expect(payloadNulErrors(withText(set, 'cof😀fee'))).toEqual([])
+  })
+
+  it.each(receipt)('bounds %s at %i characters in the shape check only', (field, max, set) => {
+    expect(payloadShapeErrors(withText(set, 'x'.repeat(max + 1)), 3)).toEqual([`payload.${field}: expected at most ${max} characters`])
+    expect(payloadNulErrors(withText(set, 'x'.repeat(max + 1)))).toEqual([])
+    expect(payloadShapeErrors(withText(set, 'x'.repeat(max)), 3)).toEqual([])
+  })
+
+  it.each([{ display: 'EUR', taxByRate: 'VAT' }, { display: { lines: [null, 'x', { discounts: [null, 5] }] }, taxByRate: [null, 5] }])(
+    'adds nothing for a missing or non-object parent %j', value => {
+      expect(() => payloadNulErrors({ ...payload, ...value })).not.toThrow()
+      expect(payloadNulErrors({ ...payload, ...value })).toEqual([])
+    })
 })
