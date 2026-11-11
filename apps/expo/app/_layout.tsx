@@ -10,12 +10,16 @@ import { DemoBanner } from '../components/demo-banner';
 import { LiveTabGate } from '../components/live-tab-gate';
 import { StorageHealth } from '../components/storage-health';
 import { installLogSinks } from '../lib/logging';
+import { defaultStorage } from '../lib/session';
+import { loadThemeChoice, subscribeThemeChoice } from '../lib/theme-choice';
 import { SessionProvider, useSession } from '../lib/session-context';
 import { OutboxProvider } from '../lib/outbox-context';
 import { OutboxStrip } from '../components/store-refused';
 
-// The POS ships the light theme; no dark design yet.
-Uniwind.setTheme('light');
+// At module load, before the layout's first render, so the first frame uses this till's saved theme (Settings › Theme, one device-wide key).
+Uniwind.setTheme(loadThemeChoice(defaultStorage()));
+// Settings › Theme applies a new choice app-wide at once.
+subscribeThemeChoice((choice) => Uniwind.setTheme(choice));
 // Once at app start: the sale and outbox loggers' warn and error reach the console.
 installLogSinks();
 
@@ -46,7 +50,7 @@ function GatedApp() {
 export default function RootLayout() {
   return (
     <ClearLocalDataGate><SessionProvider>
-      <StatusBar style="dark" />
+      <StatusBar style="auto" />
       <DemoBanner />
       <GatedApp />
       {/* One root host, after navigation and outside every gate (TallyUI's integration doc at 451a0ca): the
