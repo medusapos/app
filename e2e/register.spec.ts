@@ -1,14 +1,14 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 // The store's closure history row for `sessionId`'s closure (closure-history.ts), read with the e2e admin token.
-async function storeClosure(sessionId: string): Promise<{ sessionId: string; approvalVerified: boolean } | undefined> {
+async function storeClosure(sessionId: string): Promise<{ sessionId: string; number: number; approvalVerified: boolean } | undefined> {
   const response = await fetch(`${backend}/tally/v1/registers/register-1/closures`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
-  const { closures = [] } = await response.json() as { closures?: { sessionId: string; approvalVerified: boolean }[] };
+  const { closures = [] } = await response.json() as { closures?: { sessionId: string; number: number; approvalVerified: boolean }[] };
   return closures.find((closure) => closure.sessionId === sessionId);
 }
 
@@ -298,6 +298,60 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await approveInDialog(page);
       await expect(card).toHaveCount(0);
       await expect.poll(async () => (await storeClosure(session!.id))?.approvalVerified, { timeout: 30_000 }).toBe(true);
+    });
+
+    // TallyUI #657 (#655): this till's closure submit is held while its close reaches the store, and another till's closure
+    // takes its number there; the store refuses it register_closure_number_invalid, and the till renumbers it from the
+    // refusal's counters and resends it, with no tap from the cashier.
+    test('a closure the store refuses for its number is renumbered from the store\'s counters and accepted', async ({ page }) => {
+      const opens = captureCommands<{ sessionId: string }>(page, 'register.session.open');
+      const submits = captureCommands<{ closureId: string; number: number }>(page, 'register.closure.submit');
+      await signIn(page);
+      const sessionId = opens[0].payload.sessionId;
+      const last = (await storeRegister()).counters!.lastClosureNumber;
+      // A batch's closure submits are held: taken out of a batch with other commands, or the request kept unanswered.
+      let release!: () => void;
+      const released = new Promise<void>((resolve) => { release = resolve; });
+      let holding = true;
+      await page.route(`${backend}/tally/v1/commands`, async (route) => {
+        const body = route.request().postDataJSON() as { commands: PostedCommand<unknown>[] };
+        const rest = body.commands.filter(({ type }) => type !== 'register.closure.submit');
+        if (!holding || rest.length === body.commands.length) return route.continue();
+        if (rest.length) return route.continue({ postData: JSON.stringify({ ...body, commands: rest }) });
+        await released;
+        await route.continue().catch(() => {});
+      });
+      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+      const count = page.getByTestId('register-count');
+      await count.getByTestId('count-amount').fill('100.00');
+      await count.getByTestId('count-close').click();
+      const sheet = page.getByTestId('closure-sheet');
+      await expect(sheet.getByTestId('closure-number')).toHaveText(`Closure #${last + 1}`);
+      // This till's close is applied at the store, its closure is not; another till then opens, closes and submits #last+1.
+      await expect.poll(async () => (await storeRegister()).session).toMatchObject({ id: sessionId, status: 'closed' });
+      const counterSessionId = await openStoreRegister('Counter till');
+      await closeStoreRegister();
+      await submitStoreClosure(counterSessionId, last + 1);
+      const answered = () => [...new Map(submits.filter(({ status }) => status).map((submit) => [submit.id, submit])).values()];
+      expect(answered()).toEqual([]);
+      holding = false;
+      release();
+      await expect.poll(() => answered().map(({ payload, status, code }) => [payload.number, status, code]), { timeout: 30_000 })
+        .toEqual([[last + 1, 'rejected', 'register_closure_number_invalid'], [last + 2, 'applied', undefined]]);
+      expect(new Set(answered().map(({ payload }) => payload.closureId)).size).toBe(1);
+      expect((await storeRegister()).counters?.lastClosureNumber).toBe(last + 2);
+      expect((await storeClosure(sessionId))?.number).toBe(last + 2);
+      // The screen names the closure by its new number, and no refused register command is left there.
+      await expect(sheet.getByTestId('closure-number')).toHaveText(`Closure #${last + 2}`);
+      await sheet.getByTestId('closure-print').click();
+      await expect(page.frameLocator('#closure-print-frame').locator('h2')).toHaveText(`Z report · Closure #${last + 2}`);
+      await sheet.getByTestId('closure-done').click();
+      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await expect(page.getByTestId('last-closure').getByRole('heading')).toHaveText(`Last closure · Closure #${last + 2}`);
+      await expect(page.getByText(/refused|needs attention/)).toHaveCount(0);
+      await expect(page.getByTestId('register-panel-reapproval')).toHaveCount(0);
+      await shot(page, 'renumbered');
     });
   });
 }
