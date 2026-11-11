@@ -43,7 +43,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 | Fees, shipping, custom lines | Free (FS) | Has | `order.create` v5 (`docs/adr/0021`); `e2e/charges.spec.ts` "a sale with a fee, shipping and a custom item reaches Medusa once at the till's total, with the shipping as a shipping method" | — |
 | Park and resume a sale | Free (RS) | Has | TallyUI `ParkedSales`; `e2e/parked-sales.spec.ts` "park a sale, sell another, resume the first and complete it: both orders reach Medusa once at the till's figures" | — |
 | Several open orders as tabs | 2.0 (FS, RS) | Missing | Parking only | TallyUI |
-| Order note | 2.0 (FS, RS) | Missing | TallyUI 3.8.0 ships `CartNoteInput` and an order `note` field; the app does not use them: `useSale` has no `setNote` yet (TallyUI#520). The plugin drops the note too: `tally-order-create/plan.ts` maps only `registerId` and `cashierRef` into the order metadata | TallyUI, then app and plugin |
+| Order note | 2.0 (FS, RS) | Has | The cart's `CartNoteInput` holds the sale's note (at most 1000 characters). The note is kept with a parked sale, printed on the receipt and sent as order.create v7. The plugin stores it as the Medusa order's `metadata.tally_note`, shown in Admin's Metadata section (ADR 0024). Tests: `e2e/order-note.spec.ts` and `integration-tests/http/order-create-v7.spec.ts` | — |
 | Wide and phone layouts | Free (RS) | Has | Phone below 600 wide (`docs/adr/0009`); `e2e/phone-cart.spec.ts` "at 360 × 740 the lines scroll under pinned totals and pay, and the cart bar counts items" | — |
 | Know before selling what is out of stock | Free (FS) | Partial | The till never refuses a sale; the plugin applies it and returns `insufficient_stock` (`docs/adr/0003`, `workflows/tally-order-create/stock.ts`). Nothing warns the cashier before checkout. Medusa's way: the variant's own `manage_inventory` and `allow_backorder` decide, against the stock location's levels | TallyUI, then app |
 
@@ -142,7 +142,7 @@ Quoted test names are Playwright tests in `e2e/` (repo root); each row names its
 
 1. Register v2 e2e against plugin 0.2.2: the losing till's `register_session_superseded` refusal for a session opened at contract 2, and resume after lost local state (take-over itself is covered by `e2e/register.spec.ts`). Done (#247).
 2. Pass `showViewToggle` and `showCategoryNav` to `Catalogue` (app). Done (#248).
-3. Order note: waits on TallyUI#520 (`useSale` `setNote`). Then wire `CartNoteInput` (app) and map `order.note` in `tally-order-create` (plugin).
+3. Order note: the plugin accepts order.create 6 and 7 and stores the note (ADR 0024); the app wires `CartNoteInput`. Done.
 4. Approval: recorded, not verified; proof design in ADR 0023 (accepted), the second of its two PRs, after a TallyUI ask for register contract 3. A user-exists check is ruled out (front desk, 2026-10-07): it would claim a verification it does not do. The follow-up's shape: the manager authenticates against the store with their own credential (PIN or login, verified server side), the store issues a short-lived single-use approval proof bound to the register session id and the variance amount, the close command carries it, and the plugin verifies it.
 5. Settings screen: register and printer settings (ADR 0016) (app). Till name done (#250); printer settings are TallyUI's.
 6. A POS role or capability for sign-in (plugin). ADR 0023's first PR: the `tally_pos:use` policy, the POS roles script, and the till's 403 handling. Done (#253).
