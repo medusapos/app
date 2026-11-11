@@ -102,8 +102,28 @@ const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: st
       : `tally take-back compensation: order ${data.orderId} restored its markers, but the lock release failed: ${(error as Error).message}`)
   })
 })
+type Adjusted = Array<{ adjustments?: Array<{ id: string; promotion_id?: string | null }> | null }> | null | undefined
+// The ids of the adjustments that carry a promotion; the till's own adjustments have none.
+const promoted = (rows: Adjusted) => (rows ?? []).flatMap(row => row.adjustments ?? []).filter(row => row.promotion_id).map(row => row.id)
+const dropPromotionAdjustmentsStep = createStep('tally-drop-promotion-adjustments', async (orderId: string, { container }) => {
+  const orders = container.resolve(Modules.ORDER)
+  const order = await orders.retrieveOrder(orderId, { select: ['id'], relations: ['items.adjustments', 'shipping_methods.adjustments'] })
+  const removed = { items: promoted(order.items), shipping: promoted(order.shipping_methods) }
+  if (removed.items.length) await orders.softDeleteOrderLineItemAdjustments(removed.items)
+  if (removed.shipping.length) await orders.softDeleteOrderShippingMethodAdjustments(removed.shipping)
+  return new StepResponse(removed, removed)
+}, async (removed, { container }) => {
+  if (!removed) return
+  const orders = container.resolve(Modules.ORDER)
+  if (removed.items.length) await orders.restoreOrderLineItemAdjustments(removed.items)
+  if (removed.shipping.length) await orders.restoreOrderShippingMethodAdjustments(removed.shipping)
+})
 export const takeBackStockWorkflow = createWorkflow('tally-take-back-stock', function (input: { orderId: string }) {
   takeBackStockStep(input.orderId)
+  return new WorkflowResponse(undefined)
+})
+export const dropPromotionAdjustmentsWorkflow = createWorkflow('tally-resume-drop-promotion-adjustments', function (input: { orderId: string }) {
+  dropPromotionAdjustmentsStep(input.orderId)
   return new WorkflowResponse(undefined)
 })
 
@@ -138,6 +158,9 @@ export const tallyOrderCreateWorkflow = createWorkflow('tally-order-create', fun
   })
   // Medusa fills variant-backed item titles from the product, although its DTO requires title.
   const draft = createOrderWorkflow.runAsStep({ input: input.draftOrder as unknown as CreateOrderWorkflowInput })
+  // createOrderWorkflow's promotion refresh applies the store's automatic promotions, so their adjustments come off (#290).
+  // Row 7 (till coupons) must keep the applied coupon codes' adjustments when coupons are allowed; process.ts refuses them today.
+  dropPromotionAdjustmentsStep(draft.id)
   convertDraftOrderWorkflow.runAsStep({ input: { id: draft.id } })
   // Medusa cannot capture 0, so a sale discounted to 0 (ADR-062) completes without a payment collection.
   when('has-payment', { input }, ({ input }) => input.paymentAmount > 0).then(() => {
