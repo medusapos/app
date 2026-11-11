@@ -264,7 +264,8 @@ async function postStoreRegisterCommand(type: string, version: number, payload: 
   const at = new Date().toISOString();
   const response = await fetch(`${backend}/tally/v1/commands`, { method: 'POST', headers: { Authorization: `Bearer ${await adminToken()}`,
     'Content-Type': 'application/json', 'X-Tally-Protocol': '1' }, body: JSON.stringify({ commands: [{
-    id: crypto.randomUUID(), type, version, createdAt: at, deviceId: 'e2e', attempt: 1, payload: { ...payload, ...(type === 'register.session.open' ? { openedAt: at } : { at }) },
+    id: crypto.randomUUID(), type, version, createdAt: at, deviceId: 'e2e', attempt: 1,
+    payload: { ...payload, ...(type === 'register.session.open' ? { openedAt: at } : type === 'register.closure.submit' ? {} : { at }) },
   }] }) });
   const { results } = await response.json();
   expect(results).toHaveLength(1);
@@ -307,6 +308,17 @@ export async function openStoreRegister(deviceName: string, registerId = 'regist
   const sessionId = crypto.randomUUID();
   await storeRegisterCommand('register.session.open', 2, { sessionId, registerId, countedFloatMinor: 10000, deviceName, ...(supersedes ? { supersedes } : {}) });
   return sessionId;
+}
+
+// Another till's closure of its session `sessionId`, closed at the store, numbered `number`: a v1 submit (no approval
+// check) counted at openStoreRegister's €100.00 float with no sales, at the register's perpetual totals as they stand.
+export async function submitStoreClosure(sessionId: string, number: number, registerId = 'register-1') {
+  const { counters } = await storeRegister(registerId);
+  const at = new Date().toISOString();
+  await storeRegisterCommand('register.closure.submit', 1, { closureId: crypto.randomUUID(), sessionId, registerId, number,
+    openedAt: at, closedAt: at, tillExpected: { cash: 10000 }, counted: { cash: 10000 }, periodSalesTotalMinor: 0, periodRefundsTotalMinor: 0,
+    perpetualSalesTotalMinor: counters?.perpetualSalesTotalMinor ?? 0, perpetualRefundsTotalMinor: counters?.perpetualRefundsTotalMinor ?? 0,
+    unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: 'e2e', orderIds: [], movementIds: [] });
 }
 
 // Another till's plain v2 open of `registerId`, expected to be refused because a session is live there; the refusal's
