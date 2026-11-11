@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, cartLine, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -32,7 +32,7 @@ test('park a sale, sell another, resume the first and complete it: both orders r
   const second = (await (await secondApplied).json()).results;
   await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
   await page.getByTestId(/^parked-resume-/).click();
-  await expect(page.getByText('Total', { exact: true }).locator('..')).toContainText('5.00');
+  await expect(cartTotalRow(page, 'Total')).toContainText('5.00');
   await expect(page.getByRole('button', { name: 'Parked sales', exact: true })).toBeVisible();
   const firstApplied = appliedResponse(page);
   expect(await sellBySku(page, [], 'exact')).toBe(5);
@@ -62,11 +62,11 @@ test('an edited unit price settles in Medusa at the till\'s total with no warnin
   await addE2E1(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '10');
-  await page.getByText('Price', { exact: true }).click();
+  await cartLine(page, 'E2E product 1').getByText('Price', { exact: true }).click();
   await page.getByLabel('Price value', { exact: true }).fill('3.20');
   await page.getByLabel('Reason (optional)', { exact: true }).fill('Shelf price');
   await page.getByTestId('price-apply').click();
-  await expect(page.getByText('Total', { exact: true }).locator('..')).toContainText('7.20');
+  await expect(cartTotalRow(page, 'Total')).toContainText('7.20');
   const applied = appliedResponse(page);
   expect(await sellBySku(page, [], 'exact')).toBe(7.2);
   const { results } = await (await applied).json();

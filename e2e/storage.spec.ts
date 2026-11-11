@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, test, variantIdBySku } from './helpers';
+import { addE2E1, adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, tenderCash, test, variantIdBySku } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -288,8 +288,7 @@ test('a dead storage worker shows the reload prompt, and Reload recovers the app
   await search.fill('E2E-1');
   await search.press('Enter');
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
-  await tender.locator('[tabindex="0"]').first().click();
+  await tenderCash(page, 'exact');
   const debug = (name: 'HoldOrderInserts' | 'HeldOrderInserts' | 'ReleaseOrderInserts' | 'KillStorageWorker') =>
     page.evaluate((hook) => (window as unknown as Record<string, () => number | void>)[`__medusapos${hook}`](), name);
   await debug('HoldOrderInserts');

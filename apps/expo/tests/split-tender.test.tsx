@@ -13,6 +13,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
+import { takeLeg, tenderBalance, tenderEntry } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
 vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
@@ -32,7 +33,9 @@ const record = vi.fn(async (_order: PosOrder) => {});
 const button = (name: string) => screen.getByRole('button', { name });
 const click = (name: string) => fireEvent.click(button(name));
 const add = () => fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-const summary = () => within(screen.getByTestId('split-tender-summary'));
+const headline = () => screen.getByTestId('tender-headline').textContent;
+/** The ledger's payment legs (each row's testID; its status and Cancel payment ids end -status and -void). */
+const legs = () => screen.queryAllByTestId(/^tender-leg-/).filter((row) => !/-(status|void)$/.test(row.getAttribute('data-testid')!));
 beforeEach(async () => {
   setWindowWidth(1280);
   const data = new Map<string, string>();
@@ -73,16 +76,16 @@ async function startSplit() {
   add();
   await act(async () => { click('Cash'); });
   click('Split payment');
-  expect(screen.queryByText('Cash Tendered')).toBeNull();
-  expect(summary().getByText('Total: €24.00')).toBeTruthy();
+  // TallyUI 3.14.0: SplitTender renders the one tender pane, which takes split legs itself; the switch now reads Single payment.
+  expect(button('Single payment')).toBeTruthy();
+  expect(headline()).toBe('Total€24.00');
+  expect(tenderBalance()).toBe('€24.00');
 }
 function tender(method: 'card' | 'cash', amount: string) {
-  fireEvent.click(screen.getByTestId(`split-tender-method-${method}`));
-  fireEvent.change(screen.getByTestId('split-tender-amount'), { target: { value: amount } });
-  fireEvent.click(screen.getByTestId('split-tender-add-button'));
+  takeLeg(method === 'card' ? 'external' : 'cash', amount);
 }
 async function complete() {
-  await act(async () => { fireEvent.click(screen.getByTestId('split-tender-complete')); });
+  await act(async () => { fireEvent.click(screen.getByTestId('tender-complete')); });
   await screen.findByRole('button', { name: 'New sale' });
   expect(record).toHaveBeenCalledOnce();
   const order = record.mock.calls[0][0];
@@ -92,12 +95,12 @@ async function complete() {
 it('takes a card part and a cash remainder, shows change from cash only, and records both payments', async () => {
   await startSplit();
   tender('card', '10.00');
-  expect(summary().getByText('Remaining: €14.00')).toBeTruthy();
-  expect(summary().queryByText(/^Change:/)).toBeNull();
-  expect((screen.getByTestId('split-tender-amount') as HTMLInputElement).value).toBe('14.00');
+  expect(headline()).toBe('Remaining€14.00€10.00 of €24.00 paid');
+  expect(screen.queryByTestId('tender-change')).toBeNull();
+  expect(tenderEntry()).toBe('€14.00');
   tender('cash', '20.00');
-  expect(summary().getByText('Remaining: €0.00')).toBeTruthy();
-  expect(summary().getByText('Change: €6.00')).toBeTruthy();
+  expect(tenderBalance()).toBe('€0.00');
+  expect(screen.getByTestId('tender-change').textContent).toBe('Change €6.00');
   const command = await complete();
   expect(command.type).toBe('order.create');
   expect(command.payload.totalMinor).toBe(2400);
@@ -112,10 +115,15 @@ it('takes a card part and a cash remainder, shows change from cash only, and rec
 
 it('caps a card part at the balance due, with no change from card', async () => {
   await startSplit();
+  // The pane caps a card leg before it is taken: over the balance, Take is refused with v2's hint, and nothing is recorded.
   tender('card', '30.00');
-  expect(summary().getByText('Paid: €24.00')).toBeTruthy();
-  expect(summary().getByText('Remaining: €0.00')).toBeTruthy();
-  expect(summary().queryByText(/^Change:/)).toBeNull();
+  expect(screen.getByTestId('tender-entry-hint').textContent).toBe("Only €24.00 is due — Card terminal can't give change");
+  expect(screen.getByTestId('tender-take').getAttribute('aria-disabled')).toBe('true');
+  expect(legs()).toHaveLength(0);
+  tender('card', '24.00');
+  expect(screen.getByTestId('tender-paid').textContent).toBe('€24.00 of €24.00 paid');
+  expect(tenderBalance()).toBe('€0.00');
+  expect(screen.queryByTestId('tender-change')).toBeNull();
   const { payload } = await complete();
   expect(payload.payments).toEqual([expect.objectContaining({ method: 'external', amountMinor: 2400 })]);
   expect(payload.payments[0].changeMinor ?? 0).toBe(0);
@@ -124,13 +132,15 @@ it('caps a card part at the balance due, with no change from card', async () => 
 it('removing a tender restores the balance due', async () => {
   await startSplit();
   tender('card', '10.00');
-  expect(summary().getByText('Remaining: €14.00')).toBeTruthy();
-  fireEvent.click(screen.getByTestId(/^split-tender-remove-/));
-  expect(summary().getByText('Paid: €0.00')).toBeTruthy();
-  expect(summary().getByText('Remaining: €24.00')).toBeTruthy();
-  expect((screen.getByTestId('split-tender-amount') as HTMLInputElement).value).toBe('24.00');
-  expect(screen.queryByTestId(/^split-tender-remove-/)).toBeNull();
-  expect(screen.getByTestId('split-tender-complete').getAttribute('aria-disabled')).toBe('true');
+  expect(tenderBalance()).toBe('€14.00');
+  // The pane's Cancel payment voids the leg: it stays on the ledger, struck through, and counts nothing.
+  fireEvent.click(screen.getByTestId(/^tender-leg-.*-void$/));
+  expect(screen.queryByTestId('tender-paid')).toBeNull();
+  expect(headline()).toBe('Total€24.00');
+  expect(tenderEntry()).toBe('€24.00');
+  expect(screen.queryByTestId(/^tender-leg-.*-void$/)).toBeNull();
+  expect(screen.getByTestId(/^tender-leg-.*-status$/).textContent).toBe('Cancelled');
+  expect(screen.getByTestId('tender-complete').getAttribute('aria-disabled')).toBe('true');
   expect(record).not.toHaveBeenCalled();
 });
 
@@ -138,17 +148,19 @@ it('Single payment clears split payments and shows Tender; leaving tender resets
   await startSplit();
   tender('card', '10.00');
   tender('cash', '5.00');
+  expect(legs()).toHaveLength(2);
   click('Single payment');
-  expect(screen.queryByTestId('split-tender-summary')).toBeNull();
-  expect(screen.getByText('Cash Tendered')).toBeTruthy();
-  expect(screen.getByText('Balance due: €24.00')).toBeTruthy();
+  expect(button('Split payment')).toBeTruthy();
+  expect(legs()).toHaveLength(0);
+  expect(within(screen.getByTestId('tender-ledger')).getByText('No payments yet')).toBeTruthy();
+  expect(headline()).toBe('Total€24.00');
   click('Split payment');
-  expect(screen.queryAllByTestId(/^split-tender-remove-/)).toHaveLength(0);
+  expect(legs()).toHaveLength(0);
   tender('card', '10.00');
   click('Back');
   await act(async () => { click('Cash'); });
   expect(button('Split payment')).toBeTruthy();
-  expect(screen.queryByTestId('split-tender-summary')).toBeNull();
+  expect(legs()).toHaveLength(0);
   click('Split payment');
   tender('cash', '24.00');
   await complete();
@@ -156,12 +168,12 @@ it('Single payment clears split payments and shows Tender; leaving tender resets
   add();
   await act(async () => { click('Cash'); });
   expect(button('Split payment')).toBeTruthy();
-  expect(screen.queryByTestId('split-tender-summary')).toBeNull();
+  expect(legs()).toHaveLength(0);
   click('Split payment');
   tender('cash', '24.00');
   let rejectSave!: (error: Error) => void;
   record.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectSave = reject; }));
-  await act(async () => { fireEvent.click(screen.getByTestId('split-tender-complete')); });
+  await act(async () => { fireEvent.click(screen.getByTestId('tender-complete')); });
   await waitFor(() => expect(record).toHaveBeenCalledTimes(2));
   expect(screen.queryByRole('button', { name: /^(Single|Split) payment$/ })).toBeNull();
   await act(async () => { rejectSave(new Error('Stored, but save acknowledgement failed')); });
@@ -172,7 +184,7 @@ it('Single payment clears split payments and shows Tender; leaving tender resets
   add();
   await act(async () => { click('Cash'); });
   expect(button('Split payment')).toBeTruthy();
-  expect(screen.getByText('Cash Tendered')).toBeTruthy();
-  expect(screen.queryByTestId('split-tender-summary')).toBeNull();
+  expect(screen.getByTestId('tender-pane')).toBeTruthy();
+  expect(legs()).toHaveLength(0);
   expect(record).toHaveBeenCalledTimes(2);
 }, 20_000);

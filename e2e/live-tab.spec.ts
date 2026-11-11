@@ -32,7 +32,7 @@ test('a payment in flight defers the hand-over up to 10 s', async ({ page, conte
   await search.fill('E2E-1');
   await search.press('Enter');
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  await expect(page.getByText('Cash Tendered', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('tender-pane')).toBeVisible();
 
   const openedAt = Date.now();
   const pageB = await context.newPage();
@@ -44,7 +44,7 @@ test('a payment in flight defers the hand-over up to 10 s', async ({ page, conte
   await page.bringToFront();
 
   await page.waitForTimeout(5000);
-  await expect(page.getByText('Cash Tendered', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('tender-pane')).toBeVisible();
 
   await expect(page.getByText('MedusaPOS is open in another tab')).toBeVisible({ timeout: 15_000 });
   const parkedAfterMs = Date.now() - openedAt;
@@ -61,7 +61,7 @@ test('closing the live tab makes the waiting tab live', async ({ page, context }
   await search.fill('E2E-1');
   await search.press('Enter');
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  await expect(page.getByText('Cash Tendered', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('tender-pane')).toBeVisible();
 
   const pageB = await context.newPage();
   await pageB.goto('/');

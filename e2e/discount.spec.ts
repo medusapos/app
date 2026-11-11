@@ -1,5 +1,5 @@
 import { expect, type Page, type Response } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, cartLineRow, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 // Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5] at GET /tally/v1/info,
@@ -42,8 +42,8 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   // The totals are TallyUI's order.display (ADR-063): Subtotal − Discount + VAT = Total (4.00 − 0.90 + 0.78 = 3.88).
   // The line reads before its discounts (4.00, adding up to the Subtotal); each chip carries its amount. No
   // cart-scroll testID with CartPanel (TallyUI #136): the line's own Remove button scopes to the cart's copy.
-  const cartLine = page.getByRole('button', { name: 'Remove E2E product 1' }).locator('../..');
-  await expect(cartLine.getByText('E2E product 1', { exact: true }).locator('../..')).toHaveText(/× 2\D*4\.00$/);
+  // TallyUI 3.14.0's line is columns (quantity, name, unit price, total), no longer "2.00 × 2".
+  await expect(cartLineRow(page, 'E2E product 1')).toHaveText(/^2E2E product 1\D*2\.00\D*4\.00$/);
   await expect(page.getByText(/^10% −\D*0\.40$/)).toBeVisible();
   await expect(page.getByText(/^Order discount −.*0\.50$/)).toBeVisible();
   // The last "Discount" is the totals row; the first is the line's action.
@@ -52,10 +52,7 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   const applied = appliedResponse(page);
   // Exact cash, as sellBySku pays it, stopping on the receipt to read its rows.
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
-  const amount = tender.locator('input');
-  await tender.locator('[tabindex="0"]').first().click();
-  await amount.fill(await amount.inputValue());
+  await tenderCash(page, 'exact');
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   for (const label of [/^2 × \D*2\.00: \D*4\.00$/, /^10% off: −\D*0\.40$/, /^Subtotal: \D*4\.00$/,
     /^Line discounts: −\D*0\.40$/, /^Order discount: −\D*0\.50$/, /^VAT 25%: \D*0\.78$/, /^Total: \D*3\.88$/]) {
@@ -110,7 +107,7 @@ test('100% off the line completes with cash at €0.00 as one Medusa order', asy
   await signIn(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '100');
-  const row = page.getByText('Total', { exact: true }).locator('..');
+  const row = cartTotalRow(page, 'Total');
   await expect(row).toContainText('0.00');
   const applied = appliedResponse(page);
   await page.getByRole('button', { name: 'Cash', exact: true }).click();

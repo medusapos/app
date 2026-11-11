@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
+import { tenderLegs } from './tender-pane';
 import { useOutboxContext } from '../lib/outbox-context';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { POS_CONNECTOR_ID } from '../lib/pos-connector';
@@ -200,8 +201,8 @@ describe('store settings flow', () => {
     await pos();
     const startSale = async () => { fireEvent.click(screen.getByTestId('product-tile-Shirt')); await act(async () => { fireEvent.click(button('Card terminal')); }); };
     const inTender = () => {
-      expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
-      expect(button('Payment approved on terminal')).toBeTruthy();
+      expect(tenderLegs()).toEqual(['Card terminal €15.00']);
+      expect(button('Complete sale')).toBeTruthy();
     };
     const toIdle = () => { fireEvent.click(button('Back')); fireEvent.click(button('Remove Shirt')); };
     const replicationContext = vi.mocked(useReplicatedProducts).mock.lastCall![1];
@@ -258,8 +259,8 @@ describe('store settings flow', () => {
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(screen.getByTestId('cart-footer').textContent).toContain('Total€30.00');
     await act(async () => { fireEvent.click(button('Card terminal')); });
-    expect(screen.getByText('Card terminal: €30.00')).toBeTruthy();
-    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    expect(tenderLegs()).toEqual(['Card terminal €30.00']);
+    await act(async () => { fireEvent.click(button('Complete sale')); });
     const record = vi.mocked(useOutboxContext().record);
     expect(record).toHaveBeenCalledOnce();
     expect(record.mock.calls[0][0]).toMatchObject({ pricesIncludeTax: false, subtotalMinor: 2400, taxMinor: 600, totalMinor: 3000,
@@ -286,11 +287,11 @@ describe('store settings flow', () => {
     await act(async () => { fireEvent.click(button('Card terminal')); });
     await act(async () => { settle.reject(choiceRequired({ regions })); });
     expect(screen.queryByText('Set up this till')).toBeNull();
-    expect(screen.getByText('Card terminal: €15.00')).toBeTruthy();
+    expect(tenderLegs()).toEqual(['Card terminal €15.00']);
     // A held choose result is not an outage: the status says the change waits for the sale, never "Offline".
     expect(screen.getByText('Store settings changed; this applies after the current sale')).toBeTruthy();
     expect(screen.queryByText('Offline')).toBeNull();
-    await act(async () => { fireEvent.click(button('Payment approved on terminal')); });
+    await act(async () => { fireEvent.click(button('Complete sale')); });
     expect(vi.mocked(useOutboxContext().record).mock.calls[0][0]).toMatchObject({ totalMinor: 1500, taxMinor: 300 });
     expect(screen.queryByText('Set up this till')).toBeNull();
     await act(async () => { fireEvent.click(button('New sale')); });

@@ -73,7 +73,8 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await expect(page.getByTestId('customer-dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Add charge', exact: true }).click();
   await expect(page.getByTestId('charge-form')).toBeVisible();
-  await page.getByText('Price', { exact: true }).click();
+  // The one line's Price action (its item, from its Remove button), not TallyUI 3.14.0's Price column head.
+  await page.getByRole('button', { name: /^Remove / }).locator('../../../..').getByText('Price', { exact: true }).click();
   await expect(page.getByTestId('price-form')).toBeVisible();
   await expect(page.getByTestId('price-apply')).toBeVisible();
   await page.getByTestId('price-cancel').click();
@@ -83,9 +84,9 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.getByTestId('parked-sales-dismiss').click();
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
   await page.getByRole('button', { name: 'Split payment', exact: true }).click();
-  await expect(page.getByTestId('split-tender-method-card')).toBeVisible();
-  await expect(page.getByTestId('split-tender-method-cash')).toBeVisible();
-  await expect(page.getByTestId('split-tender-add-button')).toBeVisible();
+  await expect(page.getByTestId('tender-method-external')).toBeVisible();
+  await expect(page.getByTestId('tender-method-cash')).toBeVisible();
+  await expect(page.getByTestId('tender-take')).toBeVisible();
 });
 
 test('a non-demo account does not see the demo banner', async ({ page }) => {

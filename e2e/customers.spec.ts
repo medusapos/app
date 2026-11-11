@@ -1,15 +1,12 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, createAdminCustomer, ordersByClientId, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, createAdminCustomer, ordersByClientId, signIn, tenderCash, test } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 type Sale = { clientOrderId: string; customer: { customerId: string } };
 async function payCash(page: Page) {
   await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  const tender = page.getByText('Cash Tendered', { exact: true }).locator('..');
-  const amount = tender.locator('input');
-  await tender.locator('[tabindex="0"]').first().click();
-  await amount.fill(await amount.inputValue());
+  await tenderCash(page, 'exact');
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   await expect(page.getByRole('button', { name: 'New sale', exact: true })).toBeVisible();
 }
