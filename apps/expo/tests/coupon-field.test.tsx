@@ -85,6 +85,8 @@ describe('CouponField', () => {
   it('disables empty or blank Apply and sends no second POST while applying', async () => {
     const fetchImpl = start();
     const button = screen.getByTestId('coupon-apply');
+    expect(screen.getByRole('button', { name: 'Apply coupon' })).toBe(button);
+    expect(screen.queryByRole('button', { name: 'Apply' })).toBeNull();
     expect(button.getAttribute('aria-disabled')).toBe('true');
     type('   ');
     expect(button.getAttribute('aria-disabled')).toBe('true');

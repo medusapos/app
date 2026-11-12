@@ -51,7 +51,7 @@ export function CouponField({ sale }: { sale: Sale }): JSX.Element {
       <Input className="flex-1"><Input.Field value={text} onChangeText={(value) => { setText(value); setMessage(null); }}
         accessibilityLabel="Coupon code" placeholder="Coupon code" autoCapitalize="characters" autoComplete="off"
         autoCorrect={false} onSubmitEditing={() => { void apply(); }} /></Input>
-      <Button variant="outline" testID="coupon-apply" className="min-h-11" disabled={!text.trim() || applying}
+      <Button variant="outline" testID="coupon-apply" accessibilityLabel="Apply coupon" className="min-h-11" disabled={!text.trim() || applying}
         onPress={() => { void apply(); }}><Text>Apply</Text></Button>
     </View>
     {message !== null ? <Text accessibilityRole="alert" className="text-destructive">{message}</Text> : null}
