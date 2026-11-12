@@ -74,9 +74,16 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.getByRole('button', { name: 'Add charge', exact: true }).click();
   await expect(page.getByTestId('charge-form')).toBeVisible();
   // The one line's price opens v2's price keypad popover.
+  const checkoutBefore = await page.getByTestId('cart-checkout').boundingBox();
   await page.getByTestId('price-popover-trigger').click();
   await expect(page.getByTestId('price-popover')).toBeVisible();
   await expect(page.getByTestId('price-popover-apply')).toBeVisible();
+  // It floats under its trigger and the app keeps its height: compiled from src, TallyUI's
+  // use-relative-position.web.ts stub (returns {}) put it in the page flow (metro.config.js redirects it).
+  const triggerBox = (await page.getByTestId('price-popover-trigger').boundingBox())!;
+  expect(await page.getByTestId('price-popover').evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
+  await expect.poll(async () => (await page.getByTestId('price-popover').boundingBox())?.y).toBeGreaterThanOrEqual(triggerBox.y + triggerBox.height);
+  expect(await page.getByTestId('cart-checkout').boundingBox()).toEqual(checkoutBefore);
   await page.getByTestId('price-popover-cancel').click();
   await expect(page.getByTestId('price-popover')).toHaveCount(0);
   await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
