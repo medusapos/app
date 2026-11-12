@@ -210,7 +210,8 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.textContent))
-      .toEqual(['Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Checkout €0.00']);
+      .toEqual(['Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales']);
+    expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
     expect(cartLineCells('Apple')).toEqual(['1', 'Apple', '€12.50', '€12.50']);
@@ -618,7 +619,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
       expect(signedOut()).toBe(false);
       fireEvent.click(continueButton);
-      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
     }
     const unlocked = screen.getByRole('button', { name: 'Sign out' });
     expect(unlocked.getAttribute('aria-disabled')).toBeNull();
@@ -719,7 +720,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
   async function continuePastHungSave() {
     await advance(5000);
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
     const signOut = screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING });
     expect(signOut.getAttribute('aria-disabled')).toBe('true');
     expect(screen.queryByText(SALE_SAVING)).toBeNull();
@@ -749,7 +750,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
       expect(signedOut()).toBe(false);
       fireEvent.click(continueButton);
-      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
       // The #85 review: the abandoned save is still in flight, and RxDB's close would wait on it, so Sign out stays
       // locked, described as an earlier sale's. The next sale isn't held.
       expect(screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING }).getAttribute('aria-disabled')).toBe('true');
@@ -796,7 +797,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       await continuePastHungSave();
       await act(async () => { settle.reject(new Error('Storage full')); });
       // The new sale carries on, with no error from the old one.
-      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
       expect(screen.queryByText(/could not be saved/)).toBeNull();
       expect(signOutDisabled()).toBeNull();
       fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
@@ -899,8 +900,8 @@ describe('ProductsScreen search minCodeLength', () => {
       expect(search.value).toBe('');
     } else {
       // No code lookup: the text stays a search, still showing its match, and the cart stays empty.
-      expect(screen.queryByRole('button', { name: 'Remove Shirt' })).toBeNull();
-      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
+      expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
       expect(search.value).toBe('AB123');
       expect(screen.getByTestId('product-tile-Shirt')).toBeTruthy();
     }
@@ -1067,7 +1068,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     expect(signedIn()).toBe(true);
     expect(screen.queryByText('redirect:/login')).toBeNull();
     expect(clearProductCache).not.toHaveBeenCalled();
-    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
   });
 });
 

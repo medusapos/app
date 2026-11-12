@@ -13,9 +13,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     const phone = viewport.width < 600;
     // On a phone the cart, and so the note, shows in the cart view, which the cart bar opens.
     const openCart = async (page: Page) => { if (phone) await page.getByRole('button', { name: /^Open cart, / }).click(); };
-    const noteField = (page: Page) => page.getByPlaceholder('Order note...', { exact: true });
+    const noteField = (page: Page) => page.getByPlaceholder('Order note', { exact: true });
     const addNote = async (page: Page, note: string) => {
-      await page.getByText('Add note', { exact: true }).click();
+      await page.getByText('Add order note', { exact: true }).click();
       await noteField(page).fill(note);
     };
     // Cash exact and Complete sale, as sellBySku pays, stopping on the receipt (before New sale).
@@ -63,7 +63,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       // A phone's cart bar shows only with items, so the new sale takes one to open its cart view.
       if (phone) await addE2E1(page);
       await openCart(page);
-      await expect(page.getByText('Add note', { exact: true })).toBeVisible();
+      await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
       await expect(noteField(page)).toHaveCount(0);
       await expect.poll(async () => (await ordersByClientId(token))
         .find((order) => order.metadata.tally_client_id === payload.clientOrderId)?.metadata.tally_note, { timeout: 30_000 })
@@ -80,7 +80,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(page.getByTestId(/^parked-resume-/)).toHaveCount(1);
       await page.getByTestId('parked-sales-dismiss').click();
       await expect(page.getByTestId('cart-empty')).toBeVisible();
-      await expect(page.getByText('Add note', { exact: true })).toBeVisible();
+      await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
       await expect(noteField(page)).toHaveCount(0);
       await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
       await page.getByTestId(/^parked-resume-/).click();

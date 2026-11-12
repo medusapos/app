@@ -35,6 +35,10 @@ const button = (name: string | RegExp) => screen.getByRole('button', { name });
 const add = () => fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 const drafts = () => draftsCollection(store.orders)!;
 const row = (label: string) => within(screen.getByTestId('cart-footer')).getByText(label).parentElement!.textContent;
+// TallyUI 3.19.0's popover editor: a line's Remove is in its quantity popover, its Discount (at 1280) in its price popover.
+const lineAction = (popover: 'quantity' | 'price', action: string, name = 'Shirt') => {
+  fireEvent.click(button(`Edit ${popover} of ${name}`)); fireEvent.click(button(`${action} ${name}`));
+};
 beforeEach(async () => {
   setWindowWidth(1280, 800);
   const data = new Map<string, string>();
@@ -105,10 +109,11 @@ it('parks the cart from the Parked sales sheet, starts an empty sale, and resume
   expect(await drafts().find().exec()).toHaveLength(1);
   fireEvent.click(screen.getByTestId('parked-sales-dismiss'));
   expect(screen.getByTestId('cart-empty')).toBeTruthy();
-  expect(row('Total')).toBe('Total€0.00');
+  expect(screen.queryByTestId('cart-footer')).toBeNull(); // the empty cart draws no foot
   add();
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
-  fireEvent.click(button('Remove Shirt'));
+  lineAction('quantity', 'Remove');
+  expect(screen.getByTestId('cart-empty')).toBeTruthy();
   fireEvent.click(button('Parked sales (1)'));
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
   expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
@@ -184,7 +189,7 @@ it('discarding a parked sale asks first, then removes it', async () => {
 
 it('the Price action on a line changes its unit price, and the line and total follow', async () => {
   await mount(); add(); add();
-  fireEvent.click(screen.getByText('Discount', { exact: true }));
+  lineAction('price', 'Discount');
   fireEvent.change(screen.getByLabelText('Discount value'), { target: { value: '10' } });
   fireEvent.click(button('Apply'));
   price();

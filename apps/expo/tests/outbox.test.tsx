@@ -636,7 +636,7 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     expect(signOutDisabled()).toBe(true);
 
     fireEvent.click(continueButton);
-    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
     expect(screen.queryByRole('alert')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Print receipt' })).toBeNull();
@@ -684,7 +684,7 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
       expect(sent()).toEqual([order.commandId, requeued]);
 
       fireEvent.click(button('New sale'));
-      expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+      expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
       expect(signOutDisabled()).toBe(false);
     });
 

@@ -437,9 +437,23 @@ export async function addE2E1(page: Page) {
   await expect(search).toHaveValue('');
 }
 
+// Opens the discount form of the cart's one line, as the loaded build offers it. The current build (TallyUI 3.19.0's
+// popover editor) has Discount in the line's price popover, or in its quantity popover where the cart shows no price
+// column (a phone); the released build has a Discount action under the line.
+async function openLineDiscount(page: Page) {
+  const quantity = page.getByTestId('quantity-popover-trigger');
+  const released = page.getByText('Discount', { exact: true });
+  await expect(quantity.or(released).first()).toBeVisible();
+  if (!await quantity.count()) return released.click();
+  const price = page.getByTestId('price-popover-trigger');
+  await (await price.isVisible() ? price : quantity).click();
+  await page.getByTestId(/^(price|quantity)-popover-action-discount$/).click();
+}
+
 // Applies a discount from the cart's one line (its Discount action) or the Order discount button.
 export async function discount(page: Page, opener: 'line' | 'order', type: 'Percent' | 'Amount', value: string) {
-  await (opener === 'line' ? page.getByText('Discount', { exact: true }) : page.getByRole('button', { name: 'Order discount', exact: true })).click();
+  if (opener === 'line') await openLineDiscount(page);
+  else await page.getByRole('button', { name: 'Order discount', exact: true }).click();
   await page.getByRole('button', { name: type, exact: true }).click();
   await page.getByLabel('Discount value', { exact: true }).fill(value);
   await page.getByRole('button', { name: 'Apply', exact: true }).click();

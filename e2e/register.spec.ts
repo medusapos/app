@@ -27,7 +27,7 @@ async function shot(page: Page, state: string) {
 }
 
 // The cart's E2E-1 line (the catalogue tile shows the same name, so its Remove action identifies the line).
-const cartLine = (page: Page) => page.getByRole('button', { name: 'Remove E2E product 1', exact: true });
+const cartLine = (page: Page) => page.getByRole('button', { name: 'Edit quantity of E2E product 1', exact: true });
 const money = (amount: number) => new RegExp(`^€?\\s?${amount.toFixed(2).replace('.', '[.,]')}\\s?€?$`);
 // RegisterCount's EUR faces (TallyUI's denominations), largest first, in cents.
 const EUR_FACES = [50000, 20000, 10000, 5000, 2000, 1000, 500, 200, 100, 50, 20, 10, 5, 2, 1];
@@ -488,7 +488,7 @@ test('with Register 1 open, Checkout opens the tender, and ⋮ Void asks first a
   await voidSale();
   await page.getByTestId('cart-void-confirm').click();
   await expect(page.getByTestId('cart-empty')).toBeVisible();
-  await expect(checkout).toBeDisabled();
+  await expect(checkout).toHaveCount(0); // the empty cart draws no foot (TallyUI 3.19.0)
   await expect(page.getByTestId('cart-foot-more')).toHaveCount(0);
   expect(sales).toEqual([]);
 });

@@ -338,7 +338,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <Text className="text-foreground">Parked sales{parked.length ? ` (${parked.length})` : ''}</Text>
       </Pressable>
     </View>
-    <CartNoteInput key={sale.order.id} value={sale.order.note ?? ''}
+    {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
+    <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice lineEditor="popover" checkout={checkout}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />

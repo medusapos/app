@@ -132,7 +132,7 @@ describe('the register on the sale screen', () => {
     fireEvent.change(screen.getByTestId('open-register-amount'), { target: { value: '100.00' } });
     await act(async () => { fireEvent.click(screen.getByTestId('open-register-button')); });
     await waitFor(() => expect(screen.queryByTestId('open-register-card')).toBeNull());
-    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
     expect(screen.getByTestId('register-bar')).toBeTruthy();
     expect(pill()).toBeNull();
     expect(button('Open register panel')).toBeTruthy();
@@ -204,11 +204,11 @@ describe('the register on the sale screen', () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await startCount();
-    expect(screen.queryByTestId('cart-checkout')).toBeNull();
+    expect(screen.queryByTestId('cart-empty')).toBeNull();
     await waitFor(() => expect(pill()).toBe('Counting'));
     await act(async () => { fireEvent.click(screen.getByTestId('count-back')); });
     await waitFor(() => expect(screen.queryByTestId('register-count')).toBeNull());
-    expect(checkoutButton()).toBeTruthy();
+    expect(screen.getByTestId('cart-empty')).toBeTruthy(); // the empty cart is back (it draws no Checkout)
     expect((await sessions().find().exec())[0].status).toBe('open');
   });
 });
@@ -321,7 +321,7 @@ describe('closing the register', () => {
     await act(async () => { fireEvent.click(sheet.getByTestId('closure-done')); });
     await waitFor(() => expect(screen.queryByTestId('closure-sheet')).toBeNull());
     expect((screen.getByTestId('open-register-amount') as HTMLInputElement).value).toBe('100.00');
-    expect(checkoutButton()).toBeTruthy();
+    expect(screen.getByTestId('cart-empty')).toBeTruthy(); // the empty cart, below the open card
   });
 
   it('over the threshold, the hook\'s own gate (RegisterApprovalRequiredError) is the count\'s refusal, and nothing is written', async () => {
@@ -746,7 +746,7 @@ describe('the register control', () => {
     const card = await screen.findByTestId('open-register-card');
     // One tap also focuses the gate, which mounted for it (the float field).
     expect(card.contains(document.activeElement)).toBe(true);
-    const empty = screen.getByText('Scan or tap a product to start a sale.');
+    const empty = screen.getByText('Tap a product to start a sale');
     expect(card.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     // The control now ends the "‹ Products" row.
     expect(button('Products').parentElement!.contains(screen.getByTestId('register-bar-pill'))).toBe(true);

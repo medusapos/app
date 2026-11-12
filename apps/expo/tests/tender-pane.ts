@@ -42,9 +42,12 @@ export function cartLineCells(name: string) {
 }
 
 /**
- * The cart's item for the line named `name`: the CartLine, its discount chips, then its actions row. Found from the
- * line's own Remove button (actions root > flex-1 > button row > Remove), so a product tile of the same name never matches.
+ * The cart's item for the line named `name`: the CartLine, its discount chips, then (inline editor) its actions row. Found
+ * from the line's own quantity popover trigger (item > CartLine row > quantity cell > trigger; the app's popover editor,
+ * TallyUI 3.19.0) or else its Remove button (actions root > flex-1 > button row > Remove), so a product tile never matches.
  */
 export function cartLine(name: string) {
+  const trigger = screen.queryByRole('button', { name: `Edit quantity of ${name}` });
+  if (trigger) return trigger.parentElement!.parentElement!.parentElement!;
   return screen.getByRole('button', { name: `Remove ${name}` }).parentElement!.parentElement!.parentElement!.parentElement!;
 }

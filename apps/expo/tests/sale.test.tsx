@@ -151,9 +151,9 @@ describe('sale', () => {
     expect(sale.order.lineItems.map((line) => line.variantId)).toEqual(['blue']);
     click('Remove Shirt · Blue');
     expect(sale.order.lineItems).toEqual([]);
-    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Cash' }).getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getByRole('button', { name: 'Card terminal' }).getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Cash' })).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
+    expect(screen.queryByRole('button', { name: 'Card terminal' })).toBeNull();
     act(() => sale.startTender('cash'));
     expect(sale.stage.kind).toBe('cart');
   });
@@ -199,7 +199,7 @@ describe('sale', () => {
     expect(sale.order.id).not.toBe(before.id);
     expect(sale.order.lineItems).toEqual([]);
     expect(sale.order.payments).toEqual([]);
-    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
   });
 
   it('keeps an underpaid tender on finalize failure, replaces amounts and removes it on Back', async () => {
@@ -363,9 +363,9 @@ describe('store settings on the POS screen', () => {
     saveCachedSettings(localStorage, session.baseUrl, settings);
     vi.mocked(fetchStoreSettings).mockRejectedValue(new StoreSettingsError('unreachable', 'Could not reach the backend.'));
     render(<ProductsScreen />);
-    expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
     expect(await screen.findByText('Offline')).toBeTruthy();
-    expect(screen.getByTestId('cart-checkout')).toBeTruthy();
+    expect(screen.getByTestId('cart-empty-text').textContent).toBe('Tap a product to start a sale');
     expect(fetchStoreSettings).toHaveBeenCalledExactlyOnceWith(session);
   });
 
@@ -379,9 +379,9 @@ describe('store settings on the POS screen', () => {
     vi.mocked(fetchStoreSettings).mockRejectedValueOnce(new StoreSettingsError('unreachable', 'Could not reach the backend.'));
     render(<ProductsScreen />);
     expect(await screen.findByText('Could not reach the backend.')).toBeTruthy();
-    expect(screen.queryByTestId('cart-checkout')).toBeNull();
+    expect(screen.queryByTestId('cart-empty')).toBeNull();
     click('Retry');
-    expect(await screen.findByText('Scan or tap a product to start a sale.')).toBeTruthy();
+    expect(await screen.findByText('Tap a product to start a sale')).toBeTruthy();
     expect(fetchStoreSettings).toHaveBeenCalledTimes(2);
     expect(loadCachedSettings(localStorage, session.baseUrl)).toEqual(settings);
   });
