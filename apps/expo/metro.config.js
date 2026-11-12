@@ -40,4 +40,6 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
 // Uniwind must be the outermost wrapper
 module.exports = withUniwindConfig(config, {
   cssEntryFile: './global.css',
+  // v2's extra themes, defined in themes.css; keep in step with THEME_CHOICES.
+  extraThemes: ['ocean', 'sunset', 'monochrome', 'paper', 'warm', 'bold', 'market'],
 });
