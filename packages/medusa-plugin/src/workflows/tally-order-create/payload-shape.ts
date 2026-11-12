@@ -7,10 +7,10 @@ import type { OrderCreateFee, OrderCreateShipping, OrderCreateCustomLine } from 
 // fiscal-figures.ts). Each value is
 // the version that added the field; Record<keyof T, number> makes tsc refuse a missing or an extra field.
 const since = <T>(fields: Record<keyof T, number>) => new Map<string, number>(Object.entries(fields))
-// Versions 6 and 7 (@tallyui/core 3.17.0, ADR 0024): coupons and the recorded line fields at 6, the note at 7.
+// Versions 6 and 7 (@tallyui/core 3.17.0, ADR 0024): coupons and the recorded line fields at 6, the note at 7; version 8 (@tallyui/core 3.19.0, TallyUI #722) adds taxAddress and the customer's addresses, refused because this plugin advertises only up to 7.
 const TOP_FIELDS = since<OrderCreatePayloadV3 & { fees?: OrderCreateFee[]; shipping?: OrderCreateShipping[] }>({ clientOrderId: 1, createdAt: 1, currency: 1, pricesIncludeTax: 1, lines: 1,
   subtotalMinor: 1, taxMinor: 1, totalMinor: 1, payments: 1, customer: 1, registerId: 1, cashierRef: 1, locationId: 1,
-  discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3, fees: 5, shipping: 5, coupons: 6, note: 7 })
+  discountMinor: 2, display: 3, taxByRate: 3, sessionId: 3, fees: 5, shipping: 5, coupons: 6, note: 7, taxAddress: 8 })
 const LINE_FIELDS = since<OrderCreateLine & { custom?: OrderCreateCustomLine }>({ clientLineId: 1, variantId: 1, title: 1, quantity: 1, unitPriceMinor: 1,
   taxInclusive: 1, discountMinor: 2, custom: 5, regularUnitPriceMinor: 6, attributes: 6, anyAttributes: 6 })
 // @tallyui/core's ORDER_NOTE_MAX (TallyUI ADR-083), in UTF-16 units; kept here because the plugin imports core as types only.
@@ -22,7 +22,7 @@ const SHIPPING_FIELDS = since<OrderCreateShipping>({ clientShippingId: 5, name: 
 const CUSTOM_FIELDS = since<OrderCreateCustomLine>({ name: 5, sku: 5, taxClass: 5, taxStatus: 5 })
 const PAYMENT_FIELDS = since<OrderCreatePayment>({ clientPaymentId: 1, method: 1, amountMinor: 1, tenderedMinor: 1,
   changeMinor: 1, reference: 1 })
-const CUSTOMER_FIELDS = since<NonNullable<OrderCreatePayloadV3['customer']>>({ email: 1, customerId: 3 })
+const CUSTOMER_FIELDS = since<NonNullable<OrderCreatePayloadV3['customer']>>({ email: 1, customerId: 3, billing: 8, shipping: 8 })
 // The envelope's own fields, for every command type; satisfies makes tsc refuse a missing or an extra field.
 const ENVELOPE_FIELDS = Object.keys({ id: true, type: true, version: true, payload: true, createdAt: true, deviceId: true,
   attempt: true } satisfies Record<keyof CommandEnvelope, true>)
