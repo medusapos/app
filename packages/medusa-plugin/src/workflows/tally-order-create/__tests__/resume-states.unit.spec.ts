@@ -8,7 +8,10 @@ jest.mock('@medusajs/medusa/core-flows', () => Object.fromEntries([
   'capturePaymentWorkflow', 'completeOrderWorkflow', 'convertDraftOrderWorkflow', 'createOrderFulfillmentWorkflow',
   'createOrderPaymentCollectionWorkflow', 'markPaymentCollectionAsPaid',
 ].map(name => [name, () => ({ run: (input: unknown) => mockRun(name, input) })])))
-jest.mock('../workflow', () => ({ takeBackStockWorkflow: () => ({ run: (input: unknown) => mockRun('takeBackStockWorkflow', input) }) }))
+jest.mock('../workflow', () => ({
+  takeBackStockWorkflow: () => ({ run: (input: unknown) => mockRun('takeBackStockWorkflow', input) }),
+  couponResumeWorkflow: () => ({ run: (input: unknown) => mockRun('couponResumeWorkflow', input) }),
+}))
 
 beforeEach(() => mockRun.mockClear())
 
@@ -43,6 +46,7 @@ it.each([
 it('resume captures an authorized system-provider collection and completes the order', async () => {
   await resumeOrderCreate(container({ payment_collections: [collection('authorized')] }), 'order_1', 10, 'sloc_1', 'so_1')
   expect(mockRun.mock.calls).toEqual([
+    ['couponResumeWorkflow', { input: { orderId: 'order_1' } }],
     ['capturePaymentWorkflow', { input: { payment_id: 'pay_1' } }],
     ['completeOrderWorkflow', { input: { orderIds: ['order_1'] } }],
   ])

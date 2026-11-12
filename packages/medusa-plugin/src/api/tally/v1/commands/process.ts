@@ -2,9 +2,9 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { executeOrderCreate, replayOrderCreate } from '../../../../workflows/tally-order-create/execute'
-import { orderCoupons } from '../../../../workflows/tally-coupons/order-coupons'
+import { orderCoupons, type CouponWrite } from '../../../../workflows/tally-coupons/order-coupons'
 import { executeRegisterCommand, replayRegisterCommand } from '../../../../workflows/tally-register-command/execute'
-import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
+import { liveOrderFor, type TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
 import { envelopeErrors, payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
 import { clientTimeStageErrors, clientTimeUpperBound } from '../../../../workflows/client-time'
@@ -125,15 +125,17 @@ export async function processBatch(
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
       continue
     }
-    if (Array.isArray(payload.coupons) && payload.coupons.length > 0) {
+    let writes: CouponWrite[] | undefined
+    if (Array.isArray(payload.coupons) && payload.coupons.length > 0 && !await liveOrderFor(container, payload.clientOrderId)) {
       const coupons = await orderCoupons(container, options, payload)
       if (coupons.ok === false) {
         results.push({ id: command.id, status: 'rejected', error: coupons.error as CommandErrorWithData })
         continue
       }
+      writes = coupons.writes
     }
-    // Coupons that pass the pre-flight are still refused until the adjustments step writes them (ADR 0025 decision 2).
-    if ([payload.coupons, payload.display?.coupons].some(coupons => Array.isArray(coupons) && coupons.length > 0)) {
+    // A display-only coupon has nothing for the store to write.
+    if (Array.isArray(display?.coupons) && display.coupons.length > 0 && !payload.coupons?.length) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'coupon_invalid', message: 'this store does not apply till coupons yet' } })
       continue
     }
@@ -149,7 +151,8 @@ export async function processBatch(
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: timeErrors.join('; ') } })
       continue
     }
-    const outcome = await executeOrderCreate(container, command, options)
+    const outcome = writes === undefined ? await executeOrderCreate(container, command, options)
+      : await executeOrderCreate(container, command, options, writes)
     if (outcome.kind === 'in_progress') {
       return { status: 409, body: { code: 'in_progress', id: outcome.id } }
     }

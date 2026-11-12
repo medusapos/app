@@ -24,6 +24,12 @@ export type TallyPluginOptions = {
   minRegisterContract?: number
 }
 
+export async function liveOrderFor(container: MedusaContainer, clientOrderId: string) {
+  return container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order').select('id', 'status')
+    .whereRaw("metadata->>'tally_client_id' = ?", [clientOrderId])
+    .whereNull('deleted_at').whereNot('status', 'canceled').first()
+}
+
 export async function runOrderCreate(
   container: MedusaContainer,
   command: CommandEnvelope<OrderCreatePayload>,
@@ -34,10 +40,7 @@ export async function runOrderCreate(
   const catalogueLines = payload.lines.filter((line): line is typeof line & { variantId: string } => !('custom' in line))
   const v3 = payload as OrderCreatePayloadV3
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
-  const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
-  const existing = await knex('order').select('id', 'status')
-    .whereRaw("metadata->>'tally_client_id' = ?", [payload.clientOrderId])
-    .whereNull('deleted_at').whereNot('status', 'canceled').first()
+  const existing = await liveOrderFor(container, payload.clientOrderId)
   let orderId = existing?.id
   if (!existing) for (const coupon of payload.coupons ?? []) {
     if (!coupons.some(write => write.couponCode === coupon.code)) throw new Error(`coupon writes missing for ${coupon.code}`)

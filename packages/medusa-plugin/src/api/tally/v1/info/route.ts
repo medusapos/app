@@ -10,5 +10,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const sync = options.experimentalSync
   return res.json({ contracts: {
     'order.create': SUPPORTED_ORDER_CREATE_VERSIONS, register: SUPPORTED_REGISTER_VERSIONS, ...(sync ? { sync: [1] } : {}),
-  }, taxRounding: TAX_ROUNDING, registerApproval: { thresholdMinor: approvalThresholdMinor(options) }, lineTax: LINE_TAX })
+  }, taxRounding: TAX_ROUNDING, registerApproval: { thresholdMinor: approvalThresholdMinor(options) }, lineTax: LINE_TAX,
+  // TallyUI reads capabilities.coupons to enable store-priced coupons at the till.
+  coupons: true })
 }

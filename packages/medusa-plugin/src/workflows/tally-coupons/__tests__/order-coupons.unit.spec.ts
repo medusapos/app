@@ -43,6 +43,16 @@ it('leaves an exclusive discounted line beside a coupon alone in an inclusive or
   } })
 })
 
+it('refuses an inclusive discounted line beside a coupon in an exclusive order', () => {
+  const payload = structuredClone(repro.payload) as OrderCreatePayload
+  payload.pricesIncludeTax = false
+  payload.lines[0].taxInclusive = true
+  expect(orderCouponSale(payload)).toEqual({ ok: false, error: {
+    code: 'coupon_invalid', message: "This coupon can't be combined with a discount on a tax-inclusive item yet.",
+    data: { couponCode: 'c', storeCode: 'not_applicable' },
+  } })
+})
+
 it("couponAmountError compares in the lines' own mode", () => {
   const line: CouponLine = { lineId: 'line-1', quantity: 1, taxInclusive: true, netMinor: 1190 }
   const exclusive = { ...line, taxInclusive: false }

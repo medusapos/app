@@ -259,6 +259,7 @@ medusaIntegrationTestRunner({
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         registerApproval: { thresholdMinor: 500 },
         lineTax: { none: false, classes: false },
+        coupons: true,
       })
     })
 

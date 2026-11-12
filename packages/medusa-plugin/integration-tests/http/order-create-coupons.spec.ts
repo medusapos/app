@@ -2,10 +2,14 @@ import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer, PromotionDTO } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import { createOrderWorkflow, type CreateOrderWorkflowInput } from '@medusajs/medusa/core-flows'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import type { CommandEnvelope, CommandResult, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../src/modules/tally-ledger'
 import type TallyLedgerModuleService from '../../src/modules/tally-ledger/service'
+import { orderCoupons } from '../../src/workflows/tally-coupons/order-coupons'
+import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
+import { couponResumeWorkflow } from '../../src/workflows/tally-order-create/workflow'
 import inclusive from '../../src/workflows/tally-order-create/__fixtures__/order-create-coupon-envelopes-2026-11-12/inclusive-coupon.json'
 import repro from '../../src/workflows/tally-order-create/__fixtures__/order-create-coupon-envelopes-2026-11-12/inclusive-line-discount-coupon.json'
 import { seed } from './seed'
@@ -81,12 +85,47 @@ medusaIntegrationTestRunner({
       await nothingStored(sale)
     })
 
-    it('passes the pre-flight when the store prices the coupon as the till did', async () => {
+    it("applies a store-priced coupon at the till's total", async () => {
       const promotion = await container.resolve(Modules.PROMOTION).createPromotions({
-        code: 'order-coupon-inclusive', type: 'standard', status: 'active', is_tax_inclusive: true,
+        code: 'order-coupon-inclusive', type: 'standard', status: 'active', is_tax_inclusive: true, limit: 5,
         application_method: { type: 'fixed', target_type: 'items', allocation: 'across', value: 1, currency_code: 'eur' },
       })
       const sale = command(inclusive, promotion)
+      const result = await post(sale)
+      expect(result).toMatchObject({ id: sale.id, status: 'applied', serverRefs: { totalMinor: 1090 } })
+      expect(result).not.toHaveProperty('warnings')
+      expect((await container.resolve(Modules.PROMOTION).retrievePromotion(promotion.id)).used).toBe(1)
+    })
+
+    it('retries a crashed coupon order without re-pricing a used-up coupon', async () => {
+      const promotions = container.resolve(Modules.PROMOTION)
+      const promotion = await promotions.createPromotions({
+        code: 'order-coupon-crashed', type: 'standard', status: 'active', is_tax_inclusive: true, limit: 1,
+        application_method: { type: 'fixed', target_type: 'items', allocation: 'across', value: 1, currency_code: 'eur' },
+      })
+      const sale = command(inclusive, promotion)
+      const coupons = await orderCoupons(container, {}, sale.payload)
+      if (!coupons.ok) throw new Error('Expected coupon writes')
+      const planned = planOrderCreate(sale.payload, { customer: null, commandId: sale.id, salesChannelId: data.channelId,
+        region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+        location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+        variants: { [data.variantA]: { id: data.variantA } },
+      }, sale.version)
+      if (!planned.ok) throw new Error('Expected draft plan')
+      planned.plan.draftOrder.metadata.tally_coupons = coupons.writes
+      const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+      await couponResumeWorkflow(container).run({ input: { orderId: draft.id } })
+      expect((await container.resolve(Modules.ORDER).retrieveOrder(draft.id)).is_draft_order).toBe(true)
+      expect((await promotions.retrievePromotion(promotion.id)).used).toBe(1)
+      const result = await post(sale)
+      expect(result).toMatchObject({ id: sale.id, status: 'applied', serverRefs: { orderId: draft.id, totalMinor: 1090 } })
+      expect(result).not.toHaveProperty('warnings')
+      expect((await promotions.retrievePromotion(promotion.id)).used).toBe(1)
+    })
+
+    it('still refuses display-only coupons with the interim message', async () => {
+      const sale = command(inclusive)
+      delete (sale.payload as OrderCreatePayload).coupons
       expect(await post(sale)).toEqual({ id: sale.id, status: 'rejected', error: {
         code: 'coupon_invalid', message: 'this store does not apply till coupons yet',
       } })
@@ -148,12 +187,15 @@ medusaIntegrationTestRunner({
         Object.assign(sale.payload.lines[0], { unitPriceMinor: 1000, discountMinor: 100 })
         sale.payload.discountMinor = 100
         Object.assign(sale.payload.coupons[0], { discountMinor, discountTaxMinor })
-        const error = discountMinor === 90
-          ? { code: 'coupon_invalid', message: 'this store does not apply till coupons yet' }
-          : { code: 'coupon_invalid', message: "This coupon's amount has changed since it was applied.",
-            data: { couponCode: promotion.code, storeCode: 'amount_mismatch' } }
-        expect(await post(sale)).toEqual({ id: sale.id, status: 'rejected', error })
-        await nothingStored(sale)
+        if (discountMinor === 90) {
+          expect(await post(sale)).toMatchObject({ id: sale.id, status: 'applied' })
+        } else {
+          expect(await post(sale)).toEqual({ id: sale.id, status: 'rejected', error: {
+            code: 'coupon_invalid', message: "This coupon's amount has changed since it was applied.",
+            data: { couponCode: promotion.code, storeCode: 'amount_mismatch' },
+          } })
+          await nothingStored(sale)
+        }
       }
     })
   },
