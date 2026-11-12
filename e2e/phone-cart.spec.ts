@@ -33,12 +33,13 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, \D*3\.88$/);
   await bar.click();
   const total = cartTotalRow(page, 'Total');
-  // v2's cart foot: the ⋮ actions and Checkout share one row of 48 px targets.
+  // v2's foot: the ⋮ (44 px) and Checkout (56 px) share one row.
   const checkout = page.getByTestId('cart-checkout');
   const more = page.getByTestId('cart-foot-more');
   for (const target of [page.getByText('E2E product 1', { exact: true }), total, checkout, more]) await expect(target).toBeInViewport();
   const [checkoutBox, moreBox] = [(await checkout.boundingBox())!, (await more.boundingBox())!];
-  expect([checkoutBox.y === moreBox.y, checkoutBox.height >= 48, moreBox.height >= 48]).toEqual([true, true, true]);
+  const centreGap = Math.abs(checkoutBox.y + checkoutBox.height / 2 - (moreBox.y + moreBox.height / 2));
+  expect([centreGap <= 1, checkoutBox.height >= 56, Math.round(moreBox.width), Math.round(moreBox.height)]).toEqual([true, true, 44, 44]);
   await orderChip.scrollIntoViewIfNeeded();
   for (const target of [orderChip, total, checkout]) await expect(target).toBeInViewport();
   await page.getByRole('button', { name: 'Products', exact: true }).click();
