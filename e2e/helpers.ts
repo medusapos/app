@@ -225,11 +225,11 @@ export function cartTotalRow(page: Page, label: string) {
   return page.getByTestId('cart-footer').getByText(label, { exact: true }).locator('..');
 }
 
-// The cart's item for the line named `name` (TallyUI 3.14.0): its CartLine row, discount chips and actions (Discount,
-// Price). Found from the line's own Remove button (actions root > flex-1 > button row > Remove), so neither a product
-// tile of the same name nor the Price column head matches.
+// The cart's item for the line named `name`: its CartLine row and discount chips. Found from the line's own quantity
+// popover trigger (item > CartLine row > quantity cell > trigger): TallyUI 3.19.0's popover editor draws no Remove
+// button under the line, and a product tile of the same name never matches.
 export function cartLine(page: Page, name: string) {
-  return page.getByRole('button', { name: `Remove ${name}`, exact: true }).locator('../../../..');
+  return page.getByRole('button', { name: `Edit quantity of ${name}`, exact: true }).locator('../../..');
 }
 
 // The line's CartLine row, its cells in column order: quantity, name, unit price (hidden on a phone), total.
