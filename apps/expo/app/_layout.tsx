@@ -5,6 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { PortalHost } from '@tallyui/primitives';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
+import { AppFrame } from '../components/app-frame';
 import { ClearLocalDataGate } from '../components/clear-local-data';
 import { DemoBanner } from '../components/demo-banner';
 import { LiveTabGate } from '../components/live-tab-gate';
@@ -31,7 +32,7 @@ function GatedApp() {
   const background = useCSSVariable('--color-background');
   return (
     <LiveTabGate scope={session?.baseUrl}>
-      <StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><Stack
+      <StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null}><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
@@ -42,7 +43,7 @@ function GatedApp() {
           contentStyle: { backgroundColor: background as string },
           headerTitleStyle: { fontWeight: '600' },
         }}
-      /></OutboxProvider></StorageHealth>
+      /></AppFrame></OutboxProvider></StorageHealth>
     </LiveTabGate>
   );
 }

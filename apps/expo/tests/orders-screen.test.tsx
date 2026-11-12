@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
@@ -8,10 +8,12 @@ import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { useOutboxContext } from '../lib/outbox-context';
 import OrdersScreen from '../app/orders';
+import { AppFrame } from '../components/app-frame';
+import { setWindowWidth } from './window-width';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
-  router: { replace: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
+  router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/orders',
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode } }) =>
     <div data-testid="header-left">{options.headerLeft?.()}</div> },
 }));
@@ -57,17 +59,23 @@ describe('OrdersScreen', () => {
     expect(screen.queryByText(emptyText)).toBeNull();
   });
 
-  it('has one Products back control in the header that goes back when there is history, else replaces to / (#195)', () => {
-    mount();
-    const products = screen.getAllByRole('button', { name: 'Products' });
-    expect(products).toHaveLength(1);
-    expect(screen.getByTestId('header-left').contains(products[0])).toBe(true);
-    vi.mocked(router.canGoBack).mockReturnValueOnce(true);
-    fireEvent.click(products[0]);
-    expect(router.back).toHaveBeenCalledTimes(1);
+  it('on a phone the header has one control, the frame\'s Menu, whose drawer goes back to the sale (#195)', () => {
+    setWindowWidth(390, 844);
+    render(<SessionProvider><AppFrame signedIn><OrdersScreen /></AppFrame></SessionProvider>);
+    const menu = screen.getByTestId('frame-menu');
+    expect(screen.getByTestId('header-left').contains(menu)).toBe(true);
+    expect(within(screen.getByTestId('header-left')).getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Products' })).toBeNull();
+    fireEvent.click(menu);
+    fireEvent.click(within(screen.getByTestId('nav-drawer')).getByRole('button', { name: 'Sale' }));
+    expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
     expect(router.replace).not.toHaveBeenCalled();
-    fireEvent.click(products[0]);
-    expect(router.replace).toHaveBeenCalledWith('/');
-    expect(router.back).toHaveBeenCalledTimes(1);
+  });
+
+  it('on a wide window the header has no back control; the rail stands in for it', () => {
+    setWindowWidth(1440, 900);
+    render(<SessionProvider><AppFrame signedIn><OrdersScreen /></AppFrame></SessionProvider>);
+    expect(screen.getByTestId('header-left').childElementCount).toBe(0);
+    expect(screen.getByTestId('nav-rail')).toBeTruthy();
   });
 });

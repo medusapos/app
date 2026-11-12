@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, signIn, test } from './helpers';
+import { addE2E1, openArea, signIn, test } from './helpers';
 
 // Settings › Danger zone › Clear all local data (WCPOS v2's): the reload wipes the OPFS pool, the legacy Dexie
 // databases and every medusapos. key before anything opens, and lands on sign-in.
@@ -23,7 +23,7 @@ test('Clear all local data wipes the device and returns to sign-in', async ({ pa
   expect(before.keys).not.toEqual([]);
   const oldId = await page.evaluate(() => localStorage.getItem('medusapos.register_id'));
 
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openArea(page, 'Settings');
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
   await page.getByTestId('clear-local-data').click();
   await expect(page.getByTestId('clear-local-data-warning')).toHaveText('Nothing is waiting to be sent, so your server already has your sales.');
@@ -46,7 +46,7 @@ test('Clear all local data wipes the device and returns to sign-in', async ({ pa
 
 test('after a wipe the open server session is taken over, not lost', async ({ page }) => {
   await signIn(page);
-  await page.getByRole('button', { name: 'Settings', exact: true }).click();
+  await openArea(page, 'Settings');
   await page.getByTestId('clear-local-data').click();
   await page.getByTestId('clear-local-data-word').fill('CLEAR');
   await page.getByTestId('clear-local-data-confirm').click();
@@ -78,7 +78,7 @@ test.describe('with a parked sale', () => {
     await page.getByTestId('parked-sales-dismiss').click();
     await expect(page.getByTestId('cart-empty')).toBeVisible();
 
-    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    await openArea(page, 'Settings');
     await page.getByTestId('clear-local-data').click();
     await expect(page.getByTestId('clear-local-data-warning'))
       .toHaveText('1 parked sale on this device has never reached your server and will be permanently lost.');

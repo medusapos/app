@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { buildClosureDocument, exportCsv, minorToDecimal, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
-import { ProductsBack } from '../components/products-back';
+import { FrameMenuButton } from '../components/app-frame';
 import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext } from '../components/register-close';
 import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
@@ -53,7 +53,7 @@ export default function ReportsScreen() {
   const summary = currency ? summarizeSales(sales, today, currency) : null;
 
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
-    <Stack.Screen options={{ title: 'Reports', headerLeft: () => <ProductsBack /> }} />
+    <Stack.Screen options={{ title: 'Reports', headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-md gap-4 self-center">
       <Text testID="reports-sales-heading" className="text-lg font-semibold text-foreground">Today's sales</Text>
       {orders === null ? <Text testID="reports-loading">Loading…</Text>

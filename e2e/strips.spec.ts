@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { sellBySku, signIn, test } from './helpers';
+import { openArea, sellBySku, signIn, test } from './helpers';
 
 // The password used by the e2e fixture account (mirrors the fallback in helpers.ts's `signIn`).
 const password = process.env.E2E_PASSWORD ?? 'e2e-password';
@@ -42,7 +42,7 @@ test('sign-in strip: outbox pauses after three 401s, resumes once signed in agai
   await expect(page.getByRole('heading', { name: 'Sign in again', exact: true })).not.toBeVisible();
   await expect(page.getByText('saved, waiting to send', { exact: false })).not.toBeVisible();
 
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   await expect(page.getByText('· Synced', { exact: false })).toBeVisible();
 });
 
@@ -67,6 +67,6 @@ test('refused strip: shows the store\'s refusal reason and recovers via Try agai
   await expect(page.getByRole('heading', { name: 'Not accepted by the store', exact: true })).not.toBeVisible();
   await expect(page.getByText('not accepted', { exact: false })).not.toBeVisible();
 
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   await expect(page.getByText('· Synced', { exact: false })).toBeVisible();
 });

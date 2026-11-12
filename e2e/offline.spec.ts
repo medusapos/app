@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { adminToken, captureSales, ordersByClientId, sellBySku, signIn, stockBySku, test } from './helpers';
+import { adminToken, captureSales, openArea, ordersByClientId, sellBySku, signIn, stockBySku, test } from './helpers';
 
 // Compare exact EUR minor units at the API decimal's scale, preserving sub-cent precision.
 function expectEurAmount(major: number, minor: number, toleranceMinor: number) {
@@ -90,7 +90,7 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
   expect(shortOrders).toHaveLength(1);
   const [shortOrder] = shortOrders;
   expect(shortOrder.status).toBe('completed');
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   const attention = page.getByRole('heading', { name: 'Needs attention', exact: true }).locator('..');
   const row = attention.getByText(`Order ${shortSale.clientOrderId.slice(-8)} · #${shortOrder.display_id} · 3 items`, { exact: true }).locator('../..');
   await expect(row).toBeVisible();

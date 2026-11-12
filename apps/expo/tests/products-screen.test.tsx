@@ -19,6 +19,7 @@ import { watchStorageHealth } from '../lib/storage-health';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { fetchStoreSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import ProductsScreen from '../app/index';
+import { AppFrame } from '../components/app-frame';
 import OrdersScreen from '../app/orders';
 import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 import { OutboxStrip, StoreRefused } from '../components/store-refused';
@@ -35,7 +36,7 @@ async function payByCard() { await checkout(); pickMethod('external'); take(); }
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
-  router: { replace: vi.fn(), push: vi.fn() },
+  router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/',
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() },
 }));
 // expo-localization's native module isn't available under vitest.
@@ -128,10 +129,10 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText("Products aren't updating: the online store is missing the Medusa POS plugin.")).toBeTruthy();
   });
 
-  it('keeps search focusable and editable with the authRequired strip in the title slot and header actions present', async () => {
+  it('keeps search focusable and editable with the authRequired strip in the title slot, the frame and Sign out live', async () => {
     const { SignInAgain } = await import('../components/sign-in-again');
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 1, sending: false, authRequired: true } });
-    await mount();
+    await mountFramed();
     const setOptions = vi.fn<NonNullable<Parameters<typeof SignInAgain>[0]['header']>['setOptions']>();
     const banner = render(<SessionProvider><SignInAgain header={{ setOptions }} /></SessionProvider>);
     expect(banner.container.textContent).toBe('');
@@ -144,7 +145,7 @@ describe('ProductsScreen catalogue', () => {
     expect(document.activeElement).toBe(input);
     fireEvent.change(input, { target: { value: '123456' } });
     expect(input.value).toBe('123456');
-    fireEvent.click(screen.getByRole('button', { name: 'Orders' }));
+    fireEvent.click(within(screen.getByTestId('nav-rail')).getByRole('button', { name: 'Orders' }));
     expect(router.push).toHaveBeenCalledWith('/orders');
     fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
     expect(localStorage.getItem('medusapos.session')).toBeNull();
@@ -209,7 +210,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.textContent))
-      .toEqual(['Orders', 'Reports', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Checkout €0.00']);
+      .toEqual(['Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Checkout €0.00']);
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
     expect(cartLineCells('Apple')).toEqual(['1', 'Apple', '€12.50', '€12.50']);
@@ -261,16 +262,17 @@ describe('ProductsScreen catalogue', () => {
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   });
 
-  it('shows the outbox status and attention count and pushes Orders without replacing the route', async () => {
+  it('shows the outbox status, puts the attention count on the frame\'s Orders and pushes Orders without replacing the route', async () => {
     const order = savedSale();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(),
       state: { pending: 2, sending: true }, recent: [order, { ...order, id: 'rejected', syncStatus: 'rejected' },
         { ...order, id: 'warned', syncStatus: 'applied', warnings: [{ code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }],
     });
-    await mount();
+    await mountFramed();
     expect(screen.getByLabelText('2 sales waiting to sync').textContent).toBe('2 sales waiting to sync');
     expect(screen.getByText('Sending…')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Orders (2)' }));
+    expect(screen.getByTestId('nav-item-orders-badge').textContent).toBe('2');
+    fireEvent.click(screen.getByTestId('nav-item-orders'));
     expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders');
     expect(router.replace).not.toHaveBeenCalled();
   });
@@ -316,15 +318,18 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test') {
+async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test', framed = false) {
   if (signedIn) saveSession(localStorage, {
     baseUrl: 'https://store.test', email, name,
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
+  const page = orders ? <OrdersScreen /> : <ProductsScreen />;
   let view!: ReturnType<typeof render>;
-  await act(async () => { view = render(<SessionProvider>{orders ? <OrdersScreen /> : <ProductsScreen />}</SessionProvider>); });
+  await act(async () => { view = render(<SessionProvider>{framed ? <AppFrame signedIn>{page}</AppFrame> : page}</SessionProvider>); });
   return view;
 }
+// As _layout.tsx renders the sale: under the app frame, on the wide window beforeEach sets (the rail).
+const mountFramed = () => mount(true, false, undefined, undefined, true);
 
 function savedSale(): PosOrder {
   const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
@@ -580,7 +585,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     const record = vi.fn(() => new Promise<void>((resolve, reject) => { save = resolve; fail = reject; }));
     const isStored = vi.fn().mockResolvedValue(settles === 'continue');
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored });
-    await mount();
+    await mountFramed();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await payByCard();
     expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBeNull();
@@ -590,15 +595,15 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     // Held: disabled in place, described by the tender's lock message, and a press signs nothing out.
     const signOut = screen.getByRole('button', { name: 'Sign out', description: SALE_SAVING });
     expect(signOut.getAttribute('aria-disabled')).toBe('true');
-    expect(screen.getAllByRole('button').slice(0, 4).map((button) => button.textContent)).toEqual(['Orders', 'Reports', 'Settings', 'Sign out']);
     fireEvent.click(signOut);
     expect(signedOut()).toBe(false);
     expect(router.replace).not.toHaveBeenCalled();
     expect(screen.queryByText('redirect:/login')).toBeNull();
-    // Orders, Reports and Settings stay live: they push onto the stack, over the mounted sale.
-    fireEvent.click(screen.getByRole('button', { name: 'Orders' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Reports' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    // The frame's Orders, Reports and Settings stay live: they push onto the stack, over the mounted sale.
+    const rail = within(screen.getByTestId('nav-rail'));
+    fireEvent.click(rail.getByRole('button', { name: 'Orders' }));
+    fireEvent.click(rail.getByRole('button', { name: 'Reports' }));
+    fireEvent.click(rail.getByRole('button', { name: 'Settings' }));
     expect(vi.mocked(router.push).mock.calls).toEqual([['/orders'], ['/reports'], ['/settings']]);
 
     if (settles === 'stored') {
