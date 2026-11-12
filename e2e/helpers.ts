@@ -89,25 +89,30 @@ export async function submitSignIn(page: Page, as = credentials) {
 // the register pill opens even with an empty cart; it then returns to Products. The store keeps one open session per
 // register (spec-42) and every earlier till left Register 1 open there, so this first closes the store's session, then
 // waits for the store to apply this till's open (unless not `synced`): a refused open (ADR-078's conflict) fails here, not in a later sale; a missing open times out in 30 seconds.
-export async function openRegister(page: Page, float = '100.00', synced = true) {
+// Not `picker`: the till is bound already (a demo cashier's own register, D0), so its open card shows with no picker.
+// Returns the applied open (when `synced`).
+export async function openRegister(page: Page, float = '100.00', synced = true, picker = true) {
   const phone = (page.viewportSize()?.width ?? 1280) < 600;
   await closeStoreRegister();
   const opened = synced && page.waitForResponse(response => isCommandPost(response.request())
     && (response.request().postDataJSON().commands as PostedCommand<unknown>[]).some(({ type }) => type === 'register.session.open'), { timeout: 30_000 });
   if (phone) await page.getByTestId('register-bar-pill').click();
-  await page.getByTestId('register-picker-row-register-1').click();
+  if (picker) await page.getByTestId('register-picker-row-register-1').click();
   await page.getByTestId('open-register-amount').fill(float);
   await page.getByTestId('open-register-button').click();
+  let applied: PostedCommand<{ registerId: string }> | undefined;
   if (opened) {
     const response = await opened;
-    const opens = (response.request().postDataJSON().commands as PostedCommand<unknown>[]).filter(({ type }) => type === 'register.session.open');
+    const opens = (response.request().postDataJSON().commands as PostedCommand<{ registerId: string }>[]).filter(({ type }) => type === 'register.session.open');
     const { results = [] } = await response.json() as { results?: { id: string; status: string }[] };
     const result = results.find(({ id }) => opens.some(open => open.id === id));
     expect(result?.status, `The store refused this till's register.session.open: ${JSON.stringify(result)}`).toBe('applied');
+    applied = opens.find(({ id }) => id === result!.id);
   }
   await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   if (phone) await page.getByRole('button', { name: 'Products', exact: true }).click();
+  return applied;
 }
 
 // On "Set up this till": pick a region and continue.
