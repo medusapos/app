@@ -35,3 +35,13 @@ export function demoTillChoice(choices: StoreSettingsChoices, initial: StoreSett
   const channel = initial?.channel ?? choices.channels?.[0]?.id;
   return { ...(region !== undefined && { region }), ...(channel !== undefined && { channel }) };
 }
+
+// TallyUI's bindRegister refuses a register id over 36 characters (@tallyui/pos 3.18.0 MAX_REGISTER_ID_LENGTH, not
+// exported); the plugin's bound is 64 (workflows/tally-register-command/payload-shape.ts), so 36 fits both.
+const MAX_REGISTER_ID_LENGTH = 36;
+
+/** The till's own demo register: every visitor signs in as the same cashier, so each till gets one nobody else holds.
+ *  The device id is a UUID; without its hyphens `demo-` and all but its last hex digit fit, the same on every call. */
+export function demoRegisterFor(deviceId: string): { id: string; name: string } {
+  return { id: `demo-${deviceId.replace(/-/g, '')}`.slice(0, MAX_REGISTER_ID_LENGTH), name: 'Demo register' };
+}
