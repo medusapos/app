@@ -13,7 +13,7 @@ export type CouponPriced = {
 export type CouponRefused = { code: string; ok: false; storeCode: CouponStoreCode; message: string }
 export type CouponPricing = CouponPriced | CouponRefused
 
-const messages = {
+export const messages = {
   not_found: "This coupon code isn't known to the store.",
   not_active: "This coupon isn't active right now.",
   not_applicable: "This coupon doesn't apply to this sale.",

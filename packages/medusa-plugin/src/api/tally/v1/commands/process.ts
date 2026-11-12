@@ -2,6 +2,7 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { executeOrderCreate, replayOrderCreate } from '../../../../workflows/tally-order-create/execute'
+import { orderCouponError } from '../../../../workflows/tally-coupons/order-coupons'
 import { executeRegisterCommand, replayRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
@@ -124,7 +125,14 @@ export async function processBatch(
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
       continue
     }
-    // ADR 0024: version 6 coupons are instructions this store can't apply yet, so a non-empty list is refused before the claim.
+    if (Array.isArray(payload.coupons) && payload.coupons.length > 0) {
+      const couponError = await orderCouponError(container, options, payload)
+      if (couponError) {
+        results.push({ id: command.id, status: 'rejected', error: couponError as CommandErrorWithData })
+        continue
+      }
+    }
+    // Coupons that pass the pre-flight are still refused until the adjustments step writes them (ADR 0025 decision 2).
     if ([payload.coupons, payload.display?.coupons].some(coupons => Array.isArray(coupons) && coupons.length > 0)) {
       results.push({ id: command.id, status: 'rejected', error: { code: 'coupon_invalid', message: 'this store does not apply till coupons yet' } })
       continue

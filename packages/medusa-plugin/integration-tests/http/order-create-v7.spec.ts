@@ -127,16 +127,18 @@ medusaIntegrationTestRunner({
         charges: JSON.parse(JSON.stringify({ fees: sale.payload.fees, shipping: sale.payload.shipping })) })
     })
 
-    it('case 3: a v7 order with a coupon, or with only a display coupon, is rejected coupon_invalid and nothing is stored', async () => {
+    it('case 3: a v7 order with an unknown coupon is refused not_found, one with only a display coupon is refused, and nothing is stored', async () => {
       const coupon = command(7, { note: 'n' })
       coupon.payload.coupons = [{ code: 'SAVE10', couponId: 'coupon_1', discountMinor: 100, discountTaxMinor: 19 }]
       const display = command(6)
       display.payload.display.coupons = [{ code: 'SAVE10', amountMinor: 100 }]
-      for (const sale of [coupon, display]) {
-        expect(await post(sale)).toEqual({ id: sale.id, status: 'rejected', error: {
-          code: 'coupon_invalid', message: 'this store does not apply till coupons yet' } })
-        await nothingStored(sale)
-      }
+      expect(await post(coupon)).toEqual({ id: coupon.id, status: 'rejected', error: {
+        code: 'coupon_invalid', message: "This coupon code isn't known to the store.",
+        data: { couponCode: 'SAVE10', storeCode: 'not_found' } } })
+      await nothingStored(coupon)
+      expect(await post(display)).toEqual({ id: display.id, status: 'rejected', error: {
+        code: 'coupon_invalid', message: 'this store does not apply till coupons yet' } })
+      await nothingStored(display)
       const empty = command(7, { note: 'n' })
       empty.payload.coupons = []
       empty.payload.display.coupons = []
