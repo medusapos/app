@@ -1,5 +1,75 @@
 @import 'tailwindcss';
 @import 'uniwind';
 @import '@tallyui/theme/tokens.css';
+@import './themes.css';
 
 @source './node_modules/@tallyui/components/src';
+
+/* v2's type scale (monorepo apps/main/global.css l.36-48 `@theme`): a 14 px base, with xs and 2xs set per step,
+   never a ratio of base. Tailwind's own base is 16 px, which left every `text-*` here one step above v2's. */
+@theme {
+  --text-base: 14px;
+  --text-xs: 12px;
+  --text-2xs: 11px;
+}
+
+/* v2's ramp from base (apps/main/global.css l.188-202 `@theme inline`), with a shared 1.35 line height:
+   sm 13, lg 16, xl 18, 2xl 21, 3xl 26 px. Inline, as in v2, so a utility carries the calc itself. */
+@theme inline {
+  --text-2xs--line-height: calc(var(--text-2xs) * 1.35);
+  --text-xs--line-height: calc(var(--text-xs) * 1.35);
+  --text-sm: calc(var(--text-base) * 0.929);
+  --text-sm--line-height: calc(var(--text-base) * 0.929 * 1.35);
+  --text-base--line-height: calc(var(--text-base) * 1.35);
+  --text-lg: calc(var(--text-base) * 1.143);
+  --text-lg--line-height: calc(var(--text-base) * 1.143 * 1.35);
+  --text-xl: calc(var(--text-base) * 1.286);
+  --text-xl--line-height: calc(var(--text-base) * 1.286 * 1.35);
+  --text-2xl: calc(var(--text-base) * 1.5);
+  --text-2xl--line-height: calc(var(--text-base) * 1.5 * 1.35);
+  --text-3xl: calc(var(--text-base) * 1.857);
+  --text-3xl--line-height: calc(var(--text-base) * 1.857 * 1.35);
+}
+
+/* v2's destructive (apps/main/global.css l.381-382 light, l.526-527 dark), over @tallyui/theme's #dc2626 and
+   #f85149. The seven extra themes in themes.css already carry v2's own. */
+@theme {
+  --color-destructive: oklch(0.52 0.22 25);
+  --color-destructive-foreground: oklch(0.99 0.01 25);
+}
+
+/* v2's six Poster tile tints (monorepo apps/main/global.css), for tiles without a picture. */
+@theme {
+  --color-tile-tint-0: oklch(0.86 0.09 262);
+  --color-tile-tint-1: oklch(0.88 0.10 160);
+  --color-tile-tint-2: oklch(0.88 0.10 40);
+  --color-tile-tint-3: oklch(0.86 0.09 310);
+  --color-tile-tint-4: oklch(0.90 0.11 90);
+  --color-tile-tint-5: oklch(0.88 0.09 200);
+}
+
+@layer theme {
+  :root {
+    @variant light {
+      --color-tile-tint-0: oklch(0.86 0.09 262);
+      --color-tile-tint-1: oklch(0.88 0.10 160);
+      --color-tile-tint-2: oklch(0.88 0.10 40);
+      --color-tile-tint-3: oklch(0.86 0.09 310);
+      --color-tile-tint-4: oklch(0.90 0.11 90);
+      --color-tile-tint-5: oklch(0.88 0.09 200);
+      --color-destructive: oklch(0.52 0.22 25);
+      --color-destructive-foreground: oklch(0.99 0.01 25);
+    }
+
+    @variant dark {
+      --color-tile-tint-0: oklch(0.32 0.05 250);
+      --color-tile-tint-1: oklch(0.32 0.05 160);
+      --color-tile-tint-2: oklch(0.33 0.05 40);
+      --color-tile-tint-3: oklch(0.32 0.05 300);
+      --color-tile-tint-4: oklch(0.34 0.05 90);
+      --color-tile-tint-5: oklch(0.31 0.03 200);
+      --color-destructive: oklch(0.67 0.2 25);
+      --color-destructive-foreground: oklch(0.15 0.02 25);
+    }
+  }
+}

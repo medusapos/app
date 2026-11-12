@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { SessionStorage } from './session';
 
-export type ThemeChoice = 'system' | 'light' | 'dark';
-export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark'];
+export type ThemeChoice = 'system' | 'light' | 'dark' | 'ocean' | 'sunset' | 'monochrome' | 'paper' | 'warm' | 'bold' | 'market';
+// v2's order (Settings > Theme). The seven after Dark are defined in themes.css and registered in metro.config.js.
+export const THEME_CHOICES: readonly ThemeChoice[] = ['system', 'light', 'dark', 'ocean', 'sunset', 'monochrome', 'paper', 'warm', 'bold', 'market'];
 // The POS has shipped light only, so a till that never chose keeps light; WCPOS defaults to system.
 export const DEFAULT_THEME_CHOICE: ThemeChoice = 'light';
 
 const KEY = 'medusapos.theme';
 
 export function isThemeChoice(value: unknown): value is ThemeChoice {
-  return value === 'system' || value === 'light' || value === 'dark';
+  return typeof value === 'string' && (THEME_CHOICES as readonly string[]).includes(value);
 }
 
 /** This device's choice, or the default when the stored value is missing or unusable. */

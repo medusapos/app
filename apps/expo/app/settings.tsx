@@ -1,8 +1,9 @@
 import { useRef, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { SettingsGroup, SettingsRow, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { SettingsGroup, SettingsRow } from '@tallyui/components';
 import { ClearLocalDataSection } from '../components/clear-local-data';
+import { ThemeTiles } from '../components/theme-tiles';
 import { ProductsBack } from '../components/products-back';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -10,7 +11,7 @@ import { getDeviceName } from '../lib/register-context';
 import { DEFAULT_SCANNER_SETTINGS, useScannerSettings } from '../lib/scanner-settings';
 import { loadCachedSettings, loadCachedPricing } from '../lib/store-settings';
 import { useTillName } from '../lib/till-name';
-import { THEME_CHOICES, isThemeChoice, useThemeChoice, type ThemeChoice } from '../lib/theme-choice';
+import { THEME_CHOICES, useThemeChoice } from '../lib/theme-choice';
 import { averageKeyMs } from '../lib/use-wedge-scan';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
@@ -140,21 +141,11 @@ function ScannerSection({ session }: { session: Session }) {
   </SettingsGroup>;
 }
 
-const THEME_LABELS: Record<ThemeChoice, string> = { system: 'System', light: 'Light', dark: 'Dark' };
-
 function ThemeSection() {
   const { choice, save } = useThemeChoice(defaultStorage());
-  return <SettingsGroup title="Theme" description="Light, dark, or follow this device's setting. Saved on this till only." testID="settings-theme">
+  return <SettingsGroup title="Theme" description="Light, dark, follow this device's setting, or a colour theme. Saved on this till only." testID="settings-theme">
     <View className="p-4">
-      <ToggleGroup type="single" value={choice} size="lg" accessibilityLabel="Theme" testID="settings-theme-choice"
-        onValueChange={(value) => { if (isThemeChoice(value) && value !== choice) save(value); }}
-        className="self-start flex-row gap-0 overflow-hidden rounded-md border border-border">
-        {THEME_CHOICES.map((value, index) => <ToggleGroupItem key={value} value={value}
-          testID={`settings-theme-${value}`} accessibilityLabel={THEME_LABELS[value]}
-          className={`rounded-none ${value === choice ? 'bg-primary web:hover:bg-primary' : 'bg-card'}${index > 0 ? ' border-l border-border' : ''}`}>
-          <Text className={`text-sm font-medium ${value === choice ? 'text-primary-foreground' : 'text-foreground'}`}>{THEME_LABELS[value]}</Text>
-        </ToggleGroupItem>)}
-      </ToggleGroup>
+      <ThemeTiles choice={choice} choices={THEME_CHOICES} onChoose={(value) => { if (value !== choice) save(value); }} />
     </View>
   </SettingsGroup>;
 }
