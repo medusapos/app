@@ -1,7 +1,7 @@
 import { Platform, Pressable, Text } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { OrdersList } from '@tallyui/components';
-import { ProductsBack } from '../components/products-back';
+import { FrameMenuButton } from '../components/app-frame';
 import { version as appVersion } from '../package.json';
 import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -13,7 +13,7 @@ export default function OrdersScreen() {
   const { recent, requeue } = useOutboxContext();
   if (!session) return <Redirect href="/login" />;
   return <>
-    <Stack.Screen options={{ title: 'Orders', headerLeft: () => <ProductsBack /> }} />
+    <Stack.Screen options={{ title: 'Orders', headerLeft: () => <FrameMenuButton /> }} />
     <OrdersList orders={recent} onRetry={requeue} formatDate={formatDate} footer={
         <Pressable accessibilityRole="link" className="min-h-11 justify-center" onPress={() => { openFeedbackUrl(feedbackUrl({
           appVersion, platform: Platform.OS,

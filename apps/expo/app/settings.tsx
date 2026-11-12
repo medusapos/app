@@ -4,7 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { SettingsGroup, SettingsRow } from '@tallyui/components';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ThemeTiles } from '../components/theme-tiles';
-import { ProductsBack } from '../components/products-back';
+import { FrameMenuButton } from '../components/app-frame';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { getDeviceName } from '../lib/register-context';
@@ -29,7 +29,7 @@ export default function SettingsScreen() {
   const { session } = useSession();
   if (!session) return <Redirect href="/login" />;
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
-    <Stack.Screen options={{ title: 'Settings', headerLeft: () => <ProductsBack /> }} />
+    <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-md gap-6 self-center">
       <StoreSection session={session} />
       <RegisterSection session={session} />

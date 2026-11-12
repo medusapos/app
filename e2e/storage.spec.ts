@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, stockBySku, tenderCash, test, variantIdBySku } from './helpers';
+import { addE2E1, adminToken, captureSales, chooseRegion, openArea, ordersByClientId, sellBySku, signIn, stockBySku, tenderCash, test, variantIdBySku } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -73,7 +73,7 @@ test('cold open, offline sale, and reload keep the SQLite catalogue and carry th
 
   // The catalogue count comes straight from the SQLite-wasm cache: the product pull is blocked.
   await expect(page.getByText(/5 products/)).toBeVisible();
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   // Matched narrowly (leading " · "): the order row's own text, not the "Sync status" banner,
   // which also (lowercase, case-insensitively the same) contains "waiting to sync".
   await expect(page.getByText('· Waiting to sync', { exact: false })).toBeVisible();
@@ -130,7 +130,7 @@ test('signing out and in again in the same tab rebuilds the SQLite catalogue und
   expect(await recordedCaches(page)).toEqual(caches);
   await page.unroute('**/admin/products**');
 
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   await expect(page.getByText('· Synced', { exact: false })).toHaveCount(1, { timeout: 30_000 });
   await expect(blocked).toHaveCount(0);
 
@@ -160,7 +160,7 @@ async function olderSqliteSaleSyncsOnce(page: Page, version: 0 | 1) {
   // signIn loads /login afresh (a new page, as after a build switch); its store open migrates the order to v2.
   await page.route('**/tally/v1/commands', (route) => route.abort());
   await signIn(page, 'Europe', 'unsynced');
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   await expect(page.getByText('· Waiting to sync', { exact: false })).toBeVisible();
 
   await page.unroute('**/tally/v1/commands');
@@ -194,7 +194,7 @@ test('a pending order left in the legacy Dexie store carries over on sign-in and
 
   await page.route('**/tally/v1/commands', (route) => route.abort());
   await signIn(page, 'Europe', 'unsynced');
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   await expect(page.getByText('· Waiting to sync', { exact: false })).toBeVisible();
   await page.unroute('**/tally/v1/commands');
   await expect(page.getByText('· Synced', { exact: false })).toBeVisible({ timeout: 30_000 });
@@ -246,7 +246,7 @@ test('a legacy sale is carried over once and synced once; the legacy database is
   expect(await legacyDatabases()).not.toEqual([]);
   await page.route('**/tally/v1/commands', (route) => route.abort());
   await page.reload();
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   // The marker prevents the late sale from being carried over.
   await expect(page.getByText('· Waiting to sync', { exact: false })).toHaveCount(0);
   await page.unroute('**/tally/v1/commands');
@@ -303,7 +303,7 @@ test('a dead storage worker shows the reload prompt, and Reload recovers the app
   // to Orders after the kill: leaving Products unmounts its product cache, whose close() also
   // hangs, so a later return to Products would reopen the same database name before that close
   // ever finishes (RxDB DB8).
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   await expect(page).toHaveURL(/\/orders/);
   const retryButton = page.getByRole('button', { name: 'Retry' });
   await expect(retryButton).toBeVisible();
@@ -362,6 +362,6 @@ test('a non-worker order-store open failure blocks with Reload and Report, and R
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 
   await sellBySku(page, ['E2E-1'], 'exact');
-  await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
+  await openArea(page, 'Orders');
   await expect(page.getByText('· Synced', { exact: false })).toBeVisible({ timeout: 30_000 });
 });

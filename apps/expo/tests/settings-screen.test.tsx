@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
@@ -8,10 +8,12 @@ import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { loadTillName, useTillName } from '../lib/till-name';
 import SettingsScreen from '../app/settings';
+import { AppFrame } from '../components/app-frame';
+import { setWindowWidth } from './window-width';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
-  router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
+  router: { replace: vi.fn(), navigate: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/settings',
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -34,6 +36,10 @@ beforeEach(() => {
 });
 
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+function mountFramed(width: number, height: number) {
+  setWindowWidth(width, height);
+  return mount(<AppFrame signedIn><SettingsScreen /></AppFrame>);
+}
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
@@ -141,30 +147,31 @@ describe('SettingsScreen', () => {
     expect(screen.getByText('Scan a barcode into this field to check it counts as a scan')).toBeTruthy();
   });
 
-  it('Settings shows one Products back control, in the header (walkthrough item 10)', async () => {
-    await mount();
+  it('on a phone Settings shows one control in the header, the frame\'s Menu (walkthrough item 10)', async () => {
+    await mountFramed(390, 844);
     const headerLeft = screen.getByTestId('header-left');
-    const products = screen.getAllByRole('button', { name: 'Products' });
-    expect(products).toHaveLength(1);
-    expect(headerLeft.contains(products[0])).toBe(true);
-    const labels = screen.getAllByText('‹ Products');
-    expect(labels).toHaveLength(1);
-    expect(headerLeft.contains(labels[0])).toBe(true);
+    expect(headerLeft.contains(screen.getByTestId('frame-menu'))).toBe(true);
+    expect(within(headerLeft).getAllByRole('button')).toHaveLength(1);
+    expect(screen.queryByRole('button', { name: 'Products' })).toBeNull();
+    expect(screen.queryByText('‹ Products')).toBeNull();
   });
 
-  it('the Products link navigates home, for when Settings was opened directly by URL', async () => {
-    await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Products' }));
-    expect(router.replace).toHaveBeenCalledWith('/');
-    expect(router.back).not.toHaveBeenCalled();
+  // dismissTo replaces when nothing is under Settings, as when it was opened directly by URL.
+  it('on a phone the drawer\'s Sale goes home by dismissTo, for when Settings was opened directly by URL', async () => {
+    await mountFramed(390, 844);
+    fireEvent.click(screen.getByTestId('frame-menu'));
+    fireEvent.click(within(screen.getByTestId('nav-drawer')).getByRole('button', { name: 'Sale' }));
+    expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
+    expect(router.replace).not.toHaveBeenCalled();
   });
 
   // A replace would mount a second, empty Products screen over the one holding the sale.
-  it('the Products link goes back to the Products screen under Settings when there is history', async () => {
-    vi.mocked(router.canGoBack).mockReturnValueOnce(true);
-    await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Products' }));
-    expect(router.back).toHaveBeenCalledTimes(1);
+  it('on a wide window the header has no back control and the rail\'s Sale dismisses to the sale under Settings', async () => {
+    await mountFramed(1440, 900);
+    expect(screen.getByTestId('header-left').childElementCount).toBe(0);
+    fireEvent.click(within(screen.getByTestId('nav-rail')).getByRole('button', { name: 'Sale' }));
+    expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
     expect(router.replace).not.toHaveBeenCalled();
+    expect(router.push).not.toHaveBeenCalled();
   });
 });

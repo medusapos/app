@@ -121,6 +121,13 @@ export async function chooseRegion(page: Page, region: string) {
   await page.getByText('Continue', { exact: true }).click();
 }
 
+// The app frame: the rail on a window at least 768 x 480 (TallyUI's boundary), else the drawer behind the header's Menu.
+export async function openArea(page: Page, area: 'Sale' | 'Orders' | 'Reports' | 'Settings') {
+  const { width, height } = page.viewportSize() ?? { width: 1280, height: 720 };
+  if (width < 768 || height < 480) await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: area, exact: true }).click();
+}
+
 // Numeric cash is in EUR major units. Return the displayed receipt total before New sale.
 export async function sellBySku(page: Page, skus: string[], cash: 'exact' | number | 'external') {
   const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
-import { Redirect, router, Stack } from 'expo-router';
+import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
@@ -13,6 +13,7 @@ import {
   withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
+import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
@@ -212,6 +213,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     if (fresh.length) void reconcileStock();
   }, [recent, reconcileStock]);
   const attentionCount = needsAttention(recent).length;
+  useFrameBadge('orders', attentionCount);
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
   // the outbox confirms the order is stored.
@@ -357,18 +359,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Products', headerShown: sale.stage.kind !== 'receipt', headerRight: () => (
+      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Products', headerShown: sale.stage.kind !== 'receipt',
+        // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
+        headerLeft: () => <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
-        <Pressable accessibilityRole="button" onPress={() => router.push('/orders')} className="min-h-11 justify-center">
-          <Text className="text-foreground">Orders{attentionCount ? ` (${attentionCount})` : ''}</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => router.push('/reports')} className="min-h-11 justify-center">
-          <Text className="text-foreground">Reports</Text>
-        </Pressable>
-        <Pressable accessibilityRole="button" onPress={() => router.push('/settings')} className="min-h-11 justify-center">
-          <Text className="text-foreground">Settings</Text>
-        </Pressable>
         {/* Disabled in place while a save is pending (never hidden), so the header doesn't shift; the lock message is its description. */}
         <Pressable accessibilityRole="button" disabled={signOutLocked} accessibilityHint={signOutLocked ? lockMessage : undefined}
           aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
