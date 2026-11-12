@@ -10,6 +10,7 @@ import type TallyLedgerModuleService from '../../src/modules/tally-ledger/servic
 import { orderCoupons } from '../../src/workflows/tally-coupons/order-coupons'
 import { executeOrderCreate, type ExecuteOutcome } from '../../src/workflows/tally-order-create/execute'
 import { planOrderCreate } from '../../src/workflows/tally-order-create/plan'
+import { couponResumeWorkflow } from '../../src/workflows/tally-order-create/workflow'
 import inclusive from '../../src/workflows/tally-order-create/__fixtures__/order-create-coupon-envelopes-2026-11-12/inclusive-coupon.json'
 import { seed } from './seed'
 
@@ -197,6 +198,52 @@ medusaIntegrationTestRunner({
       const promo = await promotion(), sale = command(inclusive, promo)
       expect(await executeOrderCreate(container, sale, {})).toMatchObject({ kind: 'transient', message: expect.stringContaining(promo.code!) })
       await nothingStored(sale, promo.id)
+    })
+
+    it('resumes a draft whose coupon steps already ran without counting usage twice', async () => {
+      const promo = await promotion(), sale = command(inclusive, promo), writes = await price(sale)
+      const planned = planOrderCreate(sale.payload, { customer: null, commandId: sale.id, salesChannelId: data.channelId,
+        region: { id: data.regionId, currency_code: 'eur', country_codes: ['de', 'dk'] },
+        location: { id: data.berlinId, address: { address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' } },
+        variants: { [data.variantA]: { id: data.variantA } },
+      }, sale.version)
+      if (!planned.ok) throw new Error('Expected draft plan')
+      planned.plan.draftOrder.metadata.tally_coupons = writes
+      const { result: draft } = await createOrderWorkflow(container).run({ input: planned.plan.draftOrder as unknown as CreateOrderWorkflowInput })
+      await couponResumeWorkflow(container).run({ input: { orderId: draft.id } })
+      const crashed = await container.resolve(Modules.ORDER).retrieveOrder(draft.id, { relations: ['items.adjustments'] })
+      expect(crashed.is_draft_order).toBe(true)
+      expect(crashed.items![0].adjustments).toEqual([expect.objectContaining({ promotion_id: promo.id })])
+      expect(await used(promo.id)).toBe(1)
+      const order = await applied(sale, await executeOrderCreate(container, sale, {}))
+      expect(order.id).toBe(draft.id)
+      expect(order.items[0].adjustments).toEqual([expect.objectContaining({ promotion_id: promo.id })])
+      expect(await used(promo.id)).toBe(1)
+    })
+
+    it("undoes the first coupon's usage when the second coupon's limit is exhausted", async () => {
+      const first = await promotion(), second = await promotion({ limit: 1 })
+      const saleX = command(inclusive, second), saleY = command(inclusive, first)
+      saleY.payload.coupons.push({ ...saleY.payload.coupons[0], code: second.code!, couponId: second.id })
+      saleY.payload.display.coupons!.push({ ...saleY.payload.display.coupons![0], code: second.code! })
+      Object.assign(saleY.payload, { totalMinor: 990, subtotalMinor: 832, taxMinor: 158 })
+      saleY.payload.payments[0].amountMinor = 990
+      const writesY = await price(saleY)
+      expect(writesY).toHaveLength(2)
+      expect(writesY.map(write => write.promotionId)).toEqual([first.id, second.id])
+      expect(writesY[1].lines).toEqual([
+        expect.objectContaining({ lineId: saleY.payload.lines[0].clientLineId, amountMinor: 100 }),
+      ])
+      const writesX = await price(saleX)
+      await applied(saleX, await executeOrderCreate(container, saleX, {}, writesX))
+      expect(await used(second.id)).toBe(1)
+      expect(await executeOrderCreate(container, saleY, {}, writesY)).toEqual({ kind: 'result', result: {
+        id: saleY.id, status: 'rejected', error: { code: 'coupon_invalid', message: 'This coupon has been used up.',
+          data: { couponCode: second.code, storeCode: 'limit_reached' } },
+      } })
+      await nothingStored(saleY, first.id, 0)
+      expect(await used(second.id)).toBe(1)
+      expect(await links({ promotion_id: first.id })).toHaveLength(0)
     })
   },
 })
