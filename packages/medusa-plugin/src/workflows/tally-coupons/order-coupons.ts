@@ -1,4 +1,5 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
+import { MathBN } from '@medusajs/framework/utils'
 import type { OrderCreateCoupon, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { TallyPluginOptions } from '../tally-order-create/run'
 import { buildCouponContext, type CouponLine, type CouponSale } from './coupon-context'
@@ -6,6 +7,11 @@ import { messages, priceCoupons, type CouponPricing, type CouponStoreCode } from
 
 export type OrderCouponError = {
   code: 'coupon_invalid'; message: string; data: { couponCode: string; storeCode: CouponStoreCode }
+}
+export type CouponWrite = {
+  couponCode: string; promotionId: string; promotionCode: string
+  lines: Array<{ lineId: string; amountMinor: number; taxInclusive: boolean }>
+  actions: Array<{ amount: string }>
 }
 
 /** Pure. The coupon sale the payload describes, or the ruling's refusal. */
@@ -57,18 +63,24 @@ export function couponAmountError(coupon: OrderCreateCoupon, pricing: CouponPric
   return null
 }
 
-/** The first coupon error for the order, or null when every coupon passes. Only called with non-empty payload.coupons. */
-export async function orderCouponError(
+// Pre-flight fixes the coupon amounts before the ledger claim.
+export async function orderCoupons(
   container: MedusaContainer, options: TallyPluginOptions, payload: OrderCreatePayload,
-): Promise<OrderCouponError | null> {
+): Promise<{ ok: false; error: OrderCouponError } | { ok: true; writes: CouponWrite[] }> {
   const result = orderCouponSale(payload)
-  if (result.ok === false) return result.error
+  if (result.ok === false) return result
   const context = await buildCouponContext(container, options, result.sale)
   const coupons = payload.coupons!
   const pricings = await priceCoupons(container, context, coupons.map(coupon => coupon.code))
+  const writes: CouponWrite[] = []
   for (let i = 0; i < coupons.length; i++) {
     const error = couponAmountError(coupons[i], pricings[i], result.sale.lines)
-    if (error) return error
+    if (error) return { ok: false, error }
+    const pricing = pricings[i]
+    if (pricing.ok) writes.push({ couponCode: coupons[i].code, promotionId: pricing.couponId, promotionCode: pricing.promotionCode,
+      lines: pricing.lines.map(line => ({ ...line, taxInclusive: result.sale.lines.find(item => item.lineId === line.lineId)!.taxInclusive })),
+      actions: pricing.actions.map(action => ({ ...action, amount: MathBN.convert(action.amount).toString() })),
+    })
   }
-  return null
+  return { ok: true, writes }
 }

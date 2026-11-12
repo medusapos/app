@@ -2,7 +2,7 @@ import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { executeOrderCreate, replayOrderCreate } from '../../../../workflows/tally-order-create/execute'
-import { orderCouponError } from '../../../../workflows/tally-coupons/order-coupons'
+import { orderCoupons } from '../../../../workflows/tally-coupons/order-coupons'
 import { executeRegisterCommand, replayRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import type { TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
@@ -126,9 +126,9 @@ export async function processBatch(
       continue
     }
     if (Array.isArray(payload.coupons) && payload.coupons.length > 0) {
-      const couponError = await orderCouponError(container, options, payload)
-      if (couponError) {
-        results.push({ id: command.id, status: 'rejected', error: couponError as CommandErrorWithData })
+      const coupons = await orderCoupons(container, options, payload)
+      if (coupons.ok === false) {
+        results.push({ id: command.id, status: 'rejected', error: coupons.error as CommandErrorWithData })
         continue
       }
     }

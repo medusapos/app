@@ -6,7 +6,7 @@ import {
 } from '@medusajs/medusa/core-flows'
 import { NeedsAdminError } from './needs-admin-error'
 import { fulfillmentGroups } from './plan'
-import { dropPromotionAdjustmentsWorkflow, takeBackStockWorkflow } from './workflow'
+import { couponResumeWorkflow, takeBackStockWorkflow } from './workflow'
 
 // The provider markPaymentCollectionAsPaid uses (core-flows systemPaymentProviderId).
 const SYSTEM_PROVIDER_ID = 'pp_system_default'
@@ -36,9 +36,8 @@ export async function resumeOrderCreate(container: MedusaContainer, orderId: str
   }
   const canceled = order.fulfillments.find(fulfillment => fulfillment.canceled_at)
   if (canceled) throw new NeedsAdminError(orderId, `fulfillment ${canceled.id} is canceled`)
+  await couponResumeWorkflow(container).run({ input: { orderId } })
   if (order.is_draft_order) {
-    // A crash between create and the drop step leaves the promotion's adjustment on the draft (#290, #291 review).
-    await dropPromotionAdjustmentsWorkflow(container).run({ input: { orderId } })
     await convertDraftOrderWorkflow(container).run({ input: { id: orderId } })
   }
   // ADR 0003 amendment, #22 review: skip dead collections; the sale was paid at the till.

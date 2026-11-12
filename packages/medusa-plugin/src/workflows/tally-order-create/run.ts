@@ -12,6 +12,7 @@ import { resumeOrderCreate } from './resume'
 import { mergeStockTopUps, planStockTopUp, stockWarnings as warningsForStock } from './stock'
 import { StoreConfigurationError } from './store-configuration-error'
 import { tallyOrderCreateWorkflow, type StockTopUp } from './workflow'
+import type { CouponWrite } from '../tally-coupons/order-coupons'
 
 export type TallyPluginOptions = {
   salesChannelId?: string; locationId?: string; shippingOptionId?: string
@@ -27,7 +28,7 @@ export async function runOrderCreate(
   container: MedusaContainer,
   command: CommandEnvelope<OrderCreatePayload>,
   options: TallyPluginOptions = {},
-  ledger?: { claimToken: string; carriedTopUps: StockTopUp[] }
+  ledger?: { claimToken: string; carriedTopUps: StockTopUp[] }, coupons: CouponWrite[] = []
 ): Promise<CommandResult> {
   const payload = command.payload
   const catalogueLines = payload.lines.filter((line): line is typeof line & { variantId: string } => !('custom' in line))
@@ -38,6 +39,9 @@ export async function runOrderCreate(
     .whereRaw("metadata->>'tally_client_id' = ?", [payload.clientOrderId])
     .whereNull('deleted_at').whereNot('status', 'canceled').first()
   let orderId = existing?.id
+  if (!existing) for (const coupon of payload.coupons ?? []) {
+    if (!coupons.some(write => write.couponCode === coupon.code)) throw new Error(`coupon writes missing for ${coupon.code}`)
+  }
   let stockWarnings: ReturnType<typeof planStockTopUp>['warnings'] = []
   if (existing?.status !== 'completed') {
     // An existing order may already be paid, so its configuration failures stay transient (ADR 0004).
@@ -164,6 +168,7 @@ export async function runOrderCreate(
         inventory_item_id: topUp.inventoryItemId, location_id: location.id, shortfall: topUp.shortfall,
       })))
       if (topUps.length) planned.plan.draftOrder.metadata.tally_stock_topups = topUps
+      if (coupons.length) planned.plan.draftOrder.metadata.tally_coupons = coupons
       try {
         const { result } = await tallyOrderCreateWorkflow(container).run({ input: {
           ledger: ledger ? { commandId: command.id, claimToken: ledger.claimToken } : null, carriedTopUps: ledger?.carriedTopUps ?? [],
@@ -221,7 +226,8 @@ export async function runOrderCreate(
     && !await container.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE).isKnownSession(sessionId)
     ? [{ code: 'register_session_unknown', sessionId }] : []
   const warnings = [...totalWarnings(payload.totalMinor, serverMinor), ...(command.version >= 3 ? figuresWarnings(
-    { subtotalMinor: payload.subtotalMinor, taxMinor: payload.taxMinor, discountMinor: payload.discountMinor ?? 0 },
+    { subtotalMinor: payload.subtotalMinor, taxMinor: payload.taxMinor, discountMinor: (payload.discountMinor ?? 0)
+      + (command.version >= 6 ? (payload.coupons ?? []).reduce((sum, coupon) => sum + coupon.discountMinor, 0) : 0) },
     { subtotalMinor: serverSubtotal, taxMinor: serverTax,
       ...(command.version >= 4 ? { discountMinor: majorToMinor(order.raw_discount_subtotal.value, currencyDecimals(payload.currency)) } : {}) }
   ) : []), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings, ...sessionWarnings] as NonNullable<CommandResult['warnings']>
