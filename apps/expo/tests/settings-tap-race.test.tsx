@@ -111,7 +111,7 @@ async function idleWithRetryInFlight() {
   await pos();
   await act(async () => { fireEvent.click(button('Retry')); });
   await vi.waitFor(() => expect(settle).toHaveLength(2));
-  expect(screen.queryByRole('button', { name: 'Remove Shirt' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
   expect(region()).toBe('reg_eu');
   return settle[1];
 }
@@ -135,7 +135,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     // The tap is queued behind the commit task (a microtask here), ahead of React's passive-effects task.
     onGermanyCommit = () => { if (!tapped) { tapped = true; queueMicrotask(() => tap('Shirt')); } };
     await germanyLands(retry, () => vi.waitFor(() => expect(tapped).toBe(true)));
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
   });
 
   it('window 2: keeps a line tapped after useSale\'s new-sale effect ran, before the new builder renders', async () => {
@@ -145,7 +145,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     // pending), ahead of the render that would hand the new builder to the Catalogue's onSelect.
     onGermanyEffect = () => { if (!tapped) { tapped = true; queueMicrotask(() => tap('Shirt')); } };
     await germanyLands(retry, () => vi.waitFor(() => expect(tapped).toBe(true)));
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
   });
 
   it('window 1, synchronous: keeps a line tapped from inside the new settings\' commit (a layout effect)', async () => {
@@ -153,7 +153,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     let tapped = false;
     onGermanyCommit = () => { if (!tapped) { tapped = true; tap('Shirt'); } };
     await germanyLands(retry, () => vi.waitFor(() => expect(tapped).toBe(true)));
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
   });
 
   it('window 0: a tap after the settings update is queued, before it renders, keeps the line and Europe\'s pricing', async () => {
@@ -161,7 +161,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     // Well past the microtask that sets the store state; React renders a default-priority update only in a later
     // task, and renders the tap's update together with it (19.x renders sync and default lanes in one pass).
     await germanyLands(retry, async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); tap('Shirt'); });
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
     expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€15.00'); // the Shirt at Europe's €12 + 25%
     // The sale started on Europe's settings, so the catalogue stays on them too (a money rule): Hat is €10 + 25%.
     fireEvent.click(screen.getByTestId('product-tile-Hat'));
@@ -172,7 +172,7 @@ describe('tap race when new store settings land (#58 review)', () => {
   it('control: keeps a line tapped in the same tick the new settings resolve (the tap first)', async () => {
     const retry = await idleWithRetryInFlight();
     await germanyLands(retry, () => tap('Shirt'));
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
     expect(region()).toBe('reg_eu');
     expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€15.00');
   });
@@ -182,7 +182,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     let committed = false;
     onGermanyCommit = () => { committed = true; };
     await germanyLands(retry, async () => { await vi.waitFor(() => expect(committed).toBe(true)); await settleTasks(); tap('Shirt'); });
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
     expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€20.00'); // Germany's €20, tax included
   });
 
@@ -198,11 +198,11 @@ describe('tap race when new store settings land (#58 review)', () => {
     const retry = await idleWithRetryInFlight();
     fireEvent.click(screen.getByTestId('product-tile-Cap'));
     expect(screen.getByRole('alert').textContent).toBe('No EUR price for Cap');
-    expect(screen.queryByRole('button', { name: 'Remove Cap' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit quantity of Cap' })).toBeNull();
     await germanyLands(retry);
     expect(region()).toBe('reg_de');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
     expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€20.00'); // Germany's €20, tax included
   });
 });

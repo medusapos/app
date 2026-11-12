@@ -23,7 +23,7 @@ type Migration = {
 // v0.1.0: @tallyui/pos 2.0.0 wrote these versions; 3.3.0 migrates orders to v8 with these outputs.
 // v0.2.0: @tallyui/pos 3.8.0's schemas (src/pos-order/schema.ts, src/register/schemas.ts, src/register/register-commands.ts,
 // src/order/order-drafts.ts) as the app's order-store.ts adds them; the current build stores the same, except pos_orders,
-// which moves to v11 (TallyUI 3.13.0).
+// which moves to v12 (TallyUI 3.13.0 to v11, 3.19.0 to v12).
 const RELEASE_EXPECTATIONS: Record<string, Migration | { kind: 'identity'; stored: Stored }> = {
   'v0.1.0': {
     kind: 'migration',
@@ -399,7 +399,7 @@ test('a 3.2.x till (pos_orders v7) upgrades to 3.3.0 (v8): sales, split payments
   }
 });
 
-test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with pos_orders moving to schema v11 and its documents unchanged: sales, split payments, register history, a parked draft and queued register commands survive, and pending sales sync once', async ({ context }) => {
+test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with pos_orders moving to schema v12 and its documents unchanged: sales, split payments, register history, a parked draft and queued register commands survive, and pending sales sync once', async ({ context }) => {
   test.setTimeout(15 * 60_000);
   const releasedRef = JSON.parse(readFileSync(resolve(released, 'BUILD_REF.json'), 'utf8'));
   test.skip(TALLYUI_32X_BASES.includes(releasedRef.commit), '3.2.x bases use the pos_orders v7 to v8 carry-over test.');
@@ -533,13 +533,13 @@ test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with pos_orders moving to 
     await server.stop();
     server = serve(current);
     await server.ready();
-    await test.step('C: pos_orders moves to schema v11 and whole documents equal released documents', async () => {
+    await test.step('C: pos_orders moves to schema v12 and whole documents equal released documents', async () => {
       const page = await context.newPage();
       const NEW = await dump(page);
       await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
-      // TallyUI 3.13.0's identity migrations 9-11 move pos_orders to v11; nothing else in stored changes.
-      expect(NEW.stored).toStrictEqual(OLD.stored.map(entry => entry.name === 'pos_orders' ? { ...entry, version: 11 } : entry));
+      // TallyUI 3.13.0's identity migrations 9-11 and 3.19.0's 12 move pos_orders to v12; nothing else in stored changes.
+      expect(NEW.stored).toStrictEqual(OLD.stored.map(entry => entry.name === 'pos_orders' ? { ...entry, version: 12 } : entry));
       expect(NEW.docs).toStrictEqual(OLD.docs);
       expect(NEW.register).toStrictEqual(OLD.register);
     });

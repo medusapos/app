@@ -309,6 +309,15 @@ describe('versions 6 and 7 (ADR 0024)', () => {
     expect(payloadShapeErrors({ ...payload, note: 'Gift wrap, please' }, 6)).toEqual(['payload.note: requires version 7'])
   })
 
+  it('refuses taxAddress at version 7 as requiring version 8', () => {
+    expect(payloadShapeErrors({ ...payload, taxAddress: 'billing' }, 7)).toEqual(['payload.taxAddress: requires version 8'])
+  })
+
+  it('refuses customer addresses at version 7 as requiring version 8', () => {
+    expect(payloadShapeErrors({ ...payload, customer: { email: 'buyer@example.com', billing: { country: 'DE' }, shipping: { country: 'DE' } } }, 7))
+      .toEqual(['payload.customer.billing: requires version 8', 'payload.customer.shipping: requires version 8'])
+  })
+
   it.each([['an empty', ''], ['a 1001-unit', 'x'.repeat(1001)], ['a 1002-unit emoji', '😀'.repeat(501)], ['a number', 5], ['a null', null]])(
     'refuses %s note', (_, note) => {
       expect(payloadShapeErrors({ ...payload, note }, 7)).toEqual(['payload.note: expected a string of 1 to 1000 characters'])

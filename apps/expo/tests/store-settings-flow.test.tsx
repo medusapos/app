@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
 import ProductsScreen from '../app/index';
+import { PortalHost } from '@tallyui/primitives';
 import { setWindowWidth } from './window-width';
 import { pickMethod, take, tenderLegs } from './tender-pane';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -48,6 +49,8 @@ const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnau
   reportNoPosAccess: vi.fn(), signOutNotice: null,
   setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
+// TallyUI 3.19.0's popover editor: a line's Remove is in its quantity popover.
+const removeLine = (name: string) => { fireEvent.click(button(`Edit quantity of ${name}`)); fireEvent.click(button(`Remove ${name}`)); };
 // v2's cart foot (TallyUI 3.18.0): Checkout opens the tender on Cash; the Card terminal tile takes the whole balance.
 async function payByCard() { await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); }); pickMethod('external'); take(); }
 const pos = () => screen.findByRole('searchbox');
@@ -197,7 +200,7 @@ describe('store settings flow', () => {
     let settle!: { resolve: (value: PricingSettings) => void; reject: (error: unknown) => void };
     storeSettings.mockImplementation(() => new Promise((resolve, reject) => { settle = { resolve, reject }; }));
     const requested = (times: number) => vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(times));
-    render(<ProductsScreen />);
+    render(<><ProductsScreen /><PortalHost /></>); // the line popover's portal
     await requested(1);
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
@@ -206,7 +209,7 @@ describe('store settings flow', () => {
       expect(tenderLegs()).toEqual(['Card terminal €15.00']);
       expect(button('Complete sale')).toBeTruthy();
     };
-    const toIdle = () => { fireEvent.click(button('Back')); fireEvent.click(button('Remove Shirt')); };
+    const toIdle = () => { fireEvent.click(button('Back')); removeLine('Shirt'); };
     const replicationContext = vi.mocked(useReplicatedProducts).mock.lastCall![1];
 
     // Retry is offered only while the sale is idle, so a sale is started while the retry loads.
@@ -227,7 +230,7 @@ describe('store settings flow', () => {
     expect(screen.queryByText('Offline')).toBeNull();
     expect(vi.mocked(useReplicatedProducts).mock.lastCall![1]).toBe(replicationContext);
     fireEvent.click(button('Back'));
-    expect(button('Remove Shirt')).toBeTruthy();
+    expect(button('Edit quantity of Shirt')).toBeTruthy();
     expect(screen.getByTestId('cart-footer').textContent).toContain('Total€15.00');
   }, 20000);
 
@@ -235,7 +238,7 @@ describe('store settings flow', () => {
     saveCachedPricing(localStorage, session.baseUrl, pricing);
     let settle!: { resolve: (value: PricingSettings) => void; reject: (error: unknown) => void };
     storeSettings.mockImplementation(() => new Promise((resolve, reject) => { settle = { resolve, reject }; }));
-    render(<ProductsScreen />);
+    render(<><ProductsScreen /><PortalHost /></>); // the line popover's portal
     await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledOnce());
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
@@ -245,7 +248,7 @@ describe('store settings flow', () => {
     await payByCard();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     fireEvent.click(button('Back'));
-    fireEvent.click(button('Remove Shirt'));
+    removeLine('Shirt');
     await act(async () => { fireEvent.click(button('Retry')); });
     await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
     // The catalogue follows the replication context's region: Germany's own Shirt price is €20.

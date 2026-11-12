@@ -98,12 +98,17 @@ test('a keyboard-wedge scan in the cart view adds a product, and an unknown code
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
 
   // A tapped Pressable keeps focus in Chromium and activates on Enter; the scan's Enter must not also press it
-  // (review follow-up). Tap "+" (E2E-1 to quantity 2), then scan without clicking anything else.
-  await page.getByRole('button', { name: 'Increase E2E product 1', exact: true }).click();
+  // (review follow-up). Set E2E-1 to quantity 2 in its quantity popover (TallyUI 3.19.0), which hands focus back to the
+  // line's quantity trigger on Apply, then scan without clicking anything else.
+  await page.getByRole('button', { name: 'Edit quantity of E2E product 1', exact: true }).click();
+  await page.getByTestId('quantity-popover-keypad-key-2').click();
+  await page.getByTestId('quantity-popover-apply').click();
+  await expect(page.getByTestId('quantity-popover')).toHaveCount(0);
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await page.keyboard.type('E2E-2', { delay: 10 });
   await page.keyboard.press('Enter');
   await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('quantity-popover')).toHaveCount(0);
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
@@ -115,7 +120,8 @@ test('a keyboard-wedge scan in the cart view adds a product, and an unknown code
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
 
-  await page.getByText('Discount', { exact: true }).first().click();
+  await page.getByRole('button', { name: 'Edit quantity of E2E product 1', exact: true }).click();
+  await page.getByRole('button', { name: 'Discount E2E product 1', exact: true }).click();
   await page.getByRole('button', { name: 'Amount', exact: true }).click();
   await page.getByLabel('Discount value', { exact: true }).pressSequentially('0.10', { delay: 10 });
   await page.getByLabel('Discount value', { exact: true }).press('Enter');

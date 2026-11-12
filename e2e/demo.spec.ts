@@ -84,11 +84,15 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.getByTestId('price-popover-trigger').click();
   await expect(page.getByTestId('price-popover')).toBeVisible();
   await expect(page.getByTestId('price-popover-apply')).toBeVisible();
-  // It floats under its trigger and the app keeps its height: compiled from src, TallyUI's
-  // use-relative-position.web.ts stub (returns {}) put it in the page flow (metro.config.js redirects it).
+  // It floats anchored to its trigger's end edge, shifted to stay inside the window, and the app keeps its height: compiled
+  // from src, TallyUI's use-relative-position.web.ts stub (returns {}) put it in the page flow (metro.config.js redirects it).
   const triggerBox = (await page.getByTestId('price-popover-trigger').boundingBox())!;
   expect(await page.getByTestId('price-popover').evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
-  await expect.poll(async () => (await page.getByTestId('price-popover').boundingBox())?.y).toBeGreaterThanOrEqual(triggerBox.y + triggerBox.height);
+  const viewport = page.viewportSize()!;
+  await expect.poll(async () => {
+    const box = await page.getByTestId('price-popover').boundingBox();
+    return !!box && Math.abs(box.x + box.width - (triggerBox.x + triggerBox.width)) < 1 && box.y + box.height <= viewport.height + 1;
+  }).toBe(true);
   expect(await page.getByTestId('cart-checkout').boundingBox()).toEqual(checkoutBefore);
   await page.getByTestId('price-popover-cancel').click();
   await expect(page.getByTestId('price-popover')).toHaveCount(0);
