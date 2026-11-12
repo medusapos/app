@@ -72,6 +72,68 @@ medusaIntegrationTestRunner({
       }])
     })
 
+    it("takes the store's rate at the location when the line gives none", async () => {
+      await promotions.createPromotions({
+        code: 'coupon-store-rate', type: 'standard', status: 'active', is_tax_inclusive: false,
+        application_method: { type: 'fixed', target_type: 'items', allocation: 'across', value: 1, currency_code: 'eur' },
+      })
+      sale.locationId = data.berlinId
+      sale.lines[0].taxInclusive = true
+      sale.lines[0].netMinor = 1190
+      delete sale.lines[0].taxRatePpm
+      const context = await buildCouponContext(container, {}, sale)
+      expect(await priceCoupons(container, context, ['coupon-store-rate'])).toMatchObject([{
+        code: 'coupon-store-rate', ok: true, lines: [{ lineId: 'line-a', amountMinor: 119 }],
+      }])
+      expect(context.lines[0].taxRatePpm).toBe(190000)
+    })
+
+    it('takes the Danish rate for a stock location in Denmark', async () => {
+      const location = await container.resolve(Modules.STOCK_LOCATION).createStockLocations({
+        name: 'Copenhagen',
+        address: { address_1: 'Strøget 1', city: 'København', country_code: 'dk', postal_code: '1160' },
+      })
+      await promotions.createPromotions({
+        code: 'coupon-danish-rate', type: 'standard', status: 'active', is_tax_inclusive: false,
+        application_method: { type: 'fixed', target_type: 'items', allocation: 'across', value: 1, currency_code: 'eur' },
+      })
+      sale.locationId = location.id
+      sale.lines[0].taxInclusive = true
+      sale.lines[0].netMinor = 1250
+      delete sale.lines[0].taxRatePpm
+      const context = await buildCouponContext(container, {}, sale)
+      expect(await priceCoupons(container, context, ['coupon-danish-rate'])).toMatchObject([{
+        code: 'coupon-danish-rate', ok: true, lines: [{ lineId: 'line-a', amountMinor: 125 }],
+      }])
+      expect(context.lines[0].taxRatePpm).toBe(250000)
+    })
+
+    it("keeps a rate the line gives over the store's", async () => {
+      await promotions.createPromotions({
+        code: 'coupon-given-rate', type: 'standard', status: 'active', is_tax_inclusive: false,
+        application_method: { type: 'percentage', target_type: 'items', allocation: 'across', value: 10 },
+      })
+      sale.locationId = data.berlinId
+      sale.lines[0].taxInclusive = true
+      sale.lines[0].netMinor = 1250
+      sale.lines[0].taxRatePpm = 250000
+      const context = await buildCouponContext(container, {}, sale)
+      expect(await priceCoupons(container, context, ['coupon-given-rate'])).toMatchObject([{
+        code: 'coupon-given-rate', ok: true, lines: [{ lineId: 'line-a', amountMinor: 125 }],
+      }])
+      expect(context.lines[0].taxRatePpm).toBe(250000)
+    })
+
+    it("gives a custom line the location's default rate", async () => {
+      sale.locationId = data.berlinId
+      sale.lines[0].taxInclusive = true
+      sale.lines[0].netMinor = 1190
+      delete sale.lines[0].variantId
+      delete sale.lines[0].taxRatePpm
+      const context = await buildCouponContext(container, {}, sale)
+      expect(context.lines[0].taxRatePpm).toBe(190000)
+    })
+
     it("prices a tax-inclusive promotion on a tax-exclusive line in the line's own mode", async () => {
       await promotions.createPromotions({
         code: 'coupon-gross-to-net', type: 'standard', status: 'active', is_tax_inclusive: true,
