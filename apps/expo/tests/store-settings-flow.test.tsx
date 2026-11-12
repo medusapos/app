@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
 import ProductsScreen from '../app/index';
 import { setWindowWidth } from './window-width';
-import { tenderLegs } from './tender-pane';
+import { pickMethod, take, tenderLegs } from './tender-pane';
 import { useOutboxContext } from '../lib/outbox-context';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { POS_CONNECTOR_ID } from '../lib/pos-connector';
@@ -48,6 +48,8 @@ const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnau
   reportNoPosAccess: vi.fn(), signOutNotice: null,
   setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
 const button = (name: string) => screen.getByRole('button', { name });
+// v2's cart foot (TallyUI 3.18.0): Checkout opens the tender on Cash; the Card terminal tile takes the whole balance.
+async function payByCard() { await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); }); pickMethod('external'); take(); }
 const pos = () => screen.findByRole('searchbox');
 
 beforeEach(() => {
@@ -199,7 +201,7 @@ describe('store settings flow', () => {
     await requested(1);
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
-    const startSale = async () => { fireEvent.click(screen.getByTestId('product-tile-Shirt')); await act(async () => { fireEvent.click(button('Card terminal')); }); };
+    const startSale = async () => { fireEvent.click(screen.getByTestId('product-tile-Shirt')); await payByCard(); };
     const inTender = () => {
       expect(tenderLegs()).toEqual(['Card terminal €15.00']);
       expect(button('Complete sale')).toBeTruthy();
@@ -240,7 +242,7 @@ describe('store settings flow', () => {
     expect(button('Retry')).toBeTruthy();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     fireEvent.click(button('Back'));
     fireEvent.click(button('Remove Shirt'));
@@ -258,7 +260,7 @@ describe('store settings flow', () => {
     expect(region()).toBe('reg_eu');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(screen.getByTestId('cart-footer').textContent).toContain('Total€30.00');
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     expect(tenderLegs()).toEqual(['Card terminal €30.00']);
     await act(async () => { fireEvent.click(button('Complete sale')); });
     const record = vi.mocked(useOutboxContext().record);
@@ -284,7 +286,7 @@ describe('store settings flow', () => {
     await act(async () => { fireEvent.click(button('Retry')); });
     await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     await act(async () => { settle.reject(choiceRequired({ regions })); });
     expect(screen.queryByText('Set up this till')).toBeNull();
     expect(tenderLegs()).toEqual(['Card terminal €15.00']);

@@ -26,7 +26,7 @@ import { fetchStoreSettings, saveCachedSettings, type StoreSettings } from '../l
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { openTestRegister } from './register-fixture';
 import { setWindowWidth } from './window-width';
-import { cartLineCells, tenderLegs } from './tender-pane';
+import { cartLineCells, pickMethod, take, tenderLegs } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
@@ -49,6 +49,10 @@ const pricing: PricingSettings = { currency: 'EUR', pricesIncludeTax: false, tax
 const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
   variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] };
 const button = (name: string | RegExp) => screen.getByRole('button', { name });
+// v2's cart foot (TallyUI 3.18.0): Checkout opens the tender on Cash through the gate; the Card terminal tile then
+// takes the whole balance, as the cart's old Card terminal button did.
+const checkoutButton = () => screen.getByTestId('cart-checkout');
+async function payByCard() { await act(async () => { fireEvent.click(checkoutButton()); }); pickMethod('external'); take(); }
 const pill = () => screen.queryByTestId('register-bar-pill')?.textContent ?? null;
 
 let sequence = 0;
@@ -137,7 +141,7 @@ describe('the register on the sale screen', () => {
   });
 
   it.each([['unbound', 'register-picker'], ['bound, not open', 'open-register-card']])(
-    'while %s, taps and scans still add to the cart, and Cash and Card refuse above it without starting the tender',
+    'while %s, taps and scans still add to the cart, and Checkout refuses above it without starting the tender',
     async (state, gate) => {
       if (state !== 'unbound') await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
       await mount();
@@ -147,12 +151,14 @@ describe('the register on the sale screen', () => {
       fireEvent.change(search, { target: { value: 'BLUE' } });
       fireEvent.keyDown(search, { key: 'Enter' });
       expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
-      for (const method of ['Cash', 'Card terminal']) {
-        await act(async () => { fireEvent.click(button(method)); });
+      for (let tap = 0; tap < 2; tap++) {
+        await act(async () => { fireEvent.click(checkoutButton()); });
         expect(screen.getByRole('alert').textContent).toBe(OPEN_TO_PAY);
         expect(screen.queryByRole('button', { name: /Complete sale|Payment approved on terminal/ })).toBeNull();
+        // Checkout is the only way into the tender, so its Card terminal tile can't be reached either.
+        expect(screen.queryByTestId('tender-method-external')).toBeNull();
         // Above the cart, which is still there to use.
-        expect(card.compareDocumentPosition(button(method)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(card.compareDocumentPosition(checkoutButton()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       }
       expect(record).not.toHaveBeenCalled();
     });
@@ -162,7 +168,7 @@ describe('the register on the sale screen', () => {
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     expect(screen.queryByRole('alert')).toBeNull();
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
     expect(record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ sessionId: session.id, totalMinor: 1500 }));
@@ -198,11 +204,11 @@ describe('the register on the sale screen', () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await startCount();
-    expect(screen.queryByRole('button', { name: 'Cash' })).toBeNull();
+    expect(screen.queryByTestId('cart-checkout')).toBeNull();
     await waitFor(() => expect(pill()).toBe('Counting'));
     await act(async () => { fireEvent.click(screen.getByTestId('count-back')); });
     await waitFor(() => expect(screen.queryByTestId('register-count')).toBeNull());
-    expect(button('Cash')).toBeTruthy();
+    expect(checkoutButton()).toBeTruthy();
     expect((await sessions().find().exec())[0].status).toBe('open');
   });
 });
@@ -315,7 +321,7 @@ describe('closing the register', () => {
     await act(async () => { fireEvent.click(sheet.getByTestId('closure-done')); });
     await waitFor(() => expect(screen.queryByTestId('closure-sheet')).toBeNull());
     expect((screen.getByTestId('open-register-amount') as HTMLInputElement).value).toBe('100.00');
-    expect(button('Cash')).toBeTruthy();
+    expect(checkoutButton()).toBeTruthy();
   });
 
   it('over the threshold, the hook\'s own gate (RegisterApprovalRequiredError) is the count\'s refusal, and nothing is written', async () => {
@@ -459,7 +465,7 @@ describe('closing the register', () => {
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
     await act(async () => { fireEvent.click(button('New sale')); });
     await closeWith(await startCount(), '105.00');
@@ -496,7 +502,7 @@ describe('closing the register', () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
     await act(async () => { fireEvent.click(button('New sale')); });
     await closeWith(await startCount(), '100.00');
@@ -809,8 +815,10 @@ describe('the tender gate', () => {
     // Opened straight in storage, then tapped before the register's watcher renders it (as the reviewer reproduced).
     const opened = await openSession(sessions(), { registerId: 'register-1', expectedFloatMinor: null, countedFloatMinor: 10000,
       openedBy: 'admin@store.test', businessDay: { year: 2026, month: 9, day: 28 }, storeKey: baseUrl });
-    fireEvent.click(button('Card terminal'));
+    fireEvent.click(checkoutButton());
     await screen.findByRole('button', { name: 'Open register panel' });
+    fireEvent.click(await screen.findByTestId('tender-method-external'));
+    take();
     const approve = await screen.findByRole('button', { name: 'Complete sale' });
     await act(async () => { fireEvent.click(approve); });
     await waitFor(() => expect(record).toHaveBeenCalledOnce());
@@ -825,7 +833,7 @@ describe('the tender gate', () => {
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     const approve = await screen.findByRole('button', { name: 'Complete sale' });
     // A close lands under the tender (as a server close or another path could): saleSession goes undefined.
     await act(async () => { await (await sessions().findOne(session.id).exec())!.incrementalPatch({ status: 'closed' }); });
@@ -844,30 +852,30 @@ describe('the tender gate', () => {
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(tree(null)); });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Cash')); });
+    await act(async () => { fireEvent.click(checkoutButton()); });
     expect(screen.getByRole('alert').textContent).toBe(GETTING_READY);
     expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: store.orders });
     await act(async () => { view.rerender(tree(store.orders)); });
     await screen.findByRole('button', { name: 'Open register panel' });
     expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
-    expect(button('Cash')).toBeTruthy();
+    expect(checkoutButton()).toBeTruthy();
     expect(record).not.toHaveBeenCalled();
   });
 
-  it('while a check is pending, ignores further Cash and Card taps: one tender, with the first tap\'s method', async () => {
+  it('while a check is pending, repeated Checkout taps start one tender', async () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => {
-      fireEvent.click(button('Card terminal'));
-      fireEvent.click(button('Card terminal'));
-      fireEvent.click(button('Cash'));
+      for (let tap = 0; tap < 3; tap++) fireEvent.click(checkoutButton());
     });
-    // TallyUI 3.14.0's one pane serves both methods: a card tender is its one captured Card terminal leg and the
-    // card's Terminal reference box; a cash tender would open with no leg.
+    // One tender, opened on Cash with no leg; the card leg is then taken on its tile, with its Terminal reference box.
     await screen.findByTestId('tender-pane');
+    expect(tenderLegs()).toEqual([]);
+    pickMethod('external');
+    take();
     expect(tenderLegs()).toEqual(['Card terminal €15.00']);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(tenderLegs()).toEqual(['Card terminal €15.00']);

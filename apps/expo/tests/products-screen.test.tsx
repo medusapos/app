@@ -25,7 +25,12 @@ import { OutboxStrip, StoreRefused } from '../components/store-refused';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
-import { cartLine, cartLineCells } from './tender-pane';
+import { cartLine, cartLineCells, pickMethod, take } from './tender-pane';
+
+// v2's cart foot (TallyUI 3.18.0): Checkout opens the tender on Cash through the register gate; the Card terminal
+// tile then takes the whole balance, as the cart's old Card terminal button did.
+const checkout = () => act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+async function payByCard() { await checkout(); pickMethod('external'); take(); }
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
@@ -204,7 +209,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.textContent))
-      .toEqual(['Orders', 'Reports', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Cash', 'Card terminal']);
+      .toEqual(['Orders', 'Reports', 'Settings', 'Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest', 'Parked sales', 'Checkout €0.00']);
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
     expect(cartLineCells('Apple')).toEqual(['1', 'Apple', '€12.50', '€12.50']);
@@ -277,7 +282,7 @@ describe('ProductsScreen catalogue', () => {
     }] }));
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await payByCard();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     const record = vi.mocked(useOutboxContext().record);
     expect(record).toHaveBeenCalledTimes(1);
@@ -295,7 +300,7 @@ describe('ProductsScreen catalogue', () => {
     }] }));
     await mount(true, false, name);
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await payByCard();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     expect(useOutboxContext().record).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
       syncStatus: 'pending', totalMinor: 1500, cashierRef: 'admin@store.test',
@@ -480,7 +485,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(button('Open cart, 2 items, €30.00').textContent).toBe('Cart · 2 items€30.00 ›');
     expect(search()).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Cash' })).toBeNull();
+    expect(screen.queryByTestId('cart-checkout')).toBeNull();
     fireEvent.click(button(/^Open cart/));
     expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€24.00']);
     expect(search()).toBeNull();
@@ -488,14 +493,15 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(search()).toBeTruthy();
     fireEvent.click(button('Open cart, 2 items, €30.00'));
     expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€24.00']);
-    await act(async () => { fireEvent.click(button('Cash')); });
+    await checkout();
     expect(button('Complete sale')).toBeTruthy();
     for (const name of ['Products', /^Open cart/]) expect(screen.queryByRole('button', { name })).toBeNull();
     // TallyUI 3.14.0's tender pane has its own Cash tile: the one Cash button left is the pane's, the cart's pay button is gone.
     expect(button('Cash').closest('[data-testid="tender-pane"]')).toBeTruthy();
     expect(search()).toBeNull();
+    expect(screen.queryByTestId('cart-checkout')).toBeNull();
     fireEvent.click(button('Back'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     await act(async () => { fireEvent.click(button('Complete sale')); });
     fireEvent.click(button('New sale'));
     expect(button('Cart is empty')).toBeTruthy();
@@ -513,8 +519,11 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     const orderDiscount = screen.getByRole('button', { name: 'Order discount' });
     expect(lastLine.compareDocumentPosition(orderDiscount) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     const footer = within(screen.getByTestId('cart-footer'));
-    for (const name of ['Cash', 'Card terminal']) expect(footer.getByRole('button', { name })).toBeTruthy();
+    expect(footer.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
     expect(footer.getByText('Total').parentElement!.textContent).toBe('Total€15.00');
+    // The ⋮ beside Checkout holds Void while the sale has lines and no payments.
+    fireEvent.click(footer.getByRole('button', { name: 'More actions' }));
+    expect(within(footer.getByTestId('cart-foot-menu')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Void']);
   });
 });
 
@@ -573,7 +582,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored });
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await payByCard();
     expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBeNull();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     expect(record).toHaveBeenCalledTimes(1);
@@ -621,7 +630,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await payByCard();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     // Replication reports 401 twice while the save is held: nothing signs out or navigates.
     const onUnauthorized = vi.mocked(useReplicatedProducts).mock.lastCall![2];
@@ -651,7 +660,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await payByCard();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
@@ -694,7 +703,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     await act(async () => { hungView = render(hungTree()); });
     vi.useFakeTimers();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await payByCard();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     expect(record).toHaveBeenCalledTimes(1);
     return record.mock.calls[0][0];
@@ -965,7 +974,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record, isStored: vi.fn().mockResolvedValue(false) });
     await mountTill(token);
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     await act(async () => { fireEvent.click(button('Complete sale')); });
     expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
   }
@@ -1021,7 +1030,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     let view!: ReturnType<typeof render>;
     await act(async () => { view = render(<Root sale />); });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(button('Card terminal')); });
+    await payByCard();
     await act(async () => { fireEvent.click(button('Complete sale')); });
     act(() => { vi.mocked(useReplicatedProducts).mock.lastCall![2](); });
     expect(screen.getByText(NOTE)).toBeTruthy();
@@ -1077,7 +1086,7 @@ describe('ProductsScreen earlier-sale note wording', () => {
     const record = vi.fn<(order: PosOrder) => Promise<void>>();
     await arrange(savesInFlight, resolves ? record.mockResolvedValue(undefined) : record.mockImplementation(() => new Promise(() => {})));
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await payByCard();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
   }
 
@@ -1151,7 +1160,7 @@ describe('ProductsScreen tender gated on the order store opening', () => {
     try {
       await mount();
       fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Cash' })); });
+      await checkout();
       expect(screen.getByRole('alert').textContent).toBe("Couldn't check the register. Try again.");
       expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
       expect(warn).toHaveBeenCalledWith('Could not check the register at tender start:', expect.objectContaining({ message: 'storage went away' }));
@@ -1164,13 +1173,13 @@ describe('ProductsScreen tender gated on the order store opening', () => {
     vi.mocked(useRegister).mockReturnValue(openRegisterFixture({ enabled: false }));
     const view = await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await checkout();
     expect(screen.getByRole('alert').textContent).toBe('Getting ready to save sales…');
     expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: {} as never });
     vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
     await act(async () => { view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Card terminal' })); });
+    await checkout();
     expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
   });
 });

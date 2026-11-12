@@ -20,7 +20,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     };
     // Cash exact and Complete sale, as sellBySku pays, stopping on the receipt (before New sale).
     const payCashExact = async (page: Page) => {
-      await page.getByRole('button', { name: 'Cash', exact: true }).click();
+      await page.getByTestId('cart-checkout').click();
       await tenderCash(page, 'exact');
       await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
       await expect(page.getByRole('button', { name: 'New sale', exact: true })).toBeVisible();

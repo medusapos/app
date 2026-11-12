@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
 import { toOrderCreateEnvelope, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -13,7 +13,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
-import { takeLeg, tenderBalance, tenderEntry } from './tender-pane';
+import { pickMethod, take, takeLeg, tenderBalance, tenderEntry } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
 vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
@@ -30,8 +30,6 @@ vi.mock('../lib/store-settings', async (original) => ({
 
 let store: Awaited<ReturnType<typeof openOrderStore>>;
 const record = vi.fn(async (_order: PosOrder) => {});
-const button = (name: string) => screen.getByRole('button', { name });
-const click = (name: string) => fireEvent.click(button(name));
 const add = () => fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 const headline = () => screen.getByTestId('tender-headline').textContent;
 /** The ledger's payment legs (each row's testID; its status and Cancel payment ids end -status and -void). */
@@ -74,10 +72,8 @@ async function startSplit() {
   await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
   await screen.findByTestId('product-tile-Shirt');
   add();
-  await act(async () => { click('Cash'); });
-  click('Split payment');
-  // TallyUI 3.14.0: SplitTender renders the one tender pane, which takes split legs itself; the switch now reads Single payment.
-  expect(button('Single payment')).toBeTruthy();
+  // v2's cart foot: Checkout opens the one tender pane, which takes split legs itself.
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
   expect(headline()).toBe('Total€24.00');
   expect(tenderBalance()).toBe('€24.00');
 }
@@ -146,47 +142,21 @@ it('removing a tender restores the balance due', async () => {
   expect(record).not.toHaveBeenCalled();
 });
 
-it('Single payment clears split payments and shows Tender; leaving tender resets the switch', async () => {
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('takes a cash part and the rest on the card terminal, and records both payments against the order total', async () => {
   await startSplit();
-  tender('card', '10.00');
   tender('cash', '5.00');
-  expect(legs()).toHaveLength(2);
-  click('Single payment');
-  expect(button('Split payment')).toBeTruthy();
-  expect(legs()).toHaveLength(0);
-  expect(within(screen.getByTestId('tender-ledger')).getByText('No payments yet')).toBeTruthy();
-  expect(headline()).toBe('Total€24.00');
-  click('Split payment');
-  expect(legs()).toHaveLength(0);
-  tender('card', '10.00');
-  click('Back');
-  await act(async () => { click('Cash'); });
-  expect(button('Split payment')).toBeTruthy();
-  expect(legs()).toHaveLength(0);
-  click('Split payment');
-  tender('cash', '24.00');
-  await complete();
-  click('New sale');
-  add();
-  await act(async () => { click('Cash'); });
-  expect(button('Split payment')).toBeTruthy();
-  expect(legs()).toHaveLength(0);
-  click('Split payment');
-  tender('cash', '24.00');
-  let rejectSave!: (error: Error) => void;
-  record.mockImplementationOnce(() => new Promise<void>((_resolve, reject) => { rejectSave = reject; }));
-  await act(async () => { fireEvent.click(screen.getByTestId('tender-complete')); });
-  await waitFor(() => expect(record).toHaveBeenCalledTimes(2));
-  expect(screen.queryByRole('button', { name: /^(Single|Split) payment$/ })).toBeNull();
-  await act(async () => { rejectSave(new Error('Stored, but save acknowledgement failed')); });
-  await screen.findByRole('button', { name: 'Continue' });
-  expect(screen.queryByRole('button', { name: /^(Single|Split) payment$/ })).toBeNull();
-  click('Continue');
-  expect(screen.getByTestId('cart-empty')).toBeTruthy();
-  add();
-  await act(async () => { click('Cash'); });
-  expect(button('Split payment')).toBeTruthy();
-  expect(screen.getByTestId('tender-pane')).toBeTruthy();
-  expect(legs()).toHaveLength(0);
-  expect(record).toHaveBeenCalledTimes(2);
-}, 20_000);
+  expect(headline()).toBe('Remaining€19.00€5.00 of €24.00 paid');
+  // The Card terminal tile prefills the balance due, so Take settles the rest.
+  pickMethod('external');
+  expect(tenderEntry()).toBe('€19.00');
+  take();
+  expect(tenderBalance()).toBe('€0.00');
+  expect(screen.queryByTestId('tender-change')).toBeNull();
+  const { payload } = await complete();
+  expect(payload.totalMinor).toBe(2400);
+  expect(payload.payments).toEqual([
+    expect.objectContaining({ method: 'cash', amountMinor: 500 }),
+    expect.objectContaining({ method: 'external', amountMinor: 1900 }),
+  ]);
+}, 15000);

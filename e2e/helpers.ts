@@ -136,13 +136,13 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
     }
   }
   if (cash === 'external') {
-    await page.getByRole('button', { name: 'Card terminal', exact: true }).click();
+    await startTender(page, 'external');
     const pane = await tenderPane(page);
     await page.getByLabel('Terminal reference', { exact: true }).fill('e2e-offline-terminal');
     if (pane) await page.getByTestId('tender-complete').click();
     else await page.getByRole('button', { name: 'Payment approved on terminal', exact: true }).click();
   } else {
-    await page.getByRole('button', { name: 'Cash', exact: true }).click();
+    await startTender(page, 'cash');
     await tenderCash(page, cash);
     await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   }
@@ -154,7 +154,22 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
   return total;
 }
 
-// Which tender is on screen once Cash or Card terminal is tapped: true for TallyUI 3.14.0's tender pane (the current
+// Opens the tender as the loaded build offers it. The current build's cart foot (TallyUI 3.18.0) has one Checkout that
+// opens the pane on Cash, where the Card terminal tile then takes the whole balance; the released build's cart has Cash
+// and Card terminal buttons. Read from the screen, as tenderPane() is.
+export async function startTender(page: Page, method: 'cash' | 'external') {
+  const checkout = page.getByTestId('cart-checkout');
+  const released = page.getByRole('button', { name: method === 'cash' ? 'Cash' : 'Card terminal', exact: true });
+  await expect(checkout.or(released).first()).toBeVisible();
+  if (!await checkout.isVisible()) return released.click();
+  await checkout.click();
+  if (method === 'external') {
+    await page.getByTestId('tender-method-external').click();
+    await page.getByTestId('tender-take').click();
+  }
+}
+
+// Which tender is on screen once the tender is opened (startTender): true for TallyUI 3.14.0's tender pane (the current
 // build), false for the released build's TallyUI 3.8.0 tender (Cash Tendered, or Payment approved on terminal), which
 // carryover step A drives through these same helpers. Read from what is visible, never a build flag: the helpers
 // serve both builds in one run, and only the screen says which one is loaded.

@@ -365,7 +365,7 @@ describe('store settings on the POS screen', () => {
     render(<ProductsScreen />);
     expect(screen.getByText('Scan or tap a product to start a sale.')).toBeTruthy();
     expect(await screen.findByText('Offline')).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Cash' })).toBeTruthy();
+    expect(screen.getByTestId('cart-checkout')).toBeTruthy();
     expect(fetchStoreSettings).toHaveBeenCalledExactlyOnceWith(session);
   });
 
@@ -379,7 +379,7 @@ describe('store settings on the POS screen', () => {
     vi.mocked(fetchStoreSettings).mockRejectedValueOnce(new StoreSettingsError('unreachable', 'Could not reach the backend.'));
     render(<ProductsScreen />);
     expect(await screen.findByText('Could not reach the backend.')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Cash' })).toBeNull();
+    expect(screen.queryByTestId('cart-checkout')).toBeNull();
     click('Retry');
     expect(await screen.findByText('Scan or tap a product to start a sale.')).toBeTruthy();
     expect(fetchStoreSettings).toHaveBeenCalledTimes(2);

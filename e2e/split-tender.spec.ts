@@ -15,10 +15,9 @@ test('a split card-and-cash sale reaches Medusa once at the till\'s total, with 
   const tillTotal = cartTotalRow(page, 'Total');
   await expect(tillTotal).toHaveText(/Total\D*5\.00$/);
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  await page.getByRole('button', { name: 'Split payment', exact: true }).click();
-  await expect(page.getByRole('button', { name: 'Single payment', exact: true })).toBeVisible();
-  // TallyUI 3.14.0's tender pane: pick a method, key the leg in (digits shift in from the right), Take.
+  await page.getByTestId('cart-checkout').click();
+  await expect(page.getByTestId('tender-pane')).toBeVisible();
+  // TallyUI 3.14.0's tender pane takes split legs itself: pick a method, key the leg in (digits shift in from the right), Take.
   const keypad = page.getByTestId('tender-keypad');
   const key = async (amount: string) => {
     await keypad.getByRole('button', { name: 'Clear', exact: true }).click();

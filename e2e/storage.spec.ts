@@ -287,7 +287,7 @@ test('a dead storage worker shows the reload prompt, and Reload recovers the app
   const search = page.getByPlaceholder(SEARCH_PLACEHOLDER, { exact: true });
   await search.fill('E2E-1');
   await search.press('Enter');
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await tenderCash(page, 'exact');
   const debug = (name: 'HoldOrderInserts' | 'HeldOrderInserts' | 'ReleaseOrderInserts' | 'KillStorageWorker') =>
     page.evaluate((hook) => (window as unknown as Record<string, () => number | void>)[`__medusapos${hook}`](), name);

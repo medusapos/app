@@ -26,7 +26,7 @@ test('a sale with a fee, shipping and a custom item reaches Medusa once at the t
   }
   const tillTotal = cartTotalRow(page, 'Total');
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await tenderCash(page, totalMinor / 100);
   const applied = page.waitForResponse(async (response) => {
     const request = response.request();

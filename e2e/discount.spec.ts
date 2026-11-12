@@ -51,7 +51,7 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   expect([await row('Subtotal'), await row('Discount'), await row('VAT 25%'), await row('Total')]).toEqual([4, 0.9, 0.78, 3.88]);
   const applied = appliedResponse(page);
   // Exact cash, as sellBySku pays it, stopping on the receipt to read its rows.
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await tenderCash(page, 'exact');
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   for (const label of [/^2 × \D*2\.00: \D*4\.00$/, /^10% off: −\D*0\.40$/, /^Subtotal: \D*4\.00$/,
@@ -110,7 +110,7 @@ test('100% off the line completes with cash at €0.00 as one Medusa order', asy
   const row = cartTotalRow(page, 'Total');
   await expect(row).toContainText('0.00');
   const applied = appliedResponse(page);
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   await expect(page.getByLabel(/^Total: /)).toHaveAttribute('aria-label', /^Total: \D*0\.00$/);
   const results = await saleResults(await applied);

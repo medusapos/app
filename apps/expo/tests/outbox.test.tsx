@@ -601,7 +601,10 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     await act(async () => { await openTestRegister(outbox.orders!, session.baseUrl); });
     await waitFor(() => expect(screen.queryByTestId('open-register-card')).toBeNull());
     fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
-    fireEvent.click(button('Card terminal'));
+    // v2's cart foot: Checkout opens the tender on Cash; the Card terminal tile takes the whole balance.
+    fireEvent.click(screen.getByTestId('cart-checkout'));
+    fireEvent.click(await screen.findByTestId('tender-method-external'));
+    fireEvent.click(screen.getByTestId('tender-take'));
     await screen.findByRole('button', { name: 'Complete sale' });
     return view;
   }

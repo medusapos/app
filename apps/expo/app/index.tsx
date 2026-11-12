@@ -3,7 +3,10 @@ import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-na
 import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
-import { Cart, CartBar, CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, ParkedSales, Receipt, SplitTender, StoreSettingsChoiceScreen, SyncStatus, Tender } from '@tallyui/components';
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
+  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText,
+} from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
@@ -227,8 +230,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
     } });
   const { sale: cartSale, refused } = useGatedSale(sale);
-  const [split, setSplit] = useState(false);
-  useEffect(() => { if (sale.stage.kind !== 'tender') setSplit(false); }, [sale.stage.kind]);
+  // v2's cart foot: one "Checkout {total}" opens the tender on Cash through the register gate, where the cashier picks
+  // the method (Card terminal included), and a ⋮ menu holds Void, which asks first: the open sale has no copy to restore.
+  const [voidOpen, setVoidOpen] = useState(false);
+  const voidOffered = sale.order.lineItems.length > 0 && sale.order.payments.length === 0;
+  const checkout = {
+    onCheckout: () => cartSale.startTender('cash'),
+    actions: voidOffered ? [{ label: 'Void', destructive: true, onPress: () => setVoidOpen(true) }] : [],
+  };
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
   // waits while an earlier sale's save is in flight after Continue: RxDB's close would wait on its write (#85 review).
@@ -290,16 +299,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // catalogue don't need a store to add lines, so only this pane is gated.
   const tenderPane = orders === null
     ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
-    : <>
-      {!sale.saving && !sale.canContinue ? <Pressable accessibilityRole="button" className="min-h-11 justify-center"
-        onPress={() => {
-          if (split) for (const payment of sale.order.payments) sale.removeTender(payment.id);
-          setSplit(!split);
-        }}>
-        <Text className="text-foreground">{split ? 'Single payment' : 'Split payment'}</Text>
-      </Pressable> : null}
-      {split ? <SplitTender sale={sale} /> : <Tender sale={sale} />}
-    </>;
+    : <Tender sale={sale} />;
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
   // The receipt's and the last closure's store (ADR 0018).
@@ -338,8 +338,21 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </View>
     <CartNoteInput key={sale.order.id} value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
-    <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice
+    <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice lineEditor="popover" checkout={checkout}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
+    {voidOpen && <AlertDialog open onOpenChange={(next) => { if (!next) setVoidOpen(false); }}>
+      <AlertDialogContent testID="cart-void-dialog">
+        <AlertDialogHeader><AlertDialogTitle>Void this sale?</AlertDialogTitle></AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel asChild onPress={() => setVoidOpen(false)}>
+            <Button variant="outline" testID="cart-void-keep"><UiText>Cancel</UiText></Button>
+          </AlertDialogCancel>
+          <AlertDialogAction asChild onPress={() => { setVoidOpen(false); sale.newSale(); }}>
+            <Button variant="destructive" testID="cart-void-confirm"><UiText>Void</UiText></Button>
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>}
   </RegisterGate>;
 
   return (

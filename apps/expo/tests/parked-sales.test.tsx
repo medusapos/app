@@ -83,14 +83,16 @@ async function park() {
   await screen.findAllByTestId(/^parked-resume-/);
 }
 function price(value = '10.00') {
-  // The line's Price action, not TallyUI 3.14.0's Price column head.
-  fireEvent.click(within(cartLine('Shirt')).getByText('Price', { exact: true }));
-  fireEvent.change(screen.getByLabelText('Price value'), { target: { value } });
-  fireEvent.change(screen.getByLabelText('Reason (optional)'), { target: { value: 'Shelf price' } });
-  fireEvent.click(screen.getByTestId('price-apply'));
+  // v2's price popover (lineEditor="popover"): tap the line's price, key the new one in, Apply. It takes no reason.
+  fireEvent.click(within(cartLine('Shirt')).getByTestId('price-popover-trigger'));
+  for (const key of value) fireEvent.click(screen.getByTestId(`price-popover-keypad-key-${key === '.' ? 'decimal' : key}`));
+  fireEvent.click(screen.getByTestId('price-popover-apply'));
 }
 async function complete() {
-  await act(async () => { fireEvent.click(button('Card terminal')); });
+  // v2's cart foot: Checkout opens the tender on Cash; the Card terminal tile takes the whole balance.
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  fireEvent.click(screen.getByTestId('tender-method-external'));
+  fireEvent.click(screen.getByTestId('tender-take'));
   await act(async () => { fireEvent.click(button('Complete sale')); });
   await waitFor(() => expect(record).toHaveBeenCalledOnce());
   return record.mock.calls[0][0];
@@ -200,11 +202,11 @@ it('a sale with an edited price is recorded with that unitPriceMinor', async () 
   expect(order.totalMinor).toBe(1250);
 });
 
-it('logs the price change with from, to and reason', async () => {
+it('logs the price change with from and to (the price popover asks no reason)', async () => {
   await mount(); add(); price();
   await park();
   const [draft] = await drafts().find().exec();
   const lineId = JSON.parse(draft.data).lineItems[0].id;
   expect(logged.filter((entry) => entry.message === 'Price changed')).toEqual([expect.objectContaining({ level: 'info',
-    data: { lineId, fromMinor: 1200, toMinor: 1000, reason: 'Shelf price' } })]);
+    data: { lineId, fromMinor: 1200, toMinor: 1000 } })]);
 });
