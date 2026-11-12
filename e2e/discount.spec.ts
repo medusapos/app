@@ -31,6 +31,7 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   // and its registerApproval, the plugin's default approvalThresholdMinor of 500 (ADR 0023; parsed since TallyUI 3.13.0, ADR-082).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
   expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3,
+    coupons: true,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
     registerApproval: { thresholdMinor: 500 } });
   await addE2E1(page);

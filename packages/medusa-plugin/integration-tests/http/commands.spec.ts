@@ -143,6 +143,7 @@ medusaIntegrationTestRunner({
           contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], sync: [1] },
           taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
           lineTax: { none: false, classes: false },
+          coupons: true,
           registerApproval: { thresholdMinor: 500 },
         }])
       }
@@ -164,6 +165,7 @@ medusaIntegrationTestRunner({
         contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         lineTax: { none: false, classes: false },
+        coupons: true,
         registerApproval: { thresholdMinor: 500 },
       })
     })

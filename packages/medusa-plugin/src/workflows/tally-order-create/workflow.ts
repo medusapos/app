@@ -12,6 +12,9 @@ import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import type { StockTopUp } from './stock'
 export type { StockTopUp } from './stock'
 import { fulfillmentGroups, type OrderCreatePlan } from './plan'
+import { currencyDecimals, minorToMajor } from './money'
+import type { CouponWrite } from '../tally-coupons/order-coupons'
+import { CouponUsageError } from '../tally-coupons/coupon-usage-error'
 
 export type TallyOrderCreateInput = {
   ledger: { commandId: string; claimToken: string } | null
@@ -103,27 +106,93 @@ const takeBackStockStep = createStep('tally-take-back-stock', async (orderId: st
   })
 })
 type Adjusted = Array<{ adjustments?: Array<{ id: string; promotion_id?: string | null }> | null }> | null | undefined
-// The ids of the adjustments that carry a promotion; the till's own adjustments have none.
-const promoted = (rows: Adjusted) => (rows ?? []).flatMap(row => row.adjustments ?? []).filter(row => row.promotion_id).map(row => row.id)
-const dropPromotionAdjustmentsStep = createStep('tally-drop-promotion-adjustments', async (orderId: string, { container }) => {
+// The till's coupon adjustments survive resume; its POS discounts have no promotion.
+const promoted = (rows: Adjusted, ids: Set<string>) => (rows ?? []).flatMap(row => row.adjustments ?? []).filter(row => row.promotion_id && !ids.has(row.promotion_id)).map(row => row.id)
+type PromotionChanges = { orderId: string; items: string[]; shipping: string[]; created: string[]; links: string[] }
+async function undoPromotionAdjustments(data: PromotionChanges | undefined, { container }: StepExecutionContext) {
+  if (!data) return
   const orders = container.resolve(Modules.ORDER)
-  const order = await orders.retrieveOrder(orderId, { select: ['id'], relations: ['items.adjustments', 'shipping_methods.adjustments'] })
-  const removed = { items: promoted(order.items), shipping: promoted(order.shipping_methods) }
-  if (removed.items.length) await orders.softDeleteOrderLineItemAdjustments(removed.items)
-  if (removed.shipping.length) await orders.softDeleteOrderShippingMethodAdjustments(removed.shipping)
-  return new StepResponse(removed, removed)
-}, async (removed, { container }) => {
-  if (!removed) return
+  if (data.items.length) await orders.restoreOrderLineItemAdjustments(data.items)
+  if (data.shipping.length) await orders.restoreOrderShippingMethodAdjustments(data.shipping)
+  if (data.created.length) await orders.softDeleteOrderLineItemAdjustments(data.created)
+  for (const promotion_id of data.links) await container.resolve(ContainerRegistrationKeys.LINK).dismiss({
+    [Modules.ORDER]: { order_id: data.orderId }, [Modules.PROMOTION]: { promotion_id },
+  })
+}
+const promotionAdjustmentsStep = createStep('tally-promotion-adjustments', async (orderId: string, context) => {
+  const { container } = context
   const orders = container.resolve(Modules.ORDER)
-  if (removed.items.length) await orders.restoreOrderLineItemAdjustments(removed.items)
-  if (removed.shipping.length) await orders.restoreOrderShippingMethodAdjustments(removed.shipping)
-})
+  const order = await orders.retrieveOrder(orderId, { relations: ['items.adjustments', 'shipping_methods.adjustments'] })
+  const writes = (order.metadata?.tally_coupons ?? []) as CouponWrite[], ids = new Set(writes.map(write => write.promotionId))
+  const { data: links } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order_promotion', filters: { order_id: orderId }, fields: ['promotion_id'] })
+  const data: PromotionChanges = { orderId, items: promoted(order.items, ids), shipping: promoted(order.shipping_methods, ids), created: [], links: [] }
+  try {
+    if (data.items.length) await orders.softDeleteOrderLineItemAdjustments(data.items)
+    if (data.shipping.length) await orders.softDeleteOrderShippingMethodAdjustments(data.shipping)
+    for (const write of writes) {
+      for (const line of write.lines) {
+        const item = order.items?.find(item => item.metadata?.tally_line_uuid === line.lineId)
+        if (!item) throw new Error(`coupon line missing: ${line.lineId}`)
+        if (item.adjustments?.some(adjustment => adjustment.promotion_id === write.promotionId)) continue
+        const [adjustment] = await orders.createOrderLineItemAdjustments([{
+          item_id: item.id, code: write.promotionCode, promotion_id: write.promotionId,
+          amount: minorToMajor(line.amountMinor, currencyDecimals(order.currency_code)), is_tax_inclusive: line.taxInclusive, description: 'Coupon',
+        }])
+        data.created.push(adjustment.id)
+        item.adjustments = [...(item.adjustments ?? []), adjustment]
+      }
+      if (!links.some(link => link.promotion_id === write.promotionId) && !data.links.includes(write.promotionId)) {
+        await container.resolve(ContainerRegistrationKeys.LINK).create({ [Modules.ORDER]: { order_id: orderId }, [Modules.PROMOTION]: { promotion_id: write.promotionId } })
+        data.links.push(write.promotionId)
+      }
+    }
+    return new StepResponse(undefined, data)
+  } catch (error) {
+    await undoPromotionAdjustments(data, context)
+    throw error
+  }
+}, undoPromotionAdjustments)
+type CouponUsage = { orderId: string; marker: unknown; registered: CouponWrite[]; context: { customer_id: string | null; customer_email: string | null } }
+async function undoCouponUsage(data: CouponUsage | undefined, { container }: StepExecutionContext) {
+  if (!data) return
+  for (const write of data.registered) await container.resolve(Modules.PROMOTION).revertUsage(
+    write.actions.map(action => ({ action: 'addItemAdjustment', code: write.promotionCode, amount: action.amount })), data.context)
+  const orders = container.resolve(Modules.ORDER), order = await orders.retrieveOrder(data.orderId)
+  await orders.updateOrders(data.orderId, { metadata: { ...order.metadata, tally_coupon_usage_registered: data.marker } })
+}
+const couponUsageStep = createStep('tally-register-coupon-usage', async ({ orderId, onLimit }: { orderId: string; onLimit: 'refuse' | 'log' }, context) => {
+  const { container } = context, orders = container.resolve(Modules.ORDER), order = await orders.retrieveOrder(orderId)
+  const writes = (order.metadata?.tally_coupons ?? []) as CouponWrite[]
+  if (!writes.length || order.metadata?.tally_coupon_usage_registered === true) return new StepResponse(undefined)
+  const data: CouponUsage = { orderId, marker: order.metadata?.tally_coupon_usage_registered ?? null, registered: [],
+    context: { customer_id: order.customer_id ?? null, customer_email: order.email ?? null } }
+  // Mark first so a crash under-counts usage instead of consuming a coupon twice.
+  await orders.updateOrders(orderId, { metadata: { ...order.metadata, tally_coupon_usage_registered: true } })
+  for (const write of writes) {
+    try {
+      await container.resolve(Modules.PROMOTION).registerUsage(
+        write.actions.map(action => ({ action: 'addItemAdjustment', code: write.promotionCode, amount: action.amount })), data.context)
+      data.registered.push(write)
+    } catch (error) {
+      await undoCouponUsage(data, context)
+      const storeCode = MedusaError.isMedusaError(error) && error.type === MedusaError.Types.NOT_ALLOWED
+        ? error.message === 'Promotion usage exceeds the limit.' ? 'limit_reached'
+          : error.message === 'Promotion usage exceeds the budget limit.' ? 'budget_exceeded' : null : null
+      if (!storeCode) throw error
+      if (onLimit === 'refuse') throw new CouponUsageError(write.couponCode, storeCode)
+      container.resolve(ContainerRegistrationKeys.LOGGER).error(`tally coupon usage: order ${orderId}, coupon ${write.couponCode}: ${error.message}`)
+      return new StepResponse(undefined)
+    }
+  }
+  return new StepResponse(undefined, data)
+}, undoCouponUsage)
 export const takeBackStockWorkflow = createWorkflow('tally-take-back-stock', function (input: { orderId: string }) {
   takeBackStockStep(input.orderId)
   return new WorkflowResponse(undefined)
 })
-export const dropPromotionAdjustmentsWorkflow = createWorkflow('tally-resume-drop-promotion-adjustments', function (input: { orderId: string }) {
-  dropPromotionAdjustmentsStep(input.orderId)
+export const couponResumeWorkflow = createWorkflow('tally-resume-promotion-adjustments', function (input: { orderId: string }) {
+  promotionAdjustmentsStep(input.orderId)
+  couponUsageStep({ orderId: input.orderId, onLimit: 'log' })
   return new WorkflowResponse(undefined)
 })
 
@@ -159,8 +228,9 @@ export const tallyOrderCreateWorkflow = createWorkflow('tally-order-create', fun
   // Medusa fills variant-backed item titles from the product, although its DTO requires title.
   const draft = createOrderWorkflow.runAsStep({ input: input.draftOrder as unknown as CreateOrderWorkflowInput })
   // createOrderWorkflow's promotion refresh applies the store's automatic promotions, so their adjustments come off (#290).
-  // Row 7 (till coupons) must keep the applied coupon codes' adjustments when coupons are allowed; process.ts refuses them today.
-  dropPromotionAdjustmentsStep(draft.id)
+  // Till coupons replace automatic discounts so the stored total matches the till.
+  promotionAdjustmentsStep(draft.id)
+  couponUsageStep({ orderId: draft.id, onLimit: 'refuse' })
   convertDraftOrderWorkflow.runAsStep({ input: { id: draft.id } })
   // Medusa cannot capture 0, so a sale discounted to 0 (ADR-062) completes without a payment collection.
   when('has-payment', { input }, ({ input }) => input.paymentAmount > 0).then(() => {

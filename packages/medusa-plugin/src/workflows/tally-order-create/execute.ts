@@ -12,6 +12,8 @@ import { runOrderCreate, type TallyPluginOptions } from './run'
 import { isNeedsAdminError } from './needs-admin-error'
 import { isStoreConfigurationError } from './store-configuration-error'
 import { checkCollision } from './collision'
+import type { CouponWrite } from '../tally-coupons/order-coupons'
+import { isCouponUsageError } from '../tally-coupons/coupon-usage-error'
 
 export type ExecuteOutcome =
   | { kind: 'result'; result: CommandResult }
@@ -49,7 +51,7 @@ async function replayResult(ledger: TallyLedgerModuleService, row: TallyCommandR
 export async function executeOrderCreate(
   container: MedusaContainer,
   command: CommandEnvelope<OrderCreatePayload>,
-  options?: TallyPluginOptions
+  options?: TallyPluginOptions, coupons?: CouponWrite[]
 ): Promise<ExecuteOutcome> {
   const errors = payloadShapeErrors(command.payload, command.version as number)
   if (errors.length > 0) {
@@ -100,7 +102,7 @@ export async function executeOrderCreate(
         try {
           result = await runOrderCreate(container, command, options, {
             claimToken: claim.claimToken, carriedTopUps: (claim.command.stock_topups_applied ?? []) as unknown as StockTopUp[],
-          })
+          }, coupons)
         } catch (error) {
           if (isNeedsAdminError(error)) {
             const parked = await ledger.markNeedsAdmin(id, claim.claimToken, {
@@ -113,6 +115,9 @@ export async function executeOrderCreate(
             else logger.warn(`tally order.create: claim lost while parking command ${id} for an admin (order ${error.orderId}: ${error.detail})`)
             return { kind: 'in_progress', id }
           }
+          if (isCouponUsageError(error)) return { kind: 'result', result: { id, status: 'rejected', error: {
+            code: 'coupon_invalid', message: error.message, data: error.data,
+          } as CommandResult['error'] } }
           if (!isStoreConfigurationError(error)) throw error
           return { kind: 'result', result: { id, status: 'rejected', error: {
             code: error.code, message: error.message,

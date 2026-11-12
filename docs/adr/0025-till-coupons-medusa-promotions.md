@@ -115,3 +115,28 @@ Widening this is a later decision, made per type.
   - `coupons` persisted in the session's capabilities.
 - **Before implementation, a probe must confirm** that adjustments written between `createOrderWorkflow` and `convertDraftOrderWorkflow` are counted in the converted order's totals, as they appear to be under #290, and that `registerUsageStep` can run from a plugin workflow.
 - Until the next ADR, coupons need a connection, and shipping, order-level and buy-get promotions are refused at the till.
+
+## Implementation notes (2026-11-12, plugin)
+Where the code differs from, or adds to, the decisions above:
+
+- **Usage is the plugin's own step, not `registerUsageStep`.**
+  - `tally-register-coupon-usage` calls `registerUsage` once per coupon and undoes the coupons it already counted before rethrowing.
+  - Before counting, it sets `metadata.tally_coupon_usage_registered`. A step that finds the marker set does nothing, so a crash between the marker and the count under-counts and never counts twice.
+  - Its compensation calls `revertUsage` and restores the marker.
+  - Medusa 2.21 counts `promotion.used` only for a promotion with a numeric `limit` (campaign budgets count separately), so a promotion with no limit has nothing to count.
+- **Coupon writes travel in the draft.** The pre-flight's matched amounts are stored as `metadata.tally_coupons`, so the create step and the resume step write the same adjustments from the same figures. Adjustments are written idempotently per `tally_line_uuid`.
+- **Resume.** `resume.ts` runs `tally-resume-promotion-adjustments` for every order it resumes, before a draft is converted.
+  - On resume, a limit that has since been reached is logged, not refused: the sale was already charged. That coupon's usage is then not counted (a known under-count).
+  - A retry of a command whose order already exists skips the pre-flight, so a coupon the crashed attempt used up is not re-priced and refused.
+- **Context.**
+  - Preview and create take the store location from `locationId`, then the plugin option, then the sales channel's first location. That location sets the tax address.
+  - A line with no `taxRatePpm` takes its rate from the store's tax lines for that address.
+- **Further refusals.**
+  - A coupon whose priced lines mix tax-inclusive and tax-exclusive modes is refused `not_applicable` ("can't be used at the till yet").
+  - Front desk ruling 2026-11-12 (TallyUI #786/#787): a coupon beside a till discount on a tax-inclusive line is refused `not_applicable`. The till's 3.19 `discountMinor` for such a line is net of the coupon, so the stored total was 990 against 971 charged.
+    - A line counts as tax-inclusive by its own mode.
+    - The guard lifts when `order.create` v9 brings per-line coupon amounts (TallyUI `docs/contract/order-create-v9.md`).
+    - The display data is never used to rebuild the money.
+- **Error detection.** Workflow errors reach `execute.ts` serialised, so the usage error is recognised by its `name` and `code`, not by `instanceof`. Each step undoes its own partial work before rethrowing, because a failing step's compensation receives no data.
+- **Invariant test.** `order-create-coupon-invariant.spec.ts` replays recorded 3.19.0 envelopes across inclusive and exclusive × line discount × coupon. For each, the stored order total must equal the amount the till charged.
+- **The interim refusal** ("this store does not apply till coupons yet") now covers only display-only coupons, which carry nothing to write.

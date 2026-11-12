@@ -1,0 +1,61 @@
+{
+  "id": "01a1d05f-457a-71ce-921a-38eeda50d022",
+  "type": "order.create",
+  "version": 3,
+  "createdAt": "2026-11-12T15:27:47.066Z",
+  "deviceId": "dev",
+  "attempt": 1,
+  "payload": {
+    "clientOrderId": "01a1d05f-4573-7976-80f9-e5507c985aa8",
+    "createdAt": "2026-11-12T15:27:47.066Z",
+    "currency": "EUR",
+    "pricesIncludeTax": true,
+    "lines": [
+      {
+        "clientLineId": "01a1d05f-4574-7793-b519-091d1513810e",
+        "variantId": "VARIANT",
+        "title": "Item",
+        "quantity": 1,
+        "unitPriceMinor": 1190
+      }
+    ],
+    "payments": [
+      {
+        "clientPaymentId": "01a1d05f-4574-7793-b519-091d1513810f",
+        "method": "cash",
+        "amountMinor": 1190,
+        "tenderedMinor": 1190,
+        "changeMinor": 0
+      }
+    ],
+    "subtotalMinor": 1000,
+    "taxMinor": 190,
+    "totalMinor": 1190,
+    "display": {
+      "currency": "EUR",
+      "exponent": 2,
+      "taxInclusive": true,
+      "subtotalMinor": 1190,
+      "discountMinor": 0,
+      "taxMinor": 190,
+      "totalMinor": 1190,
+      "lines": [
+        {
+          "clientLineId": "01a1d05f-4574-7793-b519-091d1513810e",
+          "amountMinor": 1190,
+          "discounts": []
+        }
+      ],
+      "orderDiscountMinor": 0
+    },
+    "taxByRate": [
+      {
+        "ratePpm": 190000,
+        "netMinor": 1000,
+        "taxMinor": 190,
+        "grossMinor": 1190
+      }
+    ],
+    "customer": null
+  }
+}
