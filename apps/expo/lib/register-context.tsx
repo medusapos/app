@@ -6,6 +6,8 @@ import {
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
+import { storeConfig } from './config';
+import { demoRegisterFor, isDemoAccount } from './demo';
 import { registerCollections, type RegisterCollections } from './order-store';
 import { refusedForPosAccess } from './pos-access';
 import { authHeaders } from './pos-connector';
@@ -65,8 +67,14 @@ type Bound = { collections: RegisterCollections; storeKey: string; id: string | 
 const RegisterContext = createContext<RegisterContextValue | null>(null);
 
 /** Under OutboxProvider, over its open order store, whose database holds the register collections. */
-export function RegisterProvider({ orders, deviceId, children }: { orders: RxCollection<PosOrder> | null; deviceId: string; children: ReactNode }) {
+export function RegisterProvider({ orders, deviceId, demo = storeConfig.demo, children }: {
+  orders: RxCollection<PosOrder> | null; deviceId: string; demo?: boolean; children: ReactNode;
+}) {
   const { session, reportNoPosAccess } = useSession();
+  // The demo (D0): every visitor is the same demo cashier, so each till offers only its own register. Gated on the
+  // demo account too, as the demo banner is: e2e runs in demo mode with ordinary accounts and keeps Register 1.
+  const demoRegister = isDemoAccount(session?.email ?? '', demo) ? demoRegisterFor(deviceId) : null;
+  const registers = demoRegister ? [demoRegister] : DEFAULT_REGISTERS;
   const storeKey = session?.baseUrl ?? '';
   const tokenRef = useRef(session?.token);
   tokenRef.current = session?.token;
@@ -87,7 +95,18 @@ export function RegisterProvider({ orders, deviceId, children }: { orders: RxCol
     }));
     return () => subscription.unsubscribe();
   }, [collections, storeKey]);
-  const current = bound?.collections === collections && bound?.storeKey === storeKey ? bound : null;
+  const read = bound?.collections === collections && bound?.storeKey === storeKey ? bound : null;
+  // A demo till bound elsewhere (unbound, or a returning visitor's Register 1) reads as not read yet until it is
+  // bound to its own, so it never shows the picker or loads another till's session. It binds itself once per binding it
+  // leaves, so a failed bind doesn't loop and an unbind (the conflict card's Choose another register) binds it again.
+  const current = demoRegister && read?.id !== demoRegister.id ? null : read;
+  const demoBound = useRef('');
+  useEffect(() => {
+    const leaving = `${storeKey}\n${read?.id}`;
+    if (!demoRegister || !collections || !read || read.id === demoRegister.id || demoBound.current === leaving) return;
+    demoBound.current = leaving;
+    bindRegister(collections.sessions, storeKey, demoRegister).catch((error: unknown) => console.warn('Could not bind the demo register:', error));
+  }, [demoRegister?.id, collections, read, storeKey]);
   const [tenderInProgress, setTenderInProgress] = useState(false);
   const { tillName } = useTillName(defaultStorage(), storeKey);
   const register = useRegisterSession({
@@ -140,9 +159,9 @@ export function RegisterProvider({ orders, deviceId, children }: { orders: RxCol
     error: closeError.storeKey === storeKey ? closeError.message : '',
   };
   const value: RegisterContextValue = {
-    register, registerOutbox, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers: DEFAULT_REGISTERS,
+    register, registerOutbox, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers,
     async bind(id) {
-      const choice = DEFAULT_REGISTERS.find((entry) => entry.id === id);
+      const choice = registers.find((entry) => entry.id === id);
       if (collections && choice) await bindRegister(collections.sessions, storeKey, choice);
     },
     async unbind() {

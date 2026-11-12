@@ -1,0 +1,259 @@
+/* v2's seven extra themes (monorepo main, apps/main/global.css), mapped to
+   TallyUI's token names: input takes v2's border, price v2's success and sale
+   v2's destructive. Uniwind requires every theme to define the same
+   variables as light and dark; register each name in metro.config.js. No :root
+   wrapper as in v2: Uniwind's web build rewrites each theme's first block to a bare
+   .name, which under :root would never match the theme class on <html>. */
+@layer theme {
+  @variant ocean {
+    --color-background: oklch(0.19 0.03 230);
+    --color-foreground: oklch(0.94 0.015 200);
+    --color-card: oklch(0.23 0.03 228);
+    --color-card-foreground: oklch(0.94 0.015 200);
+    --color-popover: oklch(0.23 0.03 228);
+    --color-popover-foreground: oklch(0.94 0.015 200);
+    --color-primary: oklch(0.72 0.15 195);
+    --color-primary-foreground: oklch(0.16 0.04 200);
+    --color-secondary: oklch(0.70 0.03 210);
+    --color-secondary-foreground: oklch(0.23 0.03 228);
+    --color-muted: oklch(0.29 0.03 226);
+    --color-muted-foreground: oklch(0.70 0.03 210);
+    --color-accent: oklch(0.29 0.03 226);
+    --color-accent-foreground: oklch(0.94 0.015 200);
+    --color-destructive: oklch(0.67 0.2 25);
+    --color-destructive-foreground: oklch(0.15 0.02 25);
+    --color-success: oklch(0.72 0.15 155);
+    --color-success-foreground: oklch(0.15 0.04 165);
+    --color-warning: oklch(0.78 0.15 75);
+    --color-warning-foreground: oklch(0.15 0.04 55);
+    --color-info: oklch(0.70 0.13 240);
+    --color-info-foreground: oklch(0.15 0.04 210);
+    --color-border: oklch(0.34 0.035 225);
+    --color-input: oklch(0.34 0.035 225);
+    --color-ring: oklch(0.72 0.15 195);
+    --color-price: oklch(0.72 0.15 155);
+    --color-sale: oklch(0.67 0.2 25);
+    --color-tile-tint-0: oklch(0.32 0.05 250);
+    --color-tile-tint-1: oklch(0.32 0.05 160);
+    --color-tile-tint-2: oklch(0.33 0.05 40);
+    --color-tile-tint-3: oklch(0.32 0.05 300);
+    --color-tile-tint-4: oklch(0.34 0.05 90);
+    --color-tile-tint-5: oklch(0.31 0.03 200);
+  }
+
+  @variant sunset {
+    --color-background: oklch(0.20 0.035 318);
+    --color-foreground: oklch(0.95 0.02 50);
+    --color-card: oklch(0.245 0.04 318);
+    --color-card-foreground: oklch(0.95 0.02 50);
+    --color-popover: oklch(0.245 0.04 318);
+    --color-popover-foreground: oklch(0.95 0.02 50);
+    --color-primary: oklch(0.72 0.18 45);
+    --color-primary-foreground: oklch(0.18 0.05 318);
+    --color-secondary: oklch(0.70 0.04 340);
+    --color-secondary-foreground: oklch(0.245 0.04 318);
+    --color-muted: oklch(0.30 0.04 318);
+    --color-muted-foreground: oklch(0.70 0.04 340);
+    --color-accent: oklch(0.30 0.04 318);
+    --color-accent-foreground: oklch(0.95 0.02 50);
+    --color-destructive: oklch(0.68 0.2 20);
+    --color-destructive-foreground: oklch(0.15 0.02 25);
+    --color-success: oklch(0.72 0.15 155);
+    --color-success-foreground: oklch(0.18 0.05 155);
+    --color-warning: oklch(0.78 0.15 75);
+    --color-warning-foreground: oklch(0.18 0.06 55);
+    --color-info: oklch(0.70 0.13 240);
+    --color-info-foreground: oklch(0.18 0.05 260);
+    --color-border: oklch(0.35 0.045 322);
+    --color-input: oklch(0.35 0.045 322);
+    --color-ring: oklch(0.72 0.18 45);
+    --color-price: oklch(0.72 0.15 155);
+    --color-sale: oklch(0.68 0.2 20);
+    --color-tile-tint-0: oklch(0.32 0.05 250);
+    --color-tile-tint-1: oklch(0.32 0.05 160);
+    --color-tile-tint-2: oklch(0.33 0.05 40);
+    --color-tile-tint-3: oklch(0.32 0.05 300);
+    --color-tile-tint-4: oklch(0.34 0.05 90);
+    --color-tile-tint-5: oklch(0.31 0.03 200);
+  }
+
+  @variant monochrome {
+    --color-background: oklch(0.15 0 0);
+    --color-foreground: oklch(0.95 0 0);
+    --color-card: oklch(0.21 0 0);
+    --color-card-foreground: oklch(0.95 0 0);
+    --color-popover: oklch(0.21 0 0);
+    --color-popover-foreground: oklch(0.95 0 0);
+    --color-primary: oklch(0.92 0 0);
+    --color-primary-foreground: oklch(0.12 0 0);
+    --color-secondary: oklch(0.70 0 0);
+    --color-secondary-foreground: oklch(0.21 0 0);
+    --color-muted: oklch(0.28 0 0);
+    --color-muted-foreground: oklch(0.70 0 0);
+    --color-accent: oklch(0.28 0 0);
+    --color-accent-foreground: oklch(0.95 0 0);
+    --color-destructive: oklch(0.66 0.2 25);
+    --color-destructive-foreground: oklch(0.15 0.02 25);
+    --color-success: oklch(0.72 0.15 155);
+    --color-success-foreground: oklch(0.12 0 0);
+    --color-warning: oklch(0.78 0.15 75);
+    --color-warning-foreground: oklch(0.12 0 0);
+    --color-info: oklch(0.70 0.13 240);
+    --color-info-foreground: oklch(0.12 0 0);
+    --color-border: oklch(0.36 0 0);
+    --color-input: oklch(0.36 0 0);
+    --color-ring: oklch(0.92 0 0);
+    --color-price: oklch(0.72 0.15 155);
+    --color-sale: oklch(0.66 0.2 25);
+    --color-tile-tint-0: oklch(0.32 0.05 250);
+    --color-tile-tint-1: oklch(0.32 0.05 160);
+    --color-tile-tint-2: oklch(0.33 0.05 40);
+    --color-tile-tint-3: oklch(0.32 0.05 300);
+    --color-tile-tint-4: oklch(0.34 0.05 90);
+    --color-tile-tint-5: oklch(0.31 0.03 200);
+  }
+
+  @variant paper {
+    --color-background: oklch(0.948 0.016 83);
+    --color-foreground: oklch(0.227 0.016 71);
+    --color-card: oklch(0.977 0.011 85);
+    --color-card-foreground: oklch(0.227 0.016 71);
+    --color-popover: oklch(0.977 0.011 85);
+    --color-popover-foreground: oklch(0.227 0.016 71);
+    --color-primary: oklch(0.227 0.016 71);
+    --color-primary-foreground: oklch(0.977 0.011 85);
+    --color-secondary: oklch(0.47 0.03 78);
+    --color-secondary-foreground: oklch(0.977 0.011 85);
+    --color-muted: oklch(0.918 0.023 85);
+    --color-muted-foreground: oklch(0.47 0.03 78);
+    --color-accent: oklch(0.905 0.028 84);
+    --color-accent-foreground: oklch(0.227 0.016 71);
+    --color-destructive: oklch(0.50 0.15 34);
+    --color-destructive-foreground: oklch(0.99 0.01 34);
+    --color-success: oklch(0.50 0.16 155);
+    --color-success-foreground: oklch(0.98 0.01 160);
+    --color-warning: oklch(0.68 0.16 70);
+    --color-warning-foreground: oklch(0.25 0.03 90);
+    --color-info: oklch(0.48 0.12 262);
+    --color-info-foreground: oklch(0.98 0.01 240);
+    --color-border: oklch(0.852 0.031 84);
+    --color-input: oklch(0.852 0.031 84);
+    --color-ring: oklch(0.227 0.016 71);
+    --color-price: oklch(0.50 0.16 155);
+    --color-sale: oklch(0.50 0.15 34);
+    --color-tile-tint-0: oklch(0.90 0.05 85);
+    --color-tile-tint-1: oklch(0.89 0.05 60);
+    --color-tile-tint-2: oklch(0.90 0.05 130);
+    --color-tile-tint-3: oklch(0.89 0.04 300);
+    --color-tile-tint-4: oklch(0.90 0.06 40);
+    --color-tile-tint-5: oklch(0.90 0.04 200);
+  }
+
+  @variant warm {
+    --color-background: oklch(0.965 0.007 81);
+    --color-foreground: oklch(0.266 0.012 56);
+    --color-card: oklch(0.995 0.005 78);
+    --color-card-foreground: oklch(0.266 0.012 56);
+    --color-popover: oklch(0.995 0.005 78);
+    --color-popover-foreground: oklch(0.266 0.012 56);
+    --color-primary: oklch(0.484 0.092 41);
+    --color-primary-foreground: oklch(0.983 0.010 58);
+    --color-secondary: oklch(0.47 0.02 65);
+    --color-secondary-foreground: oklch(0.995 0.005 78);
+    --color-muted: oklch(0.937 0.013 75);
+    --color-muted-foreground: oklch(0.47 0.02 65);
+    --color-accent: oklch(0.95 0.025 41);
+    --color-accent-foreground: oklch(0.266 0.012 56);
+    --color-destructive: oklch(0.52 0.135 35);
+    --color-destructive-foreground: oklch(0.99 0.01 35);
+    --color-success: oklch(0.50 0.16 155);
+    --color-success-foreground: oklch(0.98 0.01 160);
+    --color-warning: oklch(0.68 0.16 70);
+    --color-warning-foreground: oklch(0.25 0.03 90);
+    --color-info: oklch(0.48 0.12 262);
+    --color-info-foreground: oklch(0.98 0.01 240);
+    --color-border: oklch(0.895 0.017 76);
+    --color-input: oklch(0.895 0.017 76);
+    --color-ring: oklch(0.484 0.092 41);
+    --color-price: oklch(0.50 0.16 155);
+    --color-sale: oklch(0.52 0.135 35);
+    --color-tile-tint-0: oklch(0.88 0.07 47);
+    --color-tile-tint-1: oklch(0.88 0.06 131);
+    --color-tile-tint-2: oklch(0.88 0.06 76);
+    --color-tile-tint-3: oklch(0.87 0.06 330);
+    --color-tile-tint-4: oklch(0.90 0.09 85);
+    --color-tile-tint-5: oklch(0.88 0.05 200);
+  }
+
+  @variant bold {
+    --color-background: oklch(0.985 0 0);
+    --color-foreground: oklch(0.145 0 0);
+    --color-card: oklch(1 0 0);
+    --color-card-foreground: oklch(0.145 0 0);
+    --color-popover: oklch(1 0 0);
+    --color-popover-foreground: oklch(0.145 0 0);
+    --color-primary: oklch(0.145 0 0);
+    --color-primary-foreground: oklch(1 0 0);
+    --color-secondary: oklch(0.45 0 0);
+    --color-secondary-foreground: oklch(1 0 0);
+    --color-muted: oklch(0.958 0 0);
+    --color-muted-foreground: oklch(0.45 0 0);
+    --color-accent: oklch(0.97 0.07 123);
+    --color-accent-foreground: oklch(0.145 0 0);
+    --color-destructive: oklch(0.52 0.22 11);
+    --color-destructive-foreground: oklch(0.99 0.01 11);
+    --color-success: oklch(0.52 0.16 155);
+    --color-success-foreground: oklch(0.98 0.01 160);
+    --color-warning: oklch(0.68 0.16 70);
+    --color-warning-foreground: oklch(0.25 0.03 90);
+    --color-info: oklch(0.48 0.12 262);
+    --color-info-foreground: oklch(0.98 0.01 240);
+    --color-border: oklch(0.925 0 0);
+    --color-input: oklch(0.925 0 0);
+    --color-ring: oklch(0.145 0 0);
+    --color-price: oklch(0.52 0.16 155);
+    --color-sale: oklch(0.52 0.22 11);
+    --color-tile-tint-0: oklch(0.92 0.14 123);
+    --color-tile-tint-1: oklch(0.93 0 0);
+    --color-tile-tint-2: oklch(0.90 0.12 123);
+    --color-tile-tint-3: oklch(0.90 0 0);
+    --color-tile-tint-4: oklch(0.94 0.10 123);
+    --color-tile-tint-5: oklch(0.87 0 0);
+  }
+
+  @variant market {
+    --color-background: oklch(0.991 0.010 87);
+    --color-foreground: oklch(0.232 0.038 290);
+    --color-card: oklch(1 0 0);
+    --color-card-foreground: oklch(0.232 0.038 290);
+    --color-popover: oklch(1 0 0);
+    --color-popover-foreground: oklch(0.232 0.038 290);
+    --color-primary: oklch(0.686 0.205 34);
+    --color-primary-foreground: oklch(0.99 0.01 34);
+    --color-secondary: oklch(0.47 0.034 296);
+    --color-secondary-foreground: oklch(1 0 0);
+    --color-muted: oklch(0.959 0.016 86);
+    --color-muted-foreground: oklch(0.47 0.034 296);
+    --color-accent: oklch(0.96 0.035 34);
+    --color-accent-foreground: oklch(0.232 0.038 290);
+    --color-destructive: oklch(0.52 0.21 5);
+    --color-destructive-foreground: oklch(0.99 0.01 5);
+    --color-success: oklch(0.52 0.16 155);
+    --color-success-foreground: oklch(0.98 0.01 160);
+    --color-warning: oklch(0.68 0.16 70);
+    --color-warning-foreground: oklch(0.25 0.03 90);
+    --color-info: oklch(0.48 0.12 262);
+    --color-info-foreground: oklch(0.98 0.01 240);
+    --color-border: oklch(0.926 0.017 85);
+    --color-input: oklch(0.926 0.017 85);
+    --color-ring: oklch(0.232 0.038 290);
+    --color-price: oklch(0.52 0.16 155);
+    --color-sale: oklch(0.52 0.21 5);
+    --color-tile-tint-0: oklch(0.90 0.09 61);
+    --color-tile-tint-1: oklch(0.93 0.12 98);
+    --color-tile-tint-2: oklch(0.90 0.09 151);
+    --color-tile-tint-3: oklch(0.89 0.09 301);
+    --color-tile-tint-4: oklch(0.90 0.10 34);
+    --color-tile-tint-5: oklch(0.90 0.08 220);
+  }
+}

@@ -58,13 +58,19 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.goto('/demo');
   await page.getByTestId('demo-enter-cashier').click();
   await expect(page.getByText(products)).toBeVisible({ timeout });
-  await openRegister(page);
+  // D0: the demo cashier's till is bound to its own register by itself, so the open card shows with no picker.
+  await expect(page.getByTestId('open-register-card')).toBeVisible();
+  await expect(page.getByTestId('register-picker-row-register-1')).toHaveCount(0);
+  const applied = await openRegister(page, undefined, true, false);
+  expect(applied?.payload.registerId).toMatch(/^demo-/);
   await expect(page.getByTestId(/^product-tile-/).first()).toBeVisible();
   await page.getByTestId(/^product-tile-/).first().click();
   await expect(page.getByTestId('cart-footer')).toBeVisible();
   await expect(page.getByTestId('register-bar-open-panel')).toBeVisible();
   await page.getByTestId('register-bar-open-panel').click();
   await expect(page.getByTestId('register-panel-close')).toBeVisible();
+  // A single-register till's bar does not name its register, so its name shows first in the panel's title.
+  await expect(page.getByTestId('register-panel-amount')).toHaveText('Demo register');
   await page.getByTestId('register-panel-dismiss').click();
   await page.getByRole('button', { name: /^Customer: /, exact: true }).click();
   await expect(page.getByTestId('customer-dialog')).toBeVisible();

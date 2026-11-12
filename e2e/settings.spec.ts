@@ -129,8 +129,8 @@ test('Theme: Dark puts the dark class on <html> and its tokens, the first frame 
   await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
   await openSettings(page);
   await page.getByRole('button', { name: 'Dark', exact: true }).click();
-  await expect(page.getByTestId('settings-theme-dark')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.getByTestId('settings-theme-light')).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('theme-tile-dark')).toHaveAttribute('aria-selected', 'true');
+  await expect(page.getByTestId('theme-tile-light')).toHaveAttribute('aria-selected', 'false');
   await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
   await expect(html).not.toHaveClass(/(^|\s)light(\s|$)/);
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--color-background').trim())).toBe('#0d1117');
