@@ -578,7 +578,7 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     saveSession(localStorage, { ...session, token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
     saveCachedSettings(localStorage, session.baseUrl, storeSettings);
     vi.mocked(fetchStoreSettings).mockResolvedValue(storeSettings);
-    vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: screenPricing });
+    vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: screenPricing, refresh: () => {} });
     capabilities.mockResolvedValue(undefined);
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     error = vi.spyOn(console, 'error').mockImplementation(() => {});
