@@ -79,17 +79,23 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await expect(page.getByTestId('customer-dialog')).toHaveCount(0);
   await page.getByRole('button', { name: 'Add charge', exact: true }).click();
   await expect(page.getByTestId('charge-form')).toBeVisible();
-  // The one line's Price action (its item, from its Remove button), not TallyUI 3.14.0's Price column head.
-  await page.getByRole('button', { name: /^Remove / }).locator('../../../..').getByText('Price', { exact: true }).click();
-  await expect(page.getByTestId('price-form')).toBeVisible();
-  await expect(page.getByTestId('price-apply')).toBeVisible();
-  await page.getByTestId('price-cancel').click();
-  await expect(page.getByTestId('price-form')).toHaveCount(0);
+  // The one line's price opens v2's price keypad popover.
+  const checkoutBefore = await page.getByTestId('cart-checkout').boundingBox();
+  await page.getByTestId('price-popover-trigger').click();
+  await expect(page.getByTestId('price-popover')).toBeVisible();
+  await expect(page.getByTestId('price-popover-apply')).toBeVisible();
+  // It floats under its trigger and the app keeps its height: compiled from src, TallyUI's
+  // use-relative-position.web.ts stub (returns {}) put it in the page flow (metro.config.js redirects it).
+  const triggerBox = (await page.getByTestId('price-popover-trigger').boundingBox())!;
+  expect(await page.getByTestId('price-popover').evaluate((el) => getComputedStyle(el).position)).toBe('absolute');
+  await expect.poll(async () => (await page.getByTestId('price-popover').boundingBox())?.y).toBeGreaterThanOrEqual(triggerBox.y + triggerBox.height);
+  expect(await page.getByTestId('cart-checkout').boundingBox()).toEqual(checkoutBefore);
+  await page.getByTestId('price-popover-cancel').click();
+  await expect(page.getByTestId('price-popover')).toHaveCount(0);
   await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
   await expect(page.getByTestId('parked-sales-park')).toBeVisible();
   await page.getByTestId('parked-sales-dismiss').click();
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
-  await page.getByRole('button', { name: 'Split payment', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await expect(page.getByTestId('tender-method-external')).toBeVisible();
   await expect(page.getByTestId('tender-method-cash')).toBeVisible();
   await expect(page.getByTestId('tender-take')).toBeVisible();

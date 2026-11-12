@@ -62,10 +62,10 @@ test('an edited unit price settles in Medusa at the till\'s total with no warnin
   await addE2E1(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '10');
-  await cartLine(page, 'E2E product 1').getByText('Price', { exact: true }).click();
-  await page.getByLabel('Price value', { exact: true }).fill('3.20');
-  await page.getByLabel('Reason (optional)', { exact: true }).fill('Shelf price');
-  await page.getByTestId('price-apply').click();
+  // v2's price popover: tap the line's price, key the new one in, Apply.
+  await cartLine(page, 'E2E product 1').getByTestId('price-popover-trigger').click();
+  for (const key of ['3', 'decimal', '2', '0']) await page.getByTestId(`price-popover-keypad-key-${key}`).click();
+  await page.getByTestId('price-popover-apply').click();
   await expect(cartTotalRow(page, 'Total')).toContainText('7.20');
   const applied = appliedResponse(page);
   expect(await sellBySku(page, [], 'exact')).toBe(7.2);

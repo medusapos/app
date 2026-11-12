@@ -33,13 +33,14 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, \D*3\.88$/);
   await bar.click();
   const total = cartTotalRow(page, 'Total');
-  const cash = page.getByRole('button', { name: 'Cash', exact: true });
-  const card = page.getByRole('button', { name: 'Card terminal', exact: true });
-  for (const target of [page.getByText('E2E product 1', { exact: true }), total, cash, card]) await expect(target).toBeInViewport();
-  const [cashBox, cardBox] = [(await cash.boundingBox())!, (await card.boundingBox())!];
-  expect([cashBox.y === cardBox.y, cashBox.height >= 48]).toEqual([true, true]);
+  // v2's cart foot: the ⋮ actions and Checkout share one row of 48 px targets.
+  const checkout = page.getByTestId('cart-checkout');
+  const more = page.getByTestId('cart-foot-more');
+  for (const target of [page.getByText('E2E product 1', { exact: true }), total, checkout, more]) await expect(target).toBeInViewport();
+  const [checkoutBox, moreBox] = [(await checkout.boundingBox())!, (await more.boundingBox())!];
+  expect([checkoutBox.y === moreBox.y, checkoutBox.height >= 48, moreBox.height >= 48]).toEqual([true, true, true]);
   await orderChip.scrollIntoViewIfNeeded();
-  for (const target of [orderChip, total, cash]) await expect(target).toBeInViewport();
+  for (const target of [orderChip, total, checkout]) await expect(target).toBeInViewport();
   await page.getByRole('button', { name: 'Products', exact: true }).click();
   await page.getByTestId('product-tile-E2E product 2').click();
   await expect(bar).toHaveAccessibleName(/^Open cart, 3 items, /);
@@ -49,7 +50,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   await page.getByRole('button', { name: 'Order discount', exact: true }).click();
   const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
   await cancel.scrollIntoViewIfNeeded();
-  for (const target of [cancel, total, cash]) await expect(target).toBeInViewport();
+  for (const target of [cancel, total, checkout]) await expect(target).toBeInViewport();
   await expect(page.getByText('E2E product 1', { exact: true })).not.toBeInViewport();
   await cancel.click();
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(3.88);
@@ -61,7 +62,7 @@ test('a sign-out requested during a stuck save waits, and its note fits beside S
   await signIn(page);
   await addE2E1(page);
   await page.getByRole('button', { name: /^Open cart, / }).click();
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await tenderCash(page, 'exact');
   // A stuck save: the order's insert waits before its write (an E2E debug hook; a dead storage worker would stop
   // the sale's register stamp first, ADR 0017).

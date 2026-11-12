@@ -31,7 +31,7 @@ test('a payment in flight defers the hand-over up to 10 s', async ({ page, conte
   const search = page.getByPlaceholder(SEARCH_PLACEHOLDER, { exact: true });
   await search.fill('E2E-1');
   await search.press('Enter');
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await expect(page.getByTestId('tender-pane')).toBeVisible();
 
   const openedAt = Date.now();
@@ -60,7 +60,7 @@ test('closing the live tab makes the waiting tab live', async ({ page, context }
   const search = page.getByPlaceholder(SEARCH_PLACEHOLDER, { exact: true });
   await search.fill('E2E-1');
   await search.press('Enter');
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await expect(page.getByTestId('tender-pane')).toBeVisible();
 
   const pageB = await context.newPage();

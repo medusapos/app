@@ -34,7 +34,7 @@ test('two cash sales in quick succession both reach Medusa once, with no reload'
   await search.fill('E2E-1');
   await search.press('Enter');
   await expect(search).toHaveValue('');
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await tenderCash(page, 'exact');
   // No wait between the second sale's completion and the first sale's send.
   await Promise.all([page.getByRole('button', { name: 'Complete sale', exact: true }).click(), releaseFirst()]);

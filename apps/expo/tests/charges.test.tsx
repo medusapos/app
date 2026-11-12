@@ -71,8 +71,7 @@ async function start() {
   await screen.findByTestId('product-tile-Shirt');
 }
 async function totalMinor() {
-  await act(async () => { click('Cash'); });
-  click('Split payment');
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
   // TallyUI 3.14.0's tender pane heads an unpaid sale with its Total.
   expect(screen.getByTestId('tender-headline').textContent).toMatch(/^Total/);
   const total = screen.getByTestId('tender-balance');

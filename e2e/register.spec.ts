@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
+import { addE2E1, adminToken, captureCommands, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -68,7 +68,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await page.getByTestId('register-picker-row-register-1').click();
       await expect(page.getByTestId('open-register-card')).toBeVisible();
       await expect(page.getByTestId('register-bar-pill')).toHaveText('Register closed');
-      await page.getByRole('button', { name: 'Cash', exact: true }).click();
+      await page.getByTestId('cart-checkout').click();
       await expect(page.getByRole('alert')).toHaveText('Open the register to take payment.');
       await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toHaveCount(0);
       await expect(page.getByTestId('open-register-card')).toBeInViewport();
@@ -405,7 +405,7 @@ test('Register 1 taken over by another till: this till\'s paid in is refused sup
   await expect(page.getByTestId('open-register-card')).toBeVisible();
   await expect(page.getByTestId('register-bar-pill')).toHaveText('Register closed');
   await addE2E1(page);
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await expect(page.getByRole('alert')).toHaveText('Open the register to take payment.');
   await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toHaveCount(0);
   await shot(page, 'superseded');
@@ -460,4 +460,35 @@ test('a till that lost its local state opens Register 1 again and resumes its st
   } finally {
     await context.close();
   }
+});
+
+// v2's cart foot (TallyUI 3.18.0): Checkout opens the tender through the register gate, and ⋮ → Void, asked first,
+// empties a sale with lines and no payments without recording it.
+test('with Register 1 open, Checkout opens the tender, and ⋮ Void asks first and then empties the cart', async ({ page }) => {
+  const sales = captureCommands(page);
+  await signIn(page);
+  await addE2E1(page);
+  await addE2E1(page);
+  const checkout = page.getByTestId('cart-checkout');
+  await expect(checkout).toHaveText(/^Checkout \D*5\.00$/);
+  await checkout.click();
+  await expect(page.getByTestId('tender-pane')).toBeVisible();
+  await expect(page.getByTestId('tender-balance')).toHaveText(/5\.00$/);
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  await expect(page.getByTestId('tender-pane')).toHaveCount(0);
+  const voidSale = async () => {
+    await page.getByTestId('cart-foot-more').click();
+    await page.getByTestId('cart-foot-menu').getByRole('menuitem', { name: 'Void', exact: true }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('Void this sale?');
+  };
+  await voidSale();
+  await page.getByTestId('cart-void-keep').click();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
+  await expect(cartTotalRow(page, 'Total')).toHaveText(/Total\D*5\.00$/);
+  await voidSale();
+  await page.getByTestId('cart-void-confirm').click();
+  await expect(page.getByTestId('cart-empty')).toBeVisible();
+  await expect(checkout).toBeDisabled();
+  await expect(page.getByTestId('cart-foot-more')).toHaveCount(0);
+  expect(sales).toEqual([]);
 });

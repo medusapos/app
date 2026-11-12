@@ -17,6 +17,8 @@ config.resolver.nodeModulesPaths = [
   path.resolve(monorepoRoot, 'node_modules'),
 ];
 
+const RELATIVE_POSITION_WEB_STUB = path.join('@tallyui', 'primitives', 'src', 'hooks', 'use-relative-position.web.ts');
+
 config.resolver.resolveRequest = (context, moduleName, platform) => {
   if (/^@tallyui\/[^/]+$/.test(moduleName)) {
     const packageDir = fs.realpathSync(path.join(projectRoot, 'node_modules', moduleName));
@@ -34,7 +36,16 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     const source = pkgJson.exports?.[`./${subpath}`]?.source;
     if (source) return { type: 'sourceFile', filePath: path.join(packageDir, source) };
   }
-  return context.resolveRequest(context, moduleName, platform);
+  const resolution = context.resolveRequest(context, moduleName, platform);
+  // @tallyui/primitives 3.18.0 still ships rn-primitives' web stub of useRelativePosition
+  // (src/hooks/use-relative-position.web.ts returns {}, from when web overlays were positioned
+  // by Radix). Its dist bundles only the native hook, which is what dist consumers run on web;
+  // compiling from src, Metro prefers the .web.ts file and every Popover, DropdownMenu, Select,
+  // Tooltip, HoverCard and ContextMenu Content loses position:absolute and renders in page flow.
+  if (resolution.type === 'sourceFile' && resolution.filePath.endsWith(RELATIVE_POSITION_WEB_STUB)) {
+    return { type: 'sourceFile', filePath: resolution.filePath.replace(/\.web\.ts$/, '.ts') };
+  }
+  return resolution;
 };
 
 // Uniwind must be the outermost wrapper

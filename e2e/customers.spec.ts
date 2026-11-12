@@ -5,7 +5,7 @@ import { E2E_RUN } from './ports';
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 type Sale = { clientOrderId: string; customer: { customerId: string } };
 async function payCash(page: Page) {
-  await page.getByRole('button', { name: 'Cash', exact: true }).click();
+  await page.getByTestId('cart-checkout').click();
   await tenderCash(page, 'exact');
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   await expect(page.getByRole('button', { name: 'New sale', exact: true })).toBeVisible();
