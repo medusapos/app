@@ -37,7 +37,7 @@ config.resolver.resolveRequest = (context, moduleName, platform) => {
     if (source) return { type: 'sourceFile', filePath: path.join(packageDir, source) };
   }
   const resolution = context.resolveRequest(context, moduleName, platform);
-  // @tallyui/primitives 3.18.0 still ships rn-primitives' web stub of useRelativePosition
+  // @tallyui/primitives 3.19.0 still ships rn-primitives' web stub of useRelativePosition
   // (src/hooks/use-relative-position.web.ts returns {}, from when web overlays were positioned
   // by Radix). Its dist bundles only the native hook, which is what dist consumers run on web;
   // compiling from src, Metro prefers the .web.ts file and every Popover, DropdownMenu, Select,
