@@ -14,12 +14,14 @@ import {
 } from '@tallyui/pos';
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
+import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
+import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
 import { withDemoSaleEvent } from '../lib/demo-analytics';
@@ -226,8 +228,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [parkedOpen, setParkedOpen] = useState(false);
   const [customerOpen, setCustomerOpen] = useState(false);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
+  const token = useRef(session.token);
+  token.current = session.token;
+  const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
   const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
-    isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
+    discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
     } });
@@ -342,6 +347,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice lineEditor="popover" checkout={checkout}
+      afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
+      couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
     {voidOpen && <AlertDialog open onOpenChange={(next) => { if (!next) setVoidOpen(false); }}>
       <AlertDialogContent testID="cart-void-dialog">

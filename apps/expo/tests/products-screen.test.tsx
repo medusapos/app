@@ -95,7 +95,7 @@ beforeEach(() => {
   saveCachedSettings(localStorage, 'https://store.test', settings);
   capabilities.mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
-  vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing });
+  vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing, refresh: () => {} });
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null by default: the order store is open unless a test says otherwise (#86 review, item 5).
