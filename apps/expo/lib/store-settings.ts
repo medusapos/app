@@ -145,7 +145,3 @@ export function saveCachedPricing(storage: SessionStorage | null, baseUrl: strin
 export function saveCachedSettings(storage: SessionStorage | null, baseUrl: string, settings: StoreSettings): void {
   try { storage?.setItem(CACHE_PREFIX + baseUrl, JSON.stringify(settings)); } catch { /* Web storage may be unavailable. */ }
 }
-
-export function clearCachedSettings(storage: SessionStorage | null, baseUrl: string): void {
-  try { storage?.removeItem(CACHE_PREFIX + baseUrl); } catch { /* Web storage may be unavailable. */ }
-}

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { chooseTheme, isThemeChoice, loadThemeChoice, saveThemeChoice, subscribeThemeChoice, THEME_CHOICES } from './theme-choice';
+import { chooseTheme, DEFAULT_THEME_CHOICE, isThemeChoice, loadThemeChoice, saveThemeChoice, subscribeThemeChoice, THEME_CHOICES } from './theme-choice';
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
@@ -12,12 +12,20 @@ function fakeStorage(initial: Record<string, string> = {}) {
 }
 
 describe('theme-choice', () => {
+  it('offers ten choices in v2 order', () => {
+    expect(THEME_CHOICES).toEqual(['system', 'light', 'dark', 'ocean', 'sunset', 'monochrome', 'paper', 'warm', 'bold', 'market']);
+  });
+
   it('gives light when nothing is stored, the storage is null, the storage throws, or the value is unknown', () => {
+    expect(DEFAULT_THEME_CHOICE).toBe('light');
     expect(loadThemeChoice(fakeStorage())).toBe('light');
     expect(loadThemeChoice(null)).toBe('light');
     const throwing = { ...fakeStorage(), getItem: () => { throw new Error('denied'); } };
     expect(loadThemeChoice(throwing)).toBe('light');
     expect(loadThemeChoice(fakeStorage({ 'medusapos.theme': 'sepia' }))).toBe('light');
+    for (const value of ['Ocean', 'system ', '', 'neon']) {
+      expect(loadThemeChoice(fakeStorage({ 'medusapos.theme': value }))).toBe('light');
+    }
   });
 
   it('round-trips each choice under the one device-wide key medusapos.theme', () => {
@@ -26,6 +34,7 @@ describe('theme-choice', () => {
       saveThemeChoice(storage, choice);
       expect(storage.store.get('medusapos.theme')).toBe(choice);
       expect(loadThemeChoice(storage)).toBe(choice);
+      expect(isThemeChoice(choice)).toBe(true);
       expect(storage.store.size).toBe(1);
     }
   });
@@ -53,7 +62,7 @@ describe('theme-choice', () => {
     } finally { unsubscribeFirst(); unsubscribeSecond(); }
   });
 
-  it('isThemeChoice accepts only system, light and dark', () => {
+  it('isThemeChoice accepts known choices and rejects the listed non-choices', () => {
     for (const choice of ['system', 'light', 'dark']) expect(isThemeChoice(choice)).toBe(true);
     for (const value of ['', 'Dark', 'sepia', undefined, 1]) expect(isThemeChoice(value)).toBe(false);
   });
