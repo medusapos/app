@@ -30,6 +30,14 @@ export async function liveOrderFor(container: MedusaContainer, clientOrderId: st
     .whereNull('deleted_at').whereNot('status', 'canceled').first()
 }
 
+function stockLine(variant: { id: string; manage_inventory: boolean
+  inventory_items: Array<{ inventory_item_id: string; required_quantity: unknown }> }) {
+  return {
+    variantId: variant.id, manageInventory: variant.manage_inventory,
+    items: variant.inventory_items.map(item => ({ inventoryItemId: item.inventory_item_id, requiredQuantity: Number(item.required_quantity) })),
+  }
+}
+
 export async function runOrderCreate(
   container: MedusaContainer,
   command: CommandEnvelope<OrderCreatePayload>,
@@ -163,25 +171,19 @@ export async function runOrderCreate(
         entity: 'inventory_level', fields: ['inventory_item_id', 'location_id', 'stocked_quantity', 'reserved_quantity'],
         filters: { inventory_item_id: variants.flatMap(variant => variant.inventory_items.map(item => item.inventory_item_id)), location_id: location.id },
       })
-      const stock = planStockTopUp(catalogueLines, variants.map(variant => ({
-        variantId: variant.id, manageInventory: variant.manage_inventory,
-        items: variant.inventory_items.map(item => ({ inventoryItemId: item.inventory_item_id, requiredQuantity: Number(item.required_quantity) })),
-      })), levels.map(level => ({ inventoryItemId: level.inventory_item_id, stocked: Number(level.stocked_quantity), reserved: Number(level.reserved_quantity) })))
+      const stock = planStockTopUp(catalogueLines, variants.map(stockLine),
+        levels.map(level => ({ inventoryItemId: level.inventory_item_id, stocked: Number(level.stocked_quantity), reserved: Number(level.reserved_quantity) })))
       const topUps = mergeStockTopUps(ledger?.carriedTopUps ?? [], stock.topUps.map(topUp => ({
         inventory_item_id: topUp.inventoryItemId, location_id: location.id, shortfall: topUp.shortfall,
       })))
       if (topUps.length) planned.plan.draftOrder.metadata.tally_stock_topups = topUps
       if (coupons.length) planned.plan.draftOrder.metadata.tally_coupons = coupons
-      try {
-        const { result } = await tallyOrderCreateWorkflow(container).run({ input: {
-          ledger: ledger ? { commandId: command.id, claimToken: ledger.claimToken } : null, carriedTopUps: ledger?.carriedTopUps ?? [],
-          draftOrder: planned.plan.draftOrder, paymentAmount: Number(planned.plan.paymentAmount),
-          locationId: planned.plan.locationId, shippingOptionId, stockTopUps: stock.topUps, missingLevels: stock.missingLevels,
-        } })
-        orderId = result.orderId
-      } catch (error) {
-        throw error
-      }
+      const { result } = await tallyOrderCreateWorkflow(container).run({ input: {
+        ledger: ledger ? { commandId: command.id, claimToken: ledger.claimToken } : null, carriedTopUps: ledger?.carriedTopUps ?? [],
+        draftOrder: planned.plan.draftOrder, paymentAmount: Number(planned.plan.paymentAmount),
+        locationId: planned.plan.locationId, shippingOptionId, stockTopUps: stock.topUps, missingLevels: stock.missingLevels,
+      } })
+      orderId = result.orderId
     }
     if (orderId) {
       await resumeOrderCreate(container, orderId, Number(minorToMajor(payload.totalMinor, currencyDecimals(payload.currency))),
@@ -211,17 +213,16 @@ export async function runOrderCreate(
     })
     const sold = new Map<string, number>()
     for (const line of catalogueLines) sold.set(line.variantId, (sold.get(line.variantId) ?? 0) + line.quantity)
-    stockWarnings = warningsForStock(variants.filter(variant => variant.manage_inventory).map(variant => ({
-      variantId: variant.id, manageInventory: variant.manage_inventory,
-      items: variant.inventory_items.map(item => ({ inventoryItemId: item.inventory_item_id, requiredQuantity: Number(item.required_quantity) })),
-    })), sold, topUps.map(topUp => ({ inventoryItemId: topUp.inventory_item_id, shortfall: topUp.shortfall })))
+    stockWarnings = warningsForStock(variants.filter(variant => variant.manage_inventory).map(stockLine),
+      sold, topUps.map(topUp => ({ inventoryItemId: topUp.inventory_item_id, shortfall: topUp.shortfall })))
   }
-  const serverMinor = majorToMinor(order.raw_total.value, currencyDecimals(payload.currency))
-  const serverTax = majorToMinor(order.raw_tax_total.value, currencyDecimals(payload.currency))
+  const decimals = currencyDecimals(payload.currency)
+  const serverMinor = majorToMinor(order.raw_total.value, decimals)
+  const serverTax = majorToMinor(order.raw_tax_total.value, decimals)
   const chargesNet = command.version >= 5 ? majorToMinor(MathBN.sum(0,
     ...order.items.filter(item => item.metadata?.tally_fee_uuid).map(item => item.raw_subtotal.value),
     ...order.shipping_methods.map(method => method.raw_subtotal.value)
-  ).toString(), currencyDecimals(payload.currency)) : 0
+  ).toString(), decimals) : 0
   const serverSubtotal = serverMinor - serverTax - chargesNet
   const tillCustomerId = typeof order.metadata?.tally_customer_id === 'string' ? order.metadata.tally_customer_id : undefined
   const sessionId = typeof order.metadata?.tally_session_id === 'string' ? order.metadata.tally_session_id : undefined
@@ -232,7 +233,7 @@ export async function runOrderCreate(
     { subtotalMinor: payload.subtotalMinor, taxMinor: payload.taxMinor, discountMinor: (payload.discountMinor ?? 0)
       + (command.version >= 6 ? (payload.coupons ?? []).reduce((sum, coupon) => sum + coupon.discountMinor, 0) : 0) },
     { subtotalMinor: serverSubtotal, taxMinor: serverTax,
-      ...(command.version >= 4 ? { discountMinor: majorToMinor(order.raw_discount_subtotal.value, currencyDecimals(payload.currency)) } : {}) }
+      ...(command.version >= 4 ? { discountMinor: majorToMinor(order.raw_discount_subtotal.value, decimals) } : {}) }
   ) : []), ...customerWarnings(tillCustomerId, order.customer_id), ...stockWarnings, ...sessionWarnings] as NonNullable<CommandResult['warnings']>
   return {
     id: command.id, status: 'applied',

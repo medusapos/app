@@ -1,7 +1,7 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, CommandBatchResponse, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
-import { executeOrderCreate, replayOrderCreate } from '../../../../workflows/tally-order-create/execute'
+import { executeOrderCreate, replayOrderCreate, type ExecuteOutcome } from '../../../../workflows/tally-order-create/execute'
 import { orderCoupons, type CouponWrite } from '../../../../workflows/tally-coupons/order-coupons'
 import { executeRegisterCommand, replayRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import { liveOrderFor, type TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
@@ -15,6 +15,14 @@ export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }
   | { status: 409; body: { code: 'in_progress'; id: string } }
   | { status: 503; body: { code: 'transient'; id: string; message: string } }
+
+function batchFailure(container: MedusaContainer, outcome: Exclude<ExecuteOutcome, { kind: 'result' }>): BatchOutcome {
+  if (outcome.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: outcome.id } }
+  const { id, message } = outcome
+  const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
+  logger.error(`Command ${id} failed transiently: ${message}`)
+  return { status: 503, body: { code: 'transient', id, message: 'Temporary failure, retry later.' } }
+}
 
 // Most commands one batch may carry; a till splits a larger batch (shared with Vendure POS).
 export const MAX_COMMANDS = 50
@@ -71,13 +79,7 @@ export async function processBatch(
         continue
       }
       const outcome = replay ?? await executeRegisterCommand(container, envelope, upperBound, options)
-      if (outcome.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: outcome.id } }
-      if (outcome.kind === 'transient') {
-        const { id, message } = outcome
-        const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
-        logger.error(`Command ${id} failed transiently: ${message}`)
-        return { status: 503, body: { code: 'transient', id, message: 'Temporary failure, retry later.' } }
-      }
+      if (outcome.kind !== 'result') return batchFailure(container, outcome)
       results.push(outcome.result)
       continue
     }
@@ -88,11 +90,7 @@ export async function processBatch(
       continue
     }
     const replay = await replayOrderCreate(container, command)
-    if (replay?.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: replay.id } }
-    if (replay?.kind === 'transient') {
-      container.resolve(ContainerRegistrationKeys.LOGGER).error(`Command ${replay.id} failed transiently: ${replay.message}`)
-      return { status: 503, body: { code: 'transient', id: replay.id, message: 'Temporary failure, retry later.' } }
-    }
+    if (replay && replay.kind !== 'result') return batchFailure(container, replay)
     if (replay?.kind === 'result') {
       results.push(replay.result)
       continue
@@ -151,17 +149,8 @@ export async function processBatch(
       results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: timeErrors.join('; ') } })
       continue
     }
-    const outcome = writes === undefined ? await executeOrderCreate(container, command, options)
-      : await executeOrderCreate(container, command, options, writes)
-    if (outcome.kind === 'in_progress') {
-      return { status: 409, body: { code: 'in_progress', id: outcome.id } }
-    }
-    if (outcome.kind === 'transient') {
-      const { id, message } = outcome
-      const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
-      logger.error(`Command ${id} failed transiently: ${message}`)
-      return { status: 503, body: { code: 'transient', id, message: 'Temporary failure, retry later.' } }
-    }
+    const outcome = await executeOrderCreate(container, command, options, writes)
+    if (outcome.kind !== 'result') return batchFailure(container, outcome)
     results.push(outcome.result)
   }
   return { status: 200, body: { results } }
