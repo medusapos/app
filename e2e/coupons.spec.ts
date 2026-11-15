@@ -1,5 +1,6 @@
 import { expect, type Page, type Response } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, cartTotalRow, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test } from './helpers';
+import { appliedResponse, saleResults } from './helpers';
 import { E2E_RUN } from './ports';
 
 // Till coupons (ADR 0025, parity row 7): the till prices a Medusa promotion code through POST /tally/v1/promotions/preview
@@ -18,20 +19,6 @@ async function createPromotion(token: string, { code, amount }: { code: string; 
   return (await response.json()).promotion;
 }
 const uniqueCode = (prefix: string) => `${prefix}-${Date.now()}`;
-
-// The response applying the sale itself (as in discount.spec.ts), and that batch's results for its one sale.
-const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
-  const request = response.request();
-  if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-  const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-  return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
-    result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
-});
-async function saleResults(response: Response) {
-  const sales = response.request().postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-  expect(sales).toHaveLength(1);
-  return (await response.json()).results.filter((result: { id: string }) => result.id === sales[0].id);
-}
 
 const field = (page: Page) => page.getByTestId('coupon-field');
 const couponRows = (page: Page) => page.locator('[data-testid^="coupon-row-"]');

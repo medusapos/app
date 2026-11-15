@@ -1,5 +1,6 @@
-import { expect, type Page, type Response } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, cartLineRow, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
+import { appliedResponse, saleResults } from './helpers';
 import { E2E_RUN } from './ports';
 
 // Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5, 6, 7] at GET /tally/v1/info,
@@ -7,20 +8,6 @@ import { E2E_RUN } from './ports';
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
 type Sale = { clientOrderId: string; lines: { discountMinor?: number }[] };
-// The response applying the sale itself, not a register command's that may come first or share its batch.
-const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
-  const request = response.request();
-  if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-  const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-  return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
-    result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
-});
-// That batch held exactly one sale; its results, by the sale's command id.
-async function saleResults(response: Response) {
-  const sales = response.request().postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-  expect(sales).toHaveLength(1);
-  return (await response.json()).results.filter((result: { id: string }) => result.id === sales[0].id);
-}
 const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medusapos.session') ?? 'null')?.capabilities);
 
 test('a discounted sale is applied as order.create v4, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
