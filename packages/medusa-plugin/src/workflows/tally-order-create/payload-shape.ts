@@ -2,6 +2,9 @@ import type { CommandEnvelope, OrderCreateLine, OrderCreatePayment } from '@tall
 import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import type { OrderCreateFee, OrderCreateShipping, OrderCreateCustomLine } from './v5'
 
+// The most validation errors a rejection lists (ADR 0004).
+export const MAX_PAYLOAD_ERRORS = 10
+
 // The fields of each order.create version (ruling 17): @tallyui/core 2.0.0 OrderCreatePayload, OrderCreateLine and
 // OrderCreatePayment (src/types/commands.ts, v2) and OrderCreatePayloadV3 (@tallyui/core's OrderCreatePayload, aliased in
 // fiscal-figures.ts). Each value is
@@ -39,12 +42,12 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && !Array.isArray(value)
   const check = (valid: boolean, path: string, expected: string) => {
-    if (!valid && errors.length < 10) errors.push(`payload.${path}: expected ${expected}`)
+    if (!valid && errors.length < MAX_PAYLOAD_ERRORS) errors.push(`payload.${path}: expected ${expected}`)
   }
   const known = (value: Record<string, unknown>, fields: Map<string, number>, prefix: string) => {
     for (const key of Object.keys(value)) {
       const added = fields.get(key) ?? Infinity
-      if (added > version && errors.length < 10) errors.push(`payload.${prefix}${key}: ${added === Infinity
+      if (added > version && errors.length < MAX_PAYLOAD_ERRORS) errors.push(`payload.${prefix}${key}: ${added === Infinity
         ? `unknown field for order.create version ${version}` : `requires version ${added}`}`)
     }
   }
@@ -67,7 +70,7 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
     check(Array.isArray(items) && (!isLines || items.length > 0), field, isLines ? 'a non-empty array' : 'an array')
     if (!Array.isArray(items)) continue
     for (const [index, item] of items.entries()) {
-      if (errors.length === 10) break
+      if (errors.length === MAX_PAYLOAD_ERRORS) break
       const path = `${field}[${index}]`
       check(object(item), path, 'an object')
       if (!object(item)) continue
@@ -159,7 +162,7 @@ export function payloadShapeErrors(payload: unknown, version = 3): string[] {
     check(typeof payload.note === 'string' && payload.note.length > 0 && payload.note.length <= ORDER_NOTE_MAX,
       'note', `a string of 1 to ${ORDER_NOTE_MAX} characters`)
   }
-  return [...errors, ...payloadStringErrors(payload, true)].slice(0, 10)
+  return [...errors, ...payloadStringErrors(payload, true)].slice(0, MAX_PAYLOAD_ERRORS)
 }
 
 // Reports ill-formed text (a lone surrogate) as well as NUL.
@@ -217,5 +220,5 @@ function payloadStringErrors(payload: unknown, bounds: boolean): string[] {
     if (text.includes('\0')) errors.push(`payload.${path}: expected no NUL character`)
     if (LONE_SURROGATE.test(text)) errors.push(`payload.${path}: expected well-formed text`)
   }
-  return errors.slice(0, 10)
+  return errors.slice(0, MAX_PAYLOAD_ERRORS)
 }

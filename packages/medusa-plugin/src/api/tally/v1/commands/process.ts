@@ -6,7 +6,7 @@ import { orderCoupons, type CouponWrite } from '../../../../workflows/tally-coup
 import { executeRegisterCommand, replayRegisterCommand } from '../../../../workflows/tally-register-command/execute'
 import { liveOrderFor, type TallyPluginOptions } from '../../../../workflows/tally-order-create/run'
 import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayloadV3 } from '../../../../workflows/tally-order-create/fiscal-figures'
-import { envelopeErrors, payloadNulErrors, payloadShapeErrors } from '../../../../workflows/tally-order-create/payload-shape'
+import { envelopeErrors, payloadNulErrors, payloadShapeErrors, MAX_PAYLOAD_ERRORS } from '../../../../workflows/tally-order-create/payload-shape'
 import { clientTimeStageErrors, clientTimeUpperBound } from '../../../../workflows/client-time'
 import { lineTaxRefusals, v5DisplayErrors, withoutV5Display } from '../../../../workflows/tally-order-create/v5'
 import { registerVersionAccepted, SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
@@ -120,7 +120,7 @@ export async function processBatch(
       if (command.version >= 5) errors.push(...v5DisplayErrors(payload as unknown as Record<string, unknown>, command.version))
     }
     if (errors.length) {
-      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, 10).join('; ') } })
+      results.push({ id: command.id, status: 'rejected', error: { code: 'invalid_payload', message: errors.slice(0, MAX_PAYLOAD_ERRORS).join('; ') } })
       continue
     }
     let writes: CouponWrite[] | undefined
