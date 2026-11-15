@@ -13,7 +13,7 @@ import { approvalThresholdMinor } from '../../api/tally/v1/versions'
 import type { TallyPluginOptions } from '../tally-order-create/run'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
-import { envelopeErrors } from '../tally-order-create/payload-shape'
+import { envelopeErrors, MAX_PAYLOAD_ERRORS } from '../tally-order-create/payload-shape'
 import { clientTimeStageErrors } from '../client-time'
 import { registerPayloadErrors } from './payload-shape'
 import { loadSessionFigures } from './figures'
@@ -50,7 +50,7 @@ export async function replayRegisterCommand(container: MedusaContainer, command:
 export async function executeRegisterCommand(container: MedusaContainer, command: CommandEnvelope<unknown>, upperBound: number,
   options: TallyPluginOptions = {}): Promise<ExecuteOutcome> {
   const { id, payload } = command
-  const errors = [...envelopeErrors(command), ...registerPayloadErrors(command.type, payload, command.version)].slice(0, 10)
+  const errors = [...envelopeErrors(command), ...registerPayloadErrors(command.type, payload, command.version)].slice(0, MAX_PAYLOAD_ERRORS)
   if (errors.length) return { kind: 'result', result: { id, status: 'rejected', error: { code: 'invalid_payload', message: errors.join('; ') } } }
   const timeErrors = clientTimeStageErrors(command, upperBound)
   if (timeErrors.length) return { kind: 'result', result: { id, status: 'rejected', error: { code: 'invalid_payload', message: timeErrors.join('; ') } } }

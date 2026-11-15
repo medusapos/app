@@ -1,6 +1,7 @@
 import type { PaymentMethodKind } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import type { RegisterClosureSubmitPayload, RegisterClosureSubmitV3Payload, RegisterMovementRecordPayload, RegisterMovementVoidPayload,
   RegisterSessionOpenPayload, RegisterSessionOpenV2Payload, RegisterSessionTransitionPayload } from '../../modules/tally-register/types'
+import { MAX_PAYLOAD_ERRORS } from '../tally-order-create/payload-shape'
 
 // Register fields: exactly the payload interfaces in src/modules/tally-register/types.ts; Record<keyof T, true>
 // makes tsc refuse a missing or an extra field. The open gains fields in v2; the closure gains approval in v3.
@@ -37,13 +38,13 @@ export function registerPayloadErrors(type: string, payload: unknown, version = 
   const object = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null)
   const check = (valid: boolean, field: string, expected: string) => {
-    if (!valid && errors.length < 10) errors.push(`payload.${field}: expected ${expected}`)
+    if (!valid && errors.length < MAX_PAYLOAD_ERRORS) errors.push(`payload.${field}: expected ${expected}`)
   }
   if (!object(payload)) return ['payload: expected an object']
   for (const key of Object.keys(payload)) {
     const known = (type === 'register.session.open' && version >= 2 ? OPEN_V2_FIELDS
       : type === 'register.closure.submit' && version >= 3 ? CLOSURE_V3_FIELDS : REGISTER_FIELDS.get(type))?.includes(key) ?? false
-    if (!known && errors.length < 10) errors.push(`payload.${key}: unknown field for ${type} version ${version}`)
+    if (!known && errors.length < MAX_PAYLOAD_ERRORS) errors.push(`payload.${key}: unknown field for ${type} version ${version}`)
   }
   const string = (field: string, optional = false) => {
     const value = payload[field]
@@ -116,7 +117,7 @@ export function registerPayloadErrors(type: string, payload: unknown, version = 
       }
       break
     default:
-      if (errors.length < 10) errors.push('type: expected a register command type')
+      if (errors.length < MAX_PAYLOAD_ERRORS) errors.push('type: expected a register command type')
   }
   return errors
 }

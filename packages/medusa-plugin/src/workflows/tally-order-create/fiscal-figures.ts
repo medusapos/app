@@ -1,5 +1,6 @@
 import type { CommandError, OrderCreatePayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { currencyDecimals } from './money'
+import { MAX_PAYLOAD_ERRORS } from './payload-shape'
 
 export type CommandErrorWithData = CommandError
 export type OrderCreatePayloadV3 = OrderCreatePayload
@@ -7,7 +8,7 @@ export type OrderCreatePayloadV3 = OrderCreatePayload
 export function fiscalFiguresErrors(payload: OrderCreatePayloadV3): string[] {
   const errors: string[] = []
   const check = (valid: boolean, path: string, expected: string) => {
-    if (!valid && errors.length < 10) errors.push(`payload.${path}: expected ${expected}`)
+    if (!valid && errors.length < MAX_PAYLOAD_ERRORS) errors.push(`payload.${path}: expected ${expected}`)
   }
   const object = (value: unknown, path: string, keys: string[]): value is Record<string, unknown> => {
     const valid = typeof value === 'object' && value !== null && !Array.isArray(value)

@@ -1,4 +1,5 @@
 import type { CommandEnvelope } from '@tallyui/core' with { 'resolution-mode': 'import' }
+import { MAX_PAYLOAD_ERRORS } from './tally-order-create/payload-shape'
 
 // docs/contract/field-kinds.md, "Malformed commands": client-time format and bounds run after shape, before claim.
 export const CLIENT_TIME_EARLIEST = Date.parse('2020-01-01T00:00:00Z')
@@ -36,5 +37,5 @@ export function clientTimeStageErrors(command: CommandEnvelope<unknown>, upperBo
     if (time === null) return [`${path} must be an RFC 3339 time with Z or an offset`]
     return time < CLIENT_TIME_EARLIEST || time > upperBound
       ? [`${path} must be a time from 2020-01-01T00:00:00Z to ${bound}`] : []
-  }).slice(0, 10)
+  }).slice(0, MAX_PAYLOAD_ERRORS)
 }
