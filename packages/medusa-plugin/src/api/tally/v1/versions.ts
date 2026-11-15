@@ -27,7 +27,7 @@ export function registerVersionAccepted(version: number, options: { minRegisterC
  * - A tax provider returns rates, never amounts: `ITaxProvider.getTaxLines` (`@medusajs/types` `dist/tax/provider.d.ts:166`)
  *   returns tax lines carrying `rate`, `code` and `name`, with no amount (`dist/tax/common.d.ts:440-486`).
  * - The plugin rounds once: `majorToMinor` (`workflows/tally-order-create/money.ts:15-32`, half away from zero) on
- *   `order.raw_total` (`run.ts:189`).
+ *   `order.raw_total` (`runOrderCreate`'s `serverMinor`).
  * - #133 measured 0 differences in 340,230 sales against the till's per_order + half_away_from_zero (comment 5903926127).
  */
 export const TAX_ROUNDING: TaxRounding = { granularity: 'per_order', mode: 'half_away_from_zero' }
