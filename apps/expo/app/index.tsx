@@ -57,19 +57,27 @@ const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
 // Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
+// ADR 0009: phone mode below 600 px.
+const PHONE_BREAKPOINT = 600;
+// ADR 0009: from 600 px, products and cart stack in a column below 900 px and sit in a row from 900 px.
+const ROW_BREAKPOINT = 900;
+
+// The rate arrives in parts per million (10 000 ppm = 1%).
+const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
+
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
   const lastEmail = useRef<string | undefined>(undefined);
   if (!session) return <Redirect href={isDemoAccount(lastEmail.current ?? '') ? '/demo' : '/login'} />;
   lastEmail.current = session.email;
-  return <SettingsScreen key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
+  return <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
     onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} />;
 }
 
 type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void; onNoPosAccess: () => void;
   onCapabilities: (fresh: ServerCapabilities | undefined) => void };
 
-function SettingsScreen(props: SignedInProps) {
+function StoreSettingsGate(props: SignedInProps) {
   const { session, onUnauthorized, onNoPosAccess, onCapabilities } = props;
   const [connector] = useState(createPosConnector);
   // Once per store (this screen is keyed by it): re-read the order.create capability a restored session was saved with (ADR-062).
@@ -198,6 +206,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { setSaleHold } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
+  const online = state !== 'offline';
   const previousToken = useRef(session.token);
   useEffect(() => {
     if (previousToken.current !== session.token) resumePull();
@@ -268,7 +277,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   }, [sale.stage.kind]);
   const { width } = useWindowDimensions();
   // Phone mode (ADR 0009): products or the cart at full height, the tender over both; a new sale starts on products.
-  const phone = width < 600;
+  const phone = width < PHONE_BREAKPOINT;
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
@@ -316,7 +325,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useEffect(() => { if (phone && (registerStatus === 'counting' || registerStatus === 'closed')) setCartOpen(true); }, [phone, registerStatus]);
   const [gateFocus, setGateFocus] = useState(0);
   const gateFocusHandled = useRef(0);
-  const registerBar = (className?: string) => <TillRegisterBar online={state !== 'offline'} onOpenPanel={() => setPanelOpen(true)}
+  const registerBar = (className?: string) => <TillRegisterBar online={online} onOpenPanel={() => setPanelOpen(true)}
     onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
   const catalogue = <View className="flex-1">
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
@@ -333,7 +342,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
-  const cart = <RegisterGate currency={pricing.currency} online={state !== 'offline'} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
+  const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     <View className="flex-row justify-end gap-4 px-3">
       {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
         className="min-h-11 justify-center">
@@ -346,7 +355,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
-    <Cart sale={cartSale} taxLabel={(ppm) => `VAT ${ppm / 10000}%`} canEditPrice lineEditor="popover" checkout={checkout}
+    <Cart sale={cartSale} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
@@ -384,13 +393,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
       {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
-      <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={state !== 'offline'} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
+      <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={online} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
         open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />
       {connector.searchCustomers && <Dialog open={customerOpen} onOpenChange={setCustomerOpen}>
         <DialogContent testID="customer-dialog"><DialogTitle>Customer</DialogTitle>
-          <ScrollView><CustomerPicker selected={sale.order.customer} online={state !== 'offline'}
+          <ScrollView><CustomerPicker selected={sale.order.customer} online={online}
             search={(q) => connector.searchCustomers!(syncContext, q)}
             create={(input) => connector.createCustomer!(syncContext, input)}
             onSelect={(c) => { sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
@@ -401,13 +410,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
         store={receiptStore}
-        topInset={topInset} formatDate={formatDate} taxLabel={(ppm) => `VAT ${ppm / 10000}%`}
+        topInset={topInset} formatDate={formatDate} taxLabel={taxLabel}
         cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
           {onRetry && sale.idle ? <Pressable accessibilityRole="button" onPress={onRetry}><Text className="text-foreground underline">Retry</Text></Pressable> : null}
-          {!phone ? <View className="flex-1" style={{ flexDirection: width >= 900 ? 'row' : 'column' }}>
+          {!phone ? <View className="flex-1" style={{ flexDirection: width >= ROW_BREAKPOINT ? 'row' : 'column' }}>
             {catalogue}
             <View className="flex-1 border-t border-border bg-card">
               {sale.stage.kind === 'cart' ? cart : tenderPane}
