@@ -1,5 +1,6 @@
 import { expect } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, cartTotalRow, ordersByClientId, signIn, tenderCash, test } from './helpers';
+import { appliedResponse } from './helpers';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -28,13 +29,7 @@ test('a sale with a fee, shipping and a custom item reaches Medusa once at the t
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
   await page.getByTestId('cart-checkout').click();
   await tenderCash(page, totalMinor / 100);
-  const applied = page.waitForResponse(async (response) => {
-    const request = response.request();
-    if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-    const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-    return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
-      result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
-  });
+  const applied = appliedResponse(page);
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   await expect(page.getByLabel(/^Gift wrap: \D*2\.00$/)).toBeVisible();
   await expect(page.getByLabel(/^Local delivery: \D*4\.95$/)).toBeVisible();

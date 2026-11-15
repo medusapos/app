@@ -1,17 +1,9 @@
-import { expect, type Page } from '@playwright/test';
+import { expect } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, cartLine, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
-import { E2E_RUN } from './ports';
+import { appliedResponse } from './helpers';
 
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 type Sale = { clientOrderId: string; totalMinor: number;
   lines: { quantity: number; unitPriceMinor: number; discountMinor?: number }[] };
-const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
-  const request = response.request();
-  if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-  const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-  return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
-    result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
-});
 
 test('park a sale, sell another, resume the first and complete it: both orders reach Medusa once at the till\'s figures', async ({ page }) => {
   const token = await adminToken();

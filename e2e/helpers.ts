@@ -1,4 +1,4 @@
-import { expect, test as base, type BrowserContext, type Page, type Request } from '@playwright/test';
+import { expect, test as base, type BrowserContext, type Page, type Request, type Response } from '@playwright/test';
 import { E2E_RUN } from './ports';
 
 const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
@@ -250,6 +250,21 @@ type SalePayload = {
 
 export type PostedCommand<P> = { id: string; type: string; version: number; payload: P; status?: string; code?: string };
 const isCommandPost = (request: Request) => request.method() === 'POST' && request.url() === `${backend}/tally/v1/commands`;
+
+// The response applying the sale itself, not a register command's that may come first or share its batch.
+export const appliedResponse = (page: Page) => page.waitForResponse(async (response) => {
+  const request = response.request();
+  if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
+  const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
+  return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
+    result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
+});
+// That batch held exactly one sale; its results, by the sale's command id.
+export async function saleResults(response: Response) {
+  const sales = response.request().postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
+  expect(sales).toHaveLength(1);
+  return (await response.json()).results.filter((result: { id: string }) => result.id === sales[0].id);
+}
 
 // Every `type` command the till POSTs to /tally/v1/commands, once per attempt, each with the status the store last
 // answered for its id (and its refusal's `code`). The till sends its register facts there too (register >= 1), so sale tests take order.create.
