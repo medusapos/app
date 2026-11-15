@@ -3,7 +3,7 @@ import { login, LoginError, type SessionStorage } from './session';
 
 /**
  * A close over this count variance, in minor units, needs a manager's approval (ADR 0018): €5.00 for the EUR
- * stores the app serves today. A constant until it becomes a per-store setting.
+ * stores the app serves today. The fallback for a store that sends no registerApproval setting.
  */
 export const VARIANCE_THRESHOLD_MINOR = 500;
 

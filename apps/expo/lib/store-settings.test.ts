@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { NO_POS_ACCESS_MESSAGE, type SessionStorage } from './session';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import {
-  clearCachedSettings, clearSettingsRegion, fetchStoreSettings, loadCachedPricing, loadCachedSettings, loadSettingsChoice,
+  clearSettingsRegion, fetchStoreSettings, loadCachedPricing, loadCachedSettings, loadSettingsChoice,
   saveCachedPricing, saveCachedSettings, saveSettingsChoice, StoreSettingsError, type StoreSettings,
 } from './store-settings';
 
@@ -160,9 +160,6 @@ describe('settings cache', () => {
     expect(storage.getItem(`medusapos.settings.${session.baseUrl}`)).toBe(JSON.stringify(settings));
     expect(loadCachedSettings(storage, session.baseUrl)).toEqual(settings);
     expect(loadCachedSettings(storage, otherUrl)).toEqual(other);
-    clearCachedSettings(storage, session.baseUrl);
-    expect(loadCachedSettings(storage, session.baseUrl)).toBeNull();
-    expect(loadCachedSettings(storage, otherUrl)).toEqual(other);
   });
   it('accepts an older entry that still carries taxRatePpm and pricesIncludeTax, without them', () => {
     const storage = memoryStorage();
@@ -188,7 +185,6 @@ describe('settings cache', () => {
     for (const unavailable of [null, { getItem: fail, setItem: fail, removeItem: fail }]) {
       expect(loadCachedSettings(unavailable, session.baseUrl)).toBeNull();
       expect(() => saveCachedSettings(unavailable, session.baseUrl, settings)).not.toThrow();
-      expect(() => clearCachedSettings(unavailable, session.baseUrl)).not.toThrow();
     }
   });
 });
