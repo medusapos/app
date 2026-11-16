@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
+import { createExtensionHost, ExtensionHostProvider, ExtensionTarget, useSaleSource } from '@tallyui/extensions';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
@@ -15,7 +16,7 @@ import {
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
-import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
+import { couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import {
@@ -23,6 +24,7 @@ import {
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { UserSheet } from '../components/user-sheet';
+import { tillExtension, TILL_GRANT } from '../extensions/till';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
@@ -249,7 +251,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
     } });
-  const { sale: cartSale, refused } = useGatedSale(sale);
+  const [extensions] = useState(() => createExtensionHost({ extensions: [tillExtension], grant: TILL_GRANT }));
+  const saleSource = useSaleSource(sale);
+  const { sale: cartSale, refused } = useGatedSale(sale, (method, open) => extensions.dispatch('checkout.tender.start', { method }, {
+    sale: saleSource, register: { value: { open }, subscribe: () => () => {} },
+  }));
   // v2's cart foot: one "Checkout {total}" opens the tender on Cash through the register gate, where the cashier picks
   // the method (Card terminal included), and a ⋮ menu holds Void, which asks first: the open sale has no copy to restore.
   const [voidOpen, setVoidOpen] = useState(false);
@@ -362,7 +368,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       quickDiscounts={QUICK_DISCOUNTS}
-      afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
+      afterSubtotal={couponsEnabled(session.capabilities) ? <ExtensionHostProvider host={extensions}>
+        <ExtensionTarget key={sale.order.id} id="pos.cart.after-subtotal" sale={saleSource} />
+      </ExtensionHostProvider> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
     <View className="flex-row items-stretch">

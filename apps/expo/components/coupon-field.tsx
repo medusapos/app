@@ -2,9 +2,8 @@ import { useRef, useState, type JSX } from 'react';
 import { Pressable, View } from 'react-native';
 import { Button, Input, Text } from '@tallyui/components';
 import { formatMoney, type ServerCapabilities } from '@tallyui/core';
-import { type Order, type useSale } from '@tallyui/pos';
-
-type Sale = ReturnType<typeof useSale>;
+import { type Order } from '@tallyui/pos';
+import { useReadView, type ReadView, type SaleActions, type SaleView, type TargetBlockProps } from '@tallyui/extensions';
 
 /** Whether the till offers coupons: the same rule useSale applies (capabilities.coupons and order.create v6+). */
 export function couponsEnabled(capabilities: ServerCapabilities | undefined): boolean {
@@ -16,7 +15,13 @@ export function couponDiscountMinor(order: Order): number {
   return (order.display.coupons ?? []).reduce((sum, coupon) => sum + coupon.amountMinor, 0);
 }
 
-export function CouponField({ sale }: { sale: Sale }): JSX.Element {
+export function CouponField({ view, api }: TargetBlockProps['pos.cart.after-subtotal']): JSX.Element | null {
+  if (!view.sale || !api.sale) return null;
+  return <CouponRows view={view.sale} actions={api.sale} />;
+}
+
+function CouponRows({ view, actions }: { view: ReadView<SaleView>; actions: SaleActions }): JSX.Element {
+  const sale = useReadView(view);
   const [text, setText] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
@@ -26,7 +31,7 @@ export function CouponField({ sale }: { sale: Sale }): JSX.Element {
     inFlight.current = true;
     setApplying(true);
     try {
-      const refusal = await sale.applyCoupon(text);
+      const refusal = await actions.applyCoupon(text);
       setMessage(refusal);
       if (refusal === null) setText('');
     } finally {
@@ -35,18 +40,18 @@ export function CouponField({ sale }: { sale: Sale }): JSX.Element {
     }
   }
   return <View testID="coupon-field" className="gap-2">
-    {sale.order.display.coupons?.map(({ code, amountMinor }) => <View key={code} testID={`coupon-row-${code}`} className="flex-row items-center gap-3">
+    {sale.coupons.map(({ code, amountMinor }) => <View key={code} testID={`coupon-row-${code}`} className="flex-row items-center gap-3">
       <Text className="flex-1 text-foreground">Coupon {code.toUpperCase()}</Text>
-      <Text className="text-foreground">−{formatMoney({ amount: amountMinor, currency: sale.order.currency })}</Text>
+      <Text className="text-foreground">−{formatMoney({ amount: amountMinor, currency: sale.currency })}</Text>
       <Pressable accessibilityRole="button" accessibilityLabel={`Remove coupon ${code.toUpperCase()}`}
-        onPress={() => setMessage(sale.removeCoupon(code))}
+        onPress={() => setMessage(actions.removeCoupon(code))}
         className="rounded-md border border-border bg-card px-3 py-2 min-h-11 items-center justify-center">
         <Text className="text-foreground">Remove</Text>
       </Pressable>
     </View>)}
     {sale.couponsRepricing ? <Text className="text-muted-foreground">Checking coupon prices…</Text> : null}
-    {sale.order.couponPricesStale && !sale.couponsRepricing ? <Button variant="outline" testID="coupon-reprice"
-      onPress={() => { void sale.repriceCoupons(); }}><Text>Check coupons again</Text></Button> : null}
+    {sale.couponPricesStale && !sale.couponsRepricing ? <Button variant="outline" testID="coupon-reprice"
+      onPress={() => { void actions.repriceCoupons(); }}><Text>Check coupons again</Text></Button> : null}
     <View className="flex-row items-center gap-2">
       <Input className="flex-1"><Input.Field value={text} onChangeText={(value) => { setText(value); setMessage(null); }}
         accessibilityLabel="Coupon code" placeholder="Coupon code" autoCapitalize="characters" autoComplete="off"

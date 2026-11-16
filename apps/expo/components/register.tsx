@@ -26,7 +26,7 @@ type Sale = ReturnType<typeof useSale>;
  * session (TallyUI c1's gate at tender start), and pin that session for the tender (`complete()` stamps it, TallyUI
  * #170, #172). Also reports the tender to the register.
  */
-export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null } {
+export function useGatedSale(sale: Sale, gate: (method: 'cash' | 'external', registerOpen: boolean) => Promise<string | null>): { sale: Sale; refused: string | null } {
   const { register, setTenderInProgress } = useRegister();
   const latest = useRef(sale);
   latest.current = sale;
@@ -46,17 +46,21 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
     // requireSaleSession() reads storage, which can be ahead of the render (a session opened just before the tap), so
     // the confirmed session is passed to startTender explicitly, and useSale pins it for this tender (TallyUI #172).
     // It resolves null only while sessions are off; the tender then starts as it did before registers.
-    register.requireSaleSession().then((session) => {
-      checking.current = false;
+    register.requireSaleSession().then(async (session) => {
+      const refusal = await gate(method, true);
+      if (refusal !== null) return setRefused(refusal);
       if (latest.current.stage.kind !== 'cart') return;
       setRefused(null);
       latest.current.startTender(method, { session: session ?? undefined });
-    }, (error: unknown) => {
-      checking.current = false;
-      if (error instanceof RegisterSessionRequiredError) return setRefused(OPEN_TO_PAY);
+    }, async (error: unknown) => {
+      if (error instanceof RegisterSessionRequiredError) {
+        const refusal = await gate(method, false);
+        if (refusal !== null) setRefused(refusal);
+        return;
+      }
       console.warn('Could not check the register at tender start:', error);
       setRefused(CHECK_FAILED);
-    });
+    }).finally(() => { checking.current = false; });
   };
   return { sale: { ...sale, startTender }, refused };
 }

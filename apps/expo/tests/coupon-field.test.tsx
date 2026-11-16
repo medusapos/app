@@ -5,6 +5,7 @@ import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/cor
 import { medusaConnector } from '@tallyui/connector-medusa';
 import { catalogueEntries, TaxProvider, taxProviderProps, useSale } from '@tallyui/pos';
 import { Cart } from '@tallyui/components';
+import { useSaleSource } from '@tallyui/extensions';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 
@@ -20,7 +21,8 @@ const money = (amount: number) => formatMoney({ amount, currency: 'EUR' });
 let sale: ReturnType<typeof useSale>;
 function SaleView({ discountCodes }: { discountCodes: ReturnType<typeof createMedusaDiscountCodes> }) {
   sale = useSale(pricing, { registerId: 'register-1', cashierRef: 'cashier', capabilities: { orderCreate: 6, coupons: true }, discountCodes });
-  return <Cart sale={sale} afterSubtotal={<CouponField sale={sale} />} couponDiscountMinor={couponDiscountMinor(sale.order)} />;
+  const source = useSaleSource(sale);
+  return <Cart sale={sale} afterSubtotal={<CouponField view={{ sale: source.view }} api={{ sale: source.actions }} />} couponDiscountMinor={couponDiscountMinor(sale.order)} />;
 }
 function start() {
   const fetchImpl = vi.fn<typeof fetch>();
