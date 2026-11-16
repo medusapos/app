@@ -5,6 +5,7 @@ import { BehaviorSubject } from 'rxjs';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
+import { PortalHost } from '@tallyui/primitives';
 import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
 import { createOrderBuilder, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -262,6 +263,29 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Store settings changed; this applies after the current sale')).toBeTruthy();
     expect(screen.queryByText('Offline')).toBeNull();
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  });
+
+  it('shows exactly the three default quick-discount keys in order on the line price keypad', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt', status: 'published',
+      variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] }));
+    await mount();
+    render(<PortalHost />);
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(within(cartLine('Shirt')).getByTestId('price-popover-trigger'));
+    expect(screen.getAllByTestId(/^price-discount-/).map((key) => key.textContent)).toEqual(['−5%', '−10%', '−15%']);
+  });
+
+  it('applies the −10% quick discount: €10.80, with the €12.00 regular price struck through', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt', status: 'published',
+      variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] }));
+    await mount();
+    render(<PortalHost />);
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(within(cartLine('Shirt')).getByTestId('price-popover-trigger'));
+    fireEvent.click(screen.getByRole('button', { name: 'Discount (10%)' }));
+    fireEvent.click(screen.getByTestId('price-popover-apply'));
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00€10.80', '€10.80']);
+    expect(within(cartLine('Shirt')).getByLabelText('Regular price €12.00')).toBeTruthy();
   });
 
   it('shows the outbox status, puts the attention count on the frame\'s Orders and pushes Orders without replacing the route', async () => {
