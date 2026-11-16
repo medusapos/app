@@ -16,6 +16,7 @@ import {
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
+import { EmailReceipt } from '../components/email-receipt';
 import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
@@ -385,6 +386,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </AlertDialog>}
   </RegisterGate>;
 
+  const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Products', headerShown: sale.stage.kind !== 'receipt',
@@ -421,6 +423,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
         store={receiptStore}
+        footerSlot={connector.emailReceipt ? <EmailReceipt
+          orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
+          online={online} defaultEmail={paid?.customer?.email}
+          send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
         topInset={topInset} formatDate={formatDate} taxLabel={taxLabel}
         cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
