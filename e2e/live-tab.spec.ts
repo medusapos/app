@@ -1,6 +1,5 @@
 import { expect } from '@playwright/test';
-import { sellBySku, signIn, test } from './helpers';
-import { E2E_RUN } from './ports';
+import { appliedResponse, backend, sellBySku, signIn, test } from './helpers';
 
 const SEARCH_PLACEHOLDER = 'Search or scan barcode / SKU';
 
@@ -82,15 +81,7 @@ test('pageshow after pagehide re-opens both databases', async ({ page }) => {
   });
   await expect(page.getByText('Up to date · 5 products')).toBeVisible();
 
-  const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
-  // The sale's own applied result, not a register command's.
-  const saleApplied = page.waitForResponse(async response => {
-    const request = response.request();
-    if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-    const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-    return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
-      result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
-  });
+  const saleApplied = appliedResponse(page);
   await sellBySku(page, ['E2E-1'], 'exact');
   await saleApplied;
   await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();

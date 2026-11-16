@@ -1,9 +1,7 @@
 import { expect } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, cartTotalRow, ordersByClientId, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartTotalRow, ordersByClientId, signIn, tenderCash, test } from './helpers';
 import { appliedResponse } from './helpers';
-import { E2E_RUN } from './ports';
 
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 // OrderCreatePayload v5: charges are fees/shipping; custom items are lines[].custom.
 type Sale = { clientOrderId: string; totalMinor: number;
   fees?: { name: string; amountMinor: number }[];

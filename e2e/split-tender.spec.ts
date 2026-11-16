@@ -1,8 +1,6 @@
 import { expect } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, cartTotalRow, ordersByClientId, signIn, test } from './helpers';
-import { E2E_RUN } from './ports';
+import { addE2E1, adminToken, appliedResponse, backend, captureCommands, cartTotalRow, ordersByClientId, signIn, test } from './helpers';
 
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 type Sale = { clientOrderId: string; totalMinor: number;
   payments: { method: string; amountMinor: number; tenderedMinor?: number; changeMinor?: number }[] };
 
@@ -31,13 +29,7 @@ test('a split card-and-cash sale reaches Medusa once at the till\'s total, with 
   await key('5.00');
   await page.getByTestId('tender-take').click();
   await expect(page.getByTestId('tender-change')).toHaveText('Change €2.00');
-  const applied = page.waitForResponse(async (response) => {
-    const request = response.request();
-    if (request.method() !== 'POST' || response.url() !== `${backend}/tally/v1/commands`) return false;
-    const sales = request.postDataJSON().commands.filter((command: { type: string }) => command.type === 'order.create');
-    return ((await response.json()).results ?? []).some((result: { id: string; status: string }) =>
-      result.status === 'applied' && sales.some((sale: { id: string }) => sale.id === result.id));
-  });
+  const applied = appliedResponse(page);
   await page.getByTestId('tender-complete').click();
   await expect(page.getByLabel(/^Total: \D*5\.00$/)).toBeVisible();
   await expect(page.getByLabel(/^Card terminal: \D*2\.00$/)).toBeVisible();

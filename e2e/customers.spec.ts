@@ -1,8 +1,6 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, createAdminCustomer, ordersByClientId, signIn, tenderCash, test } from './helpers';
-import { E2E_RUN } from './ports';
+import { addE2E1, adminToken, backend, captureCommands, createAdminCustomer, ordersByClientId, signIn, tenderCash, test } from './helpers';
 
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 type Sale = { clientOrderId: string; customer: { customerId: string } };
 async function payCash(page: Page) {
   await page.getByTestId('cart-checkout').click();

@@ -1,10 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureSales, chooseRegion, openArea, ordersByClientId, sellBySku, signIn, stockBySku, tenderCash, test, variantIdBySku } from './helpers';
-import { E2E_RUN } from './ports';
+import { addE2E1, adminToken, backend, captureSales, chooseRegion, credentials, openArea, ordersByClientId, sellBySku, signIn, stockBySku, tenderCash, test, variantIdBySku } from './helpers';
 
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
-const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 const SEARCH_PLACEHOLDER = 'Search or scan barcode / SKU';
 
 // Fills in and submits the sign-in form, like `signIn` (helpers.ts), but without that helper's

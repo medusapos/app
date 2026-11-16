@@ -1,7 +1,8 @@
 import { expect, test as base, type BrowserContext, type Page, type Request, type Response } from '@playwright/test';
 import { E2E_RUN } from './ports';
 
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
+// The e2e Medusa store this run talks to (per-checkout port, e2e/ports.ts).
+export const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 export const credentials = { email: process.env.E2E_EMAIL ?? 'e2e@tally.test', password: process.env.E2E_PASSWORD ?? 'e2e-password' };
 
 // CSP gate (#154, ADR 0002): this auto fixture collects CSP violations in the test's context from its first navigation

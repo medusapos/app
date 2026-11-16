@@ -1,11 +1,9 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, cartLineRow, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartLineRow, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
 import { appliedResponse, saleResults } from './helpers';
-import { E2E_RUN } from './ports';
 
 // Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5, 6, 7] at GET /tally/v1/info,
 // and a discounted sale without charges or custom lines goes out as version 4, with one net "POS discount" adjustment per line.
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const UNSUPPORTED = 'finalize: discounts are not supported by the server yet (order.create v2)';
 type Sale = { clientOrderId: string; lines: { discountMinor?: number }[] };
 const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage.getItem('medusapos.session') ?? 'null')?.capabilities);
