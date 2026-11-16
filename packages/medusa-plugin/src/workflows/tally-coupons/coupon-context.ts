@@ -2,6 +2,7 @@ import type { ComputeActionContext, MedusaContainer } from '@medusajs/framework/
 import { ContainerRegistrationKeys, MathBN, Modules } from '@medusajs/framework/utils'
 import { currencyDecimals, minorToMajor } from '../tally-order-create/money'
 import type { TallyPluginOptions } from '../tally-order-create/run'
+import { pickSaleRegion, saleChannelId } from '../tally-order-create/sale-region'
 
 export type CouponLine = {
   lineId: string; variantId?: string; quantity: number
@@ -18,8 +19,7 @@ export async function buildCouponContext(
   const currency = sale.currency.toLowerCase()
   const decimals = currencyDecimals(currency)
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
-  const { data: stores } = await query.graph({ entity: 'store', fields: ['default_sales_channel_id'] })
-  const salesChannelId = options.salesChannelId ?? stores[0]?.default_sales_channel_id
+  const salesChannelId = await saleChannelId(query, options)
   const { data: channels } = await query.graph({
     entity: 'sales_channels', fields: ['id', 'stock_locations.id'], filters: { id: salesChannelId ?? [] },
   })
@@ -29,10 +29,7 @@ export async function buildCouponContext(
   })
   const country = locations[0]?.address?.country_code?.toLowerCase()
   const { data: regions } = await query.graph({ entity: 'region', fields: ['id', 'currency_code', 'countries.iso_2'] })
-  const matchingRegions = regions.filter(region => region.currency_code.toLowerCase() === currency)
-  const region = matchingRegions.find(region => region.countries?.some(
-    countryEntry => countryEntry.iso_2.toLowerCase() === country,
-  )) ?? matchingRegions[0]
+  const region = pickSaleRegion(regions, currency, country)
   const { data: customers } = await query.graph({
     entity: 'customer', fields: ['id', 'email', 'groups.id'], filters: { id: sale.customerId ?? [] },
   })

@@ -9,6 +9,7 @@ import type { OrderCreatePayloadV3 } from './fiscal-figures'
 import { currencyDecimals, majorToMinor, minorToMajor } from './money'
 import { customerWarnings, figuresWarnings, planOrderCreate, totalWarnings } from './plan'
 import { resumeOrderCreate } from './resume'
+import { pickSaleRegion, saleChannelId } from './sale-region'
 import { mergeStockTopUps, planStockTopUp, stockWarnings as warningsForStock } from './stock'
 import { StoreConfigurationError } from './store-configuration-error'
 import { tallyOrderCreateWorkflow, type StockTopUp } from './workflow'
@@ -58,8 +59,7 @@ export async function runOrderCreate(
     // An existing order may already be paid, so its configuration failures stay transient (ADR 0004).
     const configurationError = (message: string) =>
       existing ? new Error(message) : new StoreConfigurationError(message)
-    const { data: stores } = await query.graph({ entity: 'store', fields: ['default_sales_channel_id'] })
-    const salesChannelId = options.salesChannelId ?? stores[0]?.default_sales_channel_id
+    const salesChannelId = await saleChannelId(query, options)
     const { data: channels } = await query.graph({
       entity: 'sales_channels', fields: ['id', 'stock_locations.id', 'stock_locations.address.*'],
       filters: { id: salesChannelId ?? [] },
@@ -138,10 +138,7 @@ export async function runOrderCreate(
     let byId: { id: string } | null = null
     const createOrder = async (normalised: string | null): Promise<CommandResult | undefined> => {
       const { data: regions } = await query.graph({ entity: 'region', fields: ['id', 'currency_code', 'countries.iso_2'] })
-      const matchingRegions = regions.filter(region => region.currency_code.toLowerCase() === payload.currency.toLowerCase())
-      const region = matchingRegions.find(region => region.countries?.some(
-        country => country.iso_2.toLowerCase() === location.address.country_code.toLowerCase()
-      )) ?? matchingRegions[0]
+      const region = pickSaleRegion(regions, payload.currency, location.address.country_code)
       const { data: variants } = await query.graph({
         entity: 'product_variant', fields: ['id', 'manage_inventory', 'allow_backorder',
           'product.status', 'product.deleted_at', 'product.sales_channels.id',
