@@ -779,6 +779,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     expect(screen.queryByText('redirect:/login')).toBeNull();
   }
 
+  // Walks a 10 s hung save through several screens; on CI it runs near 4.6 s.
   it('offers Continue with no tap once a hung save is confirmed stored; Continue starts a new sale, and Sign out waits for that save', async () => {
     const isStored = vi.fn<(order: PosOrder) => Promise<boolean>>().mockResolvedValueOnce(false).mockResolvedValue(true);
     try {
@@ -825,7 +826,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       expect(screen.getByText('redirect:/login')).toBeTruthy();
       cleanup();
     } finally { vi.useRealTimers(); }
-  });
+  }, 15_000);
 
   it('keeps a deferred 401 pending past Continue while the abandoned hung save is in flight, then signs out once it settles', async () => {
     try {
