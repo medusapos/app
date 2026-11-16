@@ -29,6 +29,7 @@ async function storePriceLabel(page: Page, token: string, region: string): Promi
 
 test('a fresh till chooses its region; Germany does not cover the Copenhagen location (D1)', async ({ page }) => {
   expect(await signIn(page, null)).toBe(true);
+  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Europe', exact: true })).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Germany', exact: true })).toBeVisible();
   await expect(page.getByText('Country', { exact: true })).toHaveCount(0);

@@ -43,7 +43,8 @@ function GatedApp() {
           contentStyle: { backgroundColor: background as string },
           headerTitleStyle: { fontWeight: '600' },
         }}
-      /></AppFrame></OutboxProvider></StorageHealth>
+      ><Stack.Screen name="index" options={{ title: 'Sale' }} />
+      </Stack></AppFrame></OutboxProvider></StorageHealth>
     </LiveTabGate>
   );
 }

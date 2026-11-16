@@ -107,19 +107,19 @@ test('the frame\'s Sale from Settings returns to the same sale, with one Product
 
   await openSettings(page);
   await openArea(page, 'Sale');
-  await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
   await expect(cartBar).toBeVisible();
   // Hidden stack screens stay in the DOM, so this counts every mounted Products screen.
   await expect(page.getByPlaceholder('Search or scan barcode / SKU', { exact: true })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toHaveCount(0);
 });
 
-test('opening /settings directly by URL still lands back on Products', async ({ page }) => {
+test('opening /settings directly by URL still lands back on the sale', async ({ page }) => {
   await signIn(page);
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
   await openArea(page, 'Sale');
-  await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
 });
 
 test('Theme: Dark puts the dark class on <html> and its tokens, the first frame after a reload is dark, and System follows the browser', async ({ page }) => {
