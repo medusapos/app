@@ -32,12 +32,12 @@ afterEach(() => {
 });
 
 describe('AppFrame on a wide window', () => {
-  it('draws the rail with Sale, Orders, Reports and Settings in that order, and no menu button', () => {
+  it('draws the rail with Sale, Orders, Customers, Reports and Settings in that order, and no menu button', () => {
     mount('/');
     expect(screen.getByTestId('app-frame')).toBeTruthy();
     expect(screen.getByTestId('nav-rail')).toBeTruthy();
-    expect(navIds()).toEqual(['nav-item-sale', 'nav-item-orders', 'nav-item-reports', 'nav-item-settings']);
-    expect(['Sale', 'Orders', 'Reports', 'Settings'].map((name) => screen.getByRole('button', { name }).getAttribute('data-testid')))
+    expect(navIds()).toEqual(['nav-item-sale', 'nav-item-orders', 'nav-item-customers', 'nav-item-reports', 'nav-item-settings']);
+    expect(['Sale', 'Orders', 'Customers', 'Reports', 'Settings'].map((name) => screen.getByRole('button', { name }).getAttribute('data-testid')))
       .toEqual(navIds());
     expect(screen.queryByTestId('frame-menu')).toBeNull();
   });
