@@ -5,11 +5,11 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
-  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText,
+  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
-  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
+  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
@@ -235,6 +235,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const drafts = draftsCollection(orders);
   const { parked, discard } = useParkedSales(drafts);
   const [parkedOpen, setParkedOpen] = useState(false);
+  const [switchRefusal, setSwitchRefusal] = useState<string | null>(null);
+  const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
   const [customerOpen, setCustomerOpen] = useState(false);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
@@ -359,6 +361,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
+    <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
+      onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
+    {switchRefusal ? <Text testID="open-sale-refusal" accessibilityRole="alert" className="px-3 py-1 text-destructive">{switchRefusal}</Text> : null}
     {voidOpen && <AlertDialog open onOpenChange={(next) => { if (!next) setVoidOpen(false); }}>
       <AlertDialogContent testID="cart-void-dialog">
         <AlertDialogHeader><AlertDialogTitle>Void this sale?</AlertDialogTitle></AlertDialogHeader>
