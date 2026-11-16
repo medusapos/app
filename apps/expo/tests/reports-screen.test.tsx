@@ -83,26 +83,36 @@ function closure(overrides: Partial<Closure> = {}): Closure {
 }
 
 describe('ReportsScreen', () => {
-  it('shows today\'s sales, per method, and what is left out', async () => {
+  it('shows today\'s sales room and what is left out', async () => {
     await store.orders.insert(order(1200, 'cash'));
     await store.orders.insert(order(800, 'external', { syncStatus: 'pending' }));
     await store.orders.insert(order(500, 'cash', { currency: 'USD' }));
     mount();
     const ctx = closureContext('EUR', { name: 'Test shop' });
-    expect((await screen.findByTestId('reports-sales-count')).textContent).toBe('2');
-    expect(screen.getByTestId('reports-sales-gross').textContent).toBe(ctx.formatMoney('20.00'));
-    expect(screen.getByTestId('reports-method-cash').textContent).toBe(ctx.formatMoney('12.00'));
-    const card = screen.getByTestId('reports-method-external');
-    expect(card.textContent).toBe(ctx.formatMoney('8.00'));
-    expect(within(card.parentElement!).getByText('Card')).toBeTruthy();
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('20.00')));
+    expect(screen.getByTestId('card-orders-figure').textContent).toBe('2');
     expect(screen.getByTestId('reports-not-sent').textContent).toBe('1 sale not sent yet');
     expect(screen.getByTestId('reports-left-out').textContent).toBe('1 order in another currency left out');
   });
   it('shows empty states when there are no sales or closures today', async () => {
     mount();
-    expect((await screen.findByTestId('reports-sales-empty')).textContent).toBe('No sales yet today');
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    expect(screen.getByTestId('card-orders-empty')).toBeTruthy();
     expect((await screen.findByTestId('closures-empty')).textContent).toBe('No closures yet today');
     expect(screen.queryByTestId('closures-export')).toBeNull();
+  });
+  it('limits the sales room to pending orders when Not sent is chosen', async () => {
+    await store.orders.insert(order(1200, 'cash'));
+    await store.orders.insert(order(800, 'external', { syncStatus: 'pending' }));
+    await store.orders.insert(order(500, 'cash', { currency: 'USD', syncStatus: 'pending' }));
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('20.00')));
+    fireEvent.click(screen.getByTestId('sales-filter-status'));
+    fireEvent.click(screen.getByTestId('sales-filter-status-option-pending'));
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('8.00')));
+    expect(screen.getByTestId('card-orders-figure').textContent).toBe('1');
   });
   it('lists today\'s closures of the bound register, newest first, with variance', async () => {
     const closures = registerCollections(store.orders).closures;
