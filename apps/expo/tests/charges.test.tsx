@@ -31,6 +31,10 @@ vi.mock('../lib/store-settings', async (original) => ({
 let store: Awaited<ReturnType<typeof openOrderStore>>;
 const record = vi.fn(async (_order: PosOrder) => {});
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
+function openMenu(name?: string) {
+  fireEvent.click(screen.getByTestId('cart-add-menu'));
+  if (name) fireEvent.click(screen.getByRole('menuitem', { name }));
+}
 beforeEach(async () => {
   setWindowWidth(1280);
   const data = new Map<string, string>();
@@ -79,25 +83,28 @@ async function totalMinor() {
   return amount;
 }
 
-it('offers Add charge when the store accepts order.create 5', async () => {
+it('offers Add Fee when the store accepts order.create 5', async () => {
   await start();
-  expect(screen.getByRole('button', { name: 'Add charge' })).toBeTruthy();
+  openMenu();
+  expect(screen.getByRole('menuitem', { name: 'Add Fee' })).toBeTruthy();
 });
 
-it('hides Add charge from a store below order.create 5', async () => {
+it('hides Add Fee from a store below order.create 5', async () => {
   const context = vi.mocked(useSession).getMockImplementation()!();
   const session = { ...context.session!, capabilities: { ...context.session!.capabilities, orderCreate: 4 } };
   vi.mocked(useSession).mockReturnValue({ ...context, session });
   capabilities.mockResolvedValue(session.capabilities);
   await start();
-  expect(screen.queryByRole('button', { name: 'Add charge' })).toBeNull();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  openMenu();
+  expect(screen.queryByRole('menuitem', { name: 'Add Fee' })).toBeNull();
 });
 
 it('a fee added at the till shows in the cart and raises the total', async () => {
   await start();
   fireEvent.click(screen.getByTestId('product-tile-Shirt'));
   const before = await totalMinor();
-  click('Add charge');
+  openMenu('Add Fee');
   const form = within(screen.getByTestId('charge-form'));
   fireEvent.change(form.getByLabelText('Name'), { target: { value: 'Gift wrap' } });
   fireEvent.change(form.getByLabelText('Amount'), { target: { value: '2.00' } });

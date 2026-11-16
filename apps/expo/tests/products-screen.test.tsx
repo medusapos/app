@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { useState, type ReactNode } from 'react';
 import { BehaviorSubject } from 'rxjs';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
+import { PortalHost } from '@tallyui/primitives';
 import { SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
 import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
 import { createOrderBuilder, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
@@ -326,11 +327,15 @@ async function mount(signedIn = true, orders = false, name?: string, email = 'ad
   });
   const page = orders ? <OrdersScreen /> : <ProductsScreen />;
   let view!: ReturnType<typeof render>;
-  await act(async () => { view = render(<SessionProvider>{framed ? <AppFrame signedIn>{page}</AppFrame> : page}</SessionProvider>); });
+  await act(async () => { view = render(<SessionProvider>{framed ? <AppFrame signedIn>{page}</AppFrame> : page}<PortalHost /></SessionProvider>); });
   return view;
 }
 // As _layout.tsx renders the sale: under the app frame, on the wide window beforeEach sets (the rail).
 const mountFramed = () => mount(true, false, undefined, undefined, true);
+function openMenu(name: string) {
+  fireEvent.click(screen.getByTestId('cart-add-menu'));
+  fireEvent.click(screen.getByRole('menuitem', { name }));
+}
 
 function savedSale(): PosOrder {
   const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
@@ -514,16 +519,17 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(search()).toBeTruthy();
   }, 15000);
 
-  it('at 1280 wide shows the catalogue and cart with no bar; the order discount scrolls and pay is pinned', async () => {
+  it('at 1280 wide shows the catalogue and cart with no bar; the discount opens from the menu and pay is pinned', async () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(search()).toBeTruthy();
     expect(screen.queryByRole('button', { name: /^Open cart|^Cart is empty$/ })).toBeNull();
-    // CartPanel's scroll region isn't a separate testID; the Order discount button comes after the last line instead.
+    // CartPanel's scroll region isn't a separate testID; the footer comes after the last line.
     const lastLine = cartLine('Shirt');
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
-    const orderDiscount = screen.getByRole('button', { name: 'Order discount' });
-    expect(lastLine.compareDocumentPosition(orderDiscount) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(lastLine.compareDocumentPosition(screen.getByTestId('cart-footer')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    openMenu('Add Discount');
+    fireEvent.click(within(screen.getByTestId('cart-add-dialog')).getByRole('button', { name: 'Cancel' }));
     const footer = within(screen.getByTestId('cart-footer'));
     expect(footer.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
     expect(footer.getByText('Total').parentElement!.textContent).toBe('Total€15.00');

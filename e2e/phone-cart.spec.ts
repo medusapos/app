@@ -47,13 +47,13 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   await expect(bar).toHaveAccessibleName(/^Open cart, 3 items, /);
   await expect(page.getByText('Cart · 3 items', { exact: true })).toBeVisible();
   await bar.click();
-  // With the order discount form open the two lines overflow: the list scrolls under the pinned footer, not the page.
-  await page.getByRole('button', { name: 'Order discount', exact: true }).click();
+  // The order discount dialog's Cancel fits; closing it restores the pinned total and checkout.
+  await page.getByTestId('cart-add-menu').click();
+  await page.getByRole('menuitem', { name: 'Add Discount', exact: true }).click();
   const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
-  await cancel.scrollIntoViewIfNeeded();
-  for (const target of [cancel, total, checkout]) await expect(target).toBeInViewport();
-  await expect(page.getByText('E2E product 1', { exact: true })).not.toBeInViewport();
+  await expect(cancel).toBeInViewport();
   await cancel.click();
+  for (const target of [total, checkout]) await expect(target).toBeInViewport();
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(3.88);
   await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toBeVisible();
 });
