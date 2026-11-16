@@ -8,6 +8,7 @@ import { openOrderStore } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
+import { sessionFixture } from './session-fixture';
 import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
@@ -41,9 +42,7 @@ beforeEach(async () => {
   const session = { baseUrl: `https://charges-${crypto.randomUUID()}.test`, email: 'admin@store.test', token: 'jwt',
     capabilities: { orderCreate: 5, taxRounding: { granularity: 'per_order' as const, mode: 'half_away_from_zero' as const },
       lineTax: { none: false, classes: false } } };
-  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(),
-    reportNoPosAccess: vi.fn(), signOutNotice: null,
-    mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
+  vi.mocked(useSession).mockReturnValue(sessionFixture(session));
   capabilities.mockResolvedValue(session.capabilities);
   // Inclusive prices make a €2.00 charge increase the payable total by €2.00.
   storeSettings.mockResolvedValue({ currency: 'EUR', pricesIncludeTax: true, taxRatesPpm: { default: 250000 },

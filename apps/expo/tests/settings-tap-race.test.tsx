@@ -10,6 +10,7 @@ import { setWindowWidth } from './window-width';
 import { useOutboxContext } from '../lib/outbox-context';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { useSession } from '../lib/session-context';
+import { sessionFixture } from './session-fixture';
 import { fetchStoreSettings, saveCachedPricing, type StoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { useRegister } from '../lib/register-context';
@@ -76,9 +77,7 @@ beforeEach(() => {
   capabilities.mockResolvedValue({ orderCreate: 3, register: 1,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
-  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(),
-    reportNoPosAccess: vi.fn(), signOutNotice: null,
-    mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
+  vi.mocked(useSession).mockReturnValue(sessionFixture(session));
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
     record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
