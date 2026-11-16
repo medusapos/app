@@ -14,6 +14,7 @@ import {
 } from '@tallyui/pos';
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
+import { CartAddMenu } from '../components/cart-add-menu';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
@@ -348,16 +349,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
-    <View className="flex-row justify-end gap-4 px-3">
+    <View className="flex-row items-center justify-end gap-4 px-3">
       {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
         className="min-h-11 justify-center">
         <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
       </Pressable>}
+      <CartAddMenu sale={cartSale} />
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
-    <Cart sale={cartSale} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
+    <Cart sale={cartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       quickDiscounts={QUICK_DISCOUNTS}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}

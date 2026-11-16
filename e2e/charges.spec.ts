@@ -14,11 +14,11 @@ test('a sale with a fee, shipping and a custom item reaches Medusa once at the t
   await signIn(page);
   await addE2E1(page);
   for (const [kind, name, amount] of [
-    ['Fee', 'Gift wrap', '2.00'], ['Shipping', 'Local delivery', '4.95'], ['Custom item', 'Engraving', '3.00'],
+    ['Add Fee', 'Gift wrap', '2.00'], ['Add Shipping', 'Local delivery', '4.95'], ['Add Miscellaneous Product', 'Engraving', '3.00'],
   ]) {
-    await page.getByRole('button', { name: 'Add charge', exact: true }).click();
+    await page.getByTestId('cart-add-menu').click();
+    await page.getByRole('menuitem', { name: kind, exact: true }).click();
     const form = page.getByTestId('charge-form');
-    await form.getByRole('button', { name: kind, exact: true }).click();
     await form.getByLabel('Name', { exact: true }).fill(name);
     await form.getByLabel('Amount', { exact: true }).fill(amount);
     await form.getByRole('button', { name: 'Apply', exact: true }).click();
