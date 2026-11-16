@@ -66,6 +66,7 @@ vi.mock('../lib/session', async (importOriginal) => ({
 // store-settings-flow.test.tsx covers the settings states; here the store settings are ready.
 vi.mock('@tallyui/pos', async (importOriginal) => ({
   ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(), useOrderOutbox: vi.fn(),
+  watchFresh: vi.fn(() => ({ subscribe: () => ({ unsubscribe: vi.fn() }) })),
 }));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
