@@ -9,7 +9,7 @@ import {
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
-  catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
+  capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
 } from '@tallyui/pos';
 
@@ -22,6 +22,7 @@ import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
+import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
@@ -51,13 +52,10 @@ const STATE_LABEL: Record<SyncState, string> = {
   offline: 'Offline · cached catalogue',
 };
 
-const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Merchant-facing name of @medusapos/medusa-plugin (#129).
 const PLUGIN_NAME = 'the Medusa POS plugin';
 // TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
 const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
-// Read by assistive tech as Sign out's description, out of the layout, so the header never shifts.
-const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
 // ADR 0009: phone mode below 600 px.
 const PHONE_BREAKPOINT = 600;
@@ -324,6 +322,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     : <Tender sale={sale} />;
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
+  const [userSheetOpen, setUserSheetOpen] = useState(false);
+  const displayName = session.name || session.email;
+  const initials = (session.name ? session.name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join('') : session.email[0]).toUpperCase();
   // The receipt's and the last closure's store (ADR 0018).
   const receiptStore = { name: settings.storeName, address: settings.location.addressLine };
   // On a phone the count (and a close to finish) is in the cart view, so it opens there even with an empty cart.
@@ -399,19 +400,20 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         headerLeft: () => <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
-        {/* Disabled in place while a save is pending (never hidden), so the header doesn't shift; the lock message is its description. */}
-        <Pressable accessibilityRole="button" disabled={signOutLocked} accessibilityHint={signOutLocked ? lockMessage : undefined}
-          aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
-          onPress={() => { if (!signOutLocked) signOut(); }}
-          className={`min-h-11 justify-center ${signOutLocked ? 'opacity-50' : ''}`}>
-          <Text className="text-foreground">Sign out</Text>
+        <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
+          onPress={() => setUserSheetOpen(true)} className="min-h-11 flex-row items-center gap-2">
+          <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
+          {!phone && <Text className="text-foreground">{displayName}</Text>}
         </Pressable>
-        {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{lockMessage}</Text> : null}
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
       {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
       <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={online} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
+      <UserSheet session={session} displayName={displayName} initials={initials} storeName={receiptStore.name} currency={pricing.currency}
+        outbox={summarizeOutboxHealth(outboxState, registerOutbox.state)} parkedSales={parked.length} paidMinor={capturedMinor(sale.order.payments)}
+        open={userSheetOpen && sale.stage.kind !== 'receipt'} onOpenChange={setUserSheetOpen} onRegister={() => setPanelOpen(true)}
+        signOut={signOut} signOutLocked={signOutLocked} lockMessage={lockMessage} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
         open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />

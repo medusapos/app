@@ -5,15 +5,15 @@ import { addE2E1, cartLineQuantity, cartTotalRow, discount, sellBySku, signIn, t
 // order discount scroll, and the totals and pay buttons stay pinned. Sells only E2E-1 and E2E-2.
 test.use({ viewport: { width: 360, height: 740 } });
 
-// The "Sign out" header action's bounding box lies within the 360 px viewport (job #71 follow-up).
-async function expectSignOutInViewport(page: Page) {
-  const box = (await page.getByRole('button', { name: 'Sign out', exact: true }).boundingBox())!;
+// The account header action's bounding box lies within the 360 px viewport (job #71 follow-up).
+async function expectAccountInViewport(page: Page) {
+  const box = (await page.getByTestId('user-menu').boundingBox())!;
   expect(box.x + box.width).toBeLessThanOrEqual(360);
 }
 
 test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart bar counts items', async ({ page }) => {
   await signIn(page);
-  await expectSignOutInViewport(page);
+  await expectAccountInViewport(page);
   await addE2E1(page);
   await addE2E1(page);
   const bar = page.getByRole('button', { name: /^Open cart, / });
@@ -23,7 +23,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   expect([box.width, box.height >= 56]).toEqual([336, true]);
   await bar.click();
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
-  await expectSignOutInViewport(page);
+  await expectAccountInViewport(page);
   await discount(page, 'line', 'Percent', '10');
   await discount(page, 'order', 'Amount', '0.50');
   const orderChip = page.getByRole('button', { name: /^Remove discount .*0\.50/ });
@@ -59,7 +59,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
 });
 
 // ADR 0015 (#82 review): an automatic sign-out during a save that can't finish waits, with a note that fits at 360 px.
-test('a sign-out requested during a stuck save waits, and its note fits beside Sign out at 360 px', async ({ page }) => {
+test('a sign-out requested during a stuck save waits, and its note fits at 360 px and Sign out stays locked', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
   await page.getByRole('button', { name: /^Open cart, / }).click();
@@ -74,12 +74,16 @@ test('a sign-out requested during a stuck save waits, and its note fits beside S
   await page.evaluate(() => (window as unknown as { __medusaposReportUnauthorized: () => void }).__medusaposReportUnauthorized());
   const note = page.getByText('Signed out after this sale is saved', { exact: true });
   await expect(note).toBeVisible();
-  await expectSignOutInViewport(page);
+  await expectAccountInViewport(page);
   const box = (await note.boundingBox())!;
   expect([box.x >= 0, box.x + box.width <= 360]).toEqual([true, true]);
   // Still signed in, on the sale's tender.
   await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toBeVisible();
   await expect(page).not.toHaveURL(/\/login/);
+
+  await page.getByTestId('user-menu').click();
+  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeDisabled();
+  await page.getByTestId('user-sheet-close').click();
 
   // The save lands: the receipt shows, and the deferred sign-out waits for it to clear, then runs.
   await page.evaluate(() => (window as unknown as { __medusaposReleaseOrderInserts: () => void }).__medusaposReleaseOrderInserts());

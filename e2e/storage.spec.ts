@@ -101,7 +101,9 @@ test('signing out and in again in the same tab rebuilds the SQLite catalogue und
   const caches = await recordedCaches(page);
   expect(caches).toHaveLength(1);
 
+  await page.getByTestId('user-menu').click();
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+  await page.getByTestId('switch-confirm-confirm').click();
   await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
   // Sign-out forgets the cache it removes, so the second sign-in records it afresh.
   expect(await recordedCaches(page)).toEqual([]);
