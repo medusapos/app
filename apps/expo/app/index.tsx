@@ -381,7 +381,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
 
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Products', headerShown: sale.stage.kind !== 'receipt',
+      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
         headerLeft: () => <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.

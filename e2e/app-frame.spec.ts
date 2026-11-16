@@ -26,8 +26,8 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await expect(page.getByTestId('nav-drawer')).toHaveCount(0);
       }
       await openArea(page, 'Sale');
-      await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
-      // Back to the sale dismisses to it: one Products screen is mounted (hidden stack screens stay in the DOM).
+      await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
+      // Back to the sale dismisses to it: one sale screen is mounted (hidden stack screens stay in the DOM).
       await expect(page.getByPlaceholder('Search or scan barcode / SKU', { exact: true })).toHaveCount(1);
     });
   });

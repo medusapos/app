@@ -29,7 +29,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   const orderChip = page.getByRole('button', { name: /^Remove discount .*0\.50/ });
   await expect(orderChip).toBeVisible();
   await page.getByRole('button', { name: 'Products', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Products', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
   await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, \D*3\.88$/);
   await bar.click();
   const total = cartTotalRow(page, 'Total');
