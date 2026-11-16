@@ -148,7 +148,8 @@ describe('ProductsScreen catalogue', () => {
     expect(input.value).toBe('123456');
     fireEvent.click(within(screen.getByTestId('nav-rail')).getByRole('button', { name: 'Orders' }));
     expect(router.push).toHaveBeenCalledWith('/orders');
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(signOutButton());
+    fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
     expect(localStorage.getItem('medusapos.session')).toBeNull();
   });
 
@@ -210,8 +211,8 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
-      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.textContent))
-      .toEqual(['Sign out', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest']);
+      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.dataset.testid === 'user-menu' ? button.getAttribute('aria-label') : button.textContent))
+      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -353,6 +354,10 @@ async function mount(signedIn = true, orders = false, name?: string, email = 'ad
 }
 // As _layout.tsx renders the sale: under the app frame, on the wide window beforeEach sets (the rail).
 const mountFramed = () => mount(true, false, undefined, undefined, true);
+function signOutButton(description?: string) {
+  if (!screen.queryByTestId('user-sheet')) fireEvent.click(screen.getByTestId('user-menu'));
+  return screen.getByRole('button', { name: 'Sign out', ...(description ? { description } : {}) });
+}
 function openMenu(name: string) {
   fireEvent.click(screen.getByTestId('cart-add-menu'));
   fireEvent.click(screen.getByRole('menuitem', { name }));
@@ -568,7 +573,8 @@ describe('ProductsScreen session routing', () => {
   });
   it('clears the session and redirects to login when Sign out is pressed', async () => {
     await mount();
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(signOutButton());
+    fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
     expect(localStorage.getItem('medusapos.session')).toBeNull();
     // The screen's own <Redirect href="/login">, with no extra navigation.
     expect(screen.getByText('redirect:/login')).toBeTruthy();
@@ -577,14 +583,16 @@ describe('ProductsScreen session routing', () => {
   it('a demo account lands back on /demo after Sign out (#196)', async () => {
     storeConfig.demo = true;
     await mount(true, false, undefined, 'cashier@demo.medusapos.com');
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(signOutButton());
+    fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
     expect(localStorage.getItem('medusapos.session')).toBeNull();
     expect(screen.getByText('redirect:/demo')).toBeTruthy();
   });
   it('a demo email on a non-demo build still lands on /login (#196)', async () => {
     storeConfig.demo = false;
     await mount(true, false, undefined, 'cashier@demo.medusapos.com');
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(signOutButton());
+    fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
     expect(screen.getByText('redirect:/login')).toBeTruthy();
   });
   it('signs out when product replication reports unauthorized', async () => {
@@ -595,7 +603,7 @@ describe('ProductsScreen session routing', () => {
     act(() => onUnauthorized());
     expect(localStorage.getItem('medusapos.session')).toBeNull();
     expect(screen.getByText('redirect:/login')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+    expect(screen.queryByTestId('user-menu')).toBeNull();
   });
 });
 
@@ -616,17 +624,19 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     await mountFramed();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await payByCard();
-    expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBeNull();
+    expect(signOutButton().getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(screen.getByTestId('user-sheet-close'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     expect(record).toHaveBeenCalledTimes(1);
 
     // Held: disabled in place, described by the tender's lock message, and a press signs nothing out.
-    const signOut = screen.getByRole('button', { name: 'Sign out', description: SALE_SAVING });
+    const signOut = signOutButton(SALE_SAVING);
     expect(signOut.getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(signOut);
     expect(signedOut()).toBe(false);
     expect(router.replace).not.toHaveBeenCalled();
     expect(screen.queryByText('redirect:/login')).toBeNull();
+    fireEvent.click(screen.getByTestId('user-sheet-close'));
     // The frame's Orders, Reports and Settings stay live: they push onto the stack, over the mounted sale.
     const rail = within(screen.getByTestId('nav-rail'));
     fireEvent.click(rail.getByRole('button', { name: 'Orders' }));
@@ -637,21 +647,25 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     if (settles === 'stored') {
       await act(async () => { save(); });
       expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+      expect(screen.queryByTestId('user-sheet')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'New sale' }));
     } else {
       await act(async () => { fail(new Error('Storage full')); });
       const continueButton = await screen.findByRole('button', { name: 'Continue' });
       expect(isStored).toHaveBeenCalledTimes(1);
       // Confirmed stored, but still locked until Continue is pressed.
-      expect(screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled')).toBe('true');
-      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signOutButton().getAttribute('aria-disabled')).toBe('true');
+      fireEvent.click(signOutButton());
       expect(signedOut()).toBe(false);
+      fireEvent.click(screen.getByTestId('user-sheet-close'));
       fireEvent.click(continueButton);
       expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
     }
-    const unlocked = screen.getByRole('button', { name: 'Sign out' });
+    const unlocked = signOutButton();
     expect(unlocked.getAttribute('aria-disabled')).toBeNull();
     expect(screen.queryByText(SALE_SAVING)).toBeNull();
     fireEvent.click(unlocked);
+    fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
     expect(signedOut()).toBe(true);
     expect(screen.getByText('redirect:/login')).toBeTruthy();
   });
@@ -697,12 +711,16 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     expect(screen.getByRole('alert').textContent).toBe('The sale could not be saved: Storage full');
     expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    fireEvent.click(signOutButton());
     expect(signedOut()).toBe(false);
     expect(router.replace).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('user-sheet-close'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
     expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+    expect(screen.queryByTestId('user-sheet')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'New sale' }));
+    fireEvent.click(signOutButton());
+    fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
     expect(signedOut()).toBe(true);
   });
 
@@ -716,7 +734,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
   function HungSessionProbe() { hungSession = useSession(); return null; }
   function HungOutboxProbe() { hungOutbox = useOutboxContext(); return null; }
   const hungTree = () => <SessionProvider><HungSessionProbe />
-    <OutboxProvider><HungOutboxProbe /><ProductsScreen /></OutboxProvider></SessionProvider>;
+    <OutboxProvider><HungOutboxProbe /><ProductsScreen /><PortalHost /></OutboxProvider></SessionProvider>;
   let hungView: ReturnType<typeof render>;
   async function hungSale(isStored: (order: PosOrder) => Promise<boolean>) {
     const record = vi.fn((_order: PosOrder) => new Promise<void>((resolve, reject) => { settle = { resolve, reject }; }));
@@ -742,13 +760,17 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
     return record.mock.calls[0][0];
   }
   const advance = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
-  const signOutDisabled = () => screen.getByRole('button', { name: 'Sign out' }).getAttribute('aria-disabled');
+  const signOutDisabled = () => {
+    const disabled = signOutButton().getAttribute('aria-disabled');
+    fireEvent.click(screen.getByTestId('user-sheet-close'));
+    return disabled;
+  };
   /** Continue on a hung save confirmed stored at the first 5 s check: the new sale shows, Sign out waits for the old save. */
   async function continuePastHungSave() {
     await advance(5000);
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
     expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
-    const signOut = screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING });
+    const signOut = signOutButton(EARLIER_SALE_SAVING);
     expect(signOut.getAttribute('aria-disabled')).toBe('true');
     expect(screen.queryByText(SALE_SAVING)).toBeNull();
     fireEvent.click(signOut);
@@ -774,16 +796,18 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       const continueButton = screen.getByRole('button', { name: 'Continue' });
       // Confirmed stored, but still locked until Continue is pressed.
       expect(signOutDisabled()).toBe('true');
-      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      fireEvent.click(signOutButton());
       expect(signedOut()).toBe(false);
+      fireEvent.click(screen.getByTestId('user-sheet-close'));
       fireEvent.click(continueButton);
       expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
       // The #85 review: the abandoned save is still in flight, and RxDB's close would wait on it, so Sign out stays
       // locked, described as an earlier sale's. The next sale isn't held.
-      expect(screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING }).getAttribute('aria-disabled')).toBe('true');
+      expect(signOutButton(EARLIER_SALE_SAVING).getAttribute('aria-disabled')).toBe('true');
       expect(screen.queryByText(SALE_SAVING)).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      fireEvent.click(signOutButton());
       expect(signedOut()).toBe(false);
+      fireEvent.click(screen.getByTestId('user-sheet-close'));
       fireEvent.click(screen.getByTestId('product-tile-Shirt'));
       expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
       // The poll has stopped.
@@ -794,7 +818,8 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       await act(async () => { settle.resolve(); });
       expect(signOutDisabled()).toBeNull();
       expect(screen.queryByText(EARLIER_SALE_SAVING)).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      fireEvent.click(signOutButton());
+      fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
       expect(signedOut()).toBe(true);
       expect(screen.getByText('redirect:/login')).toBeTruthy();
       cleanup();
@@ -827,7 +852,8 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
       expect(screen.queryByText(/could not be saved/)).toBeNull();
       expect(signOutDisabled()).toBeNull();
-      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      fireEvent.click(signOutButton());
+      fireEvent.click(screen.getByTestId('switch-confirm-confirm'));
       expect(signedOut()).toBe(true);
       cleanup();
     } finally { vi.useRealTimers(); }
@@ -841,8 +867,8 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       expect(isStored).toHaveBeenCalledTimes(3);
       expect(screen.queryByRole('button', { name: 'Continue' })).toBeNull();
       expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
-      expect(screen.getByRole('button', { name: 'Sign out', description: SALE_SAVING }).getAttribute('aria-disabled')).toBe('true');
-      fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
+      expect(signOutButton(SALE_SAVING).getAttribute('aria-disabled')).toBe('true');
+      fireEvent.click(signOutButton());
       expect(signedOut()).toBe(false);
       expect(screen.queryByText('redirect:/login')).toBeNull();
       cleanup();
@@ -858,7 +884,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       vi.mocked(useStoreSettings).mockReturnValue({ state: 'unsupported' });
       await act(async () => { hungView.rerender(hungTree()); });
       expect(screen.getByText('This backend can\'t supply store settings')).toBeTruthy();
-      expect(screen.queryByRole('button', { name: 'Sign out' })).toBeNull();
+      expect(screen.queryByTestId('user-menu')).toBeNull();
       // (g) #86 review, item 1: the earlier-sale note shows above the settings screen too, not only the sale screen.
       expect(screen.getByText(EARLIER_SALE_SAVING)).toBeTruthy();
       act(() => { hungSession.reportUnauthorized(); });
@@ -899,7 +925,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
         expect(screen.queryByText('Signed out after this sale is saved')).toBeNull();
       }
       // The accessible description is unchanged.
-      expect(screen.getByRole('button', { name: 'Sign out', description: EARLIER_SALE_SAVING })).toBeTruthy();
+      expect(signOutButton(EARLIER_SALE_SAVING)).toBeTruthy();
 
       await act(async () => { settle.resolve(); });
       expect(visible(EARLIER_SALE_SAVING)).toBeNull();
@@ -973,7 +999,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
 
   async function mountTill(token = inADay()) {
     saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', token });
-    await act(async () => { render(<SessionProvider><SessionProbe /><ProductsScreen /></SessionProvider>); });
+    await act(async () => { render(<SessionProvider><SessionProbe /><ProductsScreen /><PortalHost /></SessionProvider>); });
   }
   it('resumes a stopped product pull after the session is renewed in place, never on mount', async () => {
     const resumePull = vi.fn();
@@ -1014,7 +1040,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
 
   const paths: Record<string, { token?: () => string; arm?: () => void; request: () => void }> = {
     // Disabled while saving (a press does nothing); the request it would make is the context's signOut.
-    'the Sign out button': { request: () => { fireEvent.click(button('Sign out')); context.signOut(); } },
+    'the Sign out button': { request: () => { fireEvent.click(signOutButton()); fireEvent.click(screen.getByTestId('user-sheet-close')); context.signOut(); } },
     'a product replication 401': { request: () => vi.mocked(useReplicatedProducts).mock.lastCall![2]() },
     'the capabilities check': {
       arm: () => { capabilities.mockImplementation(held); },
@@ -1035,6 +1061,7 @@ describe('ProductsScreen: every sign-out waits for a saving sale', () => {
     const path = paths[name];
     path.arm?.();
     await failedSave(path.token?.());
+    if (name === 'the Sign out button') fireEvent.click(screen.getByTestId('user-menu'));
     await act(async () => { path.request(); });
     // The sale stays mounted on its tender, and the session stays.
     expect(button('Complete sale')).toBeTruthy();

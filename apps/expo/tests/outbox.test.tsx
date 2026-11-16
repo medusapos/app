@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { PortalHost } from '@tallyui/primitives';
 import type { RxCollection } from 'rxdb';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
@@ -591,7 +592,7 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
 
   function App({ products = true, orders = false }: { products?: boolean; orders?: boolean }) {
     return <SessionProvider><OutboxProvider>
-      <CaptureOutbox />{products ? <ProductsScreen /> : null}{orders ? <OrdersScreen /> : null}
+      <CaptureOutbox />{products ? <ProductsScreen /> : null}{orders ? <OrdersScreen /> : null}<PortalHost />
     </OutboxProvider></SessionProvider>;
   }
   async function tenderShirtByCard(withOrders = false) {
@@ -621,7 +622,12 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     });
   }
   const approve = () => act(async () => { fireEvent.click(button('Complete sale')); });
-  const signOutDisabled = () => button('Sign out').getAttribute('aria-disabled') === 'true';
+  const signOutDisabled = () => {
+    fireEvent.click(screen.getByTestId('user-menu'));
+    const disabled = button('Sign out').getAttribute('aria-disabled') === 'true';
+    fireEvent.click(screen.getByTestId('user-sheet-close'));
+    return disabled;
+  };
 
   it('offers Continue once isStored confirms an order whose insert wrote and then threw; Continue starts a new sale, with one order and one command', async () => {
     let respond!: (response: Response) => void;
