@@ -22,6 +22,7 @@
     "@tallyui/connector-medusa": "3.20.1",
     "@tallyui/core": "3.20.1",
     "@tallyui/database": "3.20.1",
+    "@tallyui/extensions": "file:../../vendor/tallyui-extensions-0.1.0-e29f9fca.tgz",
     "@tallyui/pos": "3.20.1",
     "@tallyui/primitives": "3.20.1",
     "@tallyui/storage-sqlite": "3.20.1",

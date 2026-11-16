@@ -77,6 +77,9 @@ importers:
       '@tallyui/database':
         specifier: 3.20.1
         version: 3.20.1(@tallyui/core@3.20.1(react@19.2.4)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.2.4)(rxjs@7.8.2))(rxjs@7.8.2))(mongodb@6.21.0)(nats@2.29.3)(react@19.2.4)
+      '@tallyui/extensions':
+        specifier: file:../../vendor/tallyui-extensions-0.1.0-e29f9fca.tgz
+        version: file:vendor/tallyui-extensions-0.1.0-e29f9fca.tgz(react@19.2.4)
       '@tallyui/pos':
         specifier: 3.20.1
         version: 3.20.1(@tallyui/core@3.20.1(react@19.2.4)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.2.4)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.2.4)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.2.4)(rxjs@7.8.2))(rxjs@7.8.2)
@@ -1889,6 +1892,12 @@ packages:
     resolution: {integrity: sha512-PWSDLWN+S0JDaza3P3qnH5FWx680zj5gpyqGPfQggbj/YhaTKPtPfLZu1EqQkxkY1LuWUAOa3CpzrJFsvzJ9uQ==}
     peerDependencies:
       '@tallyui/core': 3.20.1
+
+  '@tallyui/extensions@file:vendor/tallyui-extensions-0.1.0-e29f9fca.tgz':
+    resolution: {integrity: sha512-KwbPiA0jIIkoGu2TP/pWes0FEmq9nVqDlsntOcQ0Xy2XKzdCZeCY/DPEKPAdhfwyOtjNJLyCeB7zvzoo8Ex6cw==, tarball: file:vendor/tallyui-extensions-0.1.0-e29f9fca.tgz}
+    version: 0.1.0
+    peerDependencies:
+      react: '>=18.0.0'
 
   '@tallyui/pos@3.20.1':
     resolution: {integrity: sha512-UgoZyUnYhw77qqV7SnSQNGUhX/vqEeyu+Vq/WKN8lguBZw8NGmhiOk+p987DGHtBwl7ExS0JtTrPCcwim0s+5g==}
@@ -7714,6 +7723,10 @@ snapshots:
       - supports-color
       - utf-8-validate
       - vue
+
+  '@tallyui/extensions@file:vendor/tallyui-extensions-0.1.0-e29f9fca.tgz(react@19.2.4)':
+    dependencies:
+      react: 19.2.4
 
   '@tallyui/pos@3.20.1(@tallyui/core@3.20.1(react@19.2.4)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.2.4)(rxjs@7.8.2))(rxjs@7.8.2))(react@19.2.4)(rxdb@17.5.0(mongodb@6.21.0)(nats@2.29.3)(react@19.2.4)(rxjs@7.8.2))(rxjs@7.8.2)':
     dependencies:
