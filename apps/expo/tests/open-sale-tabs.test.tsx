@@ -80,6 +80,28 @@ it('shows an empty tab strip and New for a blank cart', async () => {
   expect(within(screen.getByTestId('new-sale-tab')).getByText('New')).toBeTruthy();
 });
 
+it('shows an empty parked-sales chip before the strip without a header link', async () => {
+  await mount();
+  const chip = screen.getByTestId('parked-sales-chip');
+  const strip = screen.getByTestId('open-sale-tabs');
+  expect(chip.textContent).toBe('0 ▴');
+  expect(button('Parked sales')).toBe(chip);
+  expect(chip.parentElement?.firstElementChild).toBe(chip);
+  expect(chip.nextElementSibling).toBe(strip.parentElement);
+  expect(screen.queryByText('Parked sales')).toBeNull();
+});
+
+it('counts a parked sale and opens the parked sales sheet from the chip', async () => {
+  await mount(); add();
+  await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
+  const chip = screen.getByTestId('parked-sales-chip');
+  await waitFor(() => expect(chip.textContent).toBe('1 ▴'));
+  expect(button('Parked sales (1)')).toBe(chip);
+  expect(screen.queryByTestId('parked-sales')).toBeNull();
+  fireEvent.click(chip);
+  expect(await screen.findByTestId('parked-sales')).toBeTruthy();
+});
+
 it('shows the added line as a selected Guest · Shirt tab', async () => {
   await mount(); add();
   const tabs = within(screen.getByRole('tablist')).getAllByRole('tab');
