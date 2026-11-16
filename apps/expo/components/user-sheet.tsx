@@ -1,11 +1,16 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
-import { Button, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text } from '@tallyui/components';
+import { Path } from 'react-native-svg';
+import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import { switchWarnings, type SwitchWarningInput } from '@tallyui/pos';
+import { presetRange, switchWarnings, watchFresh, type PosOrder, type SwitchWarningInput } from '@tallyui/pos';
+import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
+import { localDayStartIso, salesRoomFigures } from '../lib/reports';
 import type { Session } from '../lib/session';
 
+const ExternalLinkIcon = createSvgIcon('ExternalLinkIcon', () => <><Path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" />
+  <Path d="M11 13l9 -9" /><Path d="M15 4h5v5" /></>);
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Read by assistive tech as Sign out's description, out of the layout, so the sheet never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
@@ -16,7 +21,18 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
   signOut: () => void; signOutLocked: boolean; lockMessage: string;
   outbox: SwitchWarningInput['outbox']; parkedSales: number; paidMinor: number;
 }) {
-  const { register, registerName } = useRegister();
+  const { register, registerName, boundRegisterId } = useRegister();
+  const { orders } = useOutboxContext();
+  const [sales, setSales] = useState<PosOrder[]>([]);
+  const filters = useMemo<SalesFilters>(() => ({
+    preset: 'today', range: presetRange('today', new Date(), 'device'), compare: 'previous',
+    status: 'all', cashierId: null, registerId: boundRegisterId || null,
+  }), [open, boundRegisterId]);
+  useEffect(() => {
+    if (!open || !orders) return;
+    const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(filters.range.from) } } }).subscribe(setSales);
+    return () => subscription.unsubscribe();
+  }, [open, orders, filters]);
   const [confirm, setConfirm] = useState<'signOut' | 'cashier' | null>(null);
   const warningInput = { outbox, parkedSales, paidMinor, sessionStatus: register.session?.status };
   const drawerOpen = register.session?.status === 'open' || register.session?.status === 'counting';
@@ -31,6 +47,10 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           </Text>
         </View>
       </View>
+      {orders && <View testID="user-sheet-sales-today" className="flex-row items-center justify-between gap-2">
+        <Text className="text-muted-foreground">Sales today</Text>
+        <Text className="font-semibold tabular-nums">{formatMoney({ amount: salesRoomFigures(sales, filters, currency).figures.totals.grossMinor, currency })}</Text>
+      </View>}
       {drawerOpen && <View testID="user-sheet-drawer" className="gap-2 rounded-md border border-border p-3">
         <Text>In the drawer</Text>
         {!register.blind && <Text className="text-xl font-semibold tabular-nums">{formatMoney({ amount: register.expected.cash ?? 0, currency })}</Text>}
@@ -44,14 +64,15 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           <Text>Hand the till to the next cashier</Text><Text>›</Text>
         </Pressable>
       </View>}
-      <Pressable testID="user-sheet-admin" accessibilityRole="link" className="min-h-11 justify-center"
+      <View className="mt-auto border-t border-border">
+      <Pressable testID="user-sheet-admin" accessibilityRole="link" className="min-h-11 flex-row items-center gap-2 text-muted-foreground"
         onPress={() => {
           const url = `${session.baseUrl}/app`;
           if (Platform.OS === 'web') window.open(url, '_blank', 'noopener,noreferrer');
           else void import('expo-linking').then((Linking) => Linking.openURL(url))
             .catch((error) => console.warn('Failed to open admin URL:', error));
-        }}><Text>Medusa Admin</Text></Pressable>
-      <View className="mt-auto gap-2">
+        }}><ExternalLinkIcon size={14} /><Text className="text-sm text-muted-foreground">Medusa Admin</Text></Pressable>
+      <View className="flex-row justify-between gap-2 border-t border-border pt-4">
         <Button testID="user-sheet-sign-out" variant="outline" className="min-h-11" accessibilityLabel="Sign out"
           disabled={signOutLocked} accessibilityHint={signOutLocked ? lockMessage : undefined}
           aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
@@ -64,6 +85,7 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
         </Button>
         {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{lockMessage}</Text> : null}
         <Button testID="user-sheet-close" variant="outline" className="min-h-11" onPress={() => onOpenChange(false)}><Text>Close</Text></Button>
+      </View>
       </View>
     </DialogContent>
   </Dialog>

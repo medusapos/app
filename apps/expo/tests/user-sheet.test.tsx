@@ -2,11 +2,12 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { PortalHost } from '@tallyui/primitives';
-import { useParkedSales, useStoreSettings } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, presetRange, useParkedSales, useStoreSettings, watchFresh, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
+import { localDayStartIso } from '../lib/reports';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { fetchStoreSettings, saveCachedSettings } from '../lib/store-settings';
@@ -28,14 +29,20 @@ vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/register-context', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
+const sales = vi.hoisted(() => ({ orders: [] as PosOrder[], unsubscribe: vi.fn() }));
 vi.mock('@tallyui/pos', async (importOriginal) => ({
   ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(), useParkedSales: vi.fn(),
+  watchFresh: vi.fn(() => ({ subscribe: (next: (orders: PosOrder[]) => void) => {
+    next(sales.orders);
+    return { unsubscribe: sales.unsubscribe };
+  } })),
 }));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
 
 beforeEach(() => {
+  sales.orders = [];
   setWindowWidth(1280, 800);
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -67,6 +74,42 @@ async function mount(name?: string) {
 }
 const open = () => fireEvent.click(screen.getByTestId('user-menu'));
 
+it('shows today’s gross sales for the bound register and store currency', async () => {
+  sales.orders = ([[1200, 'register-1', 'EUR'], [350, 'register-1', 'EUR'], [900, 'register-2', 'EUR'], [800, 'register-1', 'USD']] as const)
+    .map(([amount, registerId, currency]) => {
+      const builder = createOrderBuilder({ currency, taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+      builder.addLine({ productId: 'shirt', name: 'Shirt', unitPrice: { amount, currency } });
+      builder.addPayment({ method: 'cash', amountMinor: amount });
+      return { ...finalizeOrder(builder.getSnapshot()), createdAt: new Date().toISOString(), registerId };
+    });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-sales-today').textContent).toBe('Sales today€15.50');
+  expect(watchFresh).toHaveBeenCalledExactlyOnceWith(useOutboxContext().orders,
+    { selector: { createdAt: { $gte: localDayStartIso(presetRange('today', new Date(), 'device').from) } } });
+});
+
+it('shows zero sales today with no orders', async () => {
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-sales-today').textContent).toBe('Sales today€0.00');
+});
+
+it('omits sales today and does not subscribe while orders is null', async () => {
+  vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: null });
+  await mount(); open();
+  expect(screen.queryByTestId('user-sheet-sales-today')).toBeNull();
+  expect(watchFresh).not.toHaveBeenCalled();
+});
+
+it('subscribes only while open and unsubscribes when closed', async () => {
+  await mount();
+  expect(watchFresh).not.toHaveBeenCalled();
+  open();
+  expect(watchFresh).toHaveBeenCalledTimes(1);
+  expect(sales.unsubscribe).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByTestId('user-sheet-close'));
+  expect(sales.unsubscribe).toHaveBeenCalledTimes(1);
+});
+
 it.each([['Alex Smith', 'AS', 1280], [undefined, 'A', 1280], ['Alex Smith', 'AS', 360]] as const)(
   'shows the account identity for %s (%s) at %i px', async (name, initials, width) => {
     setWindowWidth(width, 800);
@@ -79,6 +122,11 @@ it.each([['Alex Smith', 'AS', 1280], [undefined, 'A', 1280], ['Alex Smith', 'AS'
     open();
     expect(screen.getByTestId('user-sheet-name').textContent).toBe(displayName);
     expect(screen.getByTestId('user-sheet-context').textContent).toBe(`${name ? 'admin@store.test · ' : ''}Test shop · Register 1`);
+    const buttons = screen.getByTestId('user-sheet-sign-out').parentElement!;
+    expect(buttons.firstElementChild).toBe(screen.getByTestId('user-sheet-sign-out'));
+    expect(buttons.lastElementChild).toBe(screen.getByTestId('user-sheet-close'));
+    expect(buttons.previousElementSibling).toBe(screen.getByTestId('user-sheet-admin'));
+    expect(screen.getByTestId('user-sheet-admin').querySelector('svg')).not.toBeNull();
   });
 
 it('omits the drawer without an open session and skips an empty register name', async () => {
