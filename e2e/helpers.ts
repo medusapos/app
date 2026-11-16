@@ -466,10 +466,13 @@ async function openLineDiscount(page: Page) {
   await page.getByTestId(/^(price|quantity)-popover-action-discount$/).click();
 }
 
-// Applies a discount from the cart's one line (its Discount action) or the Order discount button.
+// Applies a discount from the cart's one line (its Discount action) or the cart's + menu.
 export async function discount(page: Page, opener: 'line' | 'order', type: 'Percent' | 'Amount', value: string) {
   if (opener === 'line') await openLineDiscount(page);
-  else await page.getByRole('button', { name: 'Order discount', exact: true }).click();
+  else {
+    await page.getByTestId('cart-add-menu').click();
+    await page.getByRole('menuitem', { name: 'Add Discount', exact: true }).click();
+  }
   await page.getByRole('button', { name: type, exact: true }).click();
   await page.getByLabel('Discount value', { exact: true }).fill(value);
   await page.getByRole('button', { name: 'Apply', exact: true }).click();

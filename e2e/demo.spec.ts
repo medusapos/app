@@ -77,8 +77,10 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await expect(page.getByTestId('customer-dialog').getByTestId('customer-picker-search')).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByTestId('customer-dialog')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Add charge', exact: true }).click();
+  await page.getByTestId('cart-add-menu').click();
+  await page.getByRole('menuitem', { name: 'Add Fee', exact: true }).click();
   await expect(page.getByTestId('charge-form')).toBeVisible();
+  await page.getByTestId('charge-form').getByRole('button', { name: 'Cancel', exact: true }).click();
   // The one line's price opens v2's price keypad popover.
   const checkoutBefore = await page.getByTestId('cart-checkout').boundingBox();
   await page.getByTestId('price-popover-trigger').click();
