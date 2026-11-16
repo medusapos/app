@@ -14,6 +14,12 @@ beforeEach(() => { send.mockReset().mockResolvedValue(undefined); onUnauthorized
 afterEach(cleanup);
 
 describe('EmailReceipt', () => {
+  it('shows the email receipt placeholder after opening the form', () => {
+    render(<EmailReceipt {...props} />);
+    fireEvent.click(screen.getByTestId('receipt-email-open'));
+    expect(screen.getByLabelText('Receipt email address').getAttribute('placeholder')).toBe('Email receipt to');
+  });
+
   it('starts closed and hidden from print, then prefills the form without sending', () => {
     const { container } = render(<EmailReceipt {...props} />);
     expect(container.firstElementChild?.getAttribute('data-print')).toBe('hide');

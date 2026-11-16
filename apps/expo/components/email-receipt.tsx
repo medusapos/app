@@ -31,7 +31,7 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
       setSending(false);
     }
   }
-  return <View dataSet={{ print: 'hide' }} className="gap-2">
+  return <View dataSet={{ print: 'hide' }} className="w-full self-stretch gap-2">
     {!open ? <Button variant="outline" testID="receipt-email-open" onPress={() => setOpen(true)}>
       <Text>Email receipt</Text>
     </Button> : sentTo !== null ? <>
@@ -42,7 +42,7 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
     </> : <>
       <View className="flex-row items-center gap-2">
         <Input className="flex-1"><Input.Field value={text} onChangeText={setText}
-          accessibilityLabel="Receipt email address" placeholder="Email address" keyboardType="email-address"
+          accessibilityLabel="Receipt email address" placeholder="Email receipt to" keyboardType="email-address"
           autoCapitalize="none" autoComplete="email" /></Input>
         <Button testID="receipt-email-send" disabled={!text.trim() || sending || !online || orderId === undefined}
           onPress={() => { void submit(); }}><Text>{sending ? 'Sending…' : 'Send'}</Text></Button>
