@@ -365,11 +365,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
     <View className="flex-row items-stretch">
-      <Pressable testID="parked-sales-chip" accessibilityRole="button"
-        accessibilityLabel={`Parked sales${parked.length ? ` (${parked.length})` : ''}`} onPress={() => setParkedOpen(true)}
+      {parked.length > 0 && <Pressable testID="parked-sales-chip" accessibilityRole="button"
+        accessibilityLabel={`Parked sales (${parked.length})`} onPress={() => setParkedOpen(true)}
         className="h-14 justify-center border-t border-r border-border bg-card px-3">
         <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
-      </Pressable>
+      </Pressable>}
       <View className="min-w-0 flex-1">
         <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
           onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />

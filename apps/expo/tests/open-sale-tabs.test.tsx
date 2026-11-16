@@ -80,14 +80,9 @@ it('shows an empty tab strip and New for a blank cart', async () => {
   expect(within(screen.getByTestId('new-sale-tab')).getByText('New')).toBeTruthy();
 });
 
-it('shows an empty parked-sales chip before the strip without a header link', async () => {
+it('shows no parked-sales chip when nothing is parked, and no header link', async () => {
   await mount();
-  const chip = screen.getByTestId('parked-sales-chip');
-  const strip = screen.getByTestId('open-sale-tabs');
-  expect(chip.textContent).toBe('0 ▴');
-  expect(button('Parked sales')).toBe(chip);
-  expect(chip.parentElement?.firstElementChild).toBe(chip);
-  expect(chip.nextElementSibling).toBe(strip.parentElement);
+  expect(screen.queryByTestId('parked-sales-chip')).toBeNull();
   expect(screen.queryByText('Parked sales')).toBeNull();
 });
 
@@ -97,6 +92,9 @@ it('counts a parked sale and opens the parked sales sheet from the chip', async 
   const chip = screen.getByTestId('parked-sales-chip');
   await waitFor(() => expect(chip.textContent).toBe('1 ▴'));
   expect(button('Parked sales (1)')).toBe(chip);
+  const strip = screen.getByTestId('open-sale-tabs');
+  expect(chip.parentElement?.firstElementChild).toBe(chip);
+  expect(chip.nextElementSibling).toBe(strip.parentElement);
   expect(screen.queryByTestId('parked-sales')).toBeNull();
   fireEvent.click(chip);
   expect(await screen.findByTestId('parked-sales')).toBeTruthy();
