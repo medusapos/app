@@ -1,13 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { exportCsv, selectClosureRows, type Closure, type PosOrder } from '@tallyui/pos';
-import { closureScopeFor, closuresCsvFilename, closureVarianceMinor, csvLabel, downloadCsv, localDay, localDayStartIso, summarizeSales } from './reports';
+import type { SalesFilters } from '@tallyui/components';
+import { createOrderBuilder, exportCsv, finalizeOrder, selectClosureRows, type Closure, type PosOrder } from '@tallyui/pos';
+import { closureScopeFor, closuresCsvFilename, closureVarianceMinor, csvLabel, downloadCsv, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures } from './reports';
 
 const today = '2026-11-10';
 const storeKey = 'https://store.test';
 function order(overrides: Partial<PosOrder> = {}): PosOrder {
-  return { id: 'order', createdAt: new Date(2026, 10, 10, 12, 0).toISOString(), currency: 'EUR', totalMinor: 1200,
-    payments: [{ id: 'cash', method: 'cash', amountMinor: 1200 }], syncStatus: 'applied', ...overrides } as PosOrder;
+  const currency = overrides.currency ?? 'EUR';
+  const builder = createOrderBuilder({ currency, taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+  builder.addLine({ productId: 'shirt', name: 'Shirt', unitPrice: { amount: overrides.totalMinor ?? 1200, currency } });
+  builder.addPayment({ method: 'cash', amountMinor: overrides.totalMinor ?? 1200 });
+  return { ...finalizeOrder(builder.getSnapshot()), id: 'order', createdAt: new Date(2026, 10, 10, 12, 0).toISOString(),
+    syncStatus: 'applied', ...overrides };
 }
 function closure(overrides: Partial<Closure> = {}): Closure {
   return {
@@ -37,42 +42,75 @@ describe('localDay', () => {
   });
 });
 
-describe('summarizeSales', () => {
-  it('counts today\'s orders of every sync status and totals them', () => {
-    const summary = summarizeSales([
+describe('paymentMethodLabel', () => {
+  it('capitalises other methods', () => {
+    expect(paymentMethodLabel('gift_card')).toBe('Gift_card');
+  });
+});
+
+describe('salesRoomFigures', () => {
+  const filters: SalesFilters = { preset: 'today', range: { from: today, to: today }, compare: 'previous',
+    status: 'all', cashierId: null, registerId: null };
+  it('labels cash and external payments Cash and Card', () => {
+    const { figures } = salesRoomFigures([
+      order(), order({ id: 'card', payments: [{ id: 'card', method: 'external', amountMinor: 1200 }] }),
+    ], filters, 'EUR');
+    expect(figures.totals).toMatchObject({ orderCount: 2, grossMinor: 2400 });
+    expect(figures.payments.rows).toHaveLength(2);
+    expect(figures.payments.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'cash', label: 'Cash', amountMinor: 1200, orders: 1 }),
+      expect.objectContaining({ method: 'external', label: 'Card', amountMinor: 1200, orders: 1 }),
+    ]));
+  });
+  it('totals today\'s in-currency orders of every sync status and counts the notes', () => {
+    const summary = salesRoomFigures([
       order(),
       order({ id: 'pending', syncStatus: 'pending', totalMinor: 800, payments: [{ id: 'card', method: 'external', amountMinor: 800 }] }),
       order({ id: 'rejected', syncStatus: 'rejected', totalMinor: 500, payments: [{ id: 'cash', method: 'cash', amountMinor: 500 }] }),
-      order({ id: 'yesterday', createdAt: new Date(2026, 10, 9, 23, 30).toISOString() }),
-    ], today, 'EUR');
-    expect(summary).toEqual({ count: 3, grossMinor: 2500, notSentCount: 1, leftOutCount: 0, methods: [
-      { method: 'cash', label: 'Cash', amountMinor: 1700 }, { method: 'external', label: 'Card', amountMinor: 800 },
-    ] });
+      order({ id: 'usd', currency: 'USD', syncStatus: 'pending', totalMinor: 700 }),
+    ], { ...filters, cashierId: 'ignored' }, 'eur');
+    expect(summary.figures.totals).toMatchObject({ orderCount: 3, grossMinor: 2500 });
+    expect(summary).toMatchObject({ notSentCount: 1, leftOutCount: 1 });
+  });
+  it.each([
+    { status: 'pending', registerId: null, grossMinor: 1300, orderCount: 2, notSentCount: 2 },
+    { status: 'all', registerId: 'register-1', grossMinor: 2000, orderCount: 2, notSentCount: 1 },
+    { status: 'pending', registerId: 'register-1', grossMinor: 800, orderCount: 1, notSentCount: 1 },
+  ])('restricts status=$status and register=$registerId', ({ status, registerId, grossMinor, orderCount, notSentCount }) => {
+    const summary = salesRoomFigures([
+      order({ registerId: 'register-1' }),
+      order({ id: 'pending-1', registerId: 'register-1', syncStatus: 'pending', totalMinor: 800 }),
+      order({ id: 'pending-2', registerId: 'register-2', syncStatus: 'pending', totalMinor: 500 }),
+      order({ id: 'rejected', registerId: 'register-2', syncStatus: 'rejected', totalMinor: 400 }),
+      order({ id: 'usd', registerId: 'register-2', currency: 'USD', totalMinor: 700 }),
+    ], { ...filters, status, registerId }, 'EUR');
+    expect(summary.figures.totals).toMatchObject({ grossMinor, orderCount });
+    expect(summary).toMatchObject({ notSentCount, leftOutCount: 1 });
+  });
+  it('puts yesterday\'s orders in the comparison, outside today\'s totals and notes', () => {
+    const createdAt = new Date(2026, 10, 9, 23, 30).toISOString();
+    const summary = salesRoomFigures([
+      order(), order({ id: 'yesterday', createdAt, syncStatus: 'pending', totalMinor: 800 }),
+      order({ id: 'usd', createdAt, currency: 'USD' }),
+    ], filters, 'EUR');
+    expect(summary.figures.totals).toMatchObject({ orderCount: 1, grossMinor: 1200 });
+    expect(summary.figures.comparison?.totals).toMatchObject({ orderCount: 1, grossMinor: 800 });
+    expect(summary).toMatchObject({ notSentCount: 0, leftOutCount: 0 });
   });
   it('splits a split-tender order across its methods', () => {
-    const summary = summarizeSales([order({ totalMinor: 2000, payments: [
+    const { figures } = salesRoomFigures([order({ totalMinor: 2000, payments: [
       { id: 'cash', method: 'cash', amountMinor: 500 }, { id: 'card', method: 'external', amountMinor: 1500 },
-    ] })], today, 'EUR');
-    expect(summary).toMatchObject({ count: 1, grossMinor: 2000, methods: [
-      { method: 'cash', label: 'Cash', amountMinor: 500 }, { method: 'external', label: 'Card', amountMinor: 1500 },
-    ] });
-  });
-  it('leaves out orders in another currency', () => {
-    const summary = summarizeSales([
-      order({ totalMinor: 1000, payments: [{ id: 'cash', method: 'cash', amountMinor: 1000 }] }),
-      order({ id: 'usd', currency: 'USD', syncStatus: 'pending', totalMinor: 700, payments: [{ id: 'card', method: 'external', amountMinor: 700 }] }),
-    ], today, 'eur');
-    expect(summary).toEqual({ count: 1, grossMinor: 1000, leftOutCount: 1, notSentCount: 0,
-      methods: [{ method: 'cash', label: 'Cash', amountMinor: 1000 }] });
-  });
-  it('orders methods cash, external, then others alphabetically', () => {
-    const payments = ['voucher', 'external', 'cash', 'account'].map((method) => ({ id: method, method, amountMinor: 100 }));
-    const summary = summarizeSales([order({ totalMinor: 400, payments: payments as PosOrder['payments'] })], today, 'EUR');
-    expect(summary.methods.map((entry) => entry.method)).toEqual(['cash', 'external', 'account', 'voucher']);
-    expect(summary.methods[3].label).toBe('Voucher');
+    ] })], filters, 'EUR');
+    expect(figures.totals).toMatchObject({ orderCount: 1, grossMinor: 2000 });
+    expect(figures.payments.rows).toHaveLength(2);
+    expect(figures.payments.rows).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: 'cash', amountMinor: 500 }),
+      expect.objectContaining({ method: 'external', amountMinor: 1500 }),
+    ]));
   });
   it('is empty for a day with no orders', () => {
-    expect(summarizeSales([], today, 'EUR')).toEqual({ count: 0, grossMinor: 0, methods: [], notSentCount: 0, leftOutCount: 0 });
+    expect(salesRoomFigures([], filters, 'EUR')).toMatchObject({ notSentCount: 0, leftOutCount: 0,
+      figures: { totals: { orderCount: 0, grossMinor: 0 }, payments: { rows: [] } } });
   });
 });
 

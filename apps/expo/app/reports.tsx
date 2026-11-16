@@ -1,7 +1,8 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { buildClosureDocument, exportCsv, minorToDecimal, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
+import { SalesRoom, type SalesFilters } from '@tallyui/components';
+import { buildClosureDocument, comparisonRange, exportCsv, minorToDecimal, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
 import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext } from '../components/register-close';
@@ -9,7 +10,7 @@ import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
 import { useRegister } from '../lib/register-context';
-import { closureScopeFor, closuresCsvFilename, closureVarianceMinor, csvLabel, downloadCsv, localDay, localDayStartIso, summarizeSales } from '../lib/reports';
+import { closureScopeFor, closuresCsvFilename, closureVarianceMinor, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures } from '../lib/reports';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
@@ -25,6 +26,10 @@ export default function ReportsScreen() {
   const { orders } = useOutboxContext();
   const { boundRegisterId, registers, register, registerName } = useRegister();
   const [today] = useState(() => localDay(new Date()));
+  const [filters, setFilters] = useState<SalesFilters>(() => ({
+    preset: 'today', range: presetRange('today', new Date(), 'device'), compare: 'previous',
+    status: 'all', cashierId: null, registerId: null,
+  }));
   const [sales, setSales] = useState<PosOrder[]>([]);
   const [closures, setClosures] = useState<Closure[]>([]);
   const [exportError, setExportError] = useState(false);
@@ -33,9 +38,11 @@ export default function ReportsScreen() {
 
   useEffect(() => {
     if (!orders) return;
-    const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(today) } } }).subscribe(setSales);
+    const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
+    const from = filters.range.from < compare.from ? filters.range.from : compare.from;
+    const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(from) } } }).subscribe(setSales);
     return () => subscription.unsubscribe();
-  }, [orders, today]);
+  }, [orders, filters]);
   useEffect(() => {
     if (!orders) return;
     const subscription = watchFresh(registerCollections(orders).closures, { selector: {} }).subscribe(setClosures);
@@ -50,21 +57,18 @@ export default function ReportsScreen() {
   if (!session) return <Redirect href="/login" />;
   const scope = closureScopeFor({ today, boundRegisterId, storeKey: session.baseUrl });
   const rows = selectClosureRows(closures, scope, 'device');
-  const summary = currency ? summarizeSales(sales, today, currency) : null;
+  const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
 
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
     <Stack.Screen options={{ title: 'Reports', headerLeft: () => <FrameMenuButton /> }} />
-    <View className="w-full max-w-md gap-4 self-center">
-      <Text testID="reports-sales-heading" className="text-lg font-semibold text-foreground">Today's sales</Text>
+    <View className="w-full max-w-5xl gap-4 self-center">
+      <Text testID="reports-sales-heading" className="text-lg font-semibold text-foreground">Sales</Text>
       {orders === null ? <Text testID="reports-loading">Loading…</Text>
         : currency === null ? <Text testID="reports-no-currency">Store settings are not loaded yet.</Text>
         : ctx && summary ? <>
-          {summary.count === 0 ? <Text testID="reports-sales-empty">No sales yet today</Text> : <>
-            <Row label="Orders" value={String(summary.count)} testID="reports-sales-count" />
-            <Row label="Total" value={ctx.formatMoney(minorToDecimal(summary.grossMinor, ctx.exponent))} testID="reports-sales-gross" />
-            {summary.methods.map((entry) => <Row key={entry.method} label={entry.label}
-              value={ctx.formatMoney(minorToDecimal(entry.amountMinor, ctx.exponent))} testID={`reports-method-${entry.method}`} />)}
-          </>}
+          <SalesRoom figures={summary.figures} currency={currency} filters={filters} onFiltersChange={setFilters} timezone="device"
+            statusOptions={[{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }]}
+            cashierOptions={[]} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
           {summary.notSentCount > 0 ? <Text testID="reports-not-sent">
             {`${summary.notSentCount} ${summary.notSentCount === 1 ? 'sale' : 'sales'} not sent yet`}
           </Text> : null}

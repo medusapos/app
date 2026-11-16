@@ -1,4 +1,5 @@
-import { clampClosureScope, type Closure, type ClosureScope, type PosOrder } from '@tallyui/pos';
+import type { SalesFilters } from '@tallyui/components';
+import { clampClosureScope, comparisonRange, inRange, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureScope, type PosOrder, type SalesFigures } from '@tallyui/pos';
 
 export function localDay(at: Date): string {
   return `${String(at.getFullYear()).padStart(4, '0')}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
@@ -13,34 +14,22 @@ export function paymentMethodLabel(method: string): string {
   return method === 'cash' ? 'Cash' : method === 'external' ? 'Card' : method.charAt(0).toUpperCase() + method.slice(1);
 }
 
-export type SalesMethodTotal = { method: string; label: string; amountMinor: number };
-export type SalesSummary = {
-  count: number; grossMinor: number; methods: SalesMethodTotal[]; notSentCount: number; leftOutCount: number;
-};
-
-export function summarizeSales(orders: readonly PosOrder[], day: string, currency: string): SalesSummary {
-  const summary: SalesSummary = { count: 0, grossMinor: 0, methods: [], notSentCount: 0, leftOutCount: 0 };
-  const methods = new Map<string, number>();
-  for (const order of orders) {
-    if (localDay(new Date(order.createdAt)) !== day) continue;
-    if (order.currency.toUpperCase() !== currency.toUpperCase()) {
-      summary.leftOutCount += 1;
-      continue;
-    }
-    summary.count += 1;
-    summary.grossMinor += order.totalMinor;
-    if (order.syncStatus === 'pending') summary.notSentCount += 1;
-    for (const payment of order.payments) {
-      methods.set(payment.method, (methods.get(payment.method) ?? 0) + payment.amountMinor);
-    }
-  }
-  summary.methods = [...methods].map(([method, amountMinor]) => ({ method, label: paymentMethodLabel(method), amountMinor }))
-    .sort((a, b) => {
-      const rankA = a.method === 'cash' ? 0 : a.method === 'external' ? 1 : 2;
-      const rankB = b.method === 'cash' ? 0 : b.method === 'external' ? 1 : 2;
-      return rankA - rankB || a.method.localeCompare(b.method);
-    });
-  return summary;
+export function salesRoomFigures(orders: readonly PosOrder[], filters: SalesFilters, currency: string): {
+  figures: SalesFigures; notSentCount: number; leftOutCount: number;
+} {
+  const counted = orders.filter((order) => order.currency.toUpperCase() === currency.toUpperCase()
+    && (filters.registerId === null || order.registerId === filters.registerId)
+    && (filters.status === 'all' || order.syncStatus === filters.status));
+  const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
+  const reportOrders = counted.map((order) => reportOrderFromPosOrder(order)).map((order) => ({
+    ...order, payments: order.payments.map((payment) => ({ ...payment, label: payment.label || paymentMethodLabel(payment.method) })),
+  }));
+  return {
+    figures: salesFigures({ orders: reportOrders, range: filters.range, compare, timezone: 'device' }),
+    notSentCount: counted.filter((order) => order.syncStatus === 'pending' && inRange(order.createdAt, filters.range, 'device')).length,
+    leftOutCount: orders.filter((order) => order.currency.toUpperCase() !== currency.toUpperCase()
+      && inRange(order.createdAt, filters.range, 'device')).length,
+  };
 }
 
 export function closureScopeFor(input: { today: string; boundRegisterId: string | null | undefined; storeKey: string }): ClosureScope {
