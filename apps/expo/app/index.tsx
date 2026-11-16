@@ -350,9 +350,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         className="min-h-11 justify-center">
         <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
       </Pressable>}
-      <Pressable accessibilityRole="button" onPress={() => setParkedOpen(true)} className="min-h-11 justify-center">
-        <Text className="text-foreground">Parked sales{parked.length ? ` (${parked.length})` : ''}</Text>
-      </Pressable>
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
@@ -361,8 +358,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
-    <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
-      onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
+    <View className="flex-row items-stretch">
+      <Pressable testID="parked-sales-chip" accessibilityRole="button"
+        accessibilityLabel={`Parked sales${parked.length ? ` (${parked.length})` : ''}`} onPress={() => setParkedOpen(true)}
+        className="h-14 justify-center border-t border-r border-border bg-card px-3">
+        <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
+      </Pressable>
+      <View className="min-w-0 flex-1">
+        <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
+          onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
+      </View>
+    </View>
     {switchRefusal ? <Text testID="open-sale-refusal" accessibilityRole="alert" className="px-3 py-1 text-destructive">{switchRefusal}</Text> : null}
     {voidOpen && <AlertDialog open onOpenChange={(next) => { if (!next) setVoidOpen(false); }}>
       <AlertDialogContent testID="cart-void-dialog">
