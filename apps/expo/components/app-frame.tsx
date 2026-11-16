@@ -17,6 +17,9 @@ const CartIcon = createSvgIcon('CartIcon', () => <><Circle cx={6} cy={19} r={2} 
   <Path d="M17 17H6V3H4" /><Path d="M6 5l14 1-1 7H6" /></>);
 const ReceiptIcon = createSvgIcon('ReceiptIcon', () => <><Path d="M6 2h12v20l-3-2-3 2-3-2-3 2z" />
   <Line x1={9} y1={7} x2={15} y2={7} /><Line x1={9} y1={11} x2={15} y2={11} /><Line x1={9} y1={15} x2={13} y2={15} /></>);
+const UsersIcon = createSvgIcon('UsersIcon', () => <><Path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
+  <Path d="M3 21v-2a4 4 0 0 1 4 -4h4a4 4 0 0 1 4 4v2" />
+  <Path d="M16 3.13a4 4 0 0 1 0 7.75" /><Path d="M21 21v-2a4 4 0 0 0 -3 -3.85" /></>);
 const ChartIcon = createSvgIcon('ChartIcon', () => <><Line x1={4} y1={20} x2={20} y2={20} /><Rect x={5} y={11} width={3} height={6} />
   <Rect x={10.5} y={6} width={3} height={11} /><Rect x={16} y={9} width={3} height={8} /></>);
 // v2's `settings` glyph (tabler), as the Woo app's rail draws it.
@@ -28,13 +31,14 @@ const MenuIcon = createSvgIcon('MenuIcon', () => <><Line x1={4} y1={6} x2={20} y
 export const FRAME_AREAS = [
   { id: 'sale', label: 'Sale', href: '/', Icon: CartIcon },
   { id: 'orders', label: 'Orders', href: '/orders', Icon: ReceiptIcon },
+  { id: 'customers', label: 'Customers', href: '/customers', Icon: UsersIcon },
   { id: 'reports', label: 'Reports', href: '/reports', Icon: ChartIcon },
   { id: 'settings', label: 'Settings', href: '/settings', Icon: GearIcon, group: 'bottom' },
 ] as const;
 export type FrameAreaId = (typeof FRAME_AREAS)[number]['id'];
 const hrefOf = (id: FrameAreaId) => FRAME_AREAS.find((area) => area.id === id)!.href;
 
-/** The area a pathname is, or null off the four areas (/login, /demo). */
+/** The area a pathname is, or null off the five areas (/login, /demo). */
 export function frameAreaFor(pathname: string): FrameAreaId | null {
   return FRAME_AREAS.find((area) => area.href === pathname)?.id ?? null;
 }

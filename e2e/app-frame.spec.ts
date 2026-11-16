@@ -7,7 +7,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
     test.use({ viewport });
     const wide = viewport.width >= 768;
 
-    test('the frame reaches Orders, Reports, Settings and back to the sale', async ({ page }) => {
+    test('the frame reaches Orders, Customers, Reports, Settings and back to the sale', async ({ page }) => {
       await signIn(page);
       await expect(page.getByTestId('app-frame')).toBeVisible();
       await expect(page.getByTestId('nav-rail')).toHaveCount(wide ? 1 : 0);
@@ -19,7 +19,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
         await page.getByTestId('nav-drawer-backdrop').click({ position: { x: viewport.width - 20, y: viewport.height / 2 } });
         await expect(page.getByTestId('nav-drawer')).toHaveCount(0);
       }
-      for (const [area, path] of [['Orders', /\/orders$/], ['Reports', /\/reports$/], ['Settings', /\/settings$/]] as const) {
+      for (const [area, path] of [['Orders', /\/orders$/], ['Customers', /\/customers$/], ['Reports', /\/reports$/], ['Settings', /\/settings$/]] as const) {
         await openArea(page, area);
         await expect(page).toHaveURL(path);
         await expect(page.getByRole('heading', { name: area, exact: true })).toBeVisible();
