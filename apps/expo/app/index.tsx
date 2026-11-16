@@ -62,6 +62,8 @@ const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: '
 const PHONE_BREAKPOINT = 600;
 // ADR 0009: from 600 px, products and cart stack in a column below 900 px and sit in a row from 900 px.
 const ROW_BREAKPOINT = 900;
+// WCPOS 2 Cart Settings › Quick Discounts default.
+const QUICK_DISCOUNTS = [5, 10, 15];
 
 // The rate arrives in parts per million (10 000 ppm = 1%).
 const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
@@ -356,6 +358,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
+      quickDiscounts={QUICK_DISCOUNTS}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
