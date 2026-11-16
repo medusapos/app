@@ -96,9 +96,11 @@ test('signed in as the demo cashier, each What to try action has its control', a
   expect(await page.getByTestId('cart-checkout').boundingBox()).toEqual(checkoutBefore);
   await page.getByTestId('price-popover-cancel').click();
   await expect(page.getByTestId('price-popover')).toHaveCount(0);
-  await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
-  await expect(page.getByTestId('parked-sales-park')).toBeVisible();
-  await page.getByTestId('parked-sales-dismiss').click();
+  await page.getByTestId('new-sale-tab').click();
+  await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
+  await expect(page.getByTestId(/^parked-resume-/)).toBeVisible();
+  await page.getByTestId(/^parked-resume-/).click();
   await page.getByTestId('cart-checkout').click();
   await expect(page.getByTestId('tender-method-external')).toBeVisible();
   await expect(page.getByTestId('tender-method-cash')).toBeVisible();

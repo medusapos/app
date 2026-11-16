@@ -81,9 +81,15 @@ async function mount() {
   return view;
 }
 async function park() {
-  fireEvent.click(button(/^Parked sales/));
-  await act(async () => { fireEvent.click(screen.getByTestId('parked-sales-park')); });
-  await screen.findAllByTestId(/^parked-resume-/);
+  const chip = screen.queryByTestId('parked-sales-chip');
+  if (chip) {
+    fireEvent.click(chip);
+    await act(async () => { fireEvent.click(screen.getByTestId('parked-sales-park')); });
+    await screen.findAllByTestId(/^parked-resume-/);
+  } else {
+    await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
+    await screen.findByRole('button', { name: /^Parked sales \(\d+\)$/ });
+  }
 }
 function price(value = '10.00') {
   // v2's price popover (lineEditor="popover"): tap the line's price, key the new one in, Apply. It takes no reason.
@@ -101,12 +107,11 @@ async function complete() {
   return record.mock.calls[0][0];
 }
 
-it('parks the cart from the Parked sales sheet, starts an empty sale, and resumes the parked cart with its lines', async () => {
+it('parks the cart with New, starts an empty sale, and resumes the parked cart with its lines', async () => {
   await mount();
   add(); add();
   await park();
   expect(await drafts().find().exec()).toHaveLength(1);
-  fireEvent.click(screen.getByTestId('parked-sales-dismiss'));
   expect(screen.getByTestId('cart-empty')).toBeTruthy();
   expect(screen.queryByTestId('cart-footer')).toBeNull(); // the empty cart draws no foot
   add();
@@ -126,6 +131,7 @@ it('a parked sale resumed after a catalogue price change is re-priced to today\'
   add();
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   await park();
+  fireEvent.click(button('Parked sales (1)'));
   const replicated = vi.mocked(useReplicatedProducts).mock.results.at(-1)!.value;
   const product = replicated.products[0];
   vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [{ ...product,
@@ -140,6 +146,7 @@ it('a parked sale resumed after a catalogue price change is re-priced to today\'
 it('a variant no longer in the catalogue keeps its parked price on resume', async () => {
   const view = await mount();
   add(); await park();
+  fireEvent.click(button('Parked sales (1)'));
   const replicated = vi.mocked(useReplicatedProducts).mock.results.at(-1)!.value;
   vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [] });
   view.rerender(<><ProductsScreen /><PortalHost /></>);
@@ -152,6 +159,7 @@ it('a variant no longer in the catalogue keeps its parked price on resume', asyn
 
 it('an unchanged catalogue resumes at the same prices with no Prices changed note', async () => {
   await mount(); add(); await park();
+  fireEvent.click(button('Parked sales (1)'));
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   expect(row('Total')).toBe('Total€15.00');
@@ -160,17 +168,18 @@ it('an unchanged catalogue resumes at the same prices with no Prices changed not
 
 it('the opener counts parked sales', async () => {
   await mount();
-  expect(button('Parked sales')).toBeTruthy();
+  expect(screen.queryByTestId('parked-sales-chip')).toBeNull();
   for (const count of [1, 2]) {
     add();
     await park();
-    fireEvent.click(screen.getByTestId('parked-sales-dismiss'));
+    if (screen.queryByTestId('parked-sales')) fireEvent.click(screen.getByTestId('parked-sales-dismiss'));
     expect(await screen.findByRole('button', { name: `Parked sales (${count})` })).toBeTruthy();
   }
 });
 
 it('discarding a parked sale asks first, then removes it', async () => {
   await mount(); add(); await park();
+  fireEvent.click(button('Parked sales (1)'));
   const [draft] = await drafts().find().exec();
   fireEvent.click(screen.getByTestId(`parked-discard-${draft.id}`));
   expect(screen.getByText('Discard this parked sale?')).toBeTruthy();
@@ -182,7 +191,7 @@ it('discarding a parked sale asks first, then removes it', async () => {
   expect(await screen.findByTestId('parked-sales-empty')).toBeTruthy();
   expect(await drafts().find().exec()).toHaveLength(0);
   fireEvent.click(screen.getByTestId('parked-sales-dismiss'));
-  expect(button('Parked sales')).toBeTruthy();
+  expect(screen.queryByTestId('parked-sales-chip')).toBeNull();
   expect(record).not.toHaveBeenCalled();
 });
 

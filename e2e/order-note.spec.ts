@@ -75,10 +75,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await addE2E1(page);
       await openCart(page);
       await addNote(page, 'Park me');
-      await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
-      await page.getByTestId('parked-sales-park').click();
-      await expect(page.getByTestId(/^parked-resume-/)).toHaveCount(1);
-      await page.getByTestId('parked-sales-dismiss').click();
+      await page.getByTestId('new-sale-tab').click();
+      await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
       await expect(page.getByTestId('cart-empty')).toBeVisible();
       await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
       await expect(noteField(page)).toHaveCount(0);

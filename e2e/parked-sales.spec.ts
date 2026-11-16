@@ -11,10 +11,8 @@ test('park a sale, sell another, resume the first and complete it: both orders r
   await signIn(page);
   await addE2E1(page);
   await addE2E1(page);
-  await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
-  await page.getByTestId('parked-sales-park').click();
-  await expect(page.getByTestId(/^parked-resume-/)).toHaveCount(1);
-  await page.getByTestId('parked-sales-dismiss').click();
+  await page.getByTestId('new-sale-tab').click();
+  await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
   await expect(page.getByTestId('cart-empty')).toBeVisible();
   expect(commands).toHaveLength(0);
   await page.reload();
@@ -25,7 +23,7 @@ test('park a sale, sell another, resume the first and complete it: both orders r
   await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
   await page.getByTestId(/^parked-resume-/).click();
   await expect(cartTotalRow(page, 'Total')).toContainText('5.00');
-  await expect(page.getByRole('button', { name: 'Parked sales', exact: true })).toBeVisible();
+  await expect(page.getByTestId('parked-sales-chip')).toHaveCount(0);
   const firstApplied = appliedResponse(page);
   expect(await sellBySku(page, [], 'exact')).toBe(5);
   const first = (await (await firstApplied).json()).results;

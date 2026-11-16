@@ -255,9 +255,9 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await page.evaluate(() => localStorage.removeItem('medusapos.session'));
       await signIn(page, 'Europe', false);
       await addE2E1(page);
-      await page.getByRole('button', { name: 'Parked sales', exact: true }).click();
-      await page.getByTestId('parked-sales-park').click();
-      await expect(page.getByTestId(/^parked-resume-/)).toHaveCount(1);
+      await page.getByTestId('new-sale-tab').click();
+      await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
+      await expect(page.getByTestId('cart-empty')).toBeVisible();
       const before = await dump(page);
       expect(before.docs.drafts).toHaveLength(1);
       expect(JSON.parse(before.docs.drafts[0].data).lineItems).toHaveLength(1);
