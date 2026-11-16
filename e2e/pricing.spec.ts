@@ -1,13 +1,11 @@
 import { expect, type Page } from '@playwright/test';
-import { adminToken, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { adminToken, backend, captureSales, chooseRegion, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { appliedResponse, saleResults } from './helpers';
-import { E2E_RUN } from './ports';
 
 // TallyUI store settings (TV4) and priced replication (D2b) against the seeded store: regions
 // Europe (dk, exclusive) and Germany (de, inclusive), no default region, the stock location in
 // Copenhagen (dk), one publishable key for the E2E channel, and E2E-U only in another channel.
 // (Medusa 2.21.0 applies the store API's channel filter only with more than one sales channel.)
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 const setUp = (page: Page) => page.getByText('Set up this till', { exact: true });
 const tile = (page: Page) => page.getByTestId('product-tile-E2E product 1');
 

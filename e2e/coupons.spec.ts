@@ -1,11 +1,9 @@
 import { expect, type Page, type Response } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, cartTotalRow, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartTotalRow, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test } from './helpers';
 import { appliedResponse, saleResults } from './helpers';
-import { E2E_RUN } from './ports';
 
 // Till coupons (ADR 0025, parity row 7): the till prices a Medusa promotion code through POST /tally/v1/promotions/preview
 // and a coupon sale goes out as order.create v6; the plugin writes the coupon as an item adjustment carrying the promotion.
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 type Sale = { clientOrderId: string; coupons?: { code: string; couponId: string; discountMinor: number; discountTaxMinor: number }[] };
 type Adjustment = { amount: number; promotion_id: string | null; code: string | null };
 

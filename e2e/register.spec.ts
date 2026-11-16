@@ -1,10 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
-import { E2E_RUN } from './ports';
+import { addE2E1, adminToken, backend, captureCommands, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
 
-const backend = process.env.E2E_BACKEND_URL ?? `http://localhost:${E2E_RUN.backendPort}`;
 // The store's closure history row for `sessionId`'s closure (closure-history.ts), read with the e2e admin token.
 async function storeClosure(sessionId: string): Promise<{ sessionId: string; number: number; approvalVerified: boolean } | undefined> {
   const response = await fetch(`${backend}/tally/v1/registers/register-1/closures`, { headers: { Authorization: `Bearer ${await adminToken()}` } });
