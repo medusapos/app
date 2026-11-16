@@ -6,6 +6,7 @@ import DemoScreen from '../app/demo';
 import { storeConfig } from '../lib/config';
 import { DEMO_CAPTURE_URL } from '../lib/demo-analytics';
 import { useSession } from '../lib/session-context';
+import { sessionFixture } from './session-fixture';
 
 vi.mock('expo-router', () => ({
   Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: () => null },
@@ -24,11 +25,7 @@ beforeEach(() => {
   storeConfig.demo = true;
   storeConfig.analytics = true;
   signIn.mockReset().mockResolvedValue(undefined);
-  vi.mocked(useSession).mockReturnValue({
-    session: null, signIn, signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
-    reportNoPosAccess: vi.fn(), signOutNotice: null,
-    setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false,
-  });
+  vi.mocked(useSession).mockReturnValue(sessionFixture(null, { signIn }));
   fetchMock.mockReset().mockImplementation((input, init) => input === DEMO_CAPTURE_URL
     ? Promise.resolve(new Response()) : originalFetch(input, init));
   vi.stubGlobal('fetch', fetchMock);

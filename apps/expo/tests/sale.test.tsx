@@ -12,6 +12,7 @@ import { formatDate } from '../lib/format-date';
 import { useOutboxContext } from '../lib/outbox-context';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
+import { sessionFixture } from './session-fixture';
 import { capabilities } from './pos-connector-mock';
 import ProductsScreen from '../app/index';
 import { useRegister } from '../lib/register-context';
@@ -87,9 +88,7 @@ beforeEach(() => {
   });
   vi.mocked(fetchStoreSettings).mockReset().mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing, refresh: () => {} });
-  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
-    reportNoPosAccess: vi.fn(), signOutNotice: null,
-    setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
+  vi.mocked(useSession).mockReturnValue(sessionFixture(session));
   capabilities.mockResolvedValue(undefined);
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
 });

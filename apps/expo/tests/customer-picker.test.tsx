@@ -9,6 +9,7 @@ import { openOrderStore } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
+import { sessionFixture } from './session-fixture';
 import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
@@ -56,9 +57,7 @@ beforeEach(async () => {
     setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
   const session = { baseUrl: `https://customers-${crypto.randomUUID()}.test`, email: 'admin@store.test', token: 'jwt',
     capabilities: { orderCreate: 4, taxRounding: { granularity: 'per_order' as const, mode: 'half_away_from_zero' as const } } };
-  vi.mocked(useSession).mockReturnValue({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: unauthorized,
-    reportNoPosAccess: vi.fn(), signOutNotice: null,
-    mergeCapabilities: vi.fn(), setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
+  vi.mocked(useSession).mockReturnValue(sessionFixture(session, { reportUnauthorized: unauthorized }));
   capabilities.mockResolvedValue(session.capabilities);
   storeSettings.mockResolvedValue({ currency: 'EUR', pricesIncludeTax: false, taxRatesPpm: { default: 250000 },
     pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' } });

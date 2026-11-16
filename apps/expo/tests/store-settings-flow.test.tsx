@@ -10,6 +10,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { POS_CONNECTOR_ID } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
+import { sessionFixture } from './session-fixture';
 import {
   fetchStoreSettings, loadCachedPricing, loadSettingsChoice, saveCachedPricing, saveCachedSettings, saveSettingsChoice, type StoreSettings,
 } from '../lib/store-settings';
@@ -45,9 +46,7 @@ const channels = [{ id: 'pk_1', name: 'Shop' }, { id: 'pk_2', name: 'Web' }];
 const shirt = { id: 'shirt', title: 'Shirt', status: 'published',
   variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] };
 const choiceRequired = (choices: StoreSettingsChoices) => new StoreSettingsError('choice_required', 'Choose', choices);
-const signedIn = () => ({ session, signIn: vi.fn(), signOut: vi.fn(), reportUnauthorized: vi.fn(), mergeCapabilities: vi.fn(),
-  reportNoPosAccess: vi.fn(), signOutNotice: null,
-  setSaleHold: vi.fn(), setSavesHold: vi.fn(), signOutDeferred: false });
+const signedIn = () => sessionFixture(session);
 const button = (name: string) => screen.getByRole('button', { name });
 // TallyUI 3.19.0's popover editor: a line's Remove is in its quantity popover.
 const removeLine = (name: string) => { fireEvent.click(button(`Edit quantity of ${name}`)); fireEvent.click(button(`Remove ${name}`)); };
