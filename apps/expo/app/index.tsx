@@ -4,7 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
   CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
@@ -21,6 +21,8 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PhoneTabBar } from '../components/phone-tab-bar';
+import { storeRegisterTitle } from '../components/frame-drawer-header';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
@@ -44,7 +46,7 @@ import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { playScanBeep } from '../lib/scan-beep';
-import { useDefaultCustomer } from '../lib/default-customer';
+import { forgetDeletedDefaultCustomer, useDefaultCustomer } from '../lib/default-customer';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -241,7 +243,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // `session`: complete() stamps the sale with the register session (ADR 0017). The Cart's tender start
   // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
   // close during the tender still reaches the stamp, which then makes the sale late.
-  const { register, registerOutbox } = useRegister();
+  const { register, registerOutbox, boundRegisterId, registerName } = useRegister();
   const drafts = draftsCollection(orders);
   const { parked, discard } = useParkedSales(drafts);
   const [parkedOpen, setParkedOpen] = useState(false);
@@ -254,6 +256,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
   const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  useEffect(() => {
+    // The store no longer has this customer: useSale falls back to Guest on an idle cart or the next sale; an open sale keeps its customer.
+    for (const order of recent) forgetDeletedDefaultCustomer(defaultStorage(), session.baseUrl, order.warnings);
+  }, [recent, session.baseUrl]);
   const sale = useSale(pricing, { defaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
@@ -328,8 +334,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
   const productCount = `${sellableCount.toLocaleString()} ${sellableCount === 1 ? 'product' : 'products'}`;
+  const storeName = settings.storeName.trim() ? settings.storeName : connector.name;
   const statusText = phone ? `${STATE_LABEL[state]}${error ? ` · ${error}` : ''} · ${productCount}`
-    : `${settings.storeName.trim() ? settings.storeName : connector.name} · ${STATE_LABEL[state]} · ${productCount}`
+    : `${storeName} · ${STATE_LABEL[state]} · ${productCount}`
       + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
       + (error ? ` · ${error}` : '');
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.
@@ -425,8 +432,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
-        // v2's phone tender is "Checkout Order" with a close; MedusaPOS has no order number before payment, so the title carries none.
-        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
+        // The wide title names the store and register as v2's title bar does; the phone tender is "Checkout Order" with a close.
+        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : phone ? 'Sale' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
         headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
@@ -489,15 +496,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
               {sale.stage.kind === 'cart' ? cart : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
-            : cartOpen ? <View className="flex-1 bg-card">
-              <View className="flex-row items-center justify-between border-b border-border pr-3">
-                <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}
-                  className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
+            : <>{cartOpen ? <View className="flex-1 bg-card">
+              <View testID="phone-cart-head" className="min-h-11 flex-row items-center justify-end border-b border-border pr-3">
                 {registerBar(IN_ROW)}
               </View>
               {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
               {cart}
-            </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
+            </View> : catalogue}
+              <PhoneTabBar active={cartOpen ? 'cart' : 'products'}
+                itemCount={sale.order.lineItems.reduce((count, line) => count + line.quantity, 0)}
+                onSelect={(tab) => setCartOpen(tab === 'cart')} />
+            </>}
         </View>}
     </ConnectorProvider>
   );

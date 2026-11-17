@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { loadDefaultCustomer, saveDefaultCustomer, useDefaultCustomer } from './default-customer';
+import { forgetDeletedDefaultCustomer, loadDefaultCustomer, saveDefaultCustomer, useDefaultCustomer } from './default-customer';
 
 const baseUrl = 'https://store.test', key = 'medusapos.default-customer.' + baseUrl;
 const ada = { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' };
@@ -9,6 +9,8 @@ function fakeStorage(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
   return {
     store,
+    get length() { return store.size; },
+    key: (index: number) => Array.from(store.keys())[index] ?? null,
     getItem: (key: string) => store.get(key) ?? null,
     setItem: (key: string, value: string) => { store.set(key, value); },
     removeItem: (key: string) => { store.delete(key); },
@@ -17,6 +19,39 @@ function fakeStorage(initial: Record<string, string> = {}) {
 afterEach(cleanup);
 
 describe('default-customer', () => {
+  it('forgets the default when the store ignored that customer', () => {
+    const storage = fakeStorage({ [key]: JSON.stringify(ada) });
+    const reader = renderHook(() => useDefaultCustomer(storage, baseUrl));
+    act(() => {
+      expect(forgetDeletedDefaultCustomer(storage, baseUrl, [{ code: 'customer_ignored', customerId: 'ada' }])).toBe(true);
+    });
+    expect(storage.store.has(key)).toBe(false);
+    expect(reader.result.current.customer).toBeNull();
+  });
+
+  it('keeps the default when another customer was ignored', () => {
+    const storage = fakeStorage({ [key]: JSON.stringify(ada) });
+    expect(forgetDeletedDefaultCustomer(storage, baseUrl, [
+      { code: 'customer_ignored', customerId: 'grace' },
+      { code: 'insufficient_stock', variantId: 'blue', quantity: 2 },
+    ])).toBe(false);
+    expect(storage.getItem(key)).toBe(JSON.stringify(ada));
+    expect(forgetDeletedDefaultCustomer(storage, baseUrl, undefined)).toBe(false);
+    expect(storage.getItem(key)).toBe(JSON.stringify(ada));
+  });
+
+  it('only forgets this backend\'s default', () => {
+    const storage = fakeStorage();
+      saveDefaultCustomer(storage, 'https://a.test', ada);
+      saveDefaultCustomer(storage, 'https://b.test', ada);
+      expect(forgetDeletedDefaultCustomer(storage, 'https://a.test', [{ code: 'customer_ignored', customerId: 'ada' }])).toBe(true);
+      expect(loadDefaultCustomer(storage, 'https://a.test')).toBeNull();
+      expect(loadDefaultCustomer(storage, 'https://b.test')).toEqual(ada);
+      saveDefaultCustomer(storage, 'https://a.test', { id: 'grace', name: 'Grace Hopper' });
+      expect(forgetDeletedDefaultCustomer(storage, 'https://b.test', [{ code: 'customer_ignored', customerId: 'grace' }])).toBe(false);
+      expect(loadDefaultCustomer(storage, 'https://b.test')).toEqual(ada);
+  });
+
   it('round-trips only id, name and email, dropping extra fields on save and load', () => {
     const storage = fakeStorage(), customer = { ...ada, billing: { address1: '1 Private Lane', city: 'Dublin' } };
     saveDefaultCustomer(storage, baseUrl, customer);

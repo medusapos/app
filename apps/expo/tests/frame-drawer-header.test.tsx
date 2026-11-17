@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FrameDrawerHeader, registerStateLabel } from '../components/frame-drawer-header';
+import { FrameDrawerHeader, registerStateLabel, storeRegisterTitle } from '../components/frame-drawer-header';
 
 const state = vi.hoisted(() => ({
   session: { baseUrl: 'http://localhost:9000' } as { baseUrl: string } | null,
@@ -29,6 +29,21 @@ describe('registerStateLabel', () => {
     ['superseded', 'Closed'], ['abandoned', 'Closed'], [null, 'Closed'], [undefined, 'Closed'],
   ])('maps %s to %s', (status, label) => {
     expect(registerStateLabel(status)).toBe(label);
+  });
+});
+
+describe('storeRegisterTitle', () => {
+  it('names the store and bound register', () => {
+    expect(storeRegisterTitle('E2E Store', 'register-1', 'Register 1')).toBe('E2E Store · Register 1');
+  });
+  it('uses Register when the bound register name is null', () => {
+    expect(storeRegisterTitle('E2E Store', 'register-1', null)).toBe('E2E Store · Register');
+  });
+  it('names only the store when no register is chosen', () => {
+    expect(storeRegisterTitle('E2E Store', null, null)).toBe('E2E Store');
+  });
+  it('names only the store while the binding is unknown', () => {
+    expect(storeRegisterTitle('E2E Store', undefined, null)).toBe('E2E Store');
   });
 });
 
