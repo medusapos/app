@@ -4,6 +4,7 @@ import type { SessionStorage } from './session';
 
 export type CartSettings = {
   cartSide: 'left' | 'right'; openOrders: 'top' | 'bottom'; quickDiscounts: number[]; columns: CartColumnSettings;
+  autoShowReceipt: boolean;
 };
 
 // WCPOS 2 Cart Settings defaults (cart right, open orders at the bottom, quick discounts 5/10/15).
@@ -12,10 +13,12 @@ export const DEFAULT_CART_SETTINGS: CartSettings = {
   // v2's and TallyUI's column defaults: Qty, Name, Price and Total show; Image, SKU, Split and Name › SKU are off.
   columns: { quantity: { show: true, split: false }, image: { show: false }, name: { show: true, sku: false },
     sku: { show: false }, price: { show: true }, total: { show: true } },
+  // v2's "Automatically show receipt after checkout": on by default.
+  autoShowReceipt: true,
 };
 
 const PREFIX = 'medusapos.cart.';
-const isValidBase = (v: unknown): v is Omit<CartSettings, 'columns'> => {
+const isValidBase = (v: unknown): v is Omit<CartSettings, 'columns' | 'autoShowReceipt'> => {
   if (typeof v !== 'object' || v === null) return false;
   const { cartSide, openOrders, quickDiscounts } = v as CartSettings;
   return (cartSide === 'left' || cartSide === 'right') && (openOrders === 'top' || openOrders === 'bottom')
@@ -36,15 +39,17 @@ export function loadCartSettings(storage: SessionStorage | null, baseUrl: string
   try {
     const value: unknown = JSON.parse(storage?.getItem(PREFIX + baseUrl) ?? 'null');
     if (!isValidBase(value)) return DEFAULT_CART_SETTINGS;
-    // Settings saved before the Columns section have no `columns`; they keep their other choices.
-    const { columns } = value as Partial<CartSettings>;
-    return { ...value, columns: isValidColumns(columns) ? columns : DEFAULT_CART_SETTINGS.columns };
+    // Settings saved before the Columns section (or the auto-show switch) lack that field; they keep their other choices.
+    const { columns, autoShowReceipt } = value as Partial<CartSettings>;
+    return { ...value, columns: isValidColumns(columns) ? columns : DEFAULT_CART_SETTINGS.columns,
+      autoShowReceipt: typeof autoShowReceipt === 'boolean' ? autoShowReceipt : DEFAULT_CART_SETTINGS.autoShowReceipt };
   } catch { return DEFAULT_CART_SETTINGS; }
 }
 
 export function saveCartSettings(storage: SessionStorage | null, baseUrl: string, settings: CartSettings): void {
   if (!isValidBase(settings)) throw new Error('Quick discounts must be three whole numbers from 1 to 100.');
   if (!isValidColumns(settings.columns)) throw new Error('Cart columns are not valid.');
+  if (typeof settings.autoShowReceipt !== 'boolean') throw new Error('Auto show receipt must be on or off.');
   storage?.setItem(PREFIX + baseUrl, JSON.stringify(settings));
 }
 
