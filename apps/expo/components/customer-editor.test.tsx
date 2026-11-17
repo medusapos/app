@@ -22,19 +22,24 @@ const input = (label: string) => screen.getByLabelText(label, { exact: true }) a
 const change = (label: string, value: string) => fireEvent.change(input(label), { target: { value } });
 const changeForm = (placeholder: string, value: string) => fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value } });
 const submit = () => act(async () => { fireEvent.click(screen.getByTestId('customer-save')); });
+const countryTrigger = () => screen.getByTestId('customer-billing-country');
+const pickCountry = (code: string) => {
+  fireEvent.click(countryTrigger());
+  fireEvent.click(screen.getByTestId(`customer-billing-country-${code}`));
+};
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe('CustomerEditor billing', () => {
   it('sends the new billing address with trimmed names and an uppercase country', async () => {
     const save = vi.fn().mockResolvedValue(undefined);
     const loadBilling = vi.fn();
-    render(<CustomerEditor customer={null} save={save} onUnauthorized={vi.fn()} loadBilling={loadBilling} />);
+    render(<><CustomerEditor customer={null} save={save} onUnauthorized={vi.fn()} loadBilling={loadBilling} /><PortalHost /></>);
     changeForm('email@example.com', 'nia@example.com');
     changeForm('First name', ' Nia ');
     change('Address line 1', '1 Market St');
     change('City', 'Leeds');
     change('Postal code', 'LS1 1AA');
-    change('Country code', 'gb');
+    pickCountry('GB');
     await submit();
     expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ email: 'nia@example.com' }),
       { firstName: 'Nia', address1: '1 Market St', city: 'Leeds', postcode: 'LS1 1AA', country: 'GB' });
@@ -94,16 +99,52 @@ describe('CustomerEditor billing', () => {
       expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ phone: '123' }), undefined);
       expect(onUnauthorized).toHaveBeenCalledTimes(error instanceof ConnectorUnauthorizedError ? 1 : 0);
     });
-  it('limits country length and blocks an invalid two-character code', async () => {
-    const save = vi.fn();
-    render(<CustomerEditor customer={null} save={save} onUnauthorized={vi.fn()} />);
-    changeForm('email@example.com', 'nia@example.com');
-    expect(input('Country code').maxLength).toBe(2);
-    change('Country code', 'G1');
+  it('blocks a stored country that is not a two-letter code until a country is picked', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<><CustomerEditor customer={{ ...ada, billing: { ...stored, country: 'G1' } }} save={save} onUnauthorized={vi.fn()} />
+      <PortalHost /></>);
     expect(screen.getByTestId('customer-save').getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByText(BILLING_COUNTRY_HINT)).toBeTruthy();
     await submit();
     expect(save).not.toHaveBeenCalled();
+    pickCountry('GB');
+    expect(screen.queryByText(BILLING_COUNTRY_HINT)).toBeNull();
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { ...stored, country: 'GB' });
+  });
+  it('shows the stored country by name and locks the picker until billing loads', async () => {
+    let resolve!: (address: CustomerAddress) => void;
+    const loadBilling = vi.fn(() => new Promise<CustomerAddress>((done) => { resolve = done; }));
+    render(<><CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={vi.fn()} loadBilling={loadBilling} /><PortalHost /></>);
+    expect(countryTrigger().getAttribute('aria-disabled')).toBe('true');
+    expect(countryTrigger().textContent).toBe('Choose a country');
+    fireEvent.click(countryTrigger());
+    expect(screen.queryByTestId('customer-billing-country-GB')).toBeNull();
+    await act(async () => { resolve(stored); });
+    expect(countryTrigger().getAttribute('aria-disabled')).not.toBe('true');
+    expect(countryTrigger().textContent).toBe('United Kingdom');
+  });
+  it('saves the address without a country after choosing No country', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<><CustomerEditor customer={ada} save={save} onUnauthorized={vi.fn()} loadBilling={async () => stored} /><PortalHost /></>);
+    await waitFor(() => expect(countryTrigger().textContent).toBe('United Kingdom'));
+    pickCountry('none');
+    expect(countryTrigger().textContent).toBe('Choose a country');
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { firstName: 'Ada', address1: '1 Old St',
+      city: 'London', postcode: 'N1 1AA' });
+    expect(save.mock.calls[0][1]).not.toHaveProperty('country');
+  });
+  it('keeps a stored code that is missing from the list', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<><CustomerEditor customer={{ ...ada, billing: { ...stored, country: 'XK' } }} save={save} onUnauthorized={vi.fn()} />
+      <PortalHost /></>);
+    expect(countryTrigger().textContent).toBe('XK');
+    pickCountry('XK');
+    expect(countryTrigger().textContent).toBe('XK');
+    change('City', 'Leeds');
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { ...stored, city: 'Leeds', country: 'XK' });
   });
   it.each([new Error('offline'), new ConnectorUnauthorizedError('expired', 401)])('shows a partial save error: %s', async (cause) => {
     const onUnauthorized = vi.fn();
