@@ -759,7 +759,7 @@ describe('ProductsScreen cart settings', () => {
   it('keeps Cart Settings on the right on a phone', async () => {
     setWindowWidth(390, 844);
     await mount();
-    fireEvent.click(screen.getByRole('tab', { name: 'Cart' }));
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
     fireEvent.click(screen.getByTestId('cart-settings-button'));
     expect(sheetSide()).toBe('right');
   });
