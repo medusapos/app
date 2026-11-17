@@ -11,6 +11,26 @@ async function expectAccountInViewport(page: Page) {
   expect(box.x + box.width).toBeLessThanOrEqual(360);
 }
 
+test('the phone tender is titled Checkout Order and its close returns to the cart', async ({ page }) => {
+  await signIn(page);
+  await addE2E1(page);
+  await page.getByRole('button', { name: /^Open cart, / }).click();
+  await page.getByTestId('cart-checkout').click();
+  await expect(page.getByRole('heading', { name: 'Checkout Order', exact: true })).toBeVisible();
+  await expect(page.getByTestId('frame-menu')).toHaveCount(0);
+  const close = page.getByTestId('tender-close');
+  await expect(close).toBeInViewport();
+  const box = (await close.boundingBox())!;
+  expect(box.x + box.width).toBeLessThanOrEqual(360);
+  expect(box.width).toBeGreaterThanOrEqual(44);
+  expect(box.height).toBeGreaterThanOrEqual(44);
+  await close.click();
+  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+  await expect(page.getByTestId('cart-checkout')).toBeVisible();
+  await expect(page.getByTestId('frame-menu')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Complete sale' })).toHaveCount(0);
+});
+
 test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart bar counts items', async ({ page }) => {
   await signIn(page);
   await expectAccountInViewport(page);

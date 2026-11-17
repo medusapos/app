@@ -162,3 +162,23 @@ test('Theme: Dark puts the dark class on <html> and its tokens, the first frame 
   await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
   expect(await page.evaluate(() => localStorage.getItem('medusapos.theme'))).toBe('light');
 });
+
+test('Scale: Regular is the default, Auto persists after reload, and Regular restores the default size', async ({ page }) => {
+  await signIn(page, 'Europe', false);
+  await openSettings(page);
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim())).toBe('14px');
+  await expect(page.getByTestId('scale-choice-regular')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('scale-choice-auto').click();
+  await expect(page.getByTestId('scale-choice-auto')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim())).toBe('13px');
+  expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('auto');
+
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim())).toBe('13px');
+  await expect(page.getByTestId('scale-choice-auto')).toHaveAttribute('aria-pressed', 'true');
+  await page.getByTestId('scale-choice-regular').click();
+  await expect(page.getByTestId('scale-choice-regular')).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim())).toBe('14px');
+  expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('regular');
+});

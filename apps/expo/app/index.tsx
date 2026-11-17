@@ -5,13 +5,14 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
-  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText,
+  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
+  normalizeCatalogueViewState, type CatalogueViewState,
 } from '@tallyui/pos';
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
@@ -21,6 +22,7 @@ import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PriceCheckBanner } from '../components/price-check-banner';
+import { ProductSettingsButton } from '../components/product-settings';
 import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
@@ -37,6 +39,7 @@ import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
+import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
@@ -285,6 +288,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { width } = useWindowDimensions();
   // Phone mode (ADR 0009): products or the cart at full height, the tender over both; a new sale starts on products.
   const phone = width < PHONE_BREAKPOINT;
+  const [viewState, setViewState] = useState(() => normalizeCatalogueViewState({
+    ...loadCatalogueView(defaultStorage(), session.baseUrl), ...(phone ? { view: 'grid' } : {}),
+  }));
+  const { settings: productSettings, save: saveProductSettings, reset: resetProductSettings } = useProductSettings(defaultStorage(), session.baseUrl);
+  const onViewStateError = (error: unknown) => console.warn('Could not load or save the catalogue view:', error);
+  const onViewStateChange = (next: CatalogueViewState) => {
+    setViewState(next);
+    try { saveCatalogueView(defaultStorage(), session.baseUrl, next); } catch (error) { onViewStateError(error); }
+  };
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
@@ -338,6 +350,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const gateFocusHandled = useRef(0);
   const registerBar = (className?: string) => <TillRegisterBar online={online} onOpenPanel={() => setPanelOpen(true)}
     onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
+  const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
+    showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
+    settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
   const catalogue = <View className="flex-1">
     <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
@@ -346,13 +361,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined}
+      onSelect={add} statusText={statusText} statusAccessory={phone
+        ? <View className="flex-row items-center gap-2">{registerBar(IN_ROW)}{productSettingsButton}</View> : productSettingsButton}
       showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
-      loadViewState={() => phone ? { ...loadCatalogueView(defaultStorage(), session.baseUrl), view: 'grid' }
-        : loadCatalogueView(defaultStorage(), session.baseUrl)}
-      saveViewState={(state) => saveCatalogueView(defaultStorage(), session.baseUrl, state)}
-      onViewStateError={(error) => console.warn('Could not load or save the catalogue view:', error)} />
+      viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
+      onViewStateError={onViewStateError} />
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
   const openOrdersRow = <View className="flex-row items-stretch">
@@ -405,9 +419,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
+      <Stack.Screen options={{
+        // v2's phone tender is "Checkout Order" with a close; MedusaPOS has no order number before payment, so the title carries none.
+        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
-        headerLeft: () => <FrameMenuButton />, headerRight: () => (
+        headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
         <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
@@ -415,6 +431,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
           {!phone && <Text className="text-foreground">{displayName}</Text>}
         </Pressable>
+        {phone && sale.stage.kind === 'tender' && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
+          disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
+          <View className="text-foreground"><XIcon size={24} /></View>
+        </IconButton>}
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}

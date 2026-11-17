@@ -1,5 +1,6 @@
 import type { SalesFilters } from '@tallyui/components';
-import { clampClosureScope, comparisonRange, inRange, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureScope, type PosOrder, type SalesFigures } from '@tallyui/pos';
+import { clampClosureScope, comparisonRange, inRange, minorToDecimal, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureContext, type ClosureScope, type PosOrder, type SalesFigures } from '@tallyui/pos';
+import type { ClosureHistoryEntry } from './closure-history';
 
 export function localDay(at: Date): string {
   return `${String(at.getFullYear()).padStart(4, '0')}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
@@ -40,6 +41,39 @@ export function closureScopeFor(input: { today: string; boundRegisterId: string 
 
 export function closureVarianceMinor(row: Pick<Closure, 'variance'>): number {
   return Object.values(row.variance).reduce((total, amount) => total + amount, 0);
+}
+
+export type ClosureTableRow = {
+  id: string; number: number; closedAt: string; registerName: string; cashierName: string;
+  salesMinor: number; countedMinor: number | null; varianceMinor: number | null;
+};
+
+export function closureTableRow(row: Closure, registerNames: Record<string, string>): ClosureTableRow {
+  const { register_name, closed_by_name } = row.breakdowns;
+  return {
+    id: row.id, number: row.number, closedAt: row.closed_at,
+    registerName: typeof register_name === 'string' && register_name ? register_name : registerNames[row.register_id] || row.register_id.slice(0, 8),
+    cashierName: typeof closed_by_name === 'string' && closed_by_name ? closed_by_name : '—',
+    salesMinor: row.period_sales_total_minor, countedMinor: Object.values(row.counted).reduce((total, amount) => total + amount, 0),
+    varianceMinor: closureVarianceMinor(row),
+  };
+}
+
+export function historyTableRow(entry: ClosureHistoryEntry, registerName: string, cashierNames: Record<string, string>): ClosureTableRow {
+  const countedMinor = entry.counted ? Object.values(entry.counted).reduce((total, amount) => total + amount, 0) : null;
+  return {
+    id: entry.closureId, number: entry.number, closedAt: entry.closedAt,
+    registerName: registerName || entry.registerId?.slice(0, 8) || '—',
+    cashierName: entry.closedBy ? cashierNames[entry.closedBy] ?? entry.closedBy : '—',
+    salesMinor: entry.periodSalesTotalMinor, countedMinor,
+    varianceMinor: countedMinor !== null && entry.tillExpected
+      ? countedMinor - Object.values(entry.tillExpected).reduce((total, amount) => total + amount, 0) : null,
+  };
+}
+
+export function varianceLabel(varianceMinor: number, ctx: Pick<ClosureContext, 'formatMoney' | 'exponent'>): string {
+  return varianceMinor === 0 ? 'Exact'
+    : `${ctx.formatMoney(minorToDecimal(Math.abs(varianceMinor), ctx.exponent))} ${varianceMinor < 0 ? 'short' : 'over'}`;
 }
 
 export const CSV_LABELS: Record<string, string> = {
