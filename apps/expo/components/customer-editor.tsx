@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { TextInput, View } from 'react-native';
+import { Pressable, TextInput, View } from 'react-native';
 import { Button, CustomerForm, Text, type CustomerFormValues } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerAddress } from '@tallyui/core';
 import { billingAddress, billingChanged, billingCountryValid, billingFields, hasBilling, BillingNotSavedError,
   BILLING_COUNTRY_HINT, BILLING_LOAD_FAILED, BILLING_NOT_SAVED } from '../lib/customer-billing';
+import { COUNTRIES, countryName } from '../lib/countries';
 
 export const NETWORK_ERROR_TEXT = "Couldn't reach the store. Check the connection and try again.";
 export const CUSTOMER_SAVE_FAILED = "Couldn't save the customer. Try again.";
@@ -61,15 +62,17 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadBilling }: 
     <View className="gap-3 p-4">
       <Text className="text-sm font-medium text-foreground">Billing address</Text>
       {([[['address1', 'Address line 1']], [['address2', 'Address line 2']],
-        [['city', 'City'], ['state', 'State / province']], [['postcode', 'Postal code'], ['country', 'Country code']]] as const
+        [['city', 'City'], ['state', 'State / province']], [['postcode', 'Postal code'], ['country', 'Country']]] as const
       ).map((row) => <View key={row[0][0]} className="flex-row gap-3">
         {row.map(([field, label]) => <View key={field} className="flex-1 gap-1">
           <Text className="text-xs font-medium text-muted-foreground">{label}</Text>
-          <TextInput accessibilityLabel={label} value={fields[field]} editable={billingStatus === 'ready'}
-            onChangeText={(value) => setFields((current) => ({ ...current, [field]: value }))}
-            className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
-            placeholderTextColorClassName="accent-muted-foreground"
-            {...(field === 'country' ? { autoCapitalize: 'characters' as const, maxLength: 2, placeholder: 'GB' } : {})} />
+          {field === 'country'
+            ? <CountryPicker value={fields.country} disabled={billingStatus !== 'ready'}
+              onChange={(country) => setFields((current) => ({ ...current, country }))} />
+            : <TextInput accessibilityLabel={label} value={fields[field]} editable={billingStatus === 'ready'}
+              onChangeText={(value) => setFields((current) => ({ ...current, [field]: value }))}
+              className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+              placeholderTextColorClassName="accent-muted-foreground" />}
         </View>)}
       </View>)}
       {billingStatus === 'failed' && <Text className="text-sm text-muted-foreground">{BILLING_LOAD_FAILED}</Text>}
@@ -79,5 +82,45 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadBilling }: 
     <Button testID="customer-save" disabled={saving || values.email.trim() === '' || !countryValid} onPress={submit}>
       <Text>Save customer</Text>
     </Button>
+  </>;
+}
+
+const fold = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+/** Up to 6 countries whose code is the query (those first) or whose name or a word of it starts with it, accent-blind. */
+function countryMatches(query: string) {
+  const q = fold(query.trim());
+  return COUNTRIES.filter(({ code, name }) => code.toLowerCase() === q
+    || [fold(name), ...fold(name).split(/[\s\-()[\],'’]+/)].some((part) => q !== '' && part.startsWith(q)))
+    .sort((a, b) => Number(b.code.toLowerCase() === q) - Number(a.code.toLowerCase() === q)).slice(0, 6);
+}
+// Web: pressing a match would blur the field, which closes the list before the press lands; keep the focus instead.
+const keepFieldFocus = { onMouseDown: (event: { preventDefault: () => void }) => event.preventDefault() };
+
+/**
+ * Picks the billing country by name from every ISO 3166-1 country; the value is the stored code. A stored code
+ * that is not in the list is shown as it is, so opening the form never changes it. Matches sit under the field.
+ */
+function CountryPicker({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (code: string) => void }) {
+  const shown = (code: string) => countryName(code) ?? code;
+  const [text, setText] = useState(() => shown(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { setText(shown(value)); setEditing(false); }, [value]);
+  const matches = countryMatches(text);
+  const pick = (code: string) => { onChange(code); setText(shown(code)); setEditing(false); };
+  return <>
+    <TextInput testID="customer-billing-country" accessibilityLabel="Country" value={text} editable={!disabled}
+      placeholder="Type a country" onBlur={() => { setText(shown(value)); setEditing(false); }}
+      onChangeText={(next) => { setText(next); setEditing(next !== ''); if (next === '') onChange(''); }}
+      onSubmitEditing={() => { if (matches[0]) pick(matches[0].code); }}
+      className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+      placeholderTextColorClassName="accent-muted-foreground" />
+    {!disabled && editing && <View testID="customer-billing-country-matches" {...keepFieldFocus}
+      className="rounded-lg border border-border bg-card py-1">
+      {matches.length === 0 ? <Text className="px-3 py-2 text-sm text-muted-foreground">No matching country</Text>
+        : matches.map((country) => <Pressable key={country.code} testID={`customer-billing-country-${country.code}`}
+          accessibilityRole="button" onPress={() => pick(country.code)} className="px-3 py-2">
+          <Text className="text-sm text-foreground">{country.name}</Text>
+        </Pressable>)}
+    </View>}
   </>;
 }

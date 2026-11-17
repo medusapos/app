@@ -22,6 +22,12 @@ const input = (label: string) => screen.getByLabelText(label, { exact: true }) a
 const change = (label: string, value: string) => fireEvent.change(input(label), { target: { value } });
 const changeForm = (placeholder: string, value: string) => fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value } });
 const submit = () => act(async () => { fireEvent.click(screen.getByTestId('customer-save')); });
+const pickCountry = (query: string, code: string) => {
+  change('Country', query);
+  fireEvent.click(screen.getByTestId(`customer-billing-country-${code}`));
+};
+const matchNames = (query: string) => { change('Country', query);
+  return Array.from(screen.getByTestId('customer-billing-country-matches').querySelectorAll('[role=button]'), (row) => row.textContent); };
 afterEach(() => { cleanup(); vi.resetAllMocks(); });
 
 describe('CustomerEditor billing', () => {
@@ -34,7 +40,7 @@ describe('CustomerEditor billing', () => {
     change('Address line 1', '1 Market St');
     change('City', 'Leeds');
     change('Postal code', 'LS1 1AA');
-    change('Country code', 'gb');
+    pickCountry('gb', 'GB');
     await submit();
     expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ email: 'nia@example.com' }),
       { firstName: 'Nia', address1: '1 Market St', city: 'Leeds', postcode: 'LS1 1AA', country: 'GB' });
@@ -94,16 +100,81 @@ describe('CustomerEditor billing', () => {
       expect(save).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ phone: '123' }), undefined);
       expect(onUnauthorized).toHaveBeenCalledTimes(error instanceof ConnectorUnauthorizedError ? 1 : 0);
     });
-  it('limits country length and blocks an invalid two-character code', async () => {
-    const save = vi.fn();
-    render(<CustomerEditor customer={null} save={save} onUnauthorized={vi.fn()} />);
-    changeForm('email@example.com', 'nia@example.com');
-    expect(input('Country code').maxLength).toBe(2);
-    change('Country code', 'G1');
+  it('blocks a stored country that is not a two-letter code until a country is picked', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<CustomerEditor customer={{ ...ada, billing: { ...stored, country: 'G1' } }} save={save} onUnauthorized={vi.fn()} />);
     expect(screen.getByTestId('customer-save').getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByText(BILLING_COUNTRY_HINT)).toBeTruthy();
     await submit();
     expect(save).not.toHaveBeenCalled();
+    pickCountry('united k', 'GB');
+    expect(screen.queryByText(BILLING_COUNTRY_HINT)).toBeNull();
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { ...stored, country: 'GB' });
+  });
+  it('shows the stored country by name and locks the picker until billing loads', async () => {
+    let resolve!: (address: CustomerAddress) => void;
+    const loadBilling = vi.fn(() => new Promise<CustomerAddress>((done) => { resolve = done; }));
+    render(<CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={vi.fn()} loadBilling={loadBilling} />);
+    expect(input('Country').readOnly).toBe(true);
+    expect(input('Country').value).toBe('');
+    expect(input('Country').placeholder).toBe('Type a country');
+    change('Country', 'gb');
+    expect(screen.queryByTestId('customer-billing-country-matches')).toBeNull();
+    await act(async () => { resolve(stored); });
+    expect(input('Country').readOnly).toBe(false);
+    expect(input('Country').value).toBe('United Kingdom');
+  });
+  it('saves the address without a country after clearing the country field', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<CustomerEditor customer={ada} save={save} onUnauthorized={vi.fn()} loadBilling={async () => stored} />);
+    await waitFor(() => expect(input('Country').value).toBe('United Kingdom'));
+    change('Country', '');
+    expect(screen.queryByTestId('customer-billing-country-matches')).toBeNull();
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { firstName: 'Ada', address1: '1 Old St',
+      city: 'London', postcode: 'N1 1AA' });
+    expect(save.mock.calls[0][1]).not.toHaveProperty('country');
+  });
+  it('keeps a stored code that is missing from the list', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<CustomerEditor customer={{ ...ada, billing: { ...stored, country: 'XK' } }} save={save} onUnauthorized={vi.fn()} />);
+    expect(input('Country').value).toBe('XK');
+    change('City', 'Leeds');
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { ...stored, city: 'Leeds', country: 'XK' });
+  });
+  it('filters countries by code, name or word, ignoring accents and case', () => {
+    render(<CustomerEditor customer={null} save={vi.fn()} onUnauthorized={vi.fn()} />);
+    expect(matchNames('united')).toEqual(['United Arab Emirates', 'United Kingdom', 'United States', 'United States Minor Outlying Islands']);
+    expect(matchNames('s')).toHaveLength(6);
+    expect(matchNames('gb')[0]).toBe('United Kingdom');
+    expect(matchNames('aland')).toEqual(['Åland Islands']);
+    expect(matchNames('KING')).toContain('United Kingdom');
+    expect(matchNames('zz')).toEqual([]);
+    expect(screen.getByTestId('customer-billing-country-matches').textContent).toBe('No matching country');
+  });
+  it('picks the first match on Enter, and a press on a match keeps the field focused on web', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<CustomerEditor customer={null} save={save} onUnauthorized={vi.fn()} />);
+    changeForm('email@example.com', 'nia@example.com');
+    change('Country', 'fra');
+    expect(fireEvent.mouseDown(screen.getByTestId('customer-billing-country-FR'))).toBe(false);
+    fireEvent.keyDown(input('Country'), { key: 'Enter' });
+    expect(input('Country').value).toBe('France');
+    expect(screen.queryByTestId('customer-billing-country-matches')).toBeNull();
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { country: 'FR' });
+  });
+  it('restores the chosen country when the field is left without a pick', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<CustomerEditor customer={{ ...ada, billing: stored }} save={save} onUnauthorized={vi.fn()} />);
+    change('Country', 'zzz');
+    fireEvent.blur(input('Country'));
+    expect(input('Country').value).toBe('United Kingdom');
+    expect(screen.queryByTestId('customer-billing-country-matches')).toBeNull();
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), undefined);
   });
   it.each([new Error('offline'), new ConnectorUnauthorizedError('expired', 401)])('shows a partial save error: %s', async (cause) => {
     const onUnauthorized = vi.fn();

@@ -74,23 +74,36 @@ async function mount(name?: string) {
 }
 const open = () => fireEvent.click(screen.getByTestId('user-menu'));
 
-it('shows today’s gross sales for the bound register and store currency', async () => {
-  sales.orders = ([[1200, 'register-1', 'EUR'], [350, 'register-1', 'EUR'], [900, 'register-2', 'EUR'], [800, 'register-1', 'USD']] as const)
-    .map(([amount, registerId, currency]) => {
-      const builder = createOrderBuilder({ currency, taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
-      builder.addLine({ productId: 'shirt', name: 'Shirt', unitPrice: { amount, currency } });
-      builder.addPayment({ method: 'cash', amountMinor: amount });
-      return { ...finalizeOrder(builder.getSnapshot()), createdAt: new Date().toISOString(), registerId };
-    });
+function todayOrders(rows: readonly (readonly [number, string, string, string | undefined])[]): PosOrder[] {
+  return rows.map(([amount, registerId, currency, cashierRef]) => {
+    const builder = createOrderBuilder({ currency, taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+    builder.addLine({ productId: 'shirt', name: 'Shirt', unitPrice: { amount, currency } });
+    builder.addPayment({ method: 'cash', amountMinor: amount });
+    return { ...finalizeOrder(builder.getSnapshot()), createdAt: new Date().toISOString(), registerId, cashierRef };
+  });
+}
+
+it('shows the signed-in cashier’s sales today on this till in the store currency', async () => {
+  const me = 'admin@store.test';
+  const till = 'device-till-1';
+  sales.orders = todayOrders([[1200, till, 'EUR', me], [350, till, 'EUR', me], [900, till, 'EUR', me],
+    [800, till, 'USD', me], [700, till, 'EUR', 'other@store.test'], [600, till, 'EUR', undefined]]);
   await mount(); open();
-  expect(screen.getByTestId('user-sheet-sales-today').textContent).toBe('Sales today€15.50');
+  expect(screen.getByTestId('user-sheet-sales-today').textContent).toBe('Your sales today3 sales€24.50');
+  expect(screen.getByTestId('user-sheet-sales-count').textContent).toBe('3 sales');
   expect(watchFresh).toHaveBeenCalledExactlyOnceWith(useOutboxContext().orders,
     { selector: { createdAt: { $gte: localDayStartIso(presetRange('today', new Date(), 'device').from) } } });
 });
 
 it('shows zero sales today with no orders', async () => {
   await mount(); open();
-  expect(screen.getByTestId('user-sheet-sales-today').textContent).toBe('Sales today€0.00');
+  expect(screen.getByTestId('user-sheet-sales-today').textContent).toBe('Your sales today0 sales€0.00');
+});
+
+it('counts a single sale in the singular', async () => {
+  sales.orders = todayOrders([[500, 'register-1', 'EUR', 'admin@store.test']]);
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-sales-today').textContent).toBe('Your sales today1 sale€5.00');
 });
 
 it('omits sales today and does not subscribe while orders is null', async () => {
