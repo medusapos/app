@@ -81,7 +81,7 @@ test('a saved minChars gates Enter in the Products search: a shorter code stays 
   await search.fill('E2E-2');
   await search.press('Enter');
   await expect(search).toHaveValue('E2E-2');
-  await expect(page.getByRole('tab', { name: 'Cart', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Cart, New', exact: true })).toBeVisible();
 
   await openSettings(page);
   await setMinChars(page, '3');
@@ -136,7 +136,7 @@ test('the frame\'s Sale from Settings returns to the same sale, with one Product
   await expect(cart).toHaveAccessibleName(/^Cart, 1 item$/);
   // Hidden stack screens stay in the DOM, so this counts every mounted Products screen.
   await expect(page.getByPlaceholder('Search or scan barcode / SKU', { exact: true })).toHaveCount(1);
-  await expect(cart).not.toHaveAccessibleName('Cart');
+  await expect(cart).not.toHaveAccessibleName('Cart, New');
 });
 
 test('opening /settings directly by URL still lands back on the sale', async ({ page }) => {

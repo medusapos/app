@@ -1,8 +1,8 @@
-// v2's phone tab bar (docs/v2-parity/demo-shots/17-pos-demo-phone.jpg), below 600 px per ADR 0009.
+// v2's phone tab bar (docs/v2-parity/demo-shots/17-pos-demo-phone.jpg), below 600 px per ADR 0009; an empty cart shows v2's "New" badge.
 import type { JSX } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Path } from 'react-native-svg';
-import { createSvgIcon, InCartBadge, ShoppingCartIcon } from '@tallyui/components';
+import { Badge, createSvgIcon, InCartBadge, ShoppingCartIcon } from '@tallyui/components';
 
 const GiftIcon = createSvgIcon('GiftIcon', () => <>
   <Path d="M3 8m0 1a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1z" />
@@ -26,12 +26,13 @@ export function PhoneTabBar({ active, itemCount, onSelect }: {
         <Text className={`text-sm ${productsColor}`}>Products</Text>
       </Pressable>
       <Pressable testID="phone-tab-cart" accessibilityRole="tab"
-        accessibilityLabel={itemCount === 0 ? 'Cart' : `Cart, ${itemCount} ${itemCount === 1 ? 'item' : 'items'}`}
+        accessibilityLabel={itemCount === 0 ? 'Cart, New' : `Cart, ${itemCount} ${itemCount === 1 ? 'item' : 'items'}`}
         accessibilityState={{ selected: active === 'cart' }} aria-selected={active === 'cart'} onPress={() => onSelect('cart')}
         className="min-h-14 flex-1 items-center justify-center gap-1">
         <View className={`relative ${cartColor}`}>
           <ShoppingCartIcon size={24} />
           <InCartBadge count={itemCount} testID="phone-tab-cart-count" className="absolute -right-4 -top-2" />
+          {itemCount === 0 && <Badge label="New" testID="phone-tab-cart-new" className="absolute -right-6 -top-2 px-1.5 py-0" />}
         </View>
         <Text className={`text-sm ${cartColor}`}>Cart</Text>
       </Pressable>

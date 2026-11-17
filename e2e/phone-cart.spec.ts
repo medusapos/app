@@ -33,8 +33,11 @@ test('the phone tender is titled Checkout Order and its close returns to the car
 
 test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart tab counts items', async ({ page }) => {
   await signIn(page);
+  await expect(cartTab(page)).toHaveAccessibleName('Cart, New');
+  await expect(page.getByTestId('phone-tab-cart-new')).toHaveText('New');
   await expectAccountInViewport(page);
   await addE2E1(page);
+  await expect(page.getByTestId('phone-tab-cart-new')).toHaveCount(0);
   await addE2E1(page);
   const cart = cartTab(page);
   await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
@@ -77,7 +80,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
   await cancel.click();
   for (const target of [total, checkout]) await expect(target).toBeInViewport();
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(3.88);
-  await expect(cart).toHaveAccessibleName('Cart');
+  await expect(cart).toHaveAccessibleName('Cart, New');
 });
 
 // ADR 0015 (#82 review): an automatic sign-out during a save that can't finish waits, with a note that fits at 360 px.
