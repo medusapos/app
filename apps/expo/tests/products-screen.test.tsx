@@ -738,6 +738,31 @@ describe('ProductsScreen cart settings', () => {
     expect(heads()).toEqual(defaults);
     expect(switches()).toEqual(DEFAULT_SWITCHES);
   });
+
+  const sheetSide = () => screen.getByTestId('cart-settings-sheet').getAttribute('data-side');
+
+  it('opens Cart Settings from the left, over the products, on a wide till', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(sheetSide()).toBe('left');
+  });
+
+  it('opens Cart Settings from the right when the cart is on the left', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-side-left'));
+    expect(sheetSide()).toBe('right');
+    fireEvent.click(screen.getByTestId('cart-settings-restore'));
+    expect(sheetSide()).toBe('left');
+  });
+
+  it('keeps Cart Settings on the right on a phone', async () => {
+    setWindowWidth(390, 844);
+    await mount();
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(sheetSide()).toBe('right');
+  });
 });
 
 async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test', framed = false) {
@@ -947,7 +972,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
   it('at 360 wide adds stay on Products, the Cart tab opens the cart, Products returns, and tender and new sale take over', async () => {
     setWindowWidth(360);
     await mount();
-    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(screen.getByRole('tab', { name: 'Cart, 1 item' })).toBeTruthy();
@@ -975,7 +1000,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     await payByCard();
     await act(async () => { fireEvent.click(button('Complete sale')); });
     fireEvent.click(button('New sale'));
-    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
     expect(search()).toBeTruthy();
   }, 15000);
 

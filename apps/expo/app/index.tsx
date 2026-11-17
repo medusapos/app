@@ -428,7 +428,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
       </Pressable>}
       <CartAddMenu sale={cartSale} />
-      <CartSettingsButton {...cartSettings} />
+      <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
