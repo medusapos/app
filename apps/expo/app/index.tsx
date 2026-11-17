@@ -21,6 +21,7 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../components/frame-drawer-header';
 import { PriceCheckBanner } from '../components/price-check-banner';
@@ -29,6 +30,7 @@ import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
+import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
 import { useCartSettings } from '../lib/cart-settings';
@@ -53,6 +55,7 @@ import {
   saveCachedSettings, saveSettingsChoice, StoreSettingsError, type StoreSettings,
 } from '../lib/store-settings';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
+import { useDeviceScans } from '../lib/use-device-scans';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -67,6 +70,8 @@ const STATE_LABEL: Record<SyncState, string> = {
 const PLUGIN_NAME = 'the Medusa POS plugin';
 // TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
 const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
+// The till setup screen: its navigation header and its own title say the same words.
+const TILL_SETUP_TITLE = 'Set up this till';
 
 // ADR 0009: phone mode below 600 px.
 const PHONE_BREAKPOINT = 600;
@@ -195,7 +200,8 @@ function PricingScreen(props: PricingProps) {
         actions={region ? { Retry: again, 'Choose another region': () => { clearSettingsRegion(defaultStorage(), session.baseUrl); again(); } } : { Retry: again }} />;
     }
     if (autoChooseDemo) return <SettingsMessage text="Setting up the demo till…" actions={{}} />;
-    return <><EarlierSaleNote /><StoreSettingsChoiceScreen choices={choices} initial={store.initial} title="Set up this till"
+    return <><Stack.Screen options={{ title: TILL_SETUP_TITLE }} /><EarlierSaleNote />
+      <StoreSettingsChoiceScreen choices={choices} initial={store.initial} title={TILL_SETUP_TITLE}
       onSubmit={(choice) => store.choose({ ...choice, country })} /></>;
   }
   if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
@@ -326,14 +332,19 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
   const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
-  useEffect(() => { if (!wedgeActive) setScanMiss(null); }, [wedgeActive]);
+  // The miss line shows over the cart in the cart stage (on a phone, only in the cart view); it starts empty each time it shows.
+  const scanMissShown = sale.stage.kind === 'cart' && (!phone || cartOpen);
+  useEffect(() => { setScanMiss(null); }, [scanMissShown]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
-  useWedgeScan(wedgeActive, scannerSettings, (code) => {
+  const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
     if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
-  });
+  };
+  useWedgeScan(wedgeActive, scannerSettings, onScan);
+  // A directly connected scanner (Settings > Scanner) types nothing, so it adds in every layout without a double add.
+  useDeviceScans(sale.stage.kind === 'cart', onScan);
   const sellableCount = sorted.length;
   // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
@@ -414,7 +425,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
-      quickDiscounts={cartSettings.settings.quickDiscounts}
+      quickDiscounts={cartSettings.settings.quickDiscounts} columns={cartSettings.settings.columns}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
@@ -434,8 +445,25 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       </AlertDialogContent>
     </AlertDialog>}
   </RegisterGate>;
+  const scanMissLine = scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
+  const wide = width >= ROW_BREAKPOINT;
+  const paidReceipt = sale.stage.kind === 'receipt' ? <>
+    {/* v2 leads the paid screen with the change; screen only, not printed. */}
+    {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
+      <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
+    </View>}
+    <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
+    store={receiptStore}
+    footerSlot={connector.emailReceipt ? <EmailReceipt
+      orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
+      online={online} defaultEmail={paid?.customer?.email
+        ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
+      send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
+    topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
+    cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
+  </> : null;
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
@@ -477,20 +505,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </DialogContent>
       </Dialog>}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
-      {sale.stage.kind === 'receipt' ? <>
-        {/* v2 leads the paid screen with the change; screen only, not printed. */}
-        {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-          <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
-        </View>}
-        <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
-        store={receiptStore}
-        footerSlot={connector.emailReceipt ? <EmailReceipt
-          orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
-          online={online} defaultEmail={paid?.customer?.email
-            ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
-          send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-        topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
-        cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /></> :
+      {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row items-start">
+        <View className="flex-1">{paidReceipt}</View>
+        <View dataSet={{ print: 'hide' }} className="w-96 self-stretch" style={{ paddingTop: topInset }}>
+          <PaidSummary order={sale.stage.order} posOrder={sale.stage.posOrder} storeName={receiptStore.name}
+            taxLabel={taxLabel} formatDate={formatDate} />
+        </View>
+      </View> : paidReceipt :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
@@ -498,16 +519,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {/* v2's Panel position; the column and phone layouts ignore it. */}
           {!phone ? <View testID="till-panels" className="flex-1"
             style={{ flexDirection: width >= ROW_BREAKPOINT ? (cartSettings.settings.cartSide === 'left' ? 'row-reverse' : 'row') : 'column' }}>
-            {catalogue}
+            {/* v2: tender takes the products' side, the order summary stays beside it; phone unchanged. */}
+            {sale.stage.kind === 'tender' ? <View testID="tender-slot" className="flex-1 bg-card">{tenderPane}</View> : catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? cart : tenderPane}
+              {sale.stage.kind === 'cart' ? <>{scanMissLine}{cart}</> : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : <>{cartOpen ? <View className="flex-1 bg-card">
               <View testID="phone-cart-head" className="min-h-11 flex-row items-center justify-end border-b border-border pr-3">
                 {registerBar(IN_ROW)}
               </View>
-              {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
+              {scanMissLine}
               {cart}
             </View> : catalogue}
               <PhoneTabBar active={cartOpen ? 'cart' : 'products'}

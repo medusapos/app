@@ -1,8 +1,16 @@
 import { useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import { Circle, Line } from 'react-native-svg';
-import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Input, Text, XIcon } from '@tallyui/components';
-import type { useCartSettings } from '../lib/cart-settings';
+import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Input, Label, Switch, Text, XIcon } from '@tallyui/components';
+import type { CartSettings, useCartSettings } from '../lib/cart-settings';
+
+type Column = keyof CartSettings['columns'];
+// v2's Columns rows in order: [column, flag, label]; split and name's SKU are indented under their column.
+const COLUMN_ROWS: [Column, 'show' | 'split' | 'sku', string][] = [['quantity', 'show', 'Qty'], ['quantity', 'split', 'Split'],
+  ['image', 'show', 'Image'], ['name', 'show', 'Name'], ['name', 'sku', 'SKU'], ['sku', 'show', 'SKU'], ['price', 'show', 'Price'],
+  ['total', 'show', 'Total']];
+// TallyUI's default for a missing flag: Qty, Name, Price and Total show; everything else is off.
+const SHOWN_BY_DEFAULT: Column[] = ['quantity', 'name', 'price', 'total'];
 
 const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
   <Line x1={3} y1={6} x2={21} y2={6} /><Circle cx={8} cy={6} r={2} />
@@ -39,6 +47,7 @@ export function CartSettingsButton({ settings, save, reset }: ReturnType<typeof 
             <View className="text-foreground"><XIcon size={24} /></View>
           </IconButton>
         </View>
+        <ScrollView className="flex-1" contentContainerClassName="gap-4">
         <Text>Panel position</Text>
         <View className="flex-row gap-2">
           {(['left', 'right'] as const).map((side) => {
@@ -76,7 +85,19 @@ export function CartSettingsButton({ settings, save, reset }: ReturnType<typeof 
         </View>
         <Text className="text-muted-foreground">As the cashier sees them on the price keypad. Tap a key to change it.</Text>
         {error ? <Text className="text-destructive" accessibilityRole="alert">{error}</Text> : null}
-        <View className="mt-auto flex-row justify-between gap-2">
+        <Text>Columns</Text>
+        {COLUMN_ROWS.map(([column, flag, label]) => {
+          const id = `cart-settings-column-${column}${flag === 'show' ? '' : `-${flag}`}`;
+          const value = (settings.columns[column] as Record<string, boolean | undefined> | undefined)?.[flag];
+          const checked = value ?? (flag === 'show' && SHOWN_BY_DEFAULT.includes(column));
+          return <View key={id} className={`flex-row items-center justify-between gap-2${flag === 'show' ? '' : ' pl-8'}`}>
+            <Label nativeID={`${id}-label`}>{label}</Label>
+            <Switch testID={id} aria-labelledby={`${id}-label`} checked={checked} onCheckedChange={(on) => save({ ...settings,
+              columns: { ...settings.columns, [column]: { ...settings.columns[column], [flag]: on } } })} />
+          </View>;
+        })}
+        </ScrollView>
+        <View className="flex-row justify-between gap-2">
           <Button variant="outline" testID="cart-settings-restore" onPress={onReset}><Text>Restore Default Settings</Text></Button>
           <Button variant="outline" testID="cart-settings-close" onPress={() => setOpen(false)}><Text>Close</Text></Button>
         </View>

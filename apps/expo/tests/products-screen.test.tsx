@@ -647,6 +647,56 @@ describe('ProductsScreen cart settings', () => {
     expect(screen.getByTestId('cart-settings-restore').compareDocumentPosition(screen.getByTestId('cart-settings-close'))
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  const heads = () => screen.getAllByRole('columnheader').map((head) => head.textContent);
+  const column = (id: string) => screen.getByTestId(`cart-settings-column-${id}`);
+  const DEFAULT_SWITCHES = { quantity: 'true', 'quantity-split': 'false', image: 'false', name: 'true', 'name-sku': 'false',
+    sku: 'false', price: 'true', total: 'true' };
+  const switches = () => Object.fromEntries(Object.keys(DEFAULT_SWITCHES).map((id) => [id, column(id).getAttribute('aria-checked')]));
+
+  it('shows the Columns switches with v2 defaults', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(screen.getByText('Columns')).toBeTruthy();
+    expect(switches()).toEqual(DEFAULT_SWITCHES);
+  });
+
+  it('shows a SKU column and hides the Total column, and saves both', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(heads()).not.toContain('SKU');
+    expect(within(cartLine('Shirt')).queryByText('BLUE')).toBeNull();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(column('sku'));
+    expect(heads()).toContain('SKU');
+    expect(within(cartLine('Shirt')).getByText('BLUE')).toBeTruthy();
+    fireEvent.click(column('total'));
+    expect(heads()).not.toContain('Total');
+    expect(loadCartSettings(localStorage, 'https://store.test').columns)
+      .toEqual({ ...DEFAULT_CART_SETTINGS.columns, sku: { show: true }, total: { show: false } });
+  });
+
+  it('shows the SKU under the line name', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(within(cartLine('Shirt')).queryByTestId('cart-line-sku')).toBeNull();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(column('name-sku'));
+    expect(within(cartLine('Shirt')).getByTestId('cart-line-sku').textContent).toBe('BLUE');
+  });
+
+  it('restores the default columns', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    const defaults = heads();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(column('image'));
+    fireEvent.click(column('price'));
+    expect(heads()).not.toEqual(defaults);
+    fireEvent.click(screen.getByTestId('cart-settings-restore'));
+    expect(heads()).toEqual(defaults);
+    expect(switches()).toEqual(DEFAULT_SWITCHES);
+  });
 });
 
 async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test', framed = false) {
@@ -1585,5 +1635,40 @@ describe('ProductsScreen tender gated on the order store opening', () => {
     await act(async () => { view.rerender(<SessionProvider><ProductsScreen /></SessionProvider>); });
     await checkout();
     expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
+  });
+});
+
+// Settings > Scanner's direct connection: a device scan reaches the sale through the app's ScanHubProvider, on the
+// wide window too (the wedge listener is phone-cart-only), with no search-box focus.
+describe('ProductsScreen device scans', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  async function mountWithHub() {
+    const { ScanHubProvider, useScanHub } = await import('@tallyui/pos');
+    const hub: { current?: ReturnType<typeof useScanHub> } = {};
+    function HubProbe() { hub.current = useScanHub(); return null; }
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
+      token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
+    await act(async () => {
+      render(<SessionProvider><ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
+        settings={{ prefix: '', suffix: '', minChars: 3 }}><HubProbe /><ProductsScreen /></ScanHubProvider><PortalHost /></SessionProvider>);
+    });
+    return (code: string) => act(() => { hub.current!.emit({ code, source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
+  }
+
+  it('adds the product a device scan names, on the wide window', async () => {
+    const scan = await mountWithHub();
+    // The search box takes focus on mount; blurred, so the code can only arrive through the hub.
+    act(() => { screen.getByRole('searchbox').blur(); });
+    expect(document.activeElement).not.toBe(screen.getByRole('searchbox'));
+    scan('AB123');
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  });
+
+  it('says no product matches an unknown code, on the wide window', async () => {
+    const scan = await mountWithHub();
+    scan('NOPE1');
+    expect(screen.getByText('No product matches "NOPE1"')).toBeTruthy();
   });
 });
