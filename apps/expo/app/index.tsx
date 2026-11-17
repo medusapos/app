@@ -44,6 +44,7 @@ import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
+import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
 import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
@@ -338,6 +339,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const scanMissShown = sale.stage.kind === 'cart' && (!phone || cartOpen);
   useEffect(() => { setScanMiss(null); }, [scanMissShown]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
+  // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
+  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
