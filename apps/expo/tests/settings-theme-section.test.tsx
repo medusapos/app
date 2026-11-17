@@ -69,16 +69,34 @@ describe('SettingsScreen Theme section', () => {
     } finally { unsubscribe(); }
   });
 
-  it('shows a tile with a swatch for each of the ten themes, and pressing Ocean saves ocean', async () => {
+  it('shows a tile with an icon and description for each of the ten themes, and pressing Ocean saves ocean', async () => {
     await mount();
     for (const label of ['Ocean', 'Sunset', 'Monochrome', 'Paper till', 'Warm shop', 'Bold money', 'Market stall']) {
       expect(screen.getByRole('button', { name: label })).toBeTruthy();
     }
-    expect(screen.getByTestId('theme-swatch-ocean')).toBeTruthy();
+    // v2's descriptions, word for word.
+    const descriptions: [string, string][] = [
+      ['system', 'Follow your device settings'], ['light', 'Clean and bright'], ['dark', 'Easy on the eyes'],
+      ['ocean', 'Cool blues and teals'], ['sunset', 'Warm oranges and purples'], ['monochrome', 'High contrast grayscale'],
+      ['paper', 'Cream paper and ink'], ['warm', 'Warm neutrals and terracotta'], ['bold', 'Black, white and lime'],
+      ['market', 'Coral, ink and pastel tiles'],
+    ];
+    for (const [id, description] of descriptions) {
+      expect(screen.getByTestId(`theme-icon-${id}`)).toBeTruthy();
+      expect(screen.getByTestId(`theme-description-${id}`).textContent).toBe(description);
+    }
+    expect(screen.queryByTestId('theme-swatch-ocean')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Ocean' }));
     expect(localStorage.getItem('medusapos.theme')).toBe('ocean');
     expect(screen.getByTestId('theme-tile-ocean').getAttribute('aria-selected')).toBe('true');
     expect(screen.getByTestId('theme-tile-light').getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('prints the current theme and follows a choice', async () => {
+    await mount();
+    expect(screen.getByTestId('settings-theme-current').textContent).toBe('Current Theme: Light');
+    fireEvent.click(screen.getByRole('button', { name: 'Paper till' }));
+    expect(screen.getByTestId('settings-theme-current').textContent).toBe('Current Theme: Paper till');
   });
 
   it('pressing the pressed choice again changes nothing', async () => {
