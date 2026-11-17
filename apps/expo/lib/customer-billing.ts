@@ -16,7 +16,7 @@ export function billingCountryValid(fields: BillingFields): boolean {
 export function billingChanged(fields: BillingFields, stored: CustomerAddress | undefined): boolean {
   const previous = billingFields(stored);
   return keys.some((key) => key === 'country'
-    ? fields[key].trim().toUpperCase() !== previous[key].toUpperCase() : fields[key].trim() !== previous[key]);
+    ? fields[key].trim().toUpperCase() !== previous[key].trim().toUpperCase() : fields[key].trim() !== previous[key].trim());
 }
 export function billingAddress(fields: BillingFields, base: CustomerAddress): CustomerAddress {
   const address = { ...base };

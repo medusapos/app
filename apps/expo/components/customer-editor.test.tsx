@@ -118,7 +118,7 @@ describe('CustomerEditor billing', () => {
 });
 
 it('retries only billing after a partial creation, keeps one latest row, and resets for the next editor', async () => {
-  const created = { id: 'nia', name: 'Nia', email: 'nia@example.com' };
+  const created = { id: 'nia', name: 'Nia', firstName: 'Nia', email: 'nia@example.com' };
   createCustomer.mockResolvedValueOnce(created).mockResolvedValueOnce({ id: 'next', name: 'Next', email: 'next@example.com' });
   updateCustomer.mockRejectedValueOnce(new CustomerServiceError('network', 'offline'))
     .mockResolvedValueOnce({ ...created, phone: '123', billing: { city: 'Leeds' } });
@@ -144,4 +144,27 @@ it('retries only billing after a partial creation, keeps one latest row, and res
   await submit();
   expect(createCustomer).toHaveBeenCalledTimes(2);
   expect(screen.getByTestId('customer-row-next')).toBeTruthy();
+});
+
+it('saves corrected customer fields with billing when retrying a partial creation', async () => {
+  const created = { id: 'nia', name: 'Nia', firstName: 'Nia', email: 'nia@example.com' };
+  createCustomer.mockResolvedValueOnce(created);
+  updateCustomer.mockRejectedValueOnce(new CustomerServiceError('network', 'offline'))
+    .mockResolvedValueOnce({ ...created, name: 'Nina', firstName: 'Nina', phone: '555', billing: { firstName: 'Nina', city: 'Leeds' } });
+  render(<><CustomersScreen /><PortalHost /></>);
+  fireEvent.click(screen.getByTestId('customers-add'));
+  changeForm('email@example.com', created.email);
+  changeForm('First name', 'Nia');
+  change('City', 'Leeds');
+  await submit();
+  expect(screen.getByText(BILLING_NOT_SAVED)).toBeTruthy();
+  changeForm('First name', 'Nina');
+  changeForm('Phone number', '555');
+  await submit();
+  const context = { connectorId: 'medusa', baseUrl: 'https://store.test', headers: { Authorization: 'Bearer t' } };
+  expect(createCustomer).toHaveBeenCalledExactlyOnceWith(context, { email: created.email, firstName: 'Nia' });
+  expect(updateCustomer).toHaveBeenCalledTimes(2);
+  expect(updateCustomer).toHaveBeenNthCalledWith(2, context, 'nia', {
+    firstName: 'Nina', phone: '555', billing: { firstName: 'Nina', city: 'Leeds' },
+  });
 });

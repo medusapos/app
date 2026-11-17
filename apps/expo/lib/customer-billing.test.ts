@@ -23,6 +23,10 @@ describe('billing fields', () => {
     expect(billingChanged({ ...EMPTY_BILLING, city: 'Leeds' }, undefined)).toBe(true);
     expect(billingChanged(EMPTY_BILLING, undefined)).toBe(false);
   });
+  it('trims stored fields when comparing billing changes', () => {
+    expect(billingChanged({ ...EMPTY_BILLING, city: 'London' }, { city: 'London ' })).toBe(false);
+    expect(billingChanged({ ...EMPTY_BILLING, city: 'London' }, { city: 'Leeds' })).toBe(true);
+  });
   it.each([['', true], ['gb', true], ['GBR', false], ['G1', false]] as const)('validates country %s', (country, valid) => {
     expect(billingCountryValid({ ...EMPTY_BILLING, country })).toBe(valid);
   });

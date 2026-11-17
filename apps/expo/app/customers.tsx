@@ -100,6 +100,12 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
           loadBilling={editing === 'new' ? undefined : () => loadCustomerBilling(context, editing.id)}
           customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing) => {
             if (editing === 'new') {
+              const patch: CustomerPatch = {};
+              if (createdCustomer.current) {
+                for (const field of ['firstName', 'lastName', 'email', 'phone'] as const) {
+                  if (values[field].trim() !== (createdCustomer.current[field] ?? '')) patch[field] = values[field].trim();
+                }
+              }
               const input = { email: values.email.trim(),
                 ...(values.firstName.trim() ? { firstName: values.firstName.trim() } : {}),
                 ...(values.lastName.trim() ? { lastName: values.lastName.trim() } : {}),
@@ -110,9 +116,9 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
                 ? list.map((customer) => customer.id === created.id ? created : customer) : [created, ...list]);
               setMessage(null);
               setFailed(false);
-              if (billing !== undefined && connector.updateCustomer) {
+              if ((Object.keys(patch).length || billing !== undefined) && connector.updateCustomer) {
                 try {
-                  const updated = await connector.updateCustomer(context, created.id, { billing });
+                  const updated = await connector.updateCustomer(context, created.id, { ...patch, ...(billing !== undefined ? { billing } : {}) });
                   createdCustomer.current = updated;
                   setCustomers((list) => list.map((customer) => customer.id === created.id ? updated : customer));
                 } catch (error) { throw new BillingNotSavedError(created, error); }
