@@ -57,8 +57,8 @@ describe('useAutoPrintReceipt', () => {
   // The record is module-level, so every test uses ids no other test has seen.
   const newId = () => `order_auto_print_${++next}`;
   const print = vi.fn();
-  function Probe({ saleId, enabled }: { saleId: string | undefined; enabled: boolean }) {
-    useAutoPrintReceipt(saleId, enabled, print);
+  function Probe({ saleId, enabled, after }: { saleId: string | undefined; enabled: boolean; after?: () => void }) {
+    useAutoPrintReceipt(saleId, enabled, print, after);
     return null;
   }
 
@@ -104,5 +104,52 @@ describe('useAutoPrintReceipt', () => {
     render(<Probe saleId={undefined} enabled />);
     act(() => vi.advanceTimersByTime(100));
     expect(print).not.toHaveBeenCalled();
+  });
+
+  it('calls after once the print has run, once per sale', () => {
+    const id = newId();
+    const after = vi.fn();
+    const view = render(<Probe saleId={id} enabled after={after} />);
+    act(() => vi.advanceTimersByTime(49));
+    expect(after).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(1));
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(print.mock.invocationCallOrder[0]).toBeLessThan(after.mock.invocationCallOrder[0]);
+
+    view.rerender(<Probe saleId={id} enabled after={after} />);
+    view.unmount();
+    render(<Probe saleId={id} enabled after={after} />);
+    act(() => vi.advanceTimersByTime(100));
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+
+  it('calls after at once and never prints when disabled', () => {
+    const after = vi.fn();
+    render(<Probe saleId={newId()} enabled={false} after={after} />);
+    expect(after).toHaveBeenCalledTimes(1);
+    act(() => vi.advanceTimersByTime(100));
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it('calls after once under StrictMode when disabled', () => {
+    const after = vi.fn();
+    render(<StrictMode><Probe saleId={newId()} enabled={false} after={after} /></StrictMode>);
+    act(() => vi.advanceTimersByTime(100));
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it('calls the latest after, not the one from the render that first saw the sale', () => {
+    const id = newId();
+    const first = vi.fn();
+    const latest = vi.fn();
+    const view = render(<Probe saleId={id} enabled after={first} />);
+    view.rerender(<Probe saleId={id} enabled after={latest} />);
+    act(() => vi.advanceTimersByTime(50));
+    expect(latest).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
   });
 });

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SessionStorage } from './session';
 
 export type PrintingSettings = { autoPrintReceipt: boolean };
@@ -52,12 +52,21 @@ function printWindow() {
 // or a later toggle of the switch never prints that sale again.
 let seenSaleId: string | undefined;
 
-/** Prints a newly finished sale once when `enabled`; a sale first seen with `enabled` false is never printed. */
-export function useAutoPrintReceipt(saleId: string | undefined, enabled: boolean, print: () => void = printWindow): void {
+/**
+ * Prints a newly finished sale once when `enabled`; a sale first seen with `enabled` false is never printed. `after`
+ * runs once per sale, after the print (or at once when not printing): the next sale after an unshown receipt.
+ */
+export function useAutoPrintReceipt(
+  saleId: string | undefined, enabled: boolean, print: () => void = printWindow, after?: () => void,
+): void {
+  // The latest `after`, so the call never uses one from an earlier render.
+  const afterRef = useRef(after);
+  afterRef.current = after;
   useEffect(() => {
     if (!saleId || saleId === seenSaleId) return;
     seenSaleId = saleId;
     // Not cleared on cleanup: StrictMode's second effect run is then a no-op, not a cancelled print.
-    if (enabled) setTimeout(print, AUTO_PRINT_SETTLE_MS);
+    if (enabled) setTimeout(() => { print(); afterRef.current?.(); }, AUTO_PRINT_SETTLE_MS);
+    else afterRef.current?.();
   }, [saleId, enabled, print]);
 }

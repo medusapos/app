@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
 import { DEFAULT_CART_SETTINGS, loadCartSettings, saveCartSettings } from '../lib/cart-settings';
+import { useCatalogueSnapshot } from '../lib/catalogue-snapshot';
 import { clearProductCache } from '../lib/product-cache';
 import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { forgetDeletedDefaultCustomer, loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
@@ -45,7 +46,7 @@ vi.mock('expo-router', () => ({
   </> },
 }));
 // expo-localization's native module isn't available under vitest.
-vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
+vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }], getLocales: () => [{ languageTag: 'en-GB' }] }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
 // A fixed outbox value, except in the hung-save tests: those run the real OutboxProvider and useOutboxContext
 // (kept in `realOutbox`) over a stand-in for TallyUI's useOrderOutbox.
@@ -113,7 +114,7 @@ describe('ProductsScreen catalogue', () => {
     saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace' });
     try {
       await mount();
-      expect(screen.getByText('Customer: Ada Lovelace')).toBeTruthy();
+      expect(screen.getByRole('button', { name: 'Customer: Ada Lovelace' })).toBeTruthy();
     } finally {
       saveDefaultCustomer(localStorage, 'https://store.test', null);
     }
@@ -129,8 +130,8 @@ describe('ProductsScreen catalogue', () => {
         prices: [{ amount: 12, currency_code: 'eur' }] }],
     }] }));
     await mount();
-    expect(screen.getByText('Customer: Guest')).toBeTruthy();
-    expect(screen.queryByText('Customer: Ada Lovelace')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Customer: Guest' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Customer: Ada Lovelace' })).toBeNull();
     expect(loadDefaultCustomer(localStorage, 'https://store.test')).toBeNull();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await payByCard();
@@ -173,12 +174,12 @@ describe('ProductsScreen catalogue', () => {
     }] }));
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    expect(screen.getByText('Customer: Ada Lovelace')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Customer: Ada Lovelace' })).toBeTruthy();
     act(() => {
       forgetDeletedDefaultCustomer(localStorage, 'https://store.test', [{ code: 'customer_ignored', customerId: 'ada' }]);
     });
     expect(loadDefaultCustomer(localStorage, 'https://store.test')).toBeNull();
-    expect(screen.getByText('Customer: Ada Lovelace')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Customer: Ada Lovelace' })).toBeTruthy();
   });
 
   it('shows a stopped product pull above the sales line', async () => {
@@ -288,7 +289,7 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
-      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'cart-settings-button'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
+      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'cart-settings-button', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
       .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'In Stock', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
@@ -299,6 +300,23 @@ describe('ProductsScreen catalogue', () => {
     for (const name of ['Zebra', 'Apple']) {
       expect(cartLineCells(name)).toEqual(['1', name, '€12.50', '€12.50']);
     }
+  });
+
+  it('publishes the sellable catalogue for the session\'s store to the Products area, and withdraws it on unmount', async () => {
+    const product = (id: string, title: string, status = 'published') => ({ id, title, status,
+      variants: [{ id: `${id}-one`, title: 'One size', sku: id, prices: [{ amount: 12.5, currency_code: 'eur' }] }] });
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
+      products: [product('zebra', 'Zebra'), product('draft', 'Draft', 'draft'), product('a', 'Apple')],
+    }));
+    let seen: ReturnType<typeof useCatalogueSnapshot> | undefined;
+    const Probe = () => { seen = useCatalogueSnapshot(); return null; };
+    await mount();
+    render(<Probe />);
+    expect(seen).toMatchObject({ baseUrl: 'https://store.test', currency: 'EUR' });
+    expect((seen!.products as { id: string }[]).map(({ id }) => id)).toEqual(['a', 'zebra']);
+    cleanup();
+    render(<Probe />);
+    expect(seen).toBeNull();
   });
 
   it('starts with In Stock off and toggles out-of-stock product visibility', async () => {

@@ -2,9 +2,10 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { PortalHost } from '@tallyui/primitives';
-import { createOrderBuilder, finalizeOrder, presetRange, useParkedSales, useStoreSettings, watchFresh, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, formatClosureDate, presetRange, useParkedSales, useStoreSettings, watchFresh, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
+import { closureContext } from '../components/register-close';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { localDayStartIso } from '../lib/reports';
@@ -13,7 +14,7 @@ import { SessionProvider } from '../lib/session-context';
 import { fetchStoreSettings, saveCachedSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities } from './pos-connector-mock';
-import { openRegisterFixture } from './register-fixture';
+import { OPEN_SESSION, openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
@@ -22,7 +23,7 @@ vi.mock('expo-router', () => ({
   router: { replace: vi.fn(), push: vi.fn() },
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() },
 }));
-vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
+vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }], getLocales: () => [{ languageTag: 'en-GB' }] }));
 vi.mock('../lib/product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
@@ -73,6 +74,8 @@ async function mount(name?: string) {
   await act(async () => { render(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
 }
 const open = () => fireEvent.click(screen.getByTestId('user-menu'));
+// Computed as the sheet does, never a literal hour, so the suite passes in any machine time zone.
+const openedAt = formatClosureDate(OPEN_SESSION.opened_at_gmt, closureContext('EUR', { name: 'Test shop' })).time;
 
 function todayOrders(rows: readonly (readonly [number, string, string, string | undefined])[]): PosOrder[] {
   return rows.map(([amount, registerId, currency, cashierRef]) => {
@@ -134,7 +137,7 @@ it.each([['Alex Smith', 'AS', 1280], [undefined, 'A', 1280], ['Alex Smith', 'AS'
     expect(screen.queryByTestId('user-sheet')).toBeNull();
     open();
     expect(screen.getByTestId('user-sheet-name').textContent).toBe(displayName);
-    expect(screen.getByTestId('user-sheet-context').textContent).toBe(`${name ? 'admin@store.test · ' : ''}Test shop · Register 1`);
+    expect(screen.getByTestId('user-sheet-context').textContent).toBe(`${name ? 'admin@store.test · ' : ''}Test shop · Register 1 · since ${openedAt}`);
     const buttons = screen.getByTestId('user-sheet-sign-out').parentElement!;
     expect(buttons.firstElementChild).toBe(screen.getByTestId('user-sheet-sign-out'));
     expect(buttons.lastElementChild).toBe(screen.getByTestId('user-sheet-close'));
@@ -148,6 +151,46 @@ it('omits the drawer without an open session and skips an empty register name', 
   expect(screen.queryByTestId('user-sheet-drawer')).toBeNull();
   expect(screen.queryByTestId('user-sheet-handover')).toBeNull();
   expect(screen.getByTestId('user-sheet-context').textContent).toBe('Test shop');
+  expect(screen.getByTestId('user-sheet-context').textContent).not.toContain('since');
+  expect(screen.queryByTestId('user-sheet-drawer-opened')).toBeNull();
+});
+
+it('shows no opening time for a closed session', async () => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, status: 'closed' } } });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-context').textContent).toBe('Test shop · Register 1');
+  expect(screen.queryByTestId('user-sheet-drawer-opened')).toBeNull();
+});
+
+it('shows when and by whom the drawer was opened, naming the signed-in opener', async () => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, opened_by: 'admin@store.test' } } });
+  await mount('Alex Smith'); open();
+  expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`Register 1 · opened ${openedAt} by Alex Smith`);
+  expect(screen.getByTestId('user-sheet-context').textContent).toMatch(new RegExp(` · since ${openedAt}$`));
+});
+
+it('names another cashier who opened the drawer by the stored id', async () => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, opened_by: 'ana@store.test' } } });
+  await mount('Alex Smith'); open();
+  expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`Register 1 · opened ${openedAt} by ana@store.test`);
+});
+
+it('shows the opening time in the header and the drawer while counting', async () => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, status: 'counting' } } });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-context').textContent).toBe(`Test shop · Register 1 · since ${openedAt}`);
+  expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`Register 1 · opened ${openedAt}`);
+});
+
+it('starts the opened line with the time when the register has no name', async () => {
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), registerName: null });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`opened ${openedAt}`);
+  expect(screen.getByTestId('user-sheet-context').textContent).toBe(`Test shop · since ${openedAt}`);
 });
 
 it.each(['open', 'counting'] as const)('shows expected cash while %s and opens the register panel', async (status) => {
@@ -171,7 +214,7 @@ it('shows zero expected cash for an open session with empty expected totals', as
 it('hides the drawer amount while blind', async () => {
   vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register, blind: true } });
   await mount(); open();
-  expect(screen.getByTestId('user-sheet-drawer').textContent).toBe('In the drawerPay in · Pay out · Close register›Hand the till to the next cashier›');
+  expect(screen.getByTestId('user-sheet-drawer').textContent).toBe(`In the drawerRegister 1 · opened ${openedAt}Pay in · Pay out · Close register›Hand the till to the next cashier›`);
   fireEvent.click(screen.getByTestId('user-sheet-sign-out'));
   expect(screen.getByTestId('switch-confirm-title').textContent).toBe('Register 1 is still open. Close it first?');
 });
@@ -245,4 +288,59 @@ it('disables hand-over and sign-out while a save locks sign-out', async () => {
   }
   expect(screen.queryByTestId('switch-confirm')).toBeNull();
   expect(localStorage.getItem('medusapos.session')).not.toBeNull();
+});
+
+const noSession = () => vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register, session: null } });
+
+it('shows the bound register with Switch disabled while its session is open', async () => {
+  await mount(); open();
+  const row = within(screen.getByTestId('user-sheet-register-row'));
+  expect(row.getByText('Register')).toBeTruthy();
+  expect(row.getByTestId('user-sheet-register-name').textContent).toBe('Register 1');
+  expect(row.getByTestId('user-sheet-register-locked').textContent).toBe('Close the register first');
+  expect(within(screen.getByTestId('user-sheet-drawer')).queryByTestId('user-sheet-register-row')).toBeNull();
+  const button = screen.getByTestId('user-sheet-register-switch');
+  expect(button.getAttribute('aria-disabled')).toBe('true');
+  expect(button.getAttribute('aria-label')).toBe('Switch register');
+  fireEvent.click(button);
+  expect(useRegister().unbind).not.toHaveBeenCalled();
+  expect(screen.getByTestId('user-sheet')).toBeTruthy();
+});
+
+it.each(['counting', 'closed'] as const)('disables Switch while the session is %s', async (status) => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, status } } });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-register-switch').getAttribute('aria-disabled')).toBe('true');
+  expect(screen.getByTestId('user-sheet-register-locked')).toBeTruthy();
+  fireEvent.click(screen.getByTestId('user-sheet-register-switch'));
+  expect(useRegister().unbind).not.toHaveBeenCalled();
+});
+
+it('switches the register without a session: closes the sheet and unbinds the till', async () => {
+  noSession();
+  await mount(); open();
+  expect(screen.queryByTestId('user-sheet-register-locked')).toBeNull();
+  expect(screen.getByTestId('user-sheet-register-switch').getAttribute('aria-disabled')).not.toBe('true');
+  await act(async () => { fireEvent.click(screen.getByTestId('user-sheet-register-switch')); });
+  expect(screen.queryByTestId('user-sheet')).toBeNull();
+  expect(useRegister().unbind).toHaveBeenCalledTimes(1);
+});
+
+it('warns and stays put when unbinding fails', async () => {
+  noSession();
+  const error = new Error('storage unavailable');
+  vi.mocked(useRegister().unbind).mockRejectedValueOnce(error);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await mount(); open();
+  await act(async () => { fireEvent.click(screen.getByTestId('user-sheet-register-switch')); });
+  expect(warn).toHaveBeenCalledWith('Could not unbind the register:', error);
+  warn.mockRestore();
+});
+
+it('omits the register row while the till is unbound', async () => {
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), boundRegisterId: null, register: { ...useRegister().register, session: null } });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet')).toBeTruthy();
+  expect(screen.queryByTestId('user-sheet-register-row')).toBeNull();
 });

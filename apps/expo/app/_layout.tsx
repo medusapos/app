@@ -8,6 +8,7 @@ import { Uniwind, useCSSVariable } from 'uniwind';
 import { AppFrame } from '../components/app-frame';
 import { FrameDrawerHeader } from '../components/frame-drawer-header';
 import { AppScale } from '../components/app-scale';
+import { useHeaderTitleStyle } from '../components/app-text';
 import { ClearLocalDataGate } from '../components/clear-local-data';
 import { DeviceScannerProvider } from '../components/device-scanner';
 import { AppFontProvider } from '../components/font-choice';
@@ -33,6 +34,7 @@ function GatedApp() {
   const card = useCSSVariable('--color-card');
   const foreground = useCSSVariable('--color-foreground');
   const background = useCSSVariable('--color-background');
+  const headerTitleStyle = useHeaderTitleStyle();
   return (
     <LiveTabGate scope={session?.baseUrl}>
       <DeviceScannerProvider><StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null} drawerHeader={<FrameDrawerHeader />}><Stack
@@ -44,7 +46,7 @@ function GatedApp() {
           headerStyle: { backgroundColor: card as string },
           headerTintColor: foreground as string,
           contentStyle: { backgroundColor: background as string },
-          headerTitleStyle: { fontWeight: '600' },
+          headerTitleStyle,
         }}
       ><Stack.Screen name="index" options={{ title: 'Sale' }} />
       </Stack></AppFrame></OutboxProvider></StorageHealth></DeviceScannerProvider>

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
@@ -19,6 +20,7 @@ import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
+import { CustomerChip } from '../components/customer-chip';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidChange } from '../components/paid-change';
@@ -36,6 +38,7 @@ import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
 import { useCartSettings } from '../lib/cart-settings';
+import { publishCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
@@ -333,6 +336,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   );
   const entries = useMemo(() => catalogueEntries(sorted, traits), [sorted]);
   entriesRef.current = entries;
+  // The Products area reads this catalogue; it stays live while the area is pushed over the Sale.
+  useEffect(() => {
+    publishCatalogue({ baseUrl: session.baseUrl, products: sorted, traits, currency: pricing.currency });
+    return () => publishCatalogue(null);
+  }, [session.baseUrl, sorted, traits, pricing.currency]);
   // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
   const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
@@ -341,9 +349,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useEffect(() => { setScanMiss(null); }, [scanMissShown]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
-  // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
-  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
+  // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
+  // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
+  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
+    undefined, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
@@ -423,10 +433,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
-      {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
-        className="min-h-11 justify-center">
-        <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
-      </Pressable>}
+      {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)} />}
       <CartAddMenu sale={cartSale} />
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
@@ -506,6 +513,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <UserSheet session={session} displayName={displayName} initials={initials} storeName={receiptStore.name} currency={pricing.currency}
         outbox={summarizeOutboxHealth(outboxState, registerOutbox.state)} parkedSales={parked.length} paidMinor={capturedMinor(sale.order.payments)}
         open={userSheetOpen && sale.stage.kind !== 'receipt'} onOpenChange={setUserSheetOpen} onRegister={() => setPanelOpen(true)}
+        onChooseRegister={openGate}
         signOut={signOut} signOutLocked={signOutLocked} lockMessage={lockMessage} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}

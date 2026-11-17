@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { version as appVersion } from '../package.json';
 import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
 import { orderStoreOpenFailed$, storageHealth$, type OrderStoreOpenFailure } from '../lib/storage-health';

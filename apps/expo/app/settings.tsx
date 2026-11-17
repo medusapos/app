@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState, type ComponentProps } from 'react';
-import { Platform, Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
