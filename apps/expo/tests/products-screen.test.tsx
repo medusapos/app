@@ -213,7 +213,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.dataset.testid === 'user-menu' ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'Apple', 'Zebra', 'Customer: Guest']);
+      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'In Stock', 'Apple', 'Zebra', 'Customer: Guest']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -223,6 +223,28 @@ describe('ProductsScreen catalogue', () => {
     for (const name of ['Zebra', 'Apple']) {
       expect(cartLineCells(name)).toEqual(['1', name, '€12.50', '€12.50']);
     }
+  });
+
+  it('starts with In Stock off and toggles out-of-stock product visibility', async () => {
+    const products = [
+      { id: 'apple', title: 'Apple', status: 'published', variants: [{ id: 'apple-one', title: 'One size',
+        manage_inventory: true, inventory_quantity: 5, prices: [{ amount: 12.5, currency_code: 'eur' }] }] },
+      { id: 'zebra', title: 'Zebra', status: 'published', variants: [{ id: 'zebra-one', title: 'One size',
+        manage_inventory: true, inventory_quantity: 0, prices: [{ amount: 12.5, currency_code: 'eur' }] }] },
+    ];
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products }));
+    await mount();
+    const chip = screen.getByRole('button', { name: 'In Stock', pressed: false });
+    expect(screen.getByTestId('product-tile-Apple')).toBeTruthy();
+    expect(within(screen.getByTestId('product-tile-Zebra')).getByText('Out of Stock')).toBeTruthy();
+    fireEvent.click(chip);
+    expect(screen.getByRole('button', { name: 'In Stock', pressed: true })).toBeTruthy();
+    expect(screen.getByTestId('product-tile-Apple')).toBeTruthy();
+    expect(screen.queryByTestId('product-tile-Zebra')).toBeNull();
+    fireEvent.click(chip);
+    expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
+    expect(screen.getByTestId('product-tile-Apple')).toBeTruthy();
+    expect(screen.getByTestId('product-tile-Zebra')).toBeTruthy();
   });
 
   it.each([
