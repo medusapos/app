@@ -19,7 +19,9 @@ import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
-vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: () => null } }));
+// Stack.Screen renders nothing but records its options, so a test can read the header title.
+const { stackScreen } = vi.hoisted(() => ({ stackScreen: vi.fn((_props: { options?: { title?: string } }) => null) }));
+vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: stackScreen } }));
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
@@ -124,6 +126,18 @@ describe('store settings flow', () => {
     await pos();
     expect(storeSettings).toHaveBeenLastCalledWith(expect.anything(), { region: 'reg_eu', country: 'dk' });
     expect(loadSettingsChoice(localStorage, session.baseUrl)).toEqual({ region: 'reg_eu' });
+  });
+
+  it('titles the header "Set up this till" while the choice screen shows, and drops it once the POS opens', async () => {
+    storeSettings.mockRejectedValueOnce(choiceRequired({ regions })).mockResolvedValueOnce(pricing);
+    const headerTitle = () => stackScreen.mock.lastCall?.[0].options?.title;
+    render(<ProductsScreen />);
+    expect(await screen.findByText('Set up this till')).toBeTruthy();
+    expect(headerTitle()).toBe('Set up this till');
+    fireEvent.click(screen.getByRole('radio', { name: 'Europe' }));
+    await act(async () => { fireEvent.click(screen.getByText('Continue')); });
+    await pos();
+    expect(headerTitle()).not.toBe('Set up this till');
   });
 
   it('asks only for the channel when that is the only ambiguity, never for a country', async () => {

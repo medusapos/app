@@ -49,7 +49,7 @@ export async function resetCspViolations(context: BrowserContext) {
 // `as` signs in as another user than E2E_EMAIL (e2e/rbac).
 export async function signIn(page: Page, region: string | null = 'Europe', register: boolean | 'unsynced' = true, as = credentials): Promise<boolean> {
   await submitSignIn(page, as);
-  const setUp = page.getByText('Set up this till', { exact: true });
+  const setUp = page.getByRole('heading', { name: 'Set up this till', exact: true });
   const hosted = process.env.E2E_BACKEND_URL !== undefined;
   await expect(setUp.or(page.getByText(/Up to date · /))).toBeVisible({ timeout: hosted ? 5 * 60_000 : undefined });
   const chose = await setUp.isVisible();
