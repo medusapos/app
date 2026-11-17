@@ -734,13 +734,21 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(screen.queryByTestId('tender-close')).toBeNull();
   });
 
-  it('at 1280 wide the tender keeps the Sale title and has no close', async () => {
+  it('at 1280 wide the title names the store and register, through the tender, with no close', async () => {
     await mount();
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Test shop · Register 1');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await checkout();
     expect(button('Complete sale')).toBeTruthy();
-    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Sale');
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Test shop · Register 1');
     expect(screen.queryByTestId('tender-close')).toBeNull();
+  });
+
+  it('at 1280 wide the title falls back to the connector name when the store name is blank', async () => {
+    const { createPosConnector } = await import('../lib/pos-connector');
+    vi.mocked(fetchStoreSettings).mockResolvedValue({ ...settings, storeName: '' });
+    await mount();
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe(`${createPosConnector().name} · Register 1`);
   });
 
   it('at 360 wide adds stay on Products, the bar opens the cart, Products returns, and tender and new sale take over', async () => {
