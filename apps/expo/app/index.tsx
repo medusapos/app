@@ -19,6 +19,7 @@ import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
+import { CustomerChip } from '../components/customer-chip';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidSummary } from '../components/paid-summary';
@@ -422,10 +423,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
-      {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
-        className="min-h-11 justify-center">
-        <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
-      </Pressable>}
+      {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)} />}
       <CartAddMenu sale={cartSale} />
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
