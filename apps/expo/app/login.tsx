@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Platform, Pressable, Text, TextInput, View } from 'react-native';
+import { Platform, Pressable, TextInput, View } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack } from 'expo-router';
 import { version as appVersion } from '../package.json';
 import { storeConfig } from '../lib/config';

@@ -1,4 +1,5 @@
-import { ScrollView, Text, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { CartColumnHeads, CartLine, CartTotal } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, type useSale } from '@tallyui/pos';

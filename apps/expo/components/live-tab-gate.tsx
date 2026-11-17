@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Platform, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import {
   startLiveTab as startLiveTabDefault,
   type LiveTabHandle, type LiveTabOptions, type LiveTabState,

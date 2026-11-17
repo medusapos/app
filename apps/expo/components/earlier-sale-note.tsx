@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
 import { storageHealth$ } from '../lib/storage-health';

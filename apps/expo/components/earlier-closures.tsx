@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Pressable, Text } from 'react-native';
+import { Pressable } from 'react-native';
+import { AppText as Text } from './app-text';
 import type { Closure, ClosureContext } from '@tallyui/pos';
 import { ClosureHistoryError, dayBefore, fetchClosureHistory, type ClosureHistoryEntry } from '../lib/closure-history';
 import { byCashier, historyClosure, historyTableRow } from '../lib/reports';
