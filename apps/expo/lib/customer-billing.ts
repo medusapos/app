@@ -5,7 +5,7 @@ export const EMPTY_BILLING: BillingFields = { address1: '', address2: '', city: 
 const keys = Object.keys(EMPTY_BILLING) as (keyof BillingFields)[];
 export const BILLING_NOT_SAVED = 'The customer was saved, but not the billing address. Save again to try the address again.';
 export const BILLING_LOAD_FAILED = "Couldn't load the stored billing address, so it can't be changed now. The other details can still be saved.";
-export const BILLING_COUNTRY_HINT = 'Enter the country as a two-letter code, such as GB.';
+export const BILLING_COUNTRY_HINT = "The stored country isn't a two-letter code. Choose a country from the list.";
 
 export function billingFields(address: CustomerAddress | undefined): BillingFields {
   return Object.fromEntries(keys.map((key) => [key, address?.[key] ?? ''])) as BillingFields;
