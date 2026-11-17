@@ -1,6 +1,8 @@
 @import 'tailwindcss';
 @import 'uniwind';
 @import '@tallyui/theme/tokens.css';
+/* TallyUI's ScaleProvider overrides these per step (Settings › Theme › Scale). */
+@import '@tallyui/theme/scale.css';
 @import './themes.css';
 
 @source './node_modules/@tallyui/components/src';
