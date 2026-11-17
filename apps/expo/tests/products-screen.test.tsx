@@ -1520,3 +1520,38 @@ describe('ProductsScreen tender gated on the order store opening', () => {
     expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
   });
 });
+
+// Settings > Scanner's direct connection: a device scan reaches the sale through the app's ScanHubProvider, on the
+// wide window too (the wedge listener is phone-cart-only), with no search-box focus.
+describe('ProductsScreen device scans', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  async function mountWithHub() {
+    const { ScanHubProvider, useScanHub } = await import('@tallyui/pos');
+    const hub: { current?: ReturnType<typeof useScanHub> } = {};
+    function HubProbe() { hub.current = useScanHub(); return null; }
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
+      token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
+    await act(async () => {
+      render(<SessionProvider><ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
+        settings={{ prefix: '', suffix: '', minChars: 3 }}><HubProbe /><ProductsScreen /></ScanHubProvider><PortalHost /></SessionProvider>);
+    });
+    return (code: string) => act(() => { hub.current!.emit({ code, source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
+  }
+
+  it('adds the product a device scan names, on the wide window', async () => {
+    const scan = await mountWithHub();
+    // The search box takes focus on mount; blurred, so the code can only arrive through the hub.
+    act(() => { screen.getByRole('searchbox').blur(); });
+    expect(document.activeElement).not.toBe(screen.getByRole('searchbox'));
+    scan('AB123');
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  });
+
+  it('says no product matches an unknown code, on the wide window', async () => {
+    const scan = await mountWithHub();
+    scan('NOPE1');
+    expect(screen.getByText('No product matches "NOPE1"')).toBeTruthy();
+  });
+});
