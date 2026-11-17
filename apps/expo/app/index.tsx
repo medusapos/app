@@ -22,6 +22,7 @@ import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PhoneTabBar } from '../components/phone-tab-bar';
+import { storeRegisterTitle } from '../components/frame-drawer-header';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
@@ -43,6 +44,7 @@ import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { playScanBeep } from '../lib/scan-beep';
 import { useDefaultCustomer } from '../lib/default-customer';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -240,7 +242,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // `session`: complete() stamps the sale with the register session (ADR 0017). The Cart's tender start
   // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
   // close during the tender still reaches the stamp, which then makes the sale late.
-  const { register, registerOutbox } = useRegister();
+  const { register, registerOutbox, boundRegisterId, registerName } = useRegister();
   const drafts = draftsCollection(orders);
   const { parked, discard } = useParkedSales(drafts);
   const [parkedOpen, setParkedOpen] = useState(false);
@@ -319,6 +321,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
   useWedgeScan(wedgeActive, scannerSettings, (code) => {
+    if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
     if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
   });
@@ -326,8 +329,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
   const productCount = `${sellableCount.toLocaleString()} ${sellableCount === 1 ? 'product' : 'products'}`;
+  const storeName = settings.storeName.trim() ? settings.storeName : connector.name;
   const statusText = phone ? `${STATE_LABEL[state]}${error ? ` · ${error}` : ''} · ${productCount}`
-    : `${settings.storeName.trim() ? settings.storeName : connector.name} · ${STATE_LABEL[state]} · ${productCount}`
+    : `${storeName} · ${STATE_LABEL[state]} · ${productCount}`
       + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
       + (error ? ` · ${error}` : '');
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.
@@ -423,8 +427,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
-        // v2's phone tender is "Checkout Order" with a close; MedusaPOS has no order number before payment, so the title carries none.
-        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
+        // The wide title names the store and register as v2's title bar does; the phone tender is "Checkout Order" with a close.
+        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : phone ? 'Sale' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
         headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.

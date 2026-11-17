@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router, usePathname } from 'expo-router';
 import { AppFrame, FrameMenuButton, frameStep, useFrameBadge } from '../components/app-frame';
+import { version as appVersion } from '../package.json';
 import { setWindowWidth } from './window-width';
 
 vi.mock('expo-router', () => ({
@@ -32,6 +33,22 @@ afterEach(() => {
 });
 
 describe('AppFrame on a wide window', () => {
+  it('shows the package version at the foot of the rail', () => {
+    mount('/');
+    const version = screen.getByTestId('frame-version');
+    expect(version.textContent).toBe(`v ${appVersion}`);
+    expect(screen.getByTestId('frame-rail').contains(version)).toBe(true);
+    expect(screen.getByTestId('nav-rail').compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows no version on /login or when signed out', () => {
+    for (const [pathname, signedIn] of [['/login', true], ['/', false]] as const) {
+      mount(pathname, { signedIn });
+      expect(screen.queryByTestId('frame-version')).toBeNull();
+      cleanup();
+    }
+  });
+
   it('draws the rail with Sale, Orders, Customers, Reports and Settings in that order, and no menu button', () => {
     mount('/');
     expect(screen.getByTestId('app-frame')).toBeTruthy();
@@ -90,6 +107,15 @@ describe('frameStep', () => {
 });
 
 describe('AppFrame on a phone', () => {
+  it('shows no version with the drawer closed or open', () => {
+    setWindowWidth(390, 844);
+    mount('/');
+    expect(screen.queryByTestId('frame-version')).toBeNull();
+    fireEvent.click(screen.getByTestId('frame-menu'));
+    expect(screen.getByTestId('nav-drawer')).toBeTruthy();
+    expect(screen.queryByTestId('frame-version')).toBeNull();
+  });
+
   it('mounts the drawer header before Sale only after opening the menu', () => {
     setWindowWidth(390, 844);
     vi.mocked(usePathname).mockReturnValue('/');

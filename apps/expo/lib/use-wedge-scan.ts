@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
+import { stripBoundary } from '@tallyui/pos';
 import type { ScannerSettings } from './scanner-settings';
 
 // A gap this long between two keys starts a new buffer: a scanner never pauses mid-code.
@@ -12,6 +13,10 @@ const isEditable = (t: EventTarget | null) => t instanceof HTMLElement
 // the wedge listener and the Settings screen's test-scan field, so both judge a scan's speed the same way.
 export function averageKeyMs(firstAt: number, lastAt: number, length: number): number {
   return length > 1 ? (lastAt - firstAt) / (length - 1) : 0;
+}
+
+export function stripScanAffixes(raw: string, settings: ScannerSettings): string {
+  return stripBoundary(Array.from(raw), { threshold: settings.avgKeyMs, prefix: settings.prefix, suffix: settings.suffix });
 }
 
 // A keyboard-wedge barcode scan on `document`, active only while `active`: fires `onScan` with the buffered code
@@ -27,8 +32,9 @@ export function useWedgeScan(active: boolean, settings: ScannerSettings, onScan:
       if (isEditable(event.target)) return;
       const now = Date.now();
       if (event.key === 'Enter') {
-        const code = buffer; buffer = '';
-        if (code.length >= settingsRef.current.minChars && averageKeyMs(firstAt, lastAt, code.length) <= settingsRef.current.avgKeyMs) {
+        const raw = buffer; buffer = '';
+        const code = stripScanAffixes(raw, settingsRef.current);
+        if (code.length >= settingsRef.current.minChars && averageKeyMs(firstAt, lastAt, raw.length) <= settingsRef.current.avgKeyMs) {
           // A tapped Pressable (role=button) keeps focus and activates on Enter; stop this Enter here, in the
           // capture phase (before the target's own handler runs), so a scan can never also press it.
           event.preventDefault();

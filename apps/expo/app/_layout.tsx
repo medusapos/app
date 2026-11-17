@@ -9,6 +9,7 @@ import { AppFrame } from '../components/app-frame';
 import { FrameDrawerHeader } from '../components/frame-drawer-header';
 import { AppScale } from '../components/app-scale';
 import { ClearLocalDataGate } from '../components/clear-local-data';
+import { AppFontProvider } from '../components/font-choice';
 import { LiveTabGate } from '../components/live-tab-gate';
 import { StorageHealth } from '../components/storage-health';
 import { installLogSinks } from '../lib/logging';
@@ -51,13 +52,14 @@ function GatedApp() {
 }
 
 export default function RootLayout() {
+  // Above PortalHost so dialogs and sheets get the chosen font too.
   return (
-    <AppScale><ClearLocalDataGate><SessionProvider>
+    <AppScale><AppFontProvider><ClearLocalDataGate><SessionProvider>
       <StatusBar style="auto" />
       <GatedApp />
       {/* One root host, after navigation and outside every gate (TallyUI's integration doc at 451a0ca): the
           register panel and movement sheet (Dialog) render here, above the screen's header. */}
       <PortalHost />
-    </SessionProvider></ClearLocalDataGate></AppScale>
+    </SessionProvider></ClearLocalDataGate></AppFontProvider></AppScale>
   );
 }

@@ -48,6 +48,28 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
   await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
 });
 
+test('scanner affixes are stripped in the test field and cart, with sound enabled', async ({ page }) => {
+  await signIn(page);
+  await addE2E1(page);
+  await openSettings(page);
+  await page.getByLabel('Scanner prefix', { exact: true }).fill('#');
+  await page.getByLabel('Scanner suffix', { exact: true }).fill('!');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const testField = page.getByLabel('Test scan here', { exact: true });
+  await testField.pressSequentially('#E2E-2!', { delay: 10 });
+  await testField.press('Enter');
+  await expect(page.getByText(/^Last scan: E2E-2 · 5 characters/)).toBeVisible();
+  await expect(page.getByText('Counts as a scan', { exact: true })).toBeVisible();
+  const sound = page.getByRole('switch', { name: 'Play a sound on scan' });
+  await sound.click();
+  await expect(sound).toBeChecked();
+  await page.goBack();
+  await openCart(page);
+  await page.keyboard.type('#E2E-2!', { delay: 10 });
+  await page.keyboard.press('Enter');
+  await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
+});
+
 // The same minChars is the Products search's minCodeLength (TallyUI #148): below it, Enter does no code lookup.
 test('a saved minChars gates Enter in the Products search: a shorter code stays a search', async ({ page }) => {
   await signIn(page);

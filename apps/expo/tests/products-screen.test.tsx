@@ -13,7 +13,7 @@ import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
 import { DEFAULT_CART_SETTINGS, saveCartSettings } from '../lib/cart-settings';
 import { clearProductCache } from '../lib/product-cache';
-import { saveScannerSettings } from '../lib/scanner-settings';
+import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { saveDefaultCustomer } from '../lib/default-customer';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { capabilities } from './pos-connector-mock';
@@ -734,13 +734,21 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(screen.queryByTestId('tender-close')).toBeNull();
   });
 
-  it('at 1280 wide the tender keeps the Sale title and has no close', async () => {
+  it('at 1280 wide the title names the store and register, through the tender, with no close', async () => {
     await mount();
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Test shop · Register 1');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await checkout();
     expect(button('Complete sale')).toBeTruthy();
-    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Sale');
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Test shop · Register 1');
     expect(screen.queryByTestId('tender-close')).toBeNull();
+  });
+
+  it('at 1280 wide the title falls back to the connector name when the store name is blank', async () => {
+    const { createPosConnector } = await import('../lib/pos-connector');
+    vi.mocked(fetchStoreSettings).mockResolvedValue({ ...settings, storeName: '' });
+    await mount();
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe(`${createPosConnector().name} · Register 1`);
   });
 
   it('at 360 wide adds stay on Products, the Cart tab opens the cart, Products returns, and tender and new sale take over', async () => {
@@ -1177,7 +1185,7 @@ describe('ProductsScreen search minCodeLength', () => {
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
 
   it.each([[6, false], [3, true]])('with minChars %i, Enter on the 5-character code "AB123" adds the product: %s', async (minChars, adds) => {
-    saveScannerSettings(localStorage, 'https://store.test', { avgKeyMs: 100, minChars });
+    saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars });
     await mount();
     const search = screen.getByRole('searchbox') as HTMLInputElement;
     fireEvent.change(search, { target: { value: 'AB123' } });
