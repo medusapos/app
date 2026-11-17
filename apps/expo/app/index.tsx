@@ -24,7 +24,7 @@ import { EmailReceipt } from '../components/email-receipt';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
 import { phoneRegisterState, storeRegisterTitle } from '../components/frame-drawer-header';
-import { HeaderRegisterState } from '../components/header-register-state';
+import { HeaderRegisterState, WideHeaderRegister } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
@@ -484,7 +484,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
         headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
-        <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
+        <View dataSet={{ print: 'hide' }} className={phone ? 'flex-row items-center gap-4 pr-4' : 'flex-1 flex-row items-center gap-4 pr-4'}>
+        {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
         {headerRegisterState && <HeaderRegisterState label={headerRegisterState} onPress={openGate} />}
         <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
           onPress={() => setUserSheetOpen(true)} className="min-h-11 flex-row items-center gap-2">
@@ -500,8 +501,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </IconButton>}
         </View>
       ) }} />
-      {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
-      {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
       <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={online} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <UserSheet session={session} displayName={displayName} initials={initials} storeName={receiptStore.name} currency={pricing.currency}
         outbox={summarizeOutboxHealth(outboxState, registerOutbox.state)} parkedSales={parked.length} paidMinor={capturedMinor(sale.order.payments)}
