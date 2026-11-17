@@ -14,6 +14,7 @@ import { storeConfig } from '../lib/config';
 import { DEFAULT_CART_SETTINGS, saveCartSettings } from '../lib/cart-settings';
 import { clearProductCache } from '../lib/product-cache';
 import { saveScannerSettings } from '../lib/scanner-settings';
+import { saveDefaultCustomer } from '../lib/default-customer';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
@@ -108,6 +109,16 @@ beforeEach(() => {
 });
 
 describe('ProductsScreen catalogue', () => {
+  it('starts the cart on the saved default customer', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace' });
+    try {
+      await mount();
+      expect(screen.getByText('Customer: Ada Lovelace')).toBeTruthy();
+    } finally {
+      saveDefaultCustomer(localStorage, 'https://store.test', null);
+    }
+  });
+
   it('shows a stopped product pull above the sales line', async () => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
       pullNotice: { code: 'unauthorized', since: 0, fixedBy: 'till' },
