@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
-import { createOrderBuilder, finalizeOrder } from '@tallyui/pos';
+import { orderReference } from '@tallyui/components';
+import { PortalHost } from '@tallyui/primitives';
+import { formatMoney } from '@tallyui/core';
+import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -77,5 +80,73 @@ describe('OrdersScreen', () => {
     render(<SessionProvider><AppFrame signedIn><OrdersScreen /></AppFrame></SessionProvider>);
     expect(screen.getByTestId('header-left').childElementCount).toBe(0);
     expect(screen.getByTestId('nav-rail')).toBeTruthy();
+  });
+});
+
+describe('order detail (row 10)', () => {
+  function sale(name: string, syncStatus: PosOrder['syncStatus'], extra: Partial<PosOrder> = {}): PosOrder {
+    const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+    builder.addLine({ productId: name, variantId: name, name, unitPrice: { amount: 1200, currency: 'EUR' } });
+    builder.addPayment({ method: 'cash', amountMinor: 1200 });
+    return { ...finalizeOrder(builder.getSnapshot()), syncStatus, ...extra };
+  }
+  function withSales(...recent: PosOrder[]) {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent });
+  }
+  // The app's root layout holds the PortalHost the sheet renders into.
+  function mount() {
+    render(<SessionProvider><OrdersScreen /><PortalHost /></SessionProvider>);
+  }
+
+  it('Open shows the sale in TallyUI\'s OrderDetail sheet, and Close removes it', async () => {
+    const order = sale('Blue shirt', 'applied');
+    withSales(order);
+    mount();
+    expect(screen.queryByTestId('order-detail-sheet')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: `Open order ${orderReference(order)}` }));
+    const sheet = within(await screen.findByTestId('order-detail-sheet'));
+    expect(sheet.getAllByText(`Order ${orderReference(order)}`).length).toBeGreaterThan(0);
+    expect(sheet.getByText('Completed')).toBeTruthy();
+    expect(sheet.getByText('Blue shirt x1')).toBeTruthy();
+    expect(sheet.getByText('Guest')).toBeTruthy();
+    expect(sheet.getByText('Cash')).toBeTruthy();
+    expect(sheet.getAllByText(formatMoney({ amount: order.totalMinor, currency: 'EUR' })!).length).toBeGreaterThan(0);
+    fireEvent.click(sheet.getByTestId('order-detail-close'));
+    await waitFor(() => expect(screen.queryByTestId('order-detail-sheet')).toBeNull());
+  });
+
+  it('shows Pending for an unsynced sale and Cancelled for a refused one', async () => {
+    const pending = sale('Blue shirt', 'pending');
+    const rejected = sale('Red hat', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
+    withSales(pending, rejected);
+    mount();
+    fireEvent.click(screen.getByTestId(`order-open-${pending.id}`));
+    expect(within(await screen.findByTestId('order-detail-sheet')).getByText('Pending')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('order-detail-close'));
+    await waitFor(() => expect(screen.queryByTestId('order-detail-sheet')).toBeNull());
+    fireEvent.click(screen.getAllByTestId(`order-open-${rejected.id}`)[0]!);
+    expect(within(await screen.findByTestId('order-detail-sheet')).getByText('Cancelled')).toBeTruthy();
+  });
+
+  it('keeps Retry under Needs attention for a refused sale it can requeue', async () => {
+    const rejected = sale('Blue shirt', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
+    withSales(rejected);
+    mount();
+    expect(screen.getByText('Needs attention')).toBeTruthy();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+    expect(useOutboxContext().requeue).toHaveBeenCalledExactlyOnceWith([rejected.id]);
+  });
+
+  it('a search hides the other sale\'s Open button and an open sheet for a hidden sale stays open', async () => {
+    const blue = sale('Blue shirt', 'applied');
+    const red = sale('Red hat', 'applied');
+    withSales(blue, red);
+    mount();
+    fireEvent.click(screen.getByTestId(`order-open-${red.id}`));
+    expect(await screen.findByTestId('order-detail-sheet')).toBeTruthy();
+    fireEvent.change(screen.getByTestId('orders-search'), { target: { value: 'blue' } });
+    expect(screen.getByTestId(`order-open-${blue.id}`)).toBeTruthy();
+    expect(screen.queryByTestId(`order-open-${red.id}`)).toBeNull();
+    expect(within(screen.getByTestId('order-detail-sheet')).getByText('Red hat x1')).toBeTruthy();
   });
 });
