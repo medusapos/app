@@ -162,3 +162,33 @@ it('takes a cash part and the rest on the card terminal, and records both paymen
     expect.objectContaining({ method: 'external', amountMinor: 1900 }),
   ]);
 }, 15000);
+
+it('shows the screen-only paid summary beside the receipt on wide windows', async () => {
+  await startSplit();
+  tender('card', '10.00');
+  tender('cash', '20.00');
+  await complete();
+  const summary = screen.getByTestId('paid-summary');
+  expect(summary.parentElement?.closest('[data-print="hide"]')).toBeTruthy();
+  expect(screen.getByTestId('paid-layout').contains(summary)).toBe(true);
+  for (const text of ['Card terminal', '€10.00', 'Cash', '€14.00', 'Tendered €20.00 · change €6.00', 'Total', '€24.00', 'Paid in full']) {
+    expect(summary.textContent).toContain(text);
+  }
+  expect(summary.textContent).toContain('Paid€24.00');
+  expect(summary.textContent).not.toContain('€30.00');
+  expect(screen.getByTestId('paid-change-due').textContent).toContain('€6.00');
+  expect(screen.getByLabelText('Card terminal: €10.00')).toBeTruthy();
+  expect(screen.getByLabelText('Total: €24.00')).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'New sale' })).toBeTruthy();
+  expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+}, 15000);
+
+it('keeps the receipt without a paid summary at column widths', async () => {
+  setWindowWidth(800);
+  await startSplit();
+  tender('card', '24.00');
+  await complete();
+  expect(screen.queryByTestId('paid-summary')).toBeNull();
+  expect(screen.queryByTestId('paid-layout')).toBeNull();
+  expect(screen.getByRole('button', { name: 'New sale' })).toBeTruthy();
+}, 15000);
