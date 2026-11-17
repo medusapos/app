@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildClosureDocument, buildXReportDocument, formatClosureDate, TAX_ROUNDING_MIXED_NOTE, type Closure, type ClosureContext, type RegisterSession } from '@tallyui/pos';
-import { closureReportHtml, printHtml, printXReport, xReportHtml, PRINT_FAILED, PRINT_FRAME_ID, X_PRINT_FAILED } from './closure-print';
+import { buildClosureDocument, buildXReportDocument, formatClosureDate, TAX_ROUNDING_MIXED_NOTE, type Closure, type ClosureContext, type RegisterSession, type SalesFigures } from '@tallyui/pos';
+import {
+  closureReportHtml, printHtml, printSalesSummary, printXReport, salesSummaryHtml, xReportHtml, PRINT_FAILED, PRINT_FRAME_ID,
+  SUMMARY_PRINT_FAILED, X_PRINT_FAILED, type SalesSummaryInput,
+} from './closure-print';
 
 function row(overrides: Partial<Closure> = {}): Closure {
   return {
@@ -240,5 +243,112 @@ describe('printHtml', () => {
     const secondFrame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
     vi.spyOn(secondFrame.contentWindow!, 'print').mockImplementation(() => { throw new Error('boom'); });
     await expect(failed).rejects.toThrow(X_PRINT_FAILED);
+  });
+});
+
+function figures(overrides: Partial<SalesFigures> = {}): SalesFigures {
+  const margin = { costedNetMinor: 0, costMinor: 0, profitMinor: 0, marginPct: null, missingLines: 0, missingQuantity: 0 };
+  return {
+    range: { from: '2026-09-11', to: '2026-09-11' },
+    totals: { grossMinor: 24000, netMinor: 20000, taxMinor: 4000, discountMinor: 1500, refundsMinor: 2500, embeddedRefundsMinor: 0,
+      orderCount: 6, averageMinor: 4000, items: 11, margin },
+    payments: { rows: [{ method: 'cash', label: 'Cash', amountMinor: 14000, orders: 4 },
+      { method: 'card', label: 'Card', amountMinor: 7500, orders: 2 }], takenMinor: 21500 },
+    products: [], categories: [],
+    taxes: [{ key: 'vat-20', ratePpm: 200000, label: 'VAT 20%', taxMinor: 3900, netMinor: 19500 }],
+    refunds: { count: 2, amountMinor: 2500, orders: 2 },
+    series: [],
+    ...overrides,
+  };
+}
+
+describe('salesSummaryHtml', () => {
+  const summary = (overrides: Partial<SalesSummaryInput> = {}) => parse(salesSummaryHtml({
+    figures: figures(), context, period: 'Today', scope: 'All registers · All orders', notSentCount: 0, ...overrides,
+  }));
+  const cells = (scope: ParentNode, label: string) => {
+    const tr = Array.from(scope.querySelectorAll('tr')).find((r) => r.querySelector('th')?.textContent === label);
+    return tr ? Array.from(tr.querySelectorAll('td')).map((td) => td.textContent) : undefined;
+  };
+  const section = (page: Document, label: string) => Array.from(page.querySelectorAll('section'))
+    .find((s) => s.querySelector('h3')?.textContent === label);
+
+  it('prints the title, store, period, scope and the Sales group with its Total sales', () => {
+    const page = summary();
+    expect(page.title).toBe('Sales summary');
+    expect(page.querySelector('main.sales-summary h2')?.textContent).toBe('Sales summary');
+    expect(page.querySelector('h1')?.textContent).toBe('Test shop');
+    expect(page.querySelector('header p')?.textContent).toBe('1 High Street');
+    expect(page.querySelector('p.period')?.textContent).toBe('Today');
+    expect(page.querySelector('p.scope')?.textContent).toBe('All registers · All orders');
+    const sales = section(page, 'Sales')!;
+    expect(Array.from(sales.querySelectorAll('tbody th')).map((th) => th.textContent))
+      .toEqual(['Orders', 'Net sales', 'Tax', 'Refunded', 'Discounts']);
+    expect(cells(sales, 'Orders')).toEqual(['6', '']);
+    expect(cells(sales, 'Net sales')).toEqual(['', '€200.00']);
+    expect(cells(sales, 'Tax')).toEqual(['', '€40.00']);
+    expect(cells(sales, 'Refunded')).toEqual(['2', '€-25.00']);
+    expect(cells(sales, 'Discounts')).toEqual(['', '€15.00']);
+    expect(cells(sales.querySelector('tfoot')!, 'Total sales')).toEqual(['', '€240.00']);
+    expect(page.querySelector('footer')?.textContent).toBe(`Printed ${formatClosureDate(context.printedAt, context).datetime}`);
+  });
+
+  it('prints payment methods, taxes, orders and the closing Total sales row', () => {
+    const page = summary();
+    const payments = section(page, 'Payment Methods')!;
+    expect(cells(payments, 'Cash')).toEqual(['', '€140.00']);
+    expect(cells(payments, 'Card')).toEqual(['', '€75.00']);
+    expect(cells(payments.querySelector('tfoot')!, 'Taken')).toEqual(['', '€215.00']);
+    const taxes = section(page, 'Taxes')!;
+    expect(cells(taxes, 'VAT 20%')).toEqual(['', '€39.00']);
+    expect(cells(taxes.querySelector('tfoot')!, 'Tax collected')).toEqual(['', '€39.00']);
+    const orders = section(page, 'Orders')!;
+    expect(cells(orders, 'Items sold')).toEqual(['11', '']);
+    expect(cells(orders, 'Average order')).toEqual(['', '€40.00']);
+    expect(cells(page.querySelector('table.total')!, 'Total sales')).toEqual(['6', '€240.00']);
+    expect(page.querySelector('table.total')!.compareDocumentPosition(section(page, 'Orders')!) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+  });
+
+  it('leaves out Refunded and Taxes when there are none, and warns about unsent sales only when there are some', () => {
+    const page = summary({ figures: figures({ refunds: { count: 0, amountMinor: 0, orders: 0 }, taxes: [] }) });
+    expect(cells(section(page, 'Sales')!, 'Refunded')).toBeUndefined();
+    expect(section(page, 'Taxes')).toBeUndefined();
+    expect(page.querySelector('p.warning')).toBeNull();
+    expect(summary({ notSentCount: 1 }).querySelector('p.warning')?.textContent).toBe('1 sale not sent yet');
+    expect(summary({ notSentCount: 3 }).querySelector('p.warning')?.textContent).toBe('3 sales not sent yet');
+  });
+
+  it('escapes the labels it prints', () => {
+    const rows = [{ method: 'gift', label: '<b>Gift</b>', amountMinor: 100, orders: 1 }];
+    const html = salesSummaryHtml({ figures: figures({ payments: { rows, takenMinor: 100 } }), context,
+      period: 'Today', scope: '<i>x</i>', notSentCount: 0 });
+    const page = parse(html);
+    expect(page.querySelector('b')).toBeNull();
+    expect(page.querySelector('i')).toBeNull();
+    expect(cells(section(page, 'Payment Methods')!, '<b>Gift</b>')).toEqual(['', '€1.00']);
+    expect(html).not.toContain('<b>');
+  });
+});
+
+describe('printSalesSummary', () => {
+  afterEach(() => {
+    document.getElementById(PRINT_FRAME_ID)?.remove();
+    vi.restoreAllMocks();
+  });
+
+  it('prints the summary in the frame with its own title and failure message', async () => {
+    const input = { figures: figures(), context, period: 'Today', scope: 'All registers · All orders', notSentCount: 0 };
+    const done = printSalesSummary(input);
+    const frame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
+    expect(frame.title).toBe('Sales summary');
+    const print = vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => {});
+    await done;
+    expect(print).toHaveBeenCalledOnce();
+    expect(frame.contentDocument!.querySelector('h2')?.textContent).toBe('Sales summary');
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const failed = printSalesSummary(input);
+    const secondFrame = document.getElementById(PRINT_FRAME_ID) as HTMLIFrameElement;
+    vi.spyOn(secondFrame.contentWindow!, 'print').mockImplementation(() => { throw new Error('boom'); });
+    await expect(failed).rejects.toThrow(SUMMARY_PRINT_FAILED);
   });
 });
