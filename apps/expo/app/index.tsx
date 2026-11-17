@@ -45,7 +45,7 @@ import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { playScanBeep } from '../lib/scan-beep';
-import { useDefaultCustomer } from '../lib/default-customer';
+import { forgetDeletedDefaultCustomer, useDefaultCustomer } from '../lib/default-customer';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -255,6 +255,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
   const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  useEffect(() => {
+    // The store no longer has this customer: useSale falls back to Guest on an idle cart or the next sale; an open sale keeps its customer.
+    for (const order of recent) forgetDeletedDefaultCustomer(defaultStorage(), session.baseUrl, order.warnings);
+  }, [recent, session.baseUrl]);
   const sale = useSale(pricing, { defaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
