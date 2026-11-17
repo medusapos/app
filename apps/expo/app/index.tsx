@@ -44,6 +44,7 @@ import { withDemoSaleEvent } from '../lib/demo-analytics';
 import { formatDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
+import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
@@ -83,7 +84,7 @@ const PHONE_BREAKPOINT = 600;
 const ROW_BREAKPOINT = 900;
 
 // The rate arrives in parts per million (10 000 ppm = 1%).
-const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
+const taxLabel = receiptTaxLabel;
 
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
