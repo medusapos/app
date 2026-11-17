@@ -82,19 +82,20 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           <Text>Hand the till to the next cashier</Text><Text>›</Text>
         </Pressable>
       </View>}
-      {boundRegisterId ? <View testID="user-sheet-register-row" className="min-h-11 flex-row items-center justify-between gap-2">
-        <View className="min-w-0 flex-1">
-          <Text className="text-sm text-muted-foreground">Register</Text>
-          <Text testID="user-sheet-register-name">{registerName ?? boundRegisterId}</Text>
-          {sessionExists && <Text testID="user-sheet-register-locked" className="text-sm text-muted-foreground">Close the register first</Text>}
+      {boundRegisterId ? <View testID="user-sheet-register-row">
+        <View className="min-h-11 flex-row items-center gap-2">
+          <Text className="w-32 text-sm text-muted-foreground">Register</Text>
+          <Text testID="user-sheet-register-name" className="min-w-0 flex-1" numberOfLines={1}>{registerName ?? boundRegisterId}</Text>
+          <Button testID="user-sheet-register-switch" variant="link" accessibilityLabel="Switch register" disabled={sessionExists}
+            accessibilityHint={sessionExists ? 'Close the register first' : undefined}
+            onPress={() => {
+              if (sessionExists) return;
+              onOpenChange(false);
+              unbind().then(onChooseRegister, (error) => console.warn('Could not unbind the register:', error));
+            }}><Text>Switch</Text></Button>
         </View>
-        <Button testID="user-sheet-register-switch" variant="link" accessibilityLabel="Switch register" disabled={sessionExists}
-          accessibilityHint={sessionExists ? 'Close the register first' : undefined}
-          onPress={() => {
-            if (sessionExists) return;
-            onOpenChange(false);
-            unbind().then(onChooseRegister, (error) => console.warn('Could not unbind the register:', error));
-          }}><Text>Switch</Text></Button>
+        {/* Starts under the name: the label column (w-32) plus the line's gap-2. */}
+        {sessionExists && <Text testID="user-sheet-register-locked" className="ml-34 text-sm text-muted-foreground">Close the register first</Text>}
       </View> : null}
       <View className="mt-auto border-t border-border">
       <Pressable testID="user-sheet-admin" accessibilityRole="link" className="min-h-11 flex-row items-center gap-2 text-muted-foreground"
