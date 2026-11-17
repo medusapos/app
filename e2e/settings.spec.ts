@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, captureCommands, closeStoreRegister, openArea, openRegister, refusedStoreOpen, signIn, test } from './helpers';
+import { addE2E1, captureCommands, cartTab, closeStoreRegister, openArea, openRegister, productsTab, refusedStoreOpen, signIn, test } from './helpers';
 
 // Settings → Scanner (ADR 0016): minChars gates the phone-cart wedge listener, and the test-scan
 // field judges a scan the same way, against the currently saved settings.
@@ -16,7 +16,7 @@ async function setMinChars(page: Page, value: string) {
 }
 
 async function openCart(page: Page) {
-  await page.getByRole('button', { name: /^Open cart, /}).click();
+  await cartTab(page).click();
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
 }
 
@@ -33,7 +33,7 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
   await page.keyboard.press('Enter');
   await expect(page.getByText('E2E product 2', { exact: true })).toHaveCount(0);
 
-  await page.getByRole('button', { name: 'Products', exact: true }).click();
+  await productsTab(page).click();
   await openSettings(page);
   await setMinChars(page, '3');
   const testField = page.getByLabel('Test scan here', { exact: true });
@@ -59,7 +59,7 @@ test('a saved minChars gates Enter in the Products search: a shorter code stays 
   await search.fill('E2E-2');
   await search.press('Enter');
   await expect(search).toHaveValue('E2E-2');
-  await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Cart', exact: true })).toBeVisible();
 
   await openSettings(page);
   await setMinChars(page, '3');
@@ -67,7 +67,8 @@ test('a saved minChars gates Enter in the Products search: a shorter code stays 
   await search.fill('E2E-2');
   await search.press('Enter');
   await expect(search).toHaveValue('');
-  await expect(page.getByRole('button', { name: /^Open cart, 1 item, / })).toBeVisible();
+  await expect(cartTab(page)).toBeVisible();
+  await expect(cartTab(page)).toHaveAccessibleName(/^Cart, 1 item$/);
 });
 
 // Settings → Register (ADR 0016): the till name is the deviceName of this till's register v2 opens (ADR-078), so another
@@ -102,16 +103,18 @@ test('a till named in Settings opens Register 1 under that name at the store', a
 test('the frame\'s Sale from Settings returns to the same sale, with one Products screen mounted', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
-  const cartBar = page.getByRole('button', { name: /^Open cart, 1 item, / });
-  await expect(cartBar).toBeVisible();
+  const cart = cartTab(page);
+  await expect(cart).toBeVisible();
+  await expect(cart).toHaveAccessibleName(/^Cart, 1 item$/);
 
   await openSettings(page);
   await openArea(page, 'Sale');
   await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
-  await expect(cartBar).toBeVisible();
+  await expect(cart).toBeVisible();
+  await expect(cart).toHaveAccessibleName(/^Cart, 1 item$/);
   // Hidden stack screens stay in the DOM, so this counts every mounted Products screen.
   await expect(page.getByPlaceholder('Search or scan barcode / SKU', { exact: true })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toHaveCount(0);
+  await expect(cart).not.toHaveAccessibleName('Cart');
 });
 
 test('opening /settings directly by URL still lands back on the sale', async ({ page }) => {

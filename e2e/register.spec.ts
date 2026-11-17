@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartTab, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
 
 // The store's closure history row for `sessionId`'s closure (closure-history.ts), read with the e2e admin token.
 async function storeClosure(sessionId: string): Promise<{ sessionId: string; number: number; approvalVerified: boolean } | undefined> {
@@ -34,8 +34,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
   test.describe(`at ${viewport.width} × ${viewport.height}`, () => {
     test.use({ viewport });
     const phone = viewport.width < 600;
-    // On a phone the register's picker and open card show in the cart view, which the cart bar opens.
-    const openCart = async (page: Page) => { if (phone) await page.getByRole('button', { name: /^Open cart, / }).click(); };
+    // On a phone the register's picker and open card show in the cart view, which the Cart tab opens.
+    const openCart = async (page: Page) => { if (phone) await cartTab(page).click(); };
 
     test('bind, open with a float, a cash sale, a paid in and its Undo, and Close register', async ({ page }) => {
       const opens = captureCommands<{ sessionId: string }>(page, 'register.session.open');

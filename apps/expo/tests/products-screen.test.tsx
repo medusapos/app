@@ -722,7 +722,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     setWindowWidth(390, 844);
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    fireEvent.click(button(/^Open cart/));
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
     await checkout();
     expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Checkout Order');
     const close = screen.getByTestId('tender-close');
@@ -743,26 +743,29 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(screen.queryByTestId('tender-close')).toBeNull();
   });
 
-  it('at 360 wide adds stay on Products, the bar opens the cart, Products returns, and tender and new sale take over', async () => {
+  it('at 360 wide adds stay on Products, the Cart tab opens the cart, Products returns, and tender and new sale take over', async () => {
     setWindowWidth(360);
     await mount();
-    expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    expect(button('Open cart, 1 item, €15.00').textContent).toBe('Cart · 1 item€15.00 ›');
+    expect(screen.getByRole('tab', { name: 'Cart, 1 item' })).toBeTruthy();
+    expect(screen.getByTestId('phone-tab-cart-count').textContent).toBe('1');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    expect(button('Open cart, 2 items, €30.00').textContent).toBe('Cart · 2 items€30.00 ›');
+    expect(screen.getByRole('tab', { name: 'Cart, 2 items' })).toBeTruthy();
+    expect(screen.getByTestId('phone-tab-cart-count').textContent).toBe('2');
     expect(search()).toBeTruthy();
     expect(screen.queryByTestId('cart-checkout')).toBeNull();
-    fireEvent.click(button(/^Open cart/));
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
     expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€24.00']);
     expect(search()).toBeNull();
-    fireEvent.click(button('Products'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Products' }));
     expect(search()).toBeTruthy();
-    fireEvent.click(button('Open cart, 2 items, €30.00'));
+    fireEvent.click(screen.getByRole('tab', { name: 'Cart, 2 items' }));
     expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€24.00']);
     await checkout();
     expect(button('Complete sale')).toBeTruthy();
-    for (const name of ['Products', /^Open cart/]) expect(screen.queryByRole('button', { name })).toBeNull();
+    expect(screen.queryByTestId('phone-tab-bar')).toBeNull();
     // TallyUI 3.14.0's tender pane has its own Cash tile: the one Cash button left is the pane's, the cart's pay button is gone.
     expect(button('Cash').closest('[data-testid="tender-pane"]')).toBeTruthy();
     expect(search()).toBeNull();
@@ -771,7 +774,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     await payByCard();
     await act(async () => { fireEvent.click(button('Complete sale')); });
     fireEvent.click(button('New sale'));
-    expect(button('Cart is empty')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
     expect(search()).toBeTruthy();
   }, 15000);
 
@@ -779,7 +782,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(search()).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /^Open cart|^Cart is empty$/ })).toBeNull();
+    expect(screen.queryByTestId('phone-tab-bar')).toBeNull();
     // CartPanel's scroll region isn't a separate testID; the footer comes after the last line.
     const lastLine = cartLine('Shirt');
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
