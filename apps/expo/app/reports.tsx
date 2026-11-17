@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { ClosureSheet, SalesRoom, type SalesFilters } from '@tallyui/components';
+import { ClosureSheet, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
 import { ClosureFiltersBar } from '../components/closure-filters';
@@ -10,14 +10,17 @@ import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext, printClosure } from '../components/register-close';
 import { RegisterStrip } from '../components/register-strip';
 import { loadApprovers } from '../lib/approval';
-import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
+import { printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
 import { useRegister } from '../lib/register-context';
-import { byCashier, closureCashierOptions, closureHistoryWindow, closureScopeFor, closuresCsvFilename, closureTableRow, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures, showsTodayClosures, type ClosureFilters } from '../lib/reports';
+import { byCashier, closureCashierOptions, closureDayLabel, closureHistoryWindow, closureScopeFor, closuresCsvFilename, closureTableRow, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures, showsTodayClosures, type ClosureFilters } from '../lib/reports';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
+
+// The Sales room's status menu; the printed summary's scope line reads the same labels.
+const STATUS_OPTIONS = [{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }];
 
 export default function ReportsScreen() {
   const { session } = useSession();
@@ -33,6 +36,8 @@ export default function ReportsScreen() {
   const [exportError, setExportError] = useState(false);
   const [xBusy, setXBusy] = useState(false);
   const [xError, setXError] = useState<string | null>(null);
+  const [summaryBusy, setSummaryBusy] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
   const [opened, setOpened] = useState<{ closure: Closure; frozen: boolean } | null>(null);
   const [closureFilters, setClosureFilters] = useState<ClosureFilters>(() => ({
     preset: 'today', range: presetRange('today', new Date(), 'device'), registerId: null, cashierId: null,
@@ -100,9 +105,38 @@ export default function ReportsScreen() {
       {orders === null ? <Text testID="reports-loading">Loading…</Text>
         : currency === null ? <Text testID="reports-no-currency">Store settings are not loaded yet.</Text>
         : ctx && summary ? <>
-          <SalesRoom figures={summary.figures} currency={currency} filters={filters} onFiltersChange={setFilters} timezone="device"
-            statusOptions={[{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }]}
-            cashierOptions={[]} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
+          <View testID="sales-room" className="gap-4">
+            <View className="flex-row flex-wrap items-start gap-2">
+              <View className="flex-1">
+                <SalesFiltersBar filters={filters} onFiltersChange={setFilters} timezone="device" statusOptions={STATUS_OPTIONS}
+                  cashierOptions={[]} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
+              </View>
+              {Platform.OS === 'web' ? <Pressable testID="reports-print-summary" accessibilityRole="button" disabled={summaryBusy}
+                className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
+                onPress={async () => {
+                  setSummaryBusy(true);
+                  setSummaryError(null);
+                  const { from, to } = filters.range;
+                  const period = from === to ? closureDayLabel(from, today, ctx.locale)
+                    : `${closureDayLabel(from, today, ctx.locale)} – ${closureDayLabel(to, today, ctx.locale)}`;
+                  const registerLabel = filters.registerId === null ? 'All registers'
+                    : registers.find((r) => r.id === filters.registerId)?.name ?? '';
+                  const statusLabel = STATUS_OPTIONS.find((option) => option.value === filters.status)?.label ?? '';
+                  try {
+                    await printSalesSummary({ figures: summary.figures, context: ctx, notSentCount: summary.notSentCount,
+                      period, scope: `${registerLabel} · ${statusLabel}` });
+                  } catch (error) {
+                    setSummaryError(error instanceof Error ? error.message : SUMMARY_PRINT_FAILED);
+                  } finally { setSummaryBusy(false); }
+                }}>
+                <Text className="text-foreground">{summaryBusy ? 'Printing…' : 'Print summary'}</Text>
+              </Pressable> : null}
+            </View>
+            {Platform.OS === 'web' && summaryError ?
+              <Text testID="reports-print-summary-error" accessibilityRole="alert">{summaryError}</Text> : null}
+            <SalesHero figures={summary.figures} filters={filters} onFiltersChange={setFilters} currency={currency} />
+            <SalesCards figures={summary.figures} currency={currency} />
+          </View>
           {summary.notSentCount > 0 ? <Text testID="reports-not-sent">
             {`${summary.notSentCount} ${summary.notSentCount === 1 ? 'sale' : 'sales'} not sent yet`}
           </Text> : null}

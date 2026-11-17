@@ -1,4 +1,6 @@
-import { buildXReportDocument, type buildClosureDocument, type ClosureContext, type RegisterSession } from '@tallyui/pos';
+import {
+  buildXReportDocument, formatClosureDate, minorToDecimal, type buildClosureDocument, type ClosureContext, type RegisterSession, type SalesFigures,
+} from '@tallyui/pos';
 
 export type ClosureDocument = ReturnType<typeof buildClosureDocument>;
 export type XReportDocument = ReturnType<typeof buildXReportDocument>;
@@ -85,6 +87,48 @@ export function printXReport(input: {
   return printHtml(xReportHtml(buildXReportDocument(input.session, {
     ...input.context, expected: input.expected, breakdowns: { register_name: input.registerName ?? '' },
   }), input.salesCount), { title: 'X report', failed: X_PRINT_FAILED });
+}
+
+export const SUMMARY_PRINT_FAILED = 'Could not print. Try again.';
+
+export type SalesSummaryInput = {
+  figures: SalesFigures;
+  context: Pick<ClosureContext, 'store' | 'formatMoney' | 'exponent' | 'timezone' | 'locale' | 'printedAt'>;
+  period: string; scope: string; notSentCount: number;
+};
+
+/** v2's Reports "Print summary": the period's figures exactly as the Sales room has them, grouped as v2 prints them. */
+export function salesSummaryHtml(input: SalesSummaryInput): string {
+  const { figures: { totals, payments, taxes, refunds }, context, period, scope, notSentCount } = input;
+  const { store } = context;
+  const money = (minor: number) => context.formatMoney(minorToDecimal(minor, context.exponent));
+  // Every row has the same three cells: label, count, amount.
+  const row = (label: unknown, count: unknown, amount: unknown) =>
+    `<tr><th scope="row">${escapeHtml(label)}</th><td>${escapeHtml(count)}</td><td>${escapeHtml(amount)}</td></tr>`;
+  const group = (label: string, rows: string, subtotal?: string) => `<section><h3>${escapeHtml(label)}</h3><table class="rows">
+    <tbody>${rows}</tbody>${subtotal ? `<tfoot>${subtotal}</tfoot>` : ''}</table></section>`;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><title>Sales summary</title><style>${STYLE}</style></head>
+<body><main class="sales-summary">
+  <header><h1>${escapeHtml(store.name)}</h1>${typeof store.address === 'string' && store.address ? `<p>${escapeHtml(store.address)}</p>` : ''}</header>
+  <h2>Sales summary</h2>
+  <p class="period">${escapeHtml(period)}</p><p class="scope">${escapeHtml(scope)}</p>
+  ${group('Sales', `${row('Orders', totals.orderCount, '')}${row('Net sales', '', money(totals.netMinor))}${row('Tax', '', money(totals.taxMinor))}
+    ${refunds.count > 0 ? row('Refunded', refunds.count, context.formatMoney(`-${minorToDecimal(refunds.amountMinor, context.exponent)}`)) : ''}
+    ${row('Discounts', '', money(totals.discountMinor))}`, row('Total sales', '', money(totals.grossMinor)))}
+  ${group('Payment Methods', payments.rows.map((payment) => row(payment.label, '', money(payment.amountMinor))).join(''),
+    row('Taken', '', money(payments.takenMinor)))}
+  ${taxes.length ? group('Taxes', taxes.map((tax) => row(tax.label, '', money(tax.taxMinor))).join(''),
+    row('Tax collected', '', money(taxes.reduce((total, tax) => total + tax.taxMinor, 0)))) : ''}
+  ${group('Orders', `${row('Items sold', totals.items, '')}${row('Average order', '', money(totals.averageMinor))}`)}
+  <table class="total"><tbody>${row('Total sales', totals.orderCount, money(totals.grossMinor))}</tbody></table>
+  ${notSentCount > 0 ? `<p class="warning">${escapeHtml(`${notSentCount} ${notSentCount === 1 ? 'sale' : 'sales'} not sent yet`)}</p>` : ''}
+  <footer><p>Printed ${escapeHtml(formatClosureDate(context.printedAt, context).datetime)}</p></footer>
+</main></body></html>`;
+}
+
+export function printSalesSummary(input: SalesSummaryInput): Promise<void> {
+  return printHtml(salesSummaryHtml(input), { title: 'Sales summary', failed: SUMMARY_PRINT_FAILED });
 }
 
 export async function printHtml(html: string, options: { title?: string; failed?: string } = {}): Promise<void> {
