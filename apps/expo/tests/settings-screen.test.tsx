@@ -117,12 +117,44 @@ describe('SettingsScreen', () => {
     fireEvent.change(screen.getByLabelText('Average time per key (ms)'), { target: { value: '60' } });
     fireEvent.change(screen.getByLabelText('Minimum characters'), { target: { value: '6' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ avgKeyMs: 60, minChars: 6 });
+    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 60, minChars: 6 });
 
     fireEvent.change(screen.getByLabelText('Minimum characters'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     expect(screen.getByText(/whole number/)).toBeTruthy();
-    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ avgKeyMs: 60, minChars: 6 });
+    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 60, minChars: 6 });
+  });
+
+  it('saves scanner prefix and suffix', async () => {
+    await mount();
+    fireEvent.change(screen.getByLabelText('Scanner prefix'), { target: { value: '#' } });
+    fireEvent.change(screen.getByLabelText('Scanner suffix'), { target: { value: '!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!' });
+  });
+
+  it('saves sound immediately while leaving an unsaved threshold unsaved', async () => {
+    await mount();
+    fireEvent.change(screen.getByLabelText('Minimum characters'), { target: { value: '6' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Play a sound on scan' }));
+    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, playSound: true });
+    expect(screen.getByTestId('settings-scanner-sound').getAttribute('aria-checked')).toBe('true');
+    expect((screen.getByLabelText('Minimum characters') as HTMLInputElement).value).toBe('6');
+  });
+
+  it('reports the stripped test scan with timing from the raw buffer', async () => {
+    await mount();
+    fireEvent.change(screen.getByLabelText('Scanner prefix'), { target: { value: '#' } });
+    fireEvent.change(screen.getByLabelText('Scanner suffix'), { target: { value: '!' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    const field = screen.getByLabelText('Test scan here');
+    vi.useFakeTimers();
+    for (const [index, key] of ['#', 'A', 'B', 'C', '!'].entries()) {
+      vi.setSystemTime(1_000 + index * 80); fireEvent.keyDown(field, { key });
+    }
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(screen.getByText(/^Last scan: ABC · 3 characters · average 80 ms per key/)).toBeTruthy();
+    expect(screen.getByText('Counts as a scan')).toBeTruthy();
   });
 
   it('resets to defaults', async () => {
