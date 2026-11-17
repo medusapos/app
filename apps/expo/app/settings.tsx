@@ -20,6 +20,7 @@ import { THEME_CHOICES, useThemeChoice } from '../lib/theme-choice';
 import { SCALE_CHOICES, useScaleChoice, type ScaleChoice } from '../lib/scale-choice';
 import { averageKeyMs, stripScanAffixes } from '../lib/use-wedge-scan';
 import { playScanBeep } from '../lib/scan-beep';
+import { currencyFormat, separatorLabel } from '../lib/currency-format';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 // Shown for any value this till does not hold.
@@ -81,7 +82,9 @@ export default function SettingsScreen() {
 // Printer settings land here later (ADR 0016), with TallyUI printing.
 function StoreSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
-  return <SettingsGroup title="Store" description="Read-only. Set in Medusa Admin." testID="settings-store">
+  const [format] = useState(() => currencyFormat(held.pricing?.currency));
+  return <>
+  <SettingsGroup title="Store" description="Read-only. Set in Medusa Admin." testID="settings-store">
     <SettingsRow label="Store name" action={
       <Text testID="settings-store-name" className="max-w-40 text-right text-sm text-foreground">{held.settings?.storeName || UNKNOWN}</Text>
     } />
@@ -103,7 +106,28 @@ function StoreSection({ session }: { session: Session }) {
     <SettingsRow label="Sales channel" className="border-t border-border" action={
       <Text testID="settings-store-sales-channel" className="max-w-40 text-right text-sm text-foreground">{held.settings?.salesChannel?.name || UNKNOWN}</Text>
     } />
-  </SettingsGroup>;
+  </SettingsGroup>
+  <SettingsGroup title="Currency & numbers" description="Read-only. The currency follows the till's region, set in Medusa Admin; separators follow this device's language." testID="settings-currency">
+    <SettingsRow label="Symbol" action={
+      <Text testID="settings-currency-symbol" className="max-w-40 text-right text-sm text-foreground">{format ? format.symbol : UNKNOWN}</Text>
+    } />
+    <SettingsRow label="Symbol position" className="border-t border-border" action={
+      <Text testID="settings-currency-position" className="max-w-40 text-right text-sm text-foreground">{format ? (format.symbolPosition === 'left' ? 'Left' : 'Right') : UNKNOWN}</Text>
+    } />
+    <SettingsRow label="Thousands separator" className="border-t border-border" action={
+      <Text testID="settings-currency-thousands" className="max-w-40 text-right text-sm text-foreground">{format ? separatorLabel(format.thousandsSeparator) : UNKNOWN}</Text>
+    } />
+    <SettingsRow label="Decimal separator" className="border-t border-border" action={
+      <Text testID="settings-currency-decimal" className="max-w-40 text-right text-sm text-foreground">{format ? separatorLabel(format.decimalSeparator) : UNKNOWN}</Text>
+    } />
+    <SettingsRow label="Number of decimals" className="border-t border-border" action={
+      <Text testID="settings-currency-decimals" className="max-w-40 text-right text-sm text-foreground">{format ? String(format.decimals) : UNKNOWN}</Text>
+    } />
+    <SettingsRow label="Example" className="border-t border-border" action={
+      <Text testID="settings-currency-example" className="max-w-40 text-right text-sm text-foreground">{format ? format.example : UNKNOWN}</Text>
+    } />
+  </SettingsGroup>
+  </>;
 }
 function RegisterSection({ session }: { session: Session }) {
   const { tillName, save } = useTillName(defaultStorage(), session.baseUrl);
