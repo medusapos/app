@@ -120,7 +120,7 @@ it('Remove customer returns the sale to Guest', async () => {
   fireEvent.click(button('Customer: Ada Lovelace'));
   fireEvent.click(button('Remove customer'));
   expect(observed.sale!.order.customer).toBeNull();
-  expect(screen.getByText('Customer: Guest')).toBeTruthy();
+  expect(button('Customer: Guest')).toBeTruthy();
   expect(screen.queryByText('Remove customer')).toBeNull();
 });
 

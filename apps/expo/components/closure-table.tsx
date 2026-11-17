@@ -1,5 +1,6 @@
 import type { ReactElement } from 'react';
-import { Pressable, ScrollView, Text } from 'react-native';
+import { Pressable, ScrollView } from 'react-native';
+import { AppText as Text } from './app-text';
 import { Table, TableHeader, TableBody, TableRow, TableHead, TableCell, Text as TableText } from '@tallyui/components';
 import { formatClosureDate, minorToDecimal, type ClosureContext } from '@tallyui/pos';
 import { closureDayLabel, closureDays, closureDayTotal, varianceLabel, type ClosureDay, type ClosureTableRow } from '../lib/reports';

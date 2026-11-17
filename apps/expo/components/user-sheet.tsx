@@ -3,11 +3,12 @@ import { Platform, Pressable, View } from 'react-native';
 import { Path } from 'react-native-svg';
 import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import { presetRange, switchWarnings, watchFresh, type PosOrder, type SwitchWarningInput } from '@tallyui/pos';
+import { formatClosureDate, presetRange, switchWarnings, watchFresh, type PosOrder, type SwitchWarningInput } from '@tallyui/pos';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { localDayStartIso, salesRoomFigures } from '../lib/reports';
 import type { Session } from '../lib/session';
+import { closureContext } from './register-close';
 
 const ExternalLinkIcon = createSvgIcon('ExternalLinkIcon', () => <><Path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" />
   <Path d="M11 13l9 -9" /><Path d="M15 4h5v5" /></>);
@@ -15,13 +16,15 @@ const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Read by assistive tech as Sign out's description, out of the layout, so the sheet never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
-export function UserSheet({ session, displayName, initials, storeName, currency, open, onOpenChange, onRegister, signOut, signOutLocked, lockMessage, outbox, parkedSales, paidMinor }: {
+export function UserSheet({ session, displayName, initials, storeName, currency, open, onOpenChange, onRegister, onChooseRegister, signOut, signOutLocked, lockMessage, outbox, parkedSales, paidMinor }: {
   session: Session; displayName: string; initials: string; storeName: string; currency: string;
-  open: boolean; onOpenChange: (open: boolean) => void; onRegister: () => void;
+  open: boolean; onOpenChange: (open: boolean) => void; onRegister: () => void; onChooseRegister: () => void;
   signOut: () => void; signOutLocked: boolean; lockMessage: string;
   outbox: SwitchWarningInput['outbox']; parkedSales: number; paidMinor: number;
 }) {
-  const { register, registerName } = useRegister();
+  const { register, registerName, boundRegisterId, unbind } = useRegister();
+  // Any session, even a closed one with an unfinished closure: unbinding would strand it.
+  const sessionExists = register.session != null;
   const { orders } = useOutboxContext();
   const [sales, setSales] = useState<PosOrder[]>([]);
   const filters = useMemo<SalesFilters>(() => ({
@@ -37,6 +40,12 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
   const [confirm, setConfirm] = useState<'signOut' | 'cashier' | null>(null);
   const warningInput = { outbox, parkedSales, paidMinor, sessionStatus: register.session?.status };
   const drawerOpen = register.session?.status === 'open' || register.session?.status === 'counting';
+  // Only while shown: closureContext reads the device locale.
+  const since = open && drawerOpen && register.session
+    ? formatClosureDate(register.session.opened_at_gmt, closureContext(currency, { name: storeName })).time : null;
+  const openedBy = register.session?.opened_by;
+  // opened_by is the opener's cashier id, which this app records as the cashier's email.
+  const opener = !openedBy ? null : openedBy === session.email ? displayName : openedBy;
   // The signed-in cashier's own sales: the app records every local order with cashierRef = session.email.
   const totals = salesRoomFigures(sales.filter((order) => order.cashierRef === session.email), filters, currency).figures.totals;
   return <><Dialog open={open} onOpenChange={onOpenChange}>
@@ -46,7 +55,7 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
         <View className="min-w-0 flex-1 gap-2">
           <DialogTitle testID="user-sheet-name">{displayName}</DialogTitle>
           <Text testID="user-sheet-context" className="text-muted-foreground">
-            {[session.email !== displayName && session.email, storeName, registerName].filter(Boolean).join(' · ')}
+            {[session.email !== displayName && session.email, storeName, registerName, since && `since ${since}`].filter(Boolean).join(' · ')}
           </Text>
         </View>
       </View>
@@ -59,6 +68,9 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
       </View>}
       {drawerOpen && <View testID="user-sheet-drawer" className="gap-2 rounded-md border border-border p-3">
         <Text>In the drawer</Text>
+        {since && <Text testID="user-sheet-drawer-opened" className="text-sm text-muted-foreground">
+          {[registerName, `opened ${since}${opener ? ` by ${opener}` : ''}`].filter(Boolean).join(' · ')}
+        </Text>}
         {!register.blind && <Text className="text-xl font-semibold tabular-nums">{formatMoney({ amount: register.expected.cash ?? 0, currency })}</Text>}
         <Pressable testID="user-sheet-register" accessibilityRole="button" className="min-h-11 flex-row items-center justify-between gap-2"
           onPress={() => { onOpenChange(false); onRegister(); }}>
@@ -70,6 +82,20 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           <Text>Hand the till to the next cashier</Text><Text>›</Text>
         </Pressable>
       </View>}
+      {boundRegisterId ? <View testID="user-sheet-register-row" className="min-h-11 flex-row items-center justify-between gap-2">
+        <View className="min-w-0 flex-1">
+          <Text className="text-sm text-muted-foreground">Register</Text>
+          <Text testID="user-sheet-register-name">{registerName ?? boundRegisterId}</Text>
+          {sessionExists && <Text testID="user-sheet-register-locked" className="text-sm text-muted-foreground">Close the register first</Text>}
+        </View>
+        <Button testID="user-sheet-register-switch" variant="link" accessibilityLabel="Switch register" disabled={sessionExists}
+          accessibilityHint={sessionExists ? 'Close the register first' : undefined}
+          onPress={() => {
+            if (sessionExists) return;
+            onOpenChange(false);
+            unbind().then(onChooseRegister, (error) => console.warn('Could not unbind the register:', error));
+          }}><Text>Switch</Text></Button>
+      </View> : null}
       <View className="mt-auto border-t border-border">
       <Pressable testID="user-sheet-admin" accessibilityRole="link" className="min-h-11 flex-row items-center gap-2 text-muted-foreground"
         onPress={() => {

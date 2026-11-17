@@ -64,7 +64,9 @@ type FakeLiveTabScreenProps = {
   blockedBody?: string;
   reloadLabel?: string;
 };
-vi.mock('@tallyui/components', () => ({
+vi.mock('@tallyui/components', async (importOriginal) => ({
+  // AppText (rendered by LiveTabGate's screens) reads the Theme Font; the real hook needs no provider.
+  useFontType: (await importOriginal<typeof import('@tallyui/components')>()).useFontType,
   LiveTabScreen(props: FakeLiveTabScreenProps) {
     if (props.state !== 'parked' && props.state !== 'blocked') return null;
     const body = props.state === 'parked' ? props.parkedBody : props.blockedBody;

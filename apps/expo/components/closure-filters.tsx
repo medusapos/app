@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { DateRangeMenu } from '@tallyui/components';
 import type { ClosureFilters } from '../lib/reports';
 

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, SearchInput, Text as ButtonText } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerPatch, type SyncContext } from '@tallyui/core';
@@ -95,7 +96,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
     <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) { createdCustomer.current = null; setEditing(null); } }}>
       <DialogContent testID="customer-editor" className="max-h-[90%]">
         <DialogTitle>{editing === 'new' ? 'New customer' : 'Edit customer'}</DialogTitle>
-        <ScrollView>
+        <ScrollView keyboardShouldPersistTaps="handled">
         {editing !== null && <CustomerEditor key={editing === 'new' ? 'new' : editing.id}
           loadBilling={editing === 'new' ? undefined : () => loadCustomerBilling(context, editing.id)}
           customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing) => {
