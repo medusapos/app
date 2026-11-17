@@ -4,6 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { SettingsGroup, SettingsLayout, SettingsRow } from '@tallyui/components';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ThemeTiles } from '../components/theme-tiles';
+import { FontPicker } from '../components/font-choice';
 import { FrameMenuButton } from '../components/app-frame';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -177,5 +178,6 @@ function ThemeSection() {
     <View className="p-4">
       <ThemeTiles choice={choice} choices={THEME_CHOICES} onChoose={(value) => { if (value !== choice) save(value); }} />
     </View>
+    <FontPicker />
   </SettingsGroup>;
 }
