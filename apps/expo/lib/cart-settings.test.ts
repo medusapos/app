@@ -13,7 +13,8 @@ function fakeStorage(initial: Record<string, string> = {}) {
 describe('cart-settings', () => {
   it('round-trips a saved value', () => {
     const storage = fakeStorage();
-    const settings: CartSettings = { cartSide: 'left', openOrders: 'top', quickDiscounts: [20, 30, 40], columns: DEFAULT_CART_SETTINGS.columns };
+    const settings: CartSettings = { cartSide: 'left', openOrders: 'top', quickDiscounts: [20, 30, 40], columns: DEFAULT_CART_SETTINGS.columns,
+      autoShowReceipt: false };
     saveCartSettings(storage, 'https://a.test', settings);
     expect(loadCartSettings(storage, 'https://a.test')).toEqual(settings);
   });
@@ -42,14 +43,14 @@ describe('cart-settings', () => {
   it('gives settings saved before the Columns section the default columns and keeps the rest', () => {
     const legacy = { cartSide: 'left', openOrders: 'top', quickDiscounts: [20, 30, 40] };
     const storage = fakeStorage({ 'medusapos.cart.https://a.test': JSON.stringify(legacy) });
-    expect(loadCartSettings(storage, 'https://a.test')).toEqual({ ...legacy, columns: DEFAULT_CART_SETTINGS.columns });
+    expect(loadCartSettings(storage, 'https://a.test')).toEqual({ ...legacy, columns: DEFAULT_CART_SETTINGS.columns, autoShowReceipt: true });
   });
 
   it.each([{ total: { show: 'yes' } }, { subtotal: { show: true } }, { image: { split: true } }, { price: true }, []])(
     'keeps the other fields and uses the default columns on invalid stored columns: %j', (columns) => {
       const stored = { cartSide: 'left', openOrders: 'top', quickDiscounts: [20, 30, 40], columns };
       const storage = fakeStorage({ 'medusapos.cart.https://a.test': JSON.stringify(stored) });
-      expect(loadCartSettings(storage, 'https://a.test')).toEqual({ ...stored, columns: DEFAULT_CART_SETTINGS.columns });
+      expect(loadCartSettings(storage, 'https://a.test')).toEqual({ ...stored, columns: DEFAULT_CART_SETTINGS.columns, autoShowReceipt: true });
     },
   );
 
@@ -65,5 +66,20 @@ describe('cart-settings', () => {
     const columns = { total: { show: 'yes' } } as unknown as CartSettings['columns'];
     expect(() => saveCartSettings(fakeStorage(), 'https://a.test', { ...DEFAULT_CART_SETTINGS, columns }))
       .toThrow('Cart columns are not valid.');
+  });
+
+  it('shows the receipt after checkout by default, as v2 does', () => {
+    expect(DEFAULT_CART_SETTINGS.autoShowReceipt).toBe(true);
+  });
+
+  it.each([{}, { autoShowReceipt: 'no' }])('loads a missing or invalid autoShowReceipt as on, keeping the rest: %j', (extra) => {
+    const stored = { cartSide: 'left', openOrders: 'top', quickDiscounts: [20, 30, 40], columns: { sku: { show: true } }, ...extra };
+    const storage = fakeStorage({ 'medusapos.cart.https://a.test': JSON.stringify(stored) });
+    expect(loadCartSettings(storage, 'https://a.test')).toEqual({ ...stored, autoShowReceipt: true });
+  });
+
+  it('refuses to save a non-boolean autoShowReceipt', () => {
+    expect(() => saveCartSettings(fakeStorage(), 'https://a.test', { ...DEFAULT_CART_SETTINGS, autoShowReceipt: 'no' as never }))
+      .toThrow('Auto show receipt must be on or off.');
   });
 });
