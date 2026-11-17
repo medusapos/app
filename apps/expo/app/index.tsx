@@ -5,7 +5,7 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
-  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
+  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
@@ -42,6 +42,7 @@ import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { useDefaultCustomer } from '../lib/default-customer';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -250,7 +251,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const token = useRef(session.token);
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
-  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
+  const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  const sale = useSale(pricing, { defaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
@@ -458,14 +460,19 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </DialogContent>
       </Dialog>}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
-      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
+      {sale.stage.kind === 'receipt' ? <>
+        {/* v2 leads the paid screen with the change; screen only, not printed. */}
+        {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
+          <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
+        </View>}
+        <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
         store={receiptStore}
         footerSlot={connector.emailReceipt ? <EmailReceipt
           orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
           online={online} defaultEmail={paid?.customer?.email}
           send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-        topInset={topInset} formatDate={formatDate} taxLabel={taxLabel}
-        cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
+        topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
+        cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /></> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
