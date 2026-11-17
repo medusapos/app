@@ -6,6 +6,7 @@ import { getCalendars } from 'expo-localization';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
   CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText,
+  DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
@@ -240,6 +241,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [switchRefusal, setSwitchRefusal] = useState<string | null>(null);
   const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
   const [customerOpen, setCustomerOpen] = useState(false);
+  const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
   token.current = session.token;
@@ -338,10 +340,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
+    {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined}
       showViewToggle={!phone} showCategoryNav
+      showFilterBar filters={filters} onFiltersChange={setFilters}
       loadViewState={() => phone ? { ...loadCatalogueView(defaultStorage(), session.baseUrl), view: 'grid' }
         : loadCatalogueView(defaultStorage(), session.baseUrl)}
       saveViewState={(state) => saveCatalogueView(defaultStorage(), session.baseUrl, state)}
