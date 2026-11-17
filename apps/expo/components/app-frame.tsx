@@ -6,7 +6,8 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { View, useWindowDimensions } from 'react-native';
 import { router, usePathname, type Href } from 'expo-router';
 import { Circle, Line, Path, Rect } from 'react-native-svg';
-import { createSvgIcon, IconButton, NavDrawer, NavRail, type ShellNavItem } from '@tallyui/components';
+import { createSvgIcon, IconButton, NavDrawer, NavRail, Text, type ShellNavItem } from '@tallyui/components';
+import { version as appVersion } from '../package.json';
 
 // TallyUI's one layout boundary (AppShell's WIDE_MIN_WIDTH / WIDE_MIN_HEIGHT, @tallyui/components 3.18.0
 // src/shell/app-shell.tsx l.16-17): at least 768 wide AND 480 tall gets the rail, anything smaller the drawer.
@@ -100,7 +101,15 @@ export function AppFrame({ signedIn, children, drawerHeader }: { signedIn: boole
   // One tree whether or not the frame shows, so signing in or out never remounts the Stack under it.
   return <FrameContext.Provider value={state}>
     <View testID={active ? 'app-frame' : undefined} className="flex-1 flex-row bg-background">
-      {active && wide ? <NavRail items={items} activeId={active} onNavigate={navigate} /> : null}
+      {active && wide ? (
+        // The version sits under the rail because TallyUI's NavRail has no footer slot (v2 shows it at the rail's foot).
+        <View testID="frame-rail" className="z-10 w-16 border-r border-border bg-card">
+          <NavRail items={items} activeId={active} onNavigate={navigate} className="flex-1 border-r-0 bg-transparent" />
+          <Text testID="frame-version" className="text-xs text-muted-foreground text-center pb-3" numberOfLines={1}>
+            {`v ${appVersion}`}
+          </Text>
+        </View>
+      ) : null}
       <View className="min-w-0 flex-1">{children}</View>
       {active && !wide ? <NavDrawer open={menuOpen} onOpenChange={setMenuOpen} items={items} activeId={active}
         onNavigate={navigate} header={drawerHeader} /> : null}
