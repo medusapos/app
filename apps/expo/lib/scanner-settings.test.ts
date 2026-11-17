@@ -11,9 +11,31 @@ function fakeStorage(initial: Record<string, string> = {}) {
 }
 
 describe('scanner-settings', () => {
+  it.each([['#', '!'], ['📦', '🔎']])('round-trips prefix %s, suffix %s and sound', (prefix, suffix) => {
+    const storage = fakeStorage();
+    const settings = { ...DEFAULT_SCANNER_SETTINGS, prefix, suffix, playSound: true };
+    saveScannerSettings(storage, 'https://a.test', settings);
+    expect(loadScannerSettings(storage, 'https://a.test')).toEqual(settings);
+  });
+
+  it('keeps old thresholds and defaults the missing fields', () => {
+    const storage = fakeStorage({ 'medusapos.scanner.https://a.test': JSON.stringify({ avgKeyMs: 60, minChars: 4 }) });
+    expect(loadScannerSettings(storage, 'https://a.test')).toEqual({ ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 60, minChars: 4 });
+  });
+
+  it.each(['prefix', 'suffix'])('refuses a two-character %s', (field) => {
+    expect(() => saveScannerSettings(fakeStorage(), 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, [field]: 'AB' }))
+      .toThrow(/Prefix and suffix must be at most one character each/);
+  });
+
+  it('refuses a non-boolean playSound', () => {
+    const settings = { ...DEFAULT_SCANNER_SETTINGS, playSound: 'true' } as unknown as ScannerSettings;
+    expect(() => saveScannerSettings(fakeStorage(), 'https://a.test', settings)).toThrow();
+  });
+
   it('round-trips a saved value', () => {
     const storage = fakeStorage();
-    const settings: ScannerSettings = { avgKeyMs: 60, minChars: 4 };
+    const settings: ScannerSettings = { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 60, minChars: 4 };
     saveScannerSettings(storage, 'https://a.test', settings);
     expect(loadScannerSettings(storage, 'https://a.test')).toEqual(settings);
   });
@@ -34,26 +56,26 @@ describe('scanner-settings', () => {
 
   it('refuses to save an out-of-range avgKeyMs', () => {
     const storage = fakeStorage();
-    expect(() => saveScannerSettings(storage, 'https://a.test', { avgKeyMs: 501, minChars: 3 })).toThrow();
-    expect(() => saveScannerSettings(storage, 'https://a.test', { avgKeyMs: 9, minChars: 3 })).toThrow();
+    expect(() => saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 501, minChars: 3 })).toThrow();
+    expect(() => saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 9, minChars: 3 })).toThrow();
   });
 
   it('refuses to save an out-of-range minChars', () => {
     const storage = fakeStorage();
-    expect(() => saveScannerSettings(storage, 'https://a.test', { avgKeyMs: 100, minChars: 0 })).toThrow();
-    expect(() => saveScannerSettings(storage, 'https://a.test', { avgKeyMs: 100, minChars: 65 })).toThrow();
+    expect(() => saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars: 0 })).toThrow();
+    expect(() => saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars: 65 })).toThrow();
   });
 
   it('refuses to save a non-integer value', () => {
     const storage = fakeStorage();
-    expect(() => saveScannerSettings(storage, 'https://a.test', { avgKeyMs: 50.5, minChars: 3 })).toThrow();
+    expect(() => saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 50.5, minChars: 3 })).toThrow();
   });
 
   it('keeps the keys separate per baseUrl', () => {
     const storage = fakeStorage();
-    saveScannerSettings(storage, 'https://a.test', { avgKeyMs: 60, minChars: 4 });
-    saveScannerSettings(storage, 'https://b.test', { avgKeyMs: 200, minChars: 8 });
-    expect(loadScannerSettings(storage, 'https://a.test')).toEqual({ avgKeyMs: 60, minChars: 4 });
-    expect(loadScannerSettings(storage, 'https://b.test')).toEqual({ avgKeyMs: 200, minChars: 8 });
+    saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 60, minChars: 4 });
+    saveScannerSettings(storage, 'https://b.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 200, minChars: 8 });
+    expect(loadScannerSettings(storage, 'https://a.test')).toEqual({ ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 60, minChars: 4 });
+    expect(loadScannerSettings(storage, 'https://b.test')).toEqual({ ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 200, minChars: 8 });
   });
 });

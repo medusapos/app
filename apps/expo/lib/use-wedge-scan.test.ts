@@ -2,7 +2,7 @@
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_SCANNER_SETTINGS, type ScannerSettings } from './scanner-settings';
-import { useWedgeScan, WEDGE_STALE_GAP_MS } from './use-wedge-scan';
+import { stripScanAffixes, useWedgeScan, WEDGE_STALE_GAP_MS } from './use-wedge-scan';
 
 function keydown(key: string, target: EventTarget = document.body): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -21,6 +21,37 @@ beforeEach(() => vi.useFakeTimers());
 afterEach(() => vi.useRealTimers());
 
 describe('useWedgeScan', () => {
+  it.each([
+    ['#E2E-2!', 'E2E-2'],
+    ['E2E-2', 'E2E-2'],
+    ['A#B', 'A#B'],
+  ])('strips only configured edge keys from %s', (raw, code) => {
+    const onScan = vi.fn();
+    renderHook(() => useWedgeScan(true, { ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!' }, onScan));
+    type(Array.from(raw), 10, 1_000);
+    keydown('Enter');
+    expect(onScan).toHaveBeenCalledExactlyOnceWith(code);
+  });
+
+  it('checks minChars after stripping and leaves a short Enter alone', () => {
+    const onScan = vi.fn();
+    renderHook(() => useWedgeScan(true, { ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!', minChars: 3 }, onScan));
+    type(Array.from('#AB!'), 10, 1_000);
+    expect(keydown('Enter').defaultPrevented).toBe(false);
+    expect(onScan).not.toHaveBeenCalled();
+  });
+
+  it('uses raw timing and the latest settings when Enter arrives', () => {
+    const onScan = vi.fn();
+    const { rerender } = renderHook(({ settings }) => useWedgeScan(true, settings, onScan), {
+      initialProps: { settings: DEFAULT_SCANNER_SETTINGS },
+    });
+    type(Array.from('#ABC!'), 80, 1_000);
+    rerender({ settings: { ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!' } });
+    keydown('Enter');
+    expect(onScan).toHaveBeenCalledExactlyOnceWith('ABC');
+  });
+
   it('fires with the code on Enter when keys average avgKeyMs or less', () => {
     const onScan = vi.fn();
     renderHook(() => useWedgeScan(true, DEFAULT_SCANNER_SETTINGS, onScan));
@@ -41,7 +72,7 @@ describe('useWedgeScan', () => {
 
   it('takes avgKeyMs from settings: a 50 ms average does not fire at avgKeyMs 30', () => {
     const onScan = vi.fn();
-    const settings: ScannerSettings = { avgKeyMs: 30, minChars: 3 };
+    const settings: ScannerSettings = { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 30, minChars: 3 };
     renderHook(() => useWedgeScan(true, settings, onScan));
     const t = type(['A', 'B', 'C', 'D'], 50, 1_000);
     vi.setSystemTime(t);
@@ -51,7 +82,7 @@ describe('useWedgeScan', () => {
 
   it('takes minChars from settings: 3 characters do not fire at minChars 6', () => {
     const onScan = vi.fn();
-    const settings: ScannerSettings = { avgKeyMs: 100, minChars: 6 };
+    const settings: ScannerSettings = { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars: 6 };
     renderHook(() => useWedgeScan(true, settings, onScan));
     const t = type(['A', 'B', 'C'], 5, 1_000);
     vi.setSystemTime(t);
@@ -121,5 +152,19 @@ describe('useWedgeScan', () => {
     keydown('Enter');
     expect(onScan).not.toHaveBeenCalled();
     removeSpy.mockRestore();
+  });
+});
+
+describe('stripScanAffixes', () => {
+  it.each([
+    ['#ABC!', '#', '!', 'ABC'],
+    ['ABC', '#', '!', 'ABC'],
+    ['A#B!C', '#', '!', 'A#B!C'],
+    ['#ABC!', '', '', '#ABC!'],
+    ['##ABC!!', '#', '!', '#ABC!'],
+    ['📦ABC🔎', '📦', '🔎', 'ABC'],
+    ['', '#', '!', ''],
+  ])('strips %s with prefix %s and suffix %s to %s', (raw, prefix, suffix, code) => {
+    expect(stripScanAffixes(raw, { ...DEFAULT_SCANNER_SETTINGS, prefix, suffix })).toBe(code);
   });
 });
