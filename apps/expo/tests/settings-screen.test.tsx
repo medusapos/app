@@ -58,6 +58,23 @@ function Reader({ label }: { label: string }) {
 }
 
 describe('SettingsScreen', () => {
+  it('on a wide window shows section navigation and only the chosen section', async () => {
+    setWindowWidth(1024);
+    try {
+      await mount();
+      expect(within(screen.getByTestId('settings-nav')).getAllByRole('button').map((item) => item.textContent))
+        .toEqual(['Store', 'Register', 'Scanner', 'Theme', 'Danger zone']);
+      expect(screen.getByTestId('settings-store')).toBeTruthy();
+      expect(screen.queryByLabelText('Minimum characters')).toBeNull();
+      fireEvent.click(screen.getByTestId('settings-nav-scanner'));
+      expect(screen.getByLabelText('Minimum characters')).toBeTruthy();
+      expect(screen.getByTestId('settings-nav-scanner').getAttribute('aria-selected')).toBe('true');
+      expect(screen.queryByTestId('settings-store')).toBeNull();
+    } finally {
+      act(() => setWindowWidth(0));
+    }
+  });
+
   it('redirects to login when signed out', async () => {
     localStorage.removeItem('medusapos.session');
     await mount();

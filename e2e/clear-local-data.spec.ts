@@ -77,6 +77,7 @@ test.describe('with a parked sale', () => {
     await expect(page.getByTestId('cart-empty')).toBeVisible();
 
     await openArea(page, 'Settings');
+    await page.getByTestId('settings-nav-danger').click();
     await page.getByTestId('clear-local-data').click();
     await expect(page.getByTestId('clear-local-data-warning'))
       .toHaveText('1 parked sale on this device has never reached your server and will be permanently lost.');

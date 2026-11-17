@@ -1,7 +1,7 @@
 import { useRef, useState, type ComponentProps } from 'react';
-import { Pressable, ScrollView, Text, TextInput, View, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { SettingsGroup, SettingsRow } from '@tallyui/components';
+import { SettingsGroup, SettingsLayout, SettingsRow } from '@tallyui/components';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ThemeTiles } from '../components/theme-tiles';
 import { FrameMenuButton } from '../components/app-frame';
@@ -17,6 +17,8 @@ import { averageKeyMs } from '../lib/use-wedge-scan';
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 // Shown for any value this till does not hold.
 const UNKNOWN = '—';
+// v2's nav-and-section layout starts at this width; a phone keeps one page.
+const SETTINGS_SPLIT_MIN_WIDTH = 768;
 
 function Field({ label, help, ...input }: { label: string; help?: string } & ComponentProps<typeof TextInput>) {
   return <View className="gap-1">
@@ -27,7 +29,35 @@ function Field({ label, help, ...input }: { label: string; help?: string } & Com
 }
 export default function SettingsScreen() {
   const { session } = useSession();
+  const { width } = useWindowDimensions();
+  const [chosenSection, setChosenSection] = useState('store');
   if (!session) return <Redirect href="/login" />;
+  const sections = [
+    { id: 'store', label: 'Store', element: <StoreSection session={session} /> },
+    { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
+    { id: 'scanner', label: 'Scanner', element: <ScannerSection session={session} /> },
+    { id: 'theme', label: 'Theme', element: <ThemeSection /> },
+    { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
+  ];
+  if (width >= SETTINGS_SPLIT_MIN_WIDTH) return <>
+    <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
+    <SettingsLayout layout="split" navSlot={
+      <View testID="settings-nav">
+        {sections.map(({ id, label }) => <Pressable key={id} testID={`settings-nav-${id}`} accessibilityRole="button"
+          aria-selected={chosenSection === id}
+          accessibilityState={{ selected: chosenSection === id }} onPress={() => setChosenSection(id)}
+          className={`min-h-11 justify-center px-4 ${chosenSection === id ? 'bg-muted' : ''}`}>
+          <Text className="text-foreground">{label}</Text>
+        </Pressable>)}
+      </View>
+    } contentSlot={
+      <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
+        <View className="w-full max-w-md gap-6 self-center">
+          {sections.find(({ id }) => id === chosenSection)?.element}
+        </View>
+      </ScrollView>
+    } />
+  </>;
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
     <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-md gap-6 self-center">
