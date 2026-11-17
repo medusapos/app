@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import type { CommandWarning } from '@tallyui/core';
 import type { CustomerSummary } from '@tallyui/pos';
 import type { SessionStorage } from './session';
 
@@ -18,6 +19,16 @@ export function saveDefaultCustomer(storage: SessionStorage | null, baseUrl: str
 }
 
 const listeners = new Set<() => void>();
+function notify() { listeners.forEach((listener) => listener()); }
+export function forgetDeletedDefaultCustomer(
+  storage: SessionStorage | null, baseUrl: string, warnings: readonly CommandWarning[] | undefined,
+): boolean {
+  const customer = loadDefaultCustomer(storage, baseUrl);
+  if (!warnings?.some((warning) => warning.code === 'customer_ignored' && warning.customerId === customer?.id)) return false;
+  saveDefaultCustomer(storage, baseUrl, null);
+  notify();
+  return true;
+}
 export function useDefaultCustomer(storage: SessionStorage | null, baseUrl: string): {
   customer: CustomerSummary | null; save: (c: CustomerSummary | null) => void;
 } {
@@ -30,7 +41,7 @@ export function useDefaultCustomer(storage: SessionStorage | null, baseUrl: stri
     return () => { listeners.delete(reload); };
   }, [storage, baseUrl, initial]);
   const save = useCallback((c: CustomerSummary | null) => {
-    saveDefaultCustomer(storage, baseUrl, c); listeners.forEach((listener) => listener());
+    saveDefaultCustomer(storage, baseUrl, c); notify();
   }, [storage, baseUrl]);
   return { customer, save };
 }

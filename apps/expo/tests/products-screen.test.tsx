@@ -14,7 +14,7 @@ import { storeConfig } from '../lib/config';
 import { DEFAULT_CART_SETTINGS, saveCartSettings } from '../lib/cart-settings';
 import { clearProductCache } from '../lib/product-cache';
 import { saveScannerSettings } from '../lib/scanner-settings';
-import { saveDefaultCustomer } from '../lib/default-customer';
+import { forgetDeletedDefaultCustomer, loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
@@ -117,6 +117,44 @@ describe('ProductsScreen catalogue', () => {
     } finally {
       saveDefaultCustomer(localStorage, 'https://store.test', null);
     }
+  });
+
+  it('a deleted default customer: the cart starts as Guest and the sale is sent without a customer', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' });
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
+      { ...savedSale(), syncStatus: 'applied', warnings: [{ code: 'customer_ignored', customerId: 'ada' }] },
+    ] });
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
+      id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
+        prices: [{ amount: 12, currency_code: 'eur' }] }],
+    }] }));
+    await mount();
+    expect(screen.getByText('Customer: Guest')).toBeTruthy();
+    expect(screen.queryByText('Customer: Ada Lovelace')).toBeNull();
+    expect(loadDefaultCustomer(localStorage, 'https://store.test')).toBeNull();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await payByCard();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
+    const record = vi.mocked(useOutboxContext().record);
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls[0][0].customer).toBeNull();
+  });
+
+  it('clearing the default never rewrites an open sale', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' });
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [] });
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
+      id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
+        prices: [{ amount: 12, currency_code: 'eur' }] }],
+    }] }));
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(screen.getByText('Customer: Ada Lovelace')).toBeTruthy();
+    act(() => {
+      forgetDeletedDefaultCustomer(localStorage, 'https://store.test', [{ code: 'customer_ignored', customerId: 'ada' }]);
+    });
+    expect(loadDefaultCustomer(localStorage, 'https://store.test')).toBeNull();
+    expect(screen.getByText('Customer: Ada Lovelace')).toBeTruthy();
   });
 
   it('shows a stopped product pull above the sales line', async () => {
