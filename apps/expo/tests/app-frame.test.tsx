@@ -90,6 +90,17 @@ describe('frameStep', () => {
 });
 
 describe('AppFrame on a phone', () => {
+  it('mounts the drawer header before Sale only after opening the menu', () => {
+    setWindowWidth(390, 844);
+    vi.mocked(usePathname).mockReturnValue('/');
+    render(<AppFrame signedIn drawerHeader={<span data-testid="probe-header">Probe</span>}><Area /></AppFrame>);
+    expect(screen.queryByTestId('probe-header')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
+    const probe = screen.getByTestId('probe-header');
+    expect(screen.getByTestId('nav-drawer-panel').contains(probe)).toBe(true);
+    expect(probe.compareDocumentPosition(screen.getByTestId('nav-item-sale')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('has no rail; the 44 px menu button opens the drawer, which navigates and closes', async () => {
     setWindowWidth(390, 844);
     mount('/', { count: 2 });
