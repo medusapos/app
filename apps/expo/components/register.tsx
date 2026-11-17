@@ -66,7 +66,7 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
 export const IN_ROW = 'h-auto border-b-0 bg-transparent px-0';
 
 /**
- * TallyUI's RegisterBar for this till: the strip under the header when wide, or `IN_ROW` on a phone. Its pill is
+ * TallyUI's RegisterBar for this till, in a phone's rows (`IN_ROW`); the wide header uses `WideHeaderRegister`. Its pill is
  * never a dead label: with an open session it opens the panel; otherwise it brings up the gate (`onGate`), which
  * also holds the count and, for "Close not finished" (TallyUI #175), focuses the Finish closing button.
  */

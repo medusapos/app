@@ -5,7 +5,7 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
+  CartNoteInput, Catalogue, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
@@ -22,10 +22,11 @@ import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/
 import { CustomerChip } from '../components/customer-chip';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PaidChange } from '../components/paid-change';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
 import { phoneRegisterState, storeRegisterTitle } from '../components/frame-drawer-header';
-import { HeaderRegisterState } from '../components/header-register-state';
+import { HeaderRegisterState, WideHeaderRegister } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
@@ -458,7 +459,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const paidReceipt = sale.stage.kind === 'receipt' ? <>
     {/* v2 leads the paid screen with the change; screen only, not printed. */}
     {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-      <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
+      <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />
     </View>}
     <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
     store={receiptStore}
@@ -482,7 +483,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
         headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
-        <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
+        <View dataSet={{ print: 'hide' }} className={phone ? 'flex-row items-center gap-4 pr-4' : 'flex-1 flex-row items-center gap-4 pr-4'}>
+        {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
         {headerRegisterState && <HeaderRegisterState label={headerRegisterState} onPress={openGate} />}
         <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
           onPress={() => setUserSheetOpen(true)} className="min-h-11 flex-row items-center gap-2">
@@ -498,8 +500,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </IconButton>}
         </View>
       ) }} />
-      {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
-      {sale.stage.kind !== 'receipt' && !phone ? registerBar() : null}
       <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={online} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
       <UserSheet session={session} displayName={displayName} initials={initials} storeName={receiptStore.name} currency={pricing.currency}
         outbox={summarizeOutboxHealth(outboxState, registerOutbox.state)} parkedSales={parked.length} paidMinor={capturedMinor(sale.order.payments)}

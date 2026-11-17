@@ -289,7 +289,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'cart-settings-button', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'In Stock', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Cart settings']);
+      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'In Stock', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
