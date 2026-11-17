@@ -95,7 +95,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       }
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
       const panel = page.getByTestId('register-panel');
-      await expect(panel.getByTestId('register-panel-sales-count')).toHaveText('1 sale this session');
+      await expect(panel.getByTestId('register-panel-session-sales')).toHaveText(/1 sale$/);
       const expectedCash = panel.getByTestId('register-panel-expected').getByText(/\d/);
       await expect(expectedCash).toHaveText(money(100 + total));
 

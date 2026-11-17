@@ -56,7 +56,7 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.getByTestId('register-bar-open-panel').click();
   await expect(page.getByTestId('register-panel-close')).toBeVisible();
   // A single-register till's bar does not name its register, so its name shows first in the panel's title.
-  await expect(page.getByTestId('register-panel-amount')).toHaveText('Demo register');
+  await expect(page.getByTestId('register-panel-title')).toHaveText('Demo register');
   await page.getByTestId('register-panel-dismiss').click();
   await page.getByRole('button', { name: /^Customer: /, exact: true }).click();
   await expect(page.getByTestId('customer-dialog')).toBeVisible();

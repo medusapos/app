@@ -4,9 +4,10 @@ import {
   ClosureSheet, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';
 import { RegisterSessionRequiredError, type ApprovalNeeded, type useRegisterSession, type useSale } from '@tallyui/pos';
+import { printXReport } from '../lib/closure-print';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
-import { LastClosureSheet, printClosure, storeApproval, useApprove } from './register-close';
+import { closureContext, LastClosureSheet, printClosure, storeApproval, useApprove } from './register-close';
 import { RegisterConflictCard } from './register-conflict';
 
 // RegisterColumn's Finish closing button's nativeID (TallyUI #175).
@@ -82,7 +83,7 @@ export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
 }
 
 /**
- * The register panel (movements with Undo, Close register), opened from the control; between sessions, the last
+ * The register panel (movements with Undo, Close register), opened from the control as v2's side sheet; between sessions, the last
  * closure's figures, unless the store refused a closure's approval: then the panel, whose card asks a manager again.
  */
 export function RegisterPanelSheet({ currency, store, online, open, onOpenChange }: {
@@ -102,6 +103,10 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
   };
   return <>
     <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
+      presentation="side" storeName={store.name}
+      onPrintXReport={Platform.OS === 'web' && register.session?.status === 'open'
+        ? () => printXReport({ session: register.session!, expected: register.expected,
+          salesCount: register.salesCount, registerName, context: closureContext(currency, store) }) : undefined}
       onOpenChange={onOpenChange} reapprove={reapprove} />
     {dialog}
   </>;

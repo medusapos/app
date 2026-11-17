@@ -15,7 +15,7 @@ import ProductsScreen from '../app/index';
 import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
-import { PRINT_FAILED, PRINT_FRAME_ID } from '../lib/closure-print';
+import { PRINT_FAILED, PRINT_FRAME_ID, printXReport } from '../lib/closure-print';
 import { openOrderStore, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { capabilities } from './pos-connector-mock';
@@ -42,6 +42,9 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 }));
 vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
+}));
+vi.mock('../lib/closure-print', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/closure-print')>(), printXReport: vi.fn().mockResolvedValue(undefined),
 }));
 
 const settings: StoreSettings = { storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' } };
@@ -175,7 +178,22 @@ describe('the register on the sale screen', () => {
     expect(record.mock.calls[0][0]).not.toHaveProperty('lateSessionId');
     await act(async () => { fireEvent.click(button('New sale')); });
     const panel = await openPanel();
-    await waitFor(() => expect(panel.getByTestId('register-panel-sales-count').textContent).toBe('1 sale this session'));
+    await waitFor(() => expect(panel.getByTestId('register-panel-session-sales').textContent).toMatch(/1 sale$/));
+  });
+
+  it('shows the register name and prints an X-report for the open session and its sales count', async () => {
+    const session = await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await screen.findByRole('button', { name: 'Open register panel' });
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await payByCard();
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
+    await act(async () => { fireEvent.click(button('New sale')); });
+    const panel = await openPanel();
+    expect(panel.getByTestId('register-panel-title').textContent).toBe('Register 1');
+    await waitFor(() => expect(panel.getByTestId('register-panel-session-sales').textContent).toMatch(/1 sale$/));
+    await act(async () => { fireEvent.click(panel.getByTestId('register-panel-print')); });
+    expect(printXReport).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ session, salesCount: 1 }));
   });
 
   it('records a paid in of 5.00 from the panel, and Undo voids it', async () => {
