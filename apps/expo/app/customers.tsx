@@ -5,6 +5,7 @@ import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, Sea
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerPatch, type SyncContext } from '@tallyui/core';
 import { FrameMenuButton } from '../components/app-frame';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
+import { BillingNotSavedError, loadCustomerBilling } from '../lib/customer-billing';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
 import type { Session } from '../lib/session';
@@ -34,6 +35,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
   const [failed, setFailed] = useState(false);
   const [editing, setEditing] = useState<Customer | 'new' | null>(null);
   const request = useRef(0);
+  const createdCustomer = useRef<Customer | null>(null);
 
   useEffect(() => {
     const current = ++request.current;
@@ -66,7 +68,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
     <View className="flex-row items-center gap-2 px-4 pt-4 pb-2">
       <SearchInput className="flex-1" value={query} onChangeText={setQuery} placeholder="Search customers"
         accessibilityLabel="Search customers" testID="customers-search" autoFocus />
-      {connector.createCustomer && <Button variant="outline" testID="customers-add" onPress={() => setEditing('new')}>
+      {connector.createCustomer && <Button variant="outline" testID="customers-add" onPress={() => { createdCustomer.current = null; setEditing('new'); }}>
         <ButtonText>Add customer</ButtonText>
       </Button>}
     </View>
@@ -86,36 +88,50 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
           </View>
         </>;
         return connector.updateCustomer
-          ? <Pressable key={customer.id} {...props} accessibilityRole="button" onPress={() => setEditing(customer)}>{children}</Pressable>
+          ? <Pressable key={customer.id} {...props} accessibilityRole="button" onPress={() => { createdCustomer.current = null; setEditing(customer); }}>{children}</Pressable>
           : <View key={customer.id} {...props}>{children}</View>;
       })}
     </ScrollView>}
-    <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) setEditing(null); }}>
-      <DialogContent testID="customer-editor">
+    <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) { createdCustomer.current = null; setEditing(null); } }}>
+      <DialogContent testID="customer-editor" className="max-h-[90%]">
         <DialogTitle>{editing === 'new' ? 'New customer' : 'Edit customer'}</DialogTitle>
+        <ScrollView>
         {editing !== null && <CustomerEditor key={editing === 'new' ? 'new' : editing.id}
-          customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values) => {
+          loadBilling={editing === 'new' ? undefined : () => loadCustomerBilling(context, editing.id)}
+          customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing) => {
             if (editing === 'new') {
               const input = { email: values.email.trim(),
                 ...(values.firstName.trim() ? { firstName: values.firstName.trim() } : {}),
                 ...(values.lastName.trim() ? { lastName: values.lastName.trim() } : {}),
                 ...(values.phone.trim() ? { phone: values.phone.trim() } : {}) };
-              const created = await connector.createCustomer!(context, input);
-              setCustomers((list) => [created, ...list]);
+              const created = createdCustomer.current ?? await connector.createCustomer!(context, input);
+              createdCustomer.current = created;
+              setCustomers((list) => list.some((customer) => customer.id === created.id)
+                ? list.map((customer) => customer.id === created.id ? created : customer) : [created, ...list]);
               setMessage(null);
               setFailed(false);
+              if (billing !== undefined && connector.updateCustomer) {
+                try {
+                  const updated = await connector.updateCustomer(context, created.id, { billing });
+                  createdCustomer.current = updated;
+                  setCustomers((list) => list.map((customer) => customer.id === created.id ? updated : customer));
+                } catch (error) { throw new BillingNotSavedError(created, error); }
+              }
             } else {
               const patch: CustomerPatch = {};
               for (const field of ['firstName', 'lastName', 'email', 'phone'] as const) {
                 if (values[field].trim() !== (editing[field] ?? '')) patch[field] = values[field].trim();
               }
+              if (billing !== undefined) patch.billing = billing;
               if (Object.keys(patch).length) {
                 const updated = await connector.updateCustomer!(context, editing.id, patch);
                 setCustomers((list) => list.map((customer) => customer.id === editing.id ? updated : customer));
               }
             }
+            createdCustomer.current = null;
             setEditing(null);
           }} />}
+        </ScrollView>
       </DialogContent>
     </Dialog>
   </View>;
