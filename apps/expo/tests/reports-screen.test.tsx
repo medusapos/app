@@ -65,7 +65,7 @@ function openRegister(status: RegisterSession['status'] = 'open') {
     registers: [{ id: 'register-1', name: 'Register 1' }], registerName: 'Register 1',
     register: { session: { id: 's1', register_id: 'register-1', store_key: baseUrl, status,
       opened_at_gmt: '2026-09-11T08:00:00Z', expected_float_minor: 1000, counted_float_minor: 1000, opening_variance_minor: 0 },
-      expected: { cash: 2500 }, salesCount: 2 },
+      expected: { cash: 2500 }, salesCount: 2, movements: [] },
   } as unknown as ReturnType<typeof useRegister>);
 }
 function order(totalMinor: number, method: 'cash' | 'external', overrides: Partial<PosOrder> = {}): PosOrder {
@@ -93,7 +93,7 @@ describe('register strip', () => {
         cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
         paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
         expected: { cash: 4000 } },
-      lastClosure: null, blind: false,
+      lastClosure: null, blind: false, expected: {}, movements: [],
     } } as unknown as ReturnType<typeof useRegister>);
     mount();
     const ctx = closureContext('EUR', { name: 'Test shop' });
@@ -133,7 +133,7 @@ describe('register strip', () => {
         cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
         paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
         expected: { cash: 4000 } },
-      lastClosure: null, blind: true,
+      lastClosure: null, blind: true, expected: {}, movements: [],
     } } as unknown as ReturnType<typeof useRegister>);
     mount();
     expect(screen.getByTestId('register-strip-status').textContent).toBe('Open');
@@ -147,6 +147,39 @@ describe('register strip', () => {
     mount();
     expect(screen.queryByTestId('register-strip')).toBeNull();
     expect(screen.queryByTestId('reports-x-print')).toBeNull();
+  });
+
+  it('ends with v2\'s chevron, which opens the register panel', async () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z', opened_by: 'Ana' },
+      terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
+        cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
+        paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
+        expected: { cash: 4000 } },
+      lastClosure: null, blind: false, expected: {}, movements: [],
+    } } as unknown as ReturnType<typeof useRegister>);
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    const strip = screen.getByTestId('register-strip');
+    const buttons = within(strip).getAllByRole('button').map((button) => button.getAttribute('data-testid'));
+    expect(buttons.slice(-2)).toEqual(['reports-x-print', 'register-strip-open-panel']);
+    expect(within(strip).getByTestId('register-strip-open-panel').getAttribute('aria-label')).toBe('Open register panel');
+    fireEvent.click(within(strip).getByTestId('register-strip-open-panel'));
+    expect((await screen.findByTestId('register-panel-title')).textContent).toBe('Register 1');
+    expect(screen.getByTestId('register-panel-close')).toBeTruthy();
+  });
+
+  it('has no chevron without a session or a last closure', () => {
+    mount();
+    expect(screen.getByTestId('register-strip')).toBeTruthy();
+    expect(screen.queryByTestId('register-strip-open-panel')).toBeNull();
+  });
+
+  it('has no chevron for a conflict session', () => {
+    openRegister('conflict');
+    mount();
+    expect(screen.getByTestId('register-strip-status')).toBeTruthy();
+    expect(screen.queryByTestId('register-strip-open-panel')).toBeNull();
   });
 });
 

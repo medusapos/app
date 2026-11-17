@@ -1,0 +1,27 @@
+// v2's paid-screen change header: a tick, the change as a heading, and what was paid and tendered. Screen only.
+import type { JSX } from 'react';
+import { View } from 'react-native';
+import { Path } from 'react-native-svg';
+import { Text, createSvgIcon } from '@tallyui/components';
+import { formatMoney } from '@tallyui/core';
+import { capturedMinor, type PosOrder, type SentOrder } from '@tallyui/pos';
+
+const TickIcon = createSvgIcon('TickIcon', () => <Path d="M5 12l5 5l10 -10" />);
+
+export function PaidChange({ order, posOrder }: { order: SentOrder; posOrder: PosOrder }): JSX.Element {
+  const money = (amount: number) => formatMoney({ amount, currency: order.currency });
+  const tenderedMinor = posOrder.payments.filter(payment => payment.method === 'cash')
+    .reduce((sum, payment) => sum + (payment.tenderedMinor ?? payment.amountMinor), 0);
+  return <View testID="paid-change-due" className="items-center gap-3">
+    {/* The icon strokes in currentColor, so the circle's text-success colours the tick. */}
+    <View testID="paid-change-tick" className="h-24 w-24 items-center justify-center rounded-full bg-success/15 text-success">
+      <TickIcon size={40} strokeWidth={3} />
+    </View>
+    <Text testID="paid-change-figure" accessibilityRole="header" className="text-5xl font-bold text-foreground">
+      {`Change ${money(order.changeDueMinor)}`}
+    </Text>
+    <Text testID="paid-change-tendered" className="text-muted-foreground">
+      {`Paid ${money(capturedMinor(posOrder.payments))} · tendered ${money(tenderedMinor)} in cash`}
+    </Text>
+  </View>;
+}
