@@ -95,7 +95,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
     <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) { createdCustomer.current = null; setEditing(null); } }}>
       <DialogContent testID="customer-editor" className="max-h-[90%]">
         <DialogTitle>{editing === 'new' ? 'New customer' : 'Edit customer'}</DialogTitle>
-        <ScrollView>
+        <ScrollView keyboardShouldPersistTaps="handled">
         {editing !== null && <CustomerEditor key={editing === 'new' ? 'new' : editing.id}
           loadBilling={editing === 'new' ? undefined : () => loadCustomerBilling(context, editing.id)}
           customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing) => {
