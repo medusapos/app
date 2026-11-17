@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { formatClosureDate } from '@tallyui/pos';
+import { formatClosureDate, type Closure } from '@tallyui/pos';
 import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext } from '../components/register-close';
+import { localDay } from '../lib/reports';
 
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 
@@ -78,4 +79,45 @@ it('a failed Load more keeps the rows shown', async () => {
   fireEvent.click(await screen.findByTestId('earlier-closures-more'));
   expect((await screen.findByTestId('earlier-closures-error')).textContent).toBe("Couldn't load earlier closures.");
   expect(screen.getByTestId('earlier-closure-c12')).toBeTruthy();
+});
+
+const mountOpenable = (onOpen: (opened: { closure: Closure; frozen: boolean }) => void, localClosures?: Closure[]) =>
+  render(<EarlierClosures session={session} registerId="reg/1" today="2026-11-10" ctx={ctx}
+    registerName="Register 1" cashierNames={{ 'user-1': 'Ana' }} onOpen={onOpen} localClosures={localClosures} />);
+
+it('groups rows by day under a header with the day\'s totals', async () => {
+  fetchImpl.mockResolvedValueOnce(response({ closures: [first, second], more: false }));
+  mount();
+  expect((await screen.findByTestId('earlier-closures-table-day-2026-11-09-label')).textContent).toBe('Yesterday');
+  expect(screen.getByTestId('earlier-closures-table-day-2026-11-09-total').textContent)
+    .toBe(`${ctx.formatMoney('44.00')} counted · ${ctx.formatMoney('1.00')} short`);
+  expect(screen.getByTestId(`earlier-closures-table-day-${localDay(new Date(second.closedAt))}`)).toBeTruthy();
+});
+
+it('a row with store figures opens a closure built from them', async () => {
+  fetchImpl.mockResolvedValueOnce(response({ closures: [first, second], more: false }));
+  const onOpen = vi.fn();
+  mountOpenable(onOpen);
+  fireEvent.click(await screen.findByTestId('earlier-closure-c12-open'));
+  expect(onOpen).toHaveBeenCalledOnce();
+  expect(onOpen.mock.calls[0][0]).toMatchObject({ frozen: false,
+    closure: { number: 12, counted: { cash: 4400 }, expected: { cash: 4500 }, variance: { cash: -100 } } });
+  expect(screen.getByTestId('earlier-closure-c11')).toBeTruthy();
+  expect(screen.queryByTestId('earlier-closure-c11-open')).toBeNull();
+});
+
+it('a row the device closed opens the device\'s own closure', async () => {
+  fetchImpl.mockResolvedValueOnce(response({ closures: [first], more: false }));
+  const own: Closure = {
+    id: 'local-12', session_id: 's', register_id: 'reg/1', business_day: '2026-11-09', number: 12,
+    opened_at: first.openedAt, closed_at: first.closedAt, till_expected: { cash: 4500 }, expected: { cash: 4500 },
+    counted: { cash: 4400 }, variance: { cash: -100 }, period_sales_total_minor: 4500, period_refunds_total_minor: 0,
+    perpetual_sales_total_minor: 4500, perpetual_refunds_total_minor: 0, unsynced_count: 0, unsynced_total_minor: 0,
+    software_version: 'test', breakdowns: {}, order_ids: [], movement_ids: [], server_closure_id: 'c12', print_count: 0,
+  };
+  const onOpen = vi.fn();
+  mountOpenable(onOpen, [own]);
+  fireEvent.click(await screen.findByTestId('earlier-closure-c12-open'));
+  expect(onOpen).toHaveBeenCalledOnce();
+  expect(onOpen).toHaveBeenCalledWith({ closure: own, frozen: true });
 });
