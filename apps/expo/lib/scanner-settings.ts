@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { SessionStorage } from './session';
 
-export type ScannerSettings = { avgKeyMs: number; minChars: number };
+export type ScannerSettings = { avgKeyMs: number; minChars: number; prefix: string; suffix: string; playSound: boolean };
 
 // 100 ms average: Bluetooth HID scanners can send 60-100 ms per key. In the cart view nothing is focused, so a fast human typing a code and Enter wants the same result.
 // WCPOS's default is 24 ms, a per-store setting there (barcode_scanning_avg_time_input_threshold).
 // Medusa SKUs such as "E2E-2" are shorter than WCPOS's default minimum of 8.
-export const DEFAULT_SCANNER_SETTINGS: ScannerSettings = { avgKeyMs: 100, minChars: 3 };
+// Prefix/suffix follow v2's single-key-at-the-edge rule, via TallyUI's stripBoundary.
+export const DEFAULT_SCANNER_SETTINGS: ScannerSettings = { avgKeyMs: 100, minChars: 3, prefix: '', suffix: '', playSound: false };
 
 const PREFIX = 'medusapos.scanner.';
 const AVG_KEY_MS_RANGE = [10, 500] as const;
@@ -14,20 +15,25 @@ const MIN_CHARS_RANGE = [1, 64] as const;
 const inRange = (v: unknown, [min, max]: readonly [number, number]): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
 const isValidSettings = (v: unknown): v is ScannerSettings => typeof v === 'object' && v !== null
-  && inRange((v as ScannerSettings).avgKeyMs, AVG_KEY_MS_RANGE) && inRange((v as ScannerSettings).minChars, MIN_CHARS_RANGE);
+  && inRange((v as ScannerSettings).avgKeyMs, AVG_KEY_MS_RANGE) && inRange((v as ScannerSettings).minChars, MIN_CHARS_RANGE)
+  && typeof (v as ScannerSettings).prefix === 'string' && Array.from((v as ScannerSettings).prefix).length <= 1
+  && typeof (v as ScannerSettings).suffix === 'string' && Array.from((v as ScannerSettings).suffix).length <= 1
+  && typeof (v as ScannerSettings).playSound === 'boolean';
 
 /** Tolerates a missing or corrupt value, falling back to the defaults (same style as store-settings.ts). */
 export function loadScannerSettings(storage: SessionStorage | null, baseUrl: string): ScannerSettings {
   try {
     const value: unknown = JSON.parse(storage?.getItem(PREFIX + baseUrl) ?? 'null');
-    return isValidSettings(value) ? value : DEFAULT_SCANNER_SETTINGS;
+    const merged = typeof value === 'object' && value !== null ? { ...DEFAULT_SCANNER_SETTINGS, ...value } : null;
+    return isValidSettings(merged) ? merged : DEFAULT_SCANNER_SETTINGS;
   } catch { return DEFAULT_SCANNER_SETTINGS; }
 }
 
 /** Throws when `settings` is out of range, so a caller can show a validation message. */
 export function saveScannerSettings(storage: SessionStorage | null, baseUrl: string, settings: ScannerSettings): void {
   if (!isValidSettings(settings)) throw new Error(`Average time per key must be a whole number from ${AVG_KEY_MS_RANGE[0]} `
-    + `to ${AVG_KEY_MS_RANGE[1]}, and minimum characters a whole number from ${MIN_CHARS_RANGE[0]} to ${MIN_CHARS_RANGE[1]}.`);
+    + `to ${AVG_KEY_MS_RANGE[1]}, and minimum characters a whole number from ${MIN_CHARS_RANGE[0]} to ${MIN_CHARS_RANGE[1]}. `
+    + 'Prefix and suffix must be at most one character each.');
   storage?.setItem(PREFIX + baseUrl, JSON.stringify(settings));
 }
 

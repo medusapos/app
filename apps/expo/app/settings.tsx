@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ThemeTiles } from '../components/theme-tiles';
@@ -16,7 +16,8 @@ import { useDefaultCustomer } from '../lib/default-customer';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { THEME_CHOICES, useThemeChoice } from '../lib/theme-choice';
 import { SCALE_CHOICES, useScaleChoice, type ScaleChoice } from '../lib/scale-choice';
-import { averageKeyMs } from '../lib/use-wedge-scan';
+import { averageKeyMs, stripScanAffixes } from '../lib/use-wedge-scan';
+import { playScanBeep } from '../lib/scan-beep';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 // Shown for any value this till does not hold.
@@ -150,14 +151,17 @@ function ScannerSection({ session }: { session: Session }) {
   const { settings, save, reset } = useScannerSettings(defaultStorage(), session.baseUrl);
   const [avgKeyMsInput, setAvgKeyMsInput] = useState(String(settings.avgKeyMs));
   const [minCharsInput, setMinCharsInput] = useState(String(settings.minChars));
+  const [prefixInput, setPrefixInput] = useState(settings.prefix);
+  const [suffixInput, setSuffixInput] = useState(settings.suffix);
   const [error, setError] = useState<string | null>(null);
   function onSave() {
-    try { save({ avgKeyMs: Number(avgKeyMsInput), minChars: Number(minCharsInput) }); setError(null); }
+    try { save({ avgKeyMs: Number(avgKeyMsInput), minChars: Number(minCharsInput), prefix: prefixInput, suffix: suffixInput, playSound: settings.playSound }); setError(null); }
     catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
   }
   function onReset() {
     reset(); setAvgKeyMsInput(String(DEFAULT_SCANNER_SETTINGS.avgKeyMs));
     setMinCharsInput(String(DEFAULT_SCANNER_SETTINGS.minChars)); setError(null);
+    setPrefixInput(DEFAULT_SCANNER_SETTINGS.prefix); setSuffixInput(DEFAULT_SCANNER_SETTINGS.suffix);
   }
   const [testValue, setTestValue] = useState(''), [lastScan, setLastScan] = useState<{ code: string; avgMs: number } | null>(null);
   // Mirrors the wedge listener's own buffer (use-wedge-scan.ts), but on this focused field: it wants an
@@ -167,7 +171,12 @@ function ScannerSection({ session }: { session: Session }) {
     const key = event.nativeEvent.key, now = Date.now();
     if (key === 'Enter') {
       const { buffer, firstAt, lastAt } = timing.current;
-      if (buffer) setLastScan({ code: buffer, avgMs: averageKeyMs(firstAt, lastAt, buffer.length) });
+      if (buffer) {
+        const code = stripScanAffixes(buffer, settings), avgMs = averageKeyMs(firstAt, lastAt, buffer.length);
+        setLastScan({ code, avgMs });
+        const counts = code.length >= settings.minChars && avgMs <= settings.avgKeyMs;
+        if (counts && settings.playSound) playScanBeep();
+      }
       timing.current = { buffer: '', firstAt: 0, lastAt: 0 }; setTestValue('');
       return;
     }
@@ -182,6 +191,10 @@ function ScannerSection({ session }: { session: Session }) {
         value={avgKeyMsInput} onChangeText={setAvgKeyMsInput} keyboardType="number-pad" />
       <Field accessibilityLabel="Minimum characters" label="Minimum characters" help="Codes shorter than this are treated as typing, not a scan"
         value={minCharsInput} onChangeText={setMinCharsInput} keyboardType="number-pad" />
+      <Field accessibilityLabel="Scanner prefix" label="Scanner prefix" help="One character your scanner sends before each code. Removed before lookup."
+        value={prefixInput} onChangeText={setPrefixInput} maxLength={1} autoCapitalize="none" autoCorrect={false} />
+      <Field accessibilityLabel="Scanner suffix" label="Scanner suffix" help="One character your scanner sends after each code. Removed before lookup."
+        value={suffixInput} onChangeText={setSuffixInput} maxLength={1} autoCapitalize="none" autoCorrect={false} />
       {error ? <Text className="text-sm text-destructive">{error}</Text> : null}
       <View className="flex-row gap-3">
         <Pressable accessibilityRole="button" onPress={onSave} className={`${buttonClass} bg-primary`}>
@@ -191,6 +204,12 @@ function ScannerSection({ session }: { session: Session }) {
           <Text className="text-foreground">Reset to defaults</Text>
         </Pressable>
       </View>
+      <SettingsRow label="Play a sound on scan" className="border-t border-border px-0" action={
+        <Switch accessibilityLabel="Play a sound on scan" testID="settings-scanner-sound" checked={settings.playSound} onCheckedChange={(checked) => {
+          try { save({ ...settings, playSound: checked }); setError(null); }
+          catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
+        }} />
+      } />
       <View className="gap-1 border-t border-border pt-4">
         <Field accessibilityLabel="Test scan here" label="Test scan here" help="Scan a barcode into this field to check it counts as a scan" value={testValue} onChangeText={setTestValue} onKeyPress={onTestKeyPress} />
         {lastScan ? <Text className="text-sm text-muted-foreground">{`Last scan: ${lastScan.code} · ${lastScan.code.length} characters · average ${Math.round(lastScan.avgMs)} ms per key`}</Text> : null}
