@@ -1,20 +1,35 @@
-import { Platform, Pressable, Text } from 'react-native';
+import { useMemo, useState } from 'react';
+import { Platform, Pressable, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { OrdersList } from '@tallyui/components';
+import { OrderFilterBar, OrdersList, SearchInput } from '@tallyui/components';
+import type { OrderFilterValue } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
 import { version as appVersion } from '../package.json';
 import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
 import { formatDate } from '../lib/format-date';
+import { filterOrders, orderFilterOptions, ORDERS_SCREEN_FILTER_FIELDS } from '../lib/order-filters';
 
 export default function OrdersScreen() {
   const { session } = useSession();
   const { recent, requeue } = useOutboxContext();
+  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState<OrderFilterValue>({});
+  const options = useMemo(() => orderFilterOptions(recent), [recent]);
+  const orders = useMemo(() => filterOrders(recent, search, filters, 'device'), [recent, search, filters]);
   if (!session) return <Redirect href="/login" />;
-  return <>
+  return <View className="flex-1 bg-background">
     <Stack.Screen options={{ title: 'Orders', headerLeft: () => <FrameMenuButton /> }} />
-    <OrdersList orders={recent} onRetry={requeue} formatDate={formatDate} footer={
+    <View className="flex-row items-center gap-2 px-4 pt-4 pb-2">
+      <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Orders"
+        accessibilityLabel="Search Orders" testID="orders-search" />
+    </View>
+    <View className="px-4 pb-2">
+      <OrderFilterBar value={filters} onChange={setFilters} fields={ORDERS_SCREEN_FILTER_FIELDS}
+        options={options} timezone="device" testID="orders-filter-bar" />
+    </View>
+    <OrdersList orders={orders} onRetry={requeue} formatDate={formatDate} footer={
         <Pressable accessibilityRole="link" className="min-h-11 justify-center" onPress={() => { openFeedbackUrl(feedbackUrl({
           appVersion, platform: Platform.OS,
           userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
@@ -23,5 +38,5 @@ export default function OrdersScreen() {
           <Text className="text-center text-sm text-muted-foreground">Send feedback</Text>
         </Pressable>
     } />
-  </>;
+  </View>;
 }

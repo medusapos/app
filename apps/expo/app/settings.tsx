@@ -5,6 +5,7 @@ import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Tex
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ThemeTiles } from '../components/theme-tiles';
+import { FontPicker } from '../components/font-choice';
 import { FrameMenuButton } from '../components/app-frame';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -239,5 +240,6 @@ function ThemeSection() {
         </ToggleGroupItem>)}
       </ToggleGroup>
     </View>
+    <FontPicker />
   </SettingsGroup>;
 }

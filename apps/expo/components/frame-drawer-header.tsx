@@ -9,6 +9,11 @@ export function registerStateLabel(status: string | null | undefined): 'Open' | 
   return status === 'open' ? 'Open' : status === 'counting' ? 'Counting' : 'Closed';
 }
 
+// v2's title bar names the store and register: "US Store · Front Counter" (row 14a).
+export function storeRegisterTitle(storeName: string, boundRegisterId: string | null | undefined, registerName: string | null): string {
+  return typeof boundRegisterId === 'string' ? `${storeName} · ${registerName ?? 'Register'}` : storeName;
+}
+
 export function FrameDrawerHeader() {
   const { session } = useSession();
   const { register, boundRegisterId, registerName } = useRegister();
