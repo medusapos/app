@@ -254,11 +254,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
   const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  // The default's stored email stays off the order payload; the paid screen's receipt prefill reads it from storage.
+  const saleDefaultCustomer = useMemo(() => defaultCustomer ? { id: defaultCustomer.id, name: defaultCustomer.name } : null, [defaultCustomer]);
   useEffect(() => {
     // The store no longer has this customer: useSale falls back to Guest on an idle cart or the next sale; an open sale keeps its customer.
     for (const order of recent) forgetDeletedDefaultCustomer(defaultStorage(), session.baseUrl, order.warnings);
   }, [recent, session.baseUrl]);
-  const sale = useSale(pricing, { defaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
+  const sale = useSale(pricing, { defaultCustomer: saleDefaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
@@ -477,7 +479,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         store={receiptStore}
         footerSlot={connector.emailReceipt ? <EmailReceipt
           orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
-          online={online} defaultEmail={paid?.customer?.email}
+          online={online} defaultEmail={paid?.customer?.email
+            ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
           send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
         topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
         cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /></> :

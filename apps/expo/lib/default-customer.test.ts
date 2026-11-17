@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, renderHook } from '@testing-library/react';
+import type { CommandWarning } from '@tallyui/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { forgetDeletedDefaultCustomer, loadDefaultCustomer, saveDefaultCustomer, useDefaultCustomer } from './default-customer';
 
@@ -38,6 +39,13 @@ describe('default-customer', () => {
     expect(storage.getItem(key)).toBe(JSON.stringify(ada));
     expect(forgetDeletedDefaultCustomer(storage, baseUrl, undefined)).toBe(false);
     expect(storage.getItem(key)).toBe(JSON.stringify(ada));
+  });
+
+  it('forgets nothing when no default is stored, even for a warning without a customerId', () => {
+    const storage = fakeStorage();
+    const warning = { code: 'customer_ignored' } as unknown as CommandWarning;
+    expect(forgetDeletedDefaultCustomer(storage, baseUrl, [warning])).toBe(false);
+    expect(storage.store.size).toBe(0);
   });
 
   it('only forgets this backend\'s default', () => {

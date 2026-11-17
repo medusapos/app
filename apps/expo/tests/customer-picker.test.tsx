@@ -14,6 +14,7 @@ import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
+import { pickMethod, take } from './tender-pane';
 import { setWindowWidth } from './window-width';
 
 const { searchCustomers, createCustomer, observed } = vi.hoisted(() => ({
@@ -157,4 +158,15 @@ it('offline, the picker cannot search or create', async () => {
   expect(searchCustomers).not.toHaveBeenCalled();
   expect(createCustomer).not.toHaveBeenCalled();
   expect(observed.sale!.order.customer).toBeNull();
+});
+
+it('a hand-picked customer is sent with its email when the sale completes', async () => {
+  await mount(); await pick();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  pickMethod('external'); take();
+  await act(async () => { fireEvent.click(button('Complete sale')); });
+  const record = vi.mocked(useOutboxContext().record);
+  expect(record).toHaveBeenCalledTimes(1);
+  expect(record.mock.calls[0][0].customer?.email).toBe('ada@example.com');
 });
