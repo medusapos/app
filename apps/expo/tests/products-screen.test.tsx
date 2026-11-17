@@ -738,6 +738,31 @@ describe('ProductsScreen cart settings', () => {
     expect(heads()).toEqual(defaults);
     expect(switches()).toEqual(DEFAULT_SWITCHES);
   });
+
+  const sheetSide = () => screen.getByTestId('cart-settings-sheet').getAttribute('data-side');
+
+  it('opens Cart Settings from the left, over the products, on a wide till', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(sheetSide()).toBe('left');
+  });
+
+  it('opens Cart Settings from the right when the cart is on the left', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-side-left'));
+    expect(sheetSide()).toBe('right');
+    fireEvent.click(screen.getByTestId('cart-settings-restore'));
+    expect(sheetSide()).toBe('left');
+  });
+
+  it('keeps Cart Settings on the right on a phone', async () => {
+    setWindowWidth(390, 844);
+    await mount();
+    fireEvent.click(screen.getByRole('tab', { name: 'Cart' }));
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(sheetSide()).toBe('right');
+  });
 });
 
 async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test', framed = false) {
