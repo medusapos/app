@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { ClosureSheet, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
+import { Path } from 'react-native-svg';
+import { ClosureSheet, createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
 import { ClosureFiltersBar } from '../components/closure-filters';
@@ -21,6 +22,13 @@ import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
 
 // The Sales room's status menu; the printed summary's scope line reads the same labels.
 const STATUS_OPTIONS = [{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }];
+
+// v2's outline printer on the Print summary button: paper tray, body, output sheet.
+const PrinterIcon = createSvgIcon('PrinterIcon', () => <>
+  <Path d="M6 9V2h12v7" />
+  <Path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+  <Path d="M6 14h12v8H6z" />
+</>);
 
 export default function ReportsScreen() {
   const { session } = useSession();
@@ -112,7 +120,7 @@ export default function ReportsScreen() {
                   cashierOptions={[]} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
               </View>
               {Platform.OS === 'web' ? <Pressable testID="reports-print-summary" accessibilityRole="button" disabled={summaryBusy}
-                className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
+                className="min-h-11 flex-row items-center justify-center gap-2 rounded-md px-4 border border-border"
                 onPress={async () => {
                   setSummaryBusy(true);
                   setSummaryError(null);
@@ -129,6 +137,7 @@ export default function ReportsScreen() {
                     setSummaryError(error instanceof Error ? error.message : SUMMARY_PRINT_FAILED);
                   } finally { setSummaryBusy(false); }
                 }}>
+                <View testID="reports-print-summary-icon" className="text-foreground"><PrinterIcon size={18} /></View>
                 <Text className="text-foreground">{summaryBusy ? 'Printing…' : 'Print summary'}</Text>
               </Pressable> : null}
             </View>
