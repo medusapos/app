@@ -1,5 +1,6 @@
 import { createContext, useEffect, useMemo, useState, type ComponentProps, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
 import { COLLAPSED_STRIP_HEIGHT, SignInAgain } from './sign-in-again';

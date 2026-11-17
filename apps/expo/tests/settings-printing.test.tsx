@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
+import { Platform } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadPrintingSettings } from '../lib/printing-settings';
 import { saveSession } from '../lib/session';
@@ -79,5 +80,28 @@ describe('Settings › Printing', () => {
     const printing = screen.getByTestId('settings-printing');
     expect(follows(screen.getByTestId('settings-default-customer'), printing)).toBe(true);
     expect(follows(printing, screen.getByTestId('settings-scanner'))).toBe(true);
+  });
+
+  it('names the print dialog as the print method under the auto-print switch', async () => {
+    setWindowWidth(1280, 800);
+    await mount();
+    fireEvent.click(screen.getByTestId('settings-nav-printing'));
+    const method = screen.getByTestId('settings-printing-method');
+    expect(method.textContent).toBe('Print dialog (browser)');
+    expect(screen.getByText('Print method')).toBeTruthy();
+    expect(follows(screen.getByRole('switch', { name: 'Automatically print receipt after checkout' }), method)).toBe(true);
+    expect(screen.queryByRole('switch', { name: 'Print method' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Print method' })).toBeNull();
+    expect(screen.queryByRole('textbox', { name: 'Print method' })).toBeNull();
+  });
+
+  it('says no print method on a native till', async () => {
+    const original = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      setWindowWidth(390, 844);
+      await mount();
+      expect(screen.getByTestId('settings-printing-method').textContent).toBe('Not available on this device');
+    } finally { Platform.OS = original; }
   });
 });

@@ -16,6 +16,10 @@ const WIDE_MIN_HEIGHT = 480;
 
 const CartIcon = createSvgIcon('CartIcon', () => <><Circle cx={6} cy={19} r={2} /><Circle cx={17} cy={19} r={2} />
   <Path d="M17 17H6V3H4" /><Path d="M6 5l14 1-1 7H6" /></>);
+// v2's Products glyph, tabler's `gift`.
+const GiftIcon = createSvgIcon('GiftIcon', () => <><Path d="M3 8m0 1a1 1 0 0 1 1 -1h16a1 1 0 0 1 1 1v2a1 1 0 0 1 -1 1h-16a1 1 0 0 1 -1 -1z" />
+  <Path d="M12 8l0 13" /><Path d="M19 12v7a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2v-7" />
+  <Path d="M7.5 8a2.5 2.5 0 0 1 0 -5a4.8 8 0 0 1 4.5 5a4.8 8 0 0 1 4.5 -5a2.5 2.5 0 0 1 0 5" /></>);
 const ReceiptIcon = createSvgIcon('ReceiptIcon', () => <><Path d="M6 2h12v20l-3-2-3 2-3-2-3 2z" />
   <Line x1={9} y1={7} x2={15} y2={7} /><Line x1={9} y1={11} x2={15} y2={11} /><Line x1={9} y1={15} x2={13} y2={15} /></>);
 const UsersIcon = createSvgIcon('UsersIcon', () => <><Path d="M9 7m-4 0a4 4 0 1 0 8 0a4 4 0 1 0 -8 0" />
@@ -31,6 +35,7 @@ const MenuIcon = createSvgIcon('MenuIcon', () => <><Line x1={4} y1={6} x2={20} y
 
 export const FRAME_AREAS = [
   { id: 'sale', label: 'Sale', href: '/', Icon: CartIcon },
+  { id: 'products', label: 'Products', href: '/products', Icon: GiftIcon },
   { id: 'orders', label: 'Orders', href: '/orders', Icon: ReceiptIcon },
   { id: 'customers', label: 'Customers', href: '/customers', Icon: UsersIcon },
   { id: 'reports', label: 'Reports', href: '/reports', Icon: ChartIcon },
@@ -39,7 +44,7 @@ export const FRAME_AREAS = [
 export type FrameAreaId = (typeof FRAME_AREAS)[number]['id'];
 const hrefOf = (id: FrameAreaId) => FRAME_AREAS.find((area) => area.id === id)!.href;
 
-/** The area a pathname is, or null off the five areas (/login, /demo). */
+/** The area a pathname is, or null off the six areas (/login, /demo). */
 export function frameAreaFor(pathname: string): FrameAreaId | null {
   return FRAME_AREAS.find((area) => area.href === pathname)?.id ?? null;
 }
