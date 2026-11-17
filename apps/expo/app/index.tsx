@@ -21,6 +21,7 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../components/frame-drawer-header';
 import { PriceCheckBanner } from '../components/price-check-banner';
@@ -29,6 +30,7 @@ import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
+import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
 import { useCartSettings } from '../lib/cart-settings';
@@ -67,6 +69,8 @@ const STATE_LABEL: Record<SyncState, string> = {
 const PLUGIN_NAME = 'the Medusa POS plugin';
 // TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
 const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
+// The till setup screen: its navigation header and its own title say the same words.
+const TILL_SETUP_TITLE = 'Set up this till';
 
 // ADR 0009: phone mode below 600 px.
 const PHONE_BREAKPOINT = 600;
@@ -195,7 +199,8 @@ function PricingScreen(props: PricingProps) {
         actions={region ? { Retry: again, 'Choose another region': () => { clearSettingsRegion(defaultStorage(), session.baseUrl); again(); } } : { Retry: again }} />;
     }
     if (autoChooseDemo) return <SettingsMessage text="Setting up the demo till…" actions={{}} />;
-    return <><EarlierSaleNote /><StoreSettingsChoiceScreen choices={choices} initial={store.initial} title="Set up this till"
+    return <><Stack.Screen options={{ title: TILL_SETUP_TITLE }} /><EarlierSaleNote />
+      <StoreSettingsChoiceScreen choices={choices} initial={store.initial} title={TILL_SETUP_TITLE}
       onSubmit={(choice) => store.choose({ ...choice, country })} /></>;
   }
   if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
@@ -257,11 +262,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
   const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  // The default's stored email stays off the order payload; the paid screen's receipt prefill reads it from storage.
+  const saleDefaultCustomer = useMemo(() => defaultCustomer ? { id: defaultCustomer.id, name: defaultCustomer.name } : null, [defaultCustomer]);
   useEffect(() => {
     // The store no longer has this customer: useSale falls back to Guest on an idle cart or the next sale; an open sale keeps its customer.
     for (const order of recent) forgetDeletedDefaultCustomer(defaultStorage(), session.baseUrl, order.warnings);
   }, [recent, session.baseUrl]);
-  const sale = useSale(pricing, { defaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
+  const sale = useSale(pricing, { defaultCustomer: saleDefaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
@@ -434,6 +441,22 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </RegisterGate>;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
+  const wide = width >= ROW_BREAKPOINT;
+  const paidReceipt = sale.stage.kind === 'receipt' ? <>
+    {/* v2 leads the paid screen with the change; screen only, not printed. */}
+    {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
+      <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
+    </View>}
+    <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
+    store={receiptStore}
+    footerSlot={connector.emailReceipt ? <EmailReceipt
+      orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
+      online={online} defaultEmail={paid?.customer?.email
+        ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
+      send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
+    topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
+    cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
+  </> : null;
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
@@ -475,19 +498,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </DialogContent>
       </Dialog>}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
-      {sale.stage.kind === 'receipt' ? <>
-        {/* v2 leads the paid screen with the change; screen only, not printed. */}
-        {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-          <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
-        </View>}
-        <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
-        store={receiptStore}
-        footerSlot={connector.emailReceipt ? <EmailReceipt
-          orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
-          online={online} defaultEmail={paid?.customer?.email}
-          send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-        topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
-        cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /></> :
+      {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row items-start">
+        <View className="flex-1">{paidReceipt}</View>
+        <View dataSet={{ print: 'hide' }} className="w-96 self-stretch" style={{ paddingTop: topInset }}>
+          <PaidSummary order={sale.stage.order} posOrder={sale.stage.posOrder} storeName={receiptStore.name}
+            taxLabel={taxLabel} formatDate={formatDate} />
+        </View>
+      </View> : paidReceipt :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
@@ -495,9 +512,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {/* v2's Panel position; the column and phone layouts ignore it. */}
           {!phone ? <View testID="till-panels" className="flex-1"
             style={{ flexDirection: width >= ROW_BREAKPOINT ? (cartSettings.settings.cartSide === 'left' ? 'row-reverse' : 'row') : 'column' }}>
-            {catalogue}
+            {/* v2: tender takes the products' side, the order summary stays beside it; phone unchanged. */}
+            {sale.stage.kind === 'tender' ? <View testID="tender-slot" className="flex-1 bg-card">{tenderPane}</View> : catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? cart : tenderPane}
+              {sale.stage.kind === 'cart' ? cart : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : <>{cartOpen ? <View className="flex-1 bg-card">

@@ -1,6 +1,6 @@
 import type { SalesFilters } from '@tallyui/components';
-import { clampClosureScope, comparisonRange, inRange, minorToDecimal, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureContext, type ClosureScope, type PosOrder, type SalesFigures } from '@tallyui/pos';
-import type { ClosureHistoryEntry } from './closure-history';
+import { clampClosureScope, closureVariance, comparisonRange, inRange, minorToDecimal, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureContext, type ClosureScope, type PosOrder, type SalesFigures } from '@tallyui/pos';
+import { dayBefore, type ClosureHistoryEntry } from './closure-history';
 
 export function localDay(at: Date): string {
   return `${String(at.getFullYear()).padStart(4, '0')}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
@@ -44,14 +44,14 @@ export function closureVarianceMinor(row: Pick<Closure, 'variance'>): number {
 }
 
 export type ClosureTableRow = {
-  id: string; number: number; closedAt: string; registerName: string; cashierName: string;
+  id: string; number: number; day: string; closedAt: string; registerName: string; cashierName: string;
   salesMinor: number; countedMinor: number | null; varianceMinor: number | null;
 };
 
 export function closureTableRow(row: Closure, registerNames: Record<string, string>): ClosureTableRow {
   const { register_name, closed_by_name } = row.breakdowns;
   return {
-    id: row.id, number: row.number, closedAt: row.closed_at,
+    id: row.id, number: row.number, day: row.business_day || localDay(new Date(row.closed_at)), closedAt: row.closed_at,
     registerName: typeof register_name === 'string' && register_name ? register_name : registerNames[row.register_id] || row.register_id.slice(0, 8),
     cashierName: typeof closed_by_name === 'string' && closed_by_name ? closed_by_name : '—',
     salesMinor: row.period_sales_total_minor, countedMinor: Object.values(row.counted).reduce((total, amount) => total + amount, 0),
@@ -62,7 +62,7 @@ export function closureTableRow(row: Closure, registerNames: Record<string, stri
 export function historyTableRow(entry: ClosureHistoryEntry, registerName: string, cashierNames: Record<string, string>): ClosureTableRow {
   const countedMinor = entry.counted ? Object.values(entry.counted).reduce((total, amount) => total + amount, 0) : null;
   return {
-    id: entry.closureId, number: entry.number, closedAt: entry.closedAt,
+    id: entry.closureId, number: entry.number, day: entry.businessDay || localDay(new Date(entry.closedAt)), closedAt: entry.closedAt,
     registerName: registerName || entry.registerId?.slice(0, 8) || '—',
     cashierName: entry.closedBy ? cashierNames[entry.closedBy] ?? entry.closedBy : '—',
     salesMinor: entry.periodSalesTotalMinor, countedMinor,
@@ -74,6 +74,56 @@ export function historyTableRow(entry: ClosureHistoryEntry, registerName: string
 export function varianceLabel(varianceMinor: number, ctx: Pick<ClosureContext, 'formatMoney' | 'exponent'>): string {
   return varianceMinor === 0 ? 'Exact'
     : `${ctx.formatMoney(minorToDecimal(Math.abs(varianceMinor), ctx.exponent))} ${varianceMinor < 0 ? 'short' : 'over'}`;
+}
+
+export type ClosureDay = { day: string; rows: ClosureTableRow[]; countedMinor: number | null; varianceMinor: number | null };
+
+const addKnown = (total: number | null, amount: number | null) => amount === null ? total : (total ?? 0) + amount;
+
+/** Groups closure rows by day in order of first appearance, with the day's known counted and variance totals. */
+export function closureDays(rows: ClosureTableRow[]): ClosureDay[] {
+  const days: ClosureDay[] = [];
+  for (const row of rows) {
+    let group = days.find((day) => day.day === row.day);
+    if (!group) days.push(group = { day: row.day, rows: [], countedMinor: null, varianceMinor: null });
+    group.rows.push(row);
+    group.countedMinor = addKnown(group.countedMinor, row.countedMinor);
+    group.varianceMinor = addKnown(group.varianceMinor, row.varianceMinor);
+  }
+  return days;
+}
+
+export function closureDayLabel(day: string, today: string, locale: string): string {
+  if (day === today) return 'Today';
+  if (day === dayBefore(today)) return 'Yesterday';
+  return new Intl.DateTimeFormat(locale, { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' })
+    .format(new Date(`${day}T00:00:00Z`));
+}
+
+export function closureDayTotal(group: Pick<ClosureDay, 'countedMinor' | 'varianceMinor'>,
+  ctx: Pick<ClosureContext, 'formatMoney' | 'exponent'>): string {
+  if (group.countedMinor === null) return '';
+  const counted = `${ctx.formatMoney(minorToDecimal(group.countedMinor, ctx.exponent))} counted`;
+  return group.varianceMinor === null ? counted : `${counted} · ${varianceLabel(group.varianceMinor, ctx)}`;
+}
+
+/**
+ * The closure a store history row opens: the device's own closure when it holds that row (frozen, so printable),
+ * else one built from the store's figures when both counted and till-expected came back, else none.
+ */
+export function historyClosure(entry: ClosureHistoryEntry, local: Closure[]): { closure: Closure; frozen: boolean } | null {
+  const own = local.find((row) => row.id === entry.closureId || row.server_closure_id === entry.closureId);
+  if (own) return { closure: own, frozen: true };
+  if (!entry.counted || !entry.tillExpected) return null;
+  return { frozen: false, closure: {
+    id: entry.closureId, session_id: '', register_id: entry.registerId ?? '',
+    ...(entry.businessDay ? { business_day: entry.businessDay } : {}), number: entry.number,
+    opened_at: entry.openedAt, closed_at: entry.closedAt, till_expected: entry.tillExpected, expected: entry.tillExpected,
+    counted: entry.counted, variance: closureVariance(entry.counted, entry.tillExpected),
+    period_sales_total_minor: entry.periodSalesTotalMinor, period_refunds_total_minor: 0, perpetual_sales_total_minor: 0,
+    perpetual_refunds_total_minor: 0, unsynced_count: 0, unsynced_total_minor: 0, software_version: '', breakdowns: {},
+    order_ids: [], movement_ids: [], print_count: 0,
+  } };
 }
 
 export const CSV_LABELS: Record<string, string> = {
