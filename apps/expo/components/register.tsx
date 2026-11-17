@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Platform, Text, View } from 'react-native';
+import { Platform, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import {
   ClosureSheet, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';

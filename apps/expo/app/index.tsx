@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 

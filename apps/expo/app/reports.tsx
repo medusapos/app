@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { ClosureSheet, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { OrderFilterBar, OrdersList, SearchInput } from '@tallyui/components';
 import type { OrderFilterValue } from '@tallyui/pos';
