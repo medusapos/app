@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadCatalogueView, saveCatalogueView } from './catalogue-view';
+import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from './catalogue-view';
 
 function fakeStorage(initial: Record<string, string> = {}) {
   const store = new Map(Object.entries(initial));
@@ -40,5 +40,16 @@ describe('catalogue-view', () => {
     saveCatalogueView(storage, 'https://b.test', { view: 'grid' });
     expect(loadCatalogueView(storage, 'https://a.test')).toEqual({ view: 'table' });
     expect(loadCatalogueView(storage, 'https://b.test')).toEqual({ view: 'grid' });
+  });
+
+  it('turns no sort into Name ascending and keeps every other field', () => {
+    expect(withCatalogueSort({ view: 'table', gridColumns: 3, sort: null, categoryId: 'fruit' }))
+      .toEqual({ view: 'table', gridColumns: 3, sort: { field: 'name', dir: 'asc' }, categoryId: 'fruit' });
+  });
+
+  it('returns the same state when a sort is set', () => {
+    const state = { view: 'grid', gridColumns: 'auto', sort: { field: 'price', dir: 'desc' }, categoryId: null } as const;
+    expect(withCatalogueSort(state)).toBe(state);
+    expect(state.sort).toEqual({ field: 'price', dir: 'desc' });
   });
 });

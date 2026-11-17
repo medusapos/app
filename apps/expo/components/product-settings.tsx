@@ -4,6 +4,7 @@ import { Circle, Line } from 'react-native-svg';
 import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Label, Switch, Text } from '@tallyui/components';
 import { DEFAULT_CATALOGUE_VIEW_STATE, PRODUCT_SORT_FIELDS, type CatalogueViewState } from '@tallyui/pos';
 import type { useProductSettings } from '../lib/product-settings';
+import { DEFAULT_CATALOGUE_SORT } from '../lib/catalogue-view';
 
 const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
   <Line x1={3} y1={6} x2={21} y2={6} /><Circle cx={8} cy={6} r={2} />
@@ -90,7 +91,7 @@ export function ProductSettingsButton({ viewState, onViewStateChange, showOutOfS
         </ScrollView>
         <View className="mt-auto flex-row gap-2">
           <Button variant="outline" testID="product-settings-restore" onPress={() => {
-            onViewStateChange({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: viewState.categoryId, ...(phone ? { view: 'grid' } : {}) });
+            onViewStateChange({ ...DEFAULT_CATALOGUE_VIEW_STATE, sort: DEFAULT_CATALOGUE_SORT, categoryId: viewState.categoryId, ...(phone ? { view: 'grid' } : {}) });
             onShowOutOfStockChange(true); reset();
           }}><Text>Restore Default Settings</Text></Button>
           <Button testID="product-settings-close" onPress={() => setOpen(false)}><Text>Close</Text></Button>

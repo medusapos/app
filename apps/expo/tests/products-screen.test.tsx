@@ -439,6 +439,10 @@ describe('Product settings sheet', () => {
   const settingsKey = 'medusapos.product-settings.https://store.test';
   const click = (id: string) => fireEvent.click(screen.getByTestId(`product-settings-${id}`));
   const tiles = () => screen.queryAllByTestId(/^product-tile-/).map((tile) => tile.dataset.testid);
+  const nameAsc = { field: 'name', dir: 'asc' };
+  // Every sort button the sheet shows as chosen; all the others are aria-selected="false".
+  const selectedSorts = () => screen.getAllByTestId(/^product-settings-sort-/)
+    .filter((button) => button.getAttribute('aria-selected') === 'true').map((button) => button.dataset.testid);
   beforeEach(() => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [
       { id: 'apple', title: 'Apple', status: 'published', categories: [{ id: 'fruit', name: 'Fruit' }],
@@ -458,12 +462,12 @@ describe('Product settings sheet', () => {
     for (const option of screen.getAllByTestId(/^product-settings-(view|columns|sort|variations)-/)) {
       expect(option.hasAttribute('aria-selected')).toBe(true);
     }
-    expect(screen.getByTestId('product-settings-sort-name').getAttribute('aria-selected')).toBe('false');
-    expect(screen.getByTestId('product-settings-sort-asc').getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByTestId('product-settings-sort-name').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('product-settings-sort-asc').getAttribute('aria-selected')).toBe('true');
     click('view-table');
     expect(screen.getByTestId('product-row-apple')).toBeTruthy();
     expect(tiles()).toEqual([]);
-    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, view: 'table' });
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, view: 'table', sort: nameAsc });
     click('close');
     expect(screen.queryByTestId('product-settings-sheet')).toBeNull();
     fireEvent.click(screen.getByTestId('product-table-sort-price'));
@@ -523,7 +527,7 @@ describe('Product settings sheet', () => {
     click('sort-desc');
     click('out-of-stock');
     click('restore');
-    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: 'fruit' });
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: 'fruit', sort: nameAsc });
     expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list' });
     expect(screen.getByRole('switch', { name: 'Show out-of-stock products', checked: true })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
@@ -532,7 +536,44 @@ describe('Product settings sheet', () => {
     }
     expect(screen.getByTestId('product-settings-sort-price').getAttribute('aria-selected')).toBe('false');
     expect(screen.getByTestId('product-settings-sort-desc').getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByTestId('product-settings-sort-name').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('product-settings-sort-asc').getAttribute('aria-selected')).toBe('true');
     expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+  });
+
+  it('opens a fresh till on Name ascending, as v2 does', async () => {
+    await mount();
+    click('button');
+    expect(selectedSorts()).toEqual(['product-settings-sort-name', 'product-settings-sort-asc']);
+    expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+    expect(localStorage.getItem(viewKey)).toBeNull();
+  });
+
+  it('opens a saved view with no sort on Name ascending without rewriting it on mount', async () => {
+    localStorage.setItem(viewKey, JSON.stringify({ ...DEFAULT_CATALOGUE_VIEW_STATE, view: 'table' }));
+    await mount();
+    click('button');
+    expect(selectedSorts()).toEqual(['product-settings-sort-name', 'product-settings-sort-asc']);
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, view: 'table' });
+  });
+
+  it('loads a saved sort as saved', async () => {
+    localStorage.setItem(viewKey, JSON.stringify({ ...DEFAULT_CATALOGUE_VIEW_STATE, sort: { field: 'price', dir: 'desc' } }));
+    await mount();
+    expect(tiles()).toEqual(['product-tile-Zebra', 'product-tile-Apple']);
+    click('button');
+    expect(selectedSorts()).toEqual(['product-settings-sort-price', 'product-settings-sort-desc']);
+  });
+
+  it('lands the table header\'s third click back on Name ascending, never no sort', async () => {
+    localStorage.setItem(viewKey, JSON.stringify({ ...DEFAULT_CATALOGUE_VIEW_STATE, view: 'table' }));
+    await mount();
+    fireEvent.click(screen.getByTestId('product-table-sort-name'));
+    expect(JSON.parse(localStorage.getItem(viewKey)!).sort).toEqual({ field: 'name', dir: 'desc' });
+    fireEvent.click(screen.getByTestId('product-table-sort-name'));
+    expect(JSON.parse(localStorage.getItem(viewKey)!).sort).toEqual(nameAsc);
+    click('button');
+    expect(selectedSorts()).toEqual(['product-settings-sort-name', 'product-settings-sort-asc']);
   });
 
   it('loads saved preferences, but keeps a phone on the grid and hides View Mode even after restore', async () => {
@@ -547,7 +588,7 @@ describe('Product settings sheet', () => {
     expect(screen.getByTestId('product-settings-columns-3').getAttribute('aria-selected')).toBe('true');
     expect(screen.getByTestId('product-settings-variations-popover').getAttribute('aria-selected')).toBe('true');
     click('restore');
-    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: 'fruit', view: 'grid' });
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: 'fruit', view: 'grid', sort: nameAsc });
     expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
   });
 });

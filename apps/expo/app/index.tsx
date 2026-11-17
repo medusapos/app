@@ -30,7 +30,7 @@ import {
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { UserSheet } from '../components/user-sheet';
-import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
+import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
 import { useCartSettings } from '../lib/cart-settings';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
@@ -302,12 +302,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Phone mode (ADR 0009): products or the cart at full height, the tender over both; a new sale starts on products.
   const phone = width < PHONE_BREAKPOINT;
   const dimmed = counting && !phone;
-  const [viewState, setViewState] = useState(() => normalizeCatalogueViewState({
+  const [viewState, setViewState] = useState(() => withCatalogueSort(normalizeCatalogueViewState({
     ...loadCatalogueView(defaultStorage(), session.baseUrl), ...(phone ? { view: 'grid' } : {}),
-  }));
+  })));
   const { settings: productSettings, save: saveProductSettings, reset: resetProductSettings } = useProductSettings(defaultStorage(), session.baseUrl);
   const onViewStateError = (error: unknown) => console.warn('Could not load or save the catalogue view:', error);
-  const onViewStateChange = (next: CatalogueViewState) => {
+  const onViewStateChange = (change: CatalogueViewState) => {
+    const next = withCatalogueSort(change);
     setViewState(next);
     try { saveCatalogueView(defaultStorage(), session.baseUrl, next); } catch (error) { onViewStateError(error); }
   };
