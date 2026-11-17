@@ -15,6 +15,7 @@ import { DEFAULT_CART_SETTINGS, loadCartSettings, saveCartSettings } from '../li
 import { clearProductCache } from '../lib/product-cache';
 import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { forgetDeletedDefaultCustomer, loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
+import { loadCashierCustomer, saveDefaultCustomerIsCashier } from '../lib/cashier-customer';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
@@ -117,6 +118,42 @@ describe('ProductsScreen catalogue', () => {
     } finally {
       saveDefaultCustomer(localStorage, 'https://store.test', null);
     }
+  });
+
+  // Medusa's /admin/customers?q= search, stubbed at fetch; anything else fails as offline.
+  function stubCustomerSearch(customers: { id: string; first_name: string; last_name: string; email: string }[]) {
+    const fetchStub = vi.fn(async (url: string) => url.startsWith('https://store.test/admin/customers?q=')
+      ? { ok: true, status: 200, json: async () => ({ customers: customers.map((c) => ({ ...c, deleted_at: null })) }) }
+      : Promise.reject(new TypeError('Failed to fetch')));
+    vi.stubGlobal('fetch', fetchStub);
+    return fetchStub;
+  }
+  const cashier = { id: 'cus_admin', first_name: 'Store', last_name: 'Admin', email: 'admin@store.test' };
+
+  it('with Default customer is cashier on, the cart starts on the cashier\'s Medusa customer, not the saved default', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace' });
+    saveDefaultCustomerIsCashier(localStorage, 'https://store.test', true);
+    localStorage.setItem('medusapos.cashier-customer.https://store.test.admin@store.test',
+      JSON.stringify({ id: 'cus_admin', name: 'Store Admin', email: 'admin@store.test' }));
+    const fetchStub = stubCustomerSearch([cashier]);
+    await mount();
+    expect(screen.getByRole('button', { name: 'Customer: Store Admin' })).toBeTruthy();
+    await vi.waitFor(() => expect(fetchStub).toHaveBeenCalledWith(
+      'https://store.test/admin/customers?q=admin%40store.test&limit=20', expect.anything()));
+    await act(async () => {});
+    expect(screen.getByRole('button', { name: 'Customer: Store Admin' })).toBeTruthy();
+    expect(loadCashierCustomer(localStorage, 'https://store.test', 'admin@store.test')).toEqual({ id: 'cus_admin', name: 'Store Admin', email: 'admin@store.test' });
+  });
+
+  it('with Default customer is cashier on and no customer with that email, the cart starts on the saved default', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace' });
+    saveDefaultCustomerIsCashier(localStorage, 'https://store.test', true);
+    const fetchStub = stubCustomerSearch([{ ...cashier, id: 'cus_x', email: 'xadmin@store.test' }]);
+    await mount();
+    await vi.waitFor(() => expect(fetchStub).toHaveBeenCalled());
+    await act(async () => {});
+    expect(screen.getByRole('button', { name: 'Customer: Ada Lovelace' })).toBeTruthy();
+    expect(loadCashierCustomer(localStorage, 'https://store.test', 'admin@store.test')).toBeNull();
   });
 
   it('a deleted default customer: the cart starts as Guest and the sale is sent without a customer', async () => {
