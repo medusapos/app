@@ -1,7 +1,8 @@
 // v2's price-check/counting banner sits above Catalogue because it has no slot under the filter chips.
 // Selling itself is gated at Checkout by useGatedSale.
 import type { JSX } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { Path, Rect } from 'react-native-svg';
 import { createSvgIcon } from '@tallyui/components';
 import { useRegister } from '../lib/register-context';

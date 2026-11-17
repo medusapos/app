@@ -1,5 +1,6 @@
 import { Fragment, useState, type JSX, type ReactNode } from 'react';
-import { Text, View } from 'react-native';
+import { View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { Path } from 'react-native-svg';
 import { createSvgIcon, IconButton } from '@tallyui/components';
 import { formatClosureDate, minorToDecimal, type ClosureContext } from '@tallyui/pos';

@@ -12,6 +12,7 @@ import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
 import { DEFAULT_CART_SETTINGS, loadCartSettings, saveCartSettings } from '../lib/cart-settings';
+import { useCatalogueSnapshot } from '../lib/catalogue-snapshot';
 import { clearProductCache } from '../lib/product-cache';
 import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { forgetDeletedDefaultCustomer, loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
@@ -336,6 +337,23 @@ describe('ProductsScreen catalogue', () => {
     for (const name of ['Zebra', 'Apple']) {
       expect(cartLineCells(name)).toEqual(['1', name, '€12.50', '€12.50']);
     }
+  });
+
+  it('publishes the sellable catalogue for the session\'s store to the Products area, and withdraws it on unmount', async () => {
+    const product = (id: string, title: string, status = 'published') => ({ id, title, status,
+      variants: [{ id: `${id}-one`, title: 'One size', sku: id, prices: [{ amount: 12.5, currency_code: 'eur' }] }] });
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
+      products: [product('zebra', 'Zebra'), product('draft', 'Draft', 'draft'), product('a', 'Apple')],
+    }));
+    let seen: ReturnType<typeof useCatalogueSnapshot> | undefined;
+    const Probe = () => { seen = useCatalogueSnapshot(); return null; };
+    await mount();
+    render(<Probe />);
+    expect(seen).toMatchObject({ baseUrl: 'https://store.test', currency: 'EUR' });
+    expect((seen!.products as { id: string }[]).map(({ id }) => id)).toEqual(['a', 'zebra']);
+    cleanup();
+    render(<Probe />);
+    expect(seen).toBeNull();
   });
 
   it('starts with In Stock off and toggles out-of-stock product visibility', async () => {

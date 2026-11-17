@@ -1,6 +1,7 @@
 // v2's phone tab bar (docs/v2-parity/demo-shots/17-pos-demo-phone.jpg), below 600 px per ADR 0009; an empty cart shows v2's "New" badge.
 import type { JSX } from 'react';
-import { Pressable, Text, View } from 'react-native';
+import { Pressable, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { Path } from 'react-native-svg';
 import { Badge, createSvgIcon, InCartBadge, ShoppingCartIcon } from '@tallyui/components';
 

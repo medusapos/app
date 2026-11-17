@@ -1,5 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Platform, Pressable, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { SettingsRow } from '@tallyui/components';
 import { ScanHubProvider, useDeviceScanControls, type DeviceScannerErrorHandler, type HidLike, type SerialLike } from '@tallyui/pos';
 import { forgetScannerProfile, scannerProfileStoreFor, useScannerProfiles } from '../lib/scanner-profiles';

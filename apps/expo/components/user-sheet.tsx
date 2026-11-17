@@ -16,13 +16,15 @@ const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Read by assistive tech as Sign out's description, out of the layout, so the sheet never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
 
-export function UserSheet({ session, displayName, initials, storeName, currency, open, onOpenChange, onRegister, signOut, signOutLocked, lockMessage, outbox, parkedSales, paidMinor }: {
+export function UserSheet({ session, displayName, initials, storeName, currency, open, onOpenChange, onRegister, onChooseRegister, signOut, signOutLocked, lockMessage, outbox, parkedSales, paidMinor }: {
   session: Session; displayName: string; initials: string; storeName: string; currency: string;
-  open: boolean; onOpenChange: (open: boolean) => void; onRegister: () => void;
+  open: boolean; onOpenChange: (open: boolean) => void; onRegister: () => void; onChooseRegister: () => void;
   signOut: () => void; signOutLocked: boolean; lockMessage: string;
   outbox: SwitchWarningInput['outbox']; parkedSales: number; paidMinor: number;
 }) {
-  const { register, registerName } = useRegister();
+  const { register, registerName, boundRegisterId, unbind } = useRegister();
+  // Any session, even a closed one with an unfinished closure: unbinding would strand it.
+  const sessionExists = register.session != null;
   const { orders } = useOutboxContext();
   const [sales, setSales] = useState<PosOrder[]>([]);
   const filters = useMemo<SalesFilters>(() => ({
@@ -80,6 +82,20 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           <Text>Hand the till to the next cashier</Text><Text>›</Text>
         </Pressable>
       </View>}
+      {boundRegisterId ? <View testID="user-sheet-register-row" className="min-h-11 flex-row items-center justify-between gap-2">
+        <View className="min-w-0 flex-1">
+          <Text className="text-sm text-muted-foreground">Register</Text>
+          <Text testID="user-sheet-register-name">{registerName ?? boundRegisterId}</Text>
+          {sessionExists && <Text testID="user-sheet-register-locked" className="text-sm text-muted-foreground">Close the register first</Text>}
+        </View>
+        <Button testID="user-sheet-register-switch" variant="link" accessibilityLabel="Switch register" disabled={sessionExists}
+          accessibilityHint={sessionExists ? 'Close the register first' : undefined}
+          onPress={() => {
+            if (sessionExists) return;
+            onOpenChange(false);
+            unbind().then(onChooseRegister, (error) => console.warn('Could not unbind the register:', error));
+          }}><Text>Switch</Text></Button>
+      </View> : null}
       <View className="mt-auto border-t border-border">
       <Pressable testID="user-sheet-admin" accessibilityRole="link" className="min-h-11 flex-row items-center gap-2 text-muted-foreground"
         onPress={() => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Pressable, ScrollView, Text, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
@@ -37,6 +38,7 @@ import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
 import { useCartSettings } from '../lib/cart-settings';
+import { publishCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
@@ -344,6 +346,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   );
   const entries = useMemo(() => catalogueEntries(sorted, traits), [sorted]);
   entriesRef.current = entries;
+  // The Products area reads this catalogue; it stays live while the area is pushed over the Sale.
+  useEffect(() => {
+    publishCatalogue({ baseUrl: session.baseUrl, products: sorted, traits, currency: pricing.currency });
+    return () => publishCatalogue(null);
+  }, [session.baseUrl, sorted, traits, pricing.currency]);
   // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
   const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
@@ -516,6 +523,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <UserSheet session={session} displayName={displayName} initials={initials} storeName={receiptStore.name} currency={pricing.currency}
         outbox={summarizeOutboxHealth(outboxState, registerOutbox.state)} parkedSales={parked.length} paidMinor={capturedMinor(sale.order.payments)}
         open={userSheetOpen && sale.stage.kind !== 'receipt'} onOpenChange={setUserSheetOpen} onRegister={() => setPanelOpen(true)}
+        onChooseRegister={openGate}
         signOut={signOut} signOutLocked={signOutLocked} lockMessage={lockMessage} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
