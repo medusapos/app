@@ -121,3 +121,30 @@ it('a row the device closed opens the device\'s own closure', async () => {
   expect(onOpen).toHaveBeenCalledOnce();
   expect(onOpen).toHaveBeenCalledWith({ closure: own, frozen: true });
 });
+
+it('from and to reach the query', async () => {
+  fetchImpl.mockResolvedValueOnce(response({ closures: [], more: false }));
+  render(<EarlierClosures session={session} registerId="reg/1" today="2026-11-10" ctx={ctx}
+    registerName="Register 1" cashierNames={{}} from="2026-11-01" to="2026-11-05" />);
+  await screen.findByTestId('earlier-closures-empty');
+  expect(fetchImpl.mock.calls[0][0]).toContain('from=2026-11-01');
+  expect(fetchImpl.mock.calls[0][0]).toContain('to=2026-11-05');
+});
+
+it('a cashier shows only that cashier\'s rows and onCashiers gets the fetched cashiers', async () => {
+  fetchImpl.mockResolvedValueOnce(response({ closures: [first, second], more: false }));
+  const onCashiers = vi.fn();
+  render(<EarlierClosures session={session} registerId="reg/1" today="2026-11-10" ctx={ctx}
+    registerName="Register 1" cashierNames={{ 'user-1': 'Ana' }} cashierId="user-1" onCashiers={onCashiers} />);
+  await screen.findByTestId('earlier-closure-c12');
+  expect(rowIds()).toEqual(['earlier-closure-c12']);
+  expect(onCashiers).toHaveBeenLastCalledWith(['user-1']);
+});
+
+it('without a heading the empty text names the period', async () => {
+  fetchImpl.mockResolvedValueOnce(response({ closures: [], more: false }));
+  render(<EarlierClosures session={session} registerId="reg/1" today="2026-11-10" ctx={ctx}
+    registerName="Register 1" cashierNames={{}} heading={null} />);
+  expect((await screen.findByTestId('earlier-closures-empty')).textContent).toBe('No closures in this period');
+  expect(screen.queryByTestId('earlier-closures-heading')).toBeNull();
+});

@@ -6,6 +6,7 @@ import { PortalHost } from '@tallyui/primitives';
 import { createOrderBuilder, finalizeOrder, type Closure, type PosOrder, type RegisterSession } from '@tallyui/pos';
 import ReportsScreen from '../app/reports';
 import { closureContext } from '../components/register-close';
+import { dayBefore } from '../lib/closure-history';
 import { X_PRINT_FAILED } from '../lib/closure-print';
 import { openOrderStore, closeOrderStores, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -236,6 +237,41 @@ describe('ReportsScreen', () => {
     vi.mocked(downloadCsv).mockImplementationOnce(() => { throw new Error('Download failed'); });
     fireEvent.click(screen.getByTestId('closures-export'));
     expect((await screen.findByTestId('closures-export-error')).textContent).toBe('Export failed. Try again.');
+  });
+  it('choosing a cashier keeps only that cashier\'s closures', async () => {
+    const closures = registerCollections(store.orders).closures;
+    await closures.insert(closure({ closed_by: 'user-1', breakdowns: { closed_by_name: 'Ana' } }));
+    await closures.insert(closure({ id: 'c2', number: 2, closed_by: 'user-2', breakdowns: { closed_by_name: 'Ben' } }));
+    mount();
+    await screen.findByTestId('closure-row-c2');
+    fireEvent.click(screen.getByTestId('closures-cashier'));
+    expect(screen.getByTestId('closures-cashier-option-user-1').textContent).toBe('Ana');
+    fireEvent.click(screen.getByTestId('closures-cashier-option-user-2'));
+    await waitFor(() => expect(screen.queryByTestId('closure-row-c1')).toBeNull());
+    expect(screen.getByTestId('closure-row-c2')).toBeTruthy();
+    expect(screen.getByTestId('closures-cashier').textContent).toBe('Ben');
+  });
+  it('Today reads the till\'s own closures and Yesterday the store list', async () => {
+    const yesterday = dayBefore(localDay(new Date()));
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ closures: [{ closureId: 'h7', number: 7,
+      businessDay: yesterday, openedAt: new Date(Date.now() - 26 * 3600e3).toISOString(),
+      closedAt: new Date(Date.now() - 24 * 3600e3).toISOString(), periodSalesTotalMinor: 900 }], more: false })));
+    vi.stubGlobal('fetch', fetchMock);
+    await registerCollections(store.orders).closures.insert(closure());
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    await screen.findByTestId('closure-row-c1');
+    const storeCalls = () => fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('/tally/v1/registers/'));
+    expect(storeCalls()).toEqual([]);
+    fireEvent.click(screen.getByTestId('closures-period'));
+    fireEvent.click(await screen.findByTestId('closures-period-yesterday'));
+    await screen.findByTestId('earlier-closure-h7');
+    expect(screen.queryByTestId('closures-table')).toBeNull();
+    expect(screen.queryByTestId('closures-empty')).toBeNull();
+    expect(screen.queryByTestId('earlier-closures-heading')).toBeNull();
+    expect(storeCalls()).toHaveLength(1);
+    expect(storeCalls()[0]).toContain(`from=${yesterday}`);
+    expect(storeCalls()[0]).toContain(`to=${yesterday}`);
   });
   it('redirects to login without a session', () => {
     mount(false);

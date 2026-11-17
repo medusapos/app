@@ -17,9 +17,10 @@ export function dayBefore(day: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-export async function fetchClosureHistory(session: Session, registerId: string, page: { to: string; before?: number },
+export async function fetchClosureHistory(session: Session, registerId: string, page: { from?: string; to: string; before?: number },
   fetchImpl = globalThis.fetch): Promise<{ closures: ClosureHistoryEntry[]; more: boolean }> {
   const query = new URLSearchParams({ limit: String(CLOSURE_HISTORY_PAGE), to: page.to });
+  if (page.from !== undefined) query.set('from', page.from);
   if (page.before !== undefined) query.set('before', String(page.before));
   let response: Response;
   try {
