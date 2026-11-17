@@ -19,6 +19,7 @@ import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
+import { CustomerChip } from '../components/customer-chip';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidChange } from '../components/paid-change';
@@ -347,9 +348,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useEffect(() => { setScanMiss(null); }, [scanMissShown]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
-  // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
-  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
+  // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
+  // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
+  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
+    undefined, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
@@ -429,10 +432,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
-      {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
-        className="min-h-11 justify-center">
-        <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
-      </Pressable>}
+      {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)} />}
       <CartAddMenu sale={cartSale} />
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
