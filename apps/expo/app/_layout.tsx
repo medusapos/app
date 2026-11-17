@@ -9,6 +9,7 @@ import { AppFrame } from '../components/app-frame';
 import { FrameDrawerHeader } from '../components/frame-drawer-header';
 import { AppScale } from '../components/app-scale';
 import { ClearLocalDataGate } from '../components/clear-local-data';
+import { DeviceScannerProvider } from '../components/device-scanner';
 import { AppFontProvider } from '../components/font-choice';
 import { LiveTabGate } from '../components/live-tab-gate';
 import { StorageHealth } from '../components/storage-health';
@@ -34,7 +35,7 @@ function GatedApp() {
   const background = useCSSVariable('--color-background');
   return (
     <LiveTabGate scope={session?.baseUrl}>
-      <StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null} drawerHeader={<FrameDrawerHeader />}><Stack
+      <DeviceScannerProvider><StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null} drawerHeader={<FrameDrawerHeader />}><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
@@ -46,7 +47,7 @@ function GatedApp() {
           headerTitleStyle: { fontWeight: '600' },
         }}
       ><Stack.Screen name="index" options={{ title: 'Sale' }} />
-      </Stack></AppFrame></OutboxProvider></StorageHealth>
+      </Stack></AppFrame></OutboxProvider></StorageHealth></DeviceScannerProvider>
     </LiveTabGate>
   );
 }

@@ -55,6 +55,7 @@ import {
   saveCachedSettings, saveSettingsChoice, StoreSettingsError, type StoreSettings,
 } from '../lib/store-settings';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
+import { useDeviceScans } from '../lib/use-device-scans';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -331,14 +332,19 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
   const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
-  useEffect(() => { if (!wedgeActive) setScanMiss(null); }, [wedgeActive]);
+  // The miss line shows over the cart in the cart stage (on a phone, only in the cart view); it starts empty each time it shows.
+  const scanMissShown = sale.stage.kind === 'cart' && (!phone || cartOpen);
+  useEffect(() => { setScanMiss(null); }, [scanMissShown]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
-  useWedgeScan(wedgeActive, scannerSettings, (code) => {
+  const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
     if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
-  });
+  };
+  useWedgeScan(wedgeActive, scannerSettings, onScan);
+  // A directly connected scanner (Settings > Scanner) types nothing, so it adds in every layout without a double add.
+  useDeviceScans(sale.stage.kind === 'cart', onScan);
   const sellableCount = sorted.length;
   // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
@@ -439,6 +445,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       </AlertDialogContent>
     </AlertDialog>}
   </RegisterGate>;
+  const scanMissLine = scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
   const wide = width >= ROW_BREAKPOINT;
@@ -515,14 +522,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
             {/* v2: tender takes the products' side, the order summary stays beside it; phone unchanged. */}
             {sale.stage.kind === 'tender' ? <View testID="tender-slot" className="flex-1 bg-card">{tenderPane}</View> : catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? cart : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
+              {sale.stage.kind === 'cart' ? <>{scanMissLine}{cart}</> : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : <>{cartOpen ? <View className="flex-1 bg-card">
               <View testID="phone-cart-head" className="min-h-11 flex-row items-center justify-end border-b border-border pr-3">
                 {registerBar(IN_ROW)}
               </View>
-              {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
+              {scanMissLine}
               {cart}
             </View> : catalogue}
               <PhoneTabBar active={cartOpen ? 'cart' : 'products'}
