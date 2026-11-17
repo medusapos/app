@@ -246,3 +246,58 @@ it('disables hand-over and sign-out while a save locks sign-out', async () => {
   expect(screen.queryByTestId('switch-confirm')).toBeNull();
   expect(localStorage.getItem('medusapos.session')).not.toBeNull();
 });
+
+const noSession = () => vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register, session: null } });
+
+it('shows the bound register with Switch disabled while its session is open', async () => {
+  await mount(); open();
+  const row = within(screen.getByTestId('user-sheet-register-row'));
+  expect(row.getByText('Register')).toBeTruthy();
+  expect(row.getByTestId('user-sheet-register-name').textContent).toBe('Register 1');
+  expect(row.getByTestId('user-sheet-register-locked').textContent).toBe('Close the register first');
+  expect(within(screen.getByTestId('user-sheet-drawer')).queryByTestId('user-sheet-register-row')).toBeNull();
+  const button = screen.getByTestId('user-sheet-register-switch');
+  expect(button.getAttribute('aria-disabled')).toBe('true');
+  expect(button.getAttribute('aria-label')).toBe('Switch register');
+  fireEvent.click(button);
+  expect(useRegister().unbind).not.toHaveBeenCalled();
+  expect(screen.getByTestId('user-sheet')).toBeTruthy();
+});
+
+it.each(['counting', 'closed'] as const)('disables Switch while the session is %s', async (status) => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, status } } });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-register-switch').getAttribute('aria-disabled')).toBe('true');
+  expect(screen.getByTestId('user-sheet-register-locked')).toBeTruthy();
+  fireEvent.click(screen.getByTestId('user-sheet-register-switch'));
+  expect(useRegister().unbind).not.toHaveBeenCalled();
+});
+
+it('switches the register without a session: closes the sheet and unbinds the till', async () => {
+  noSession();
+  await mount(); open();
+  expect(screen.queryByTestId('user-sheet-register-locked')).toBeNull();
+  expect(screen.getByTestId('user-sheet-register-switch').getAttribute('aria-disabled')).not.toBe('true');
+  await act(async () => { fireEvent.click(screen.getByTestId('user-sheet-register-switch')); });
+  expect(screen.queryByTestId('user-sheet')).toBeNull();
+  expect(useRegister().unbind).toHaveBeenCalledTimes(1);
+});
+
+it('warns and stays put when unbinding fails', async () => {
+  noSession();
+  const error = new Error('storage unavailable');
+  vi.mocked(useRegister().unbind).mockRejectedValueOnce(error);
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  await mount(); open();
+  await act(async () => { fireEvent.click(screen.getByTestId('user-sheet-register-switch')); });
+  expect(warn).toHaveBeenCalledWith('Could not unbind the register:', error);
+  warn.mockRestore();
+});
+
+it('omits the register row while the till is unbound', async () => {
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), boundRegisterId: null, register: { ...useRegister().register, session: null } });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet')).toBeTruthy();
+  expect(screen.queryByTestId('user-sheet-register-row')).toBeNull();
+});
