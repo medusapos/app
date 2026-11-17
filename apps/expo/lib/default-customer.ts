@@ -24,7 +24,8 @@ export function forgetDeletedDefaultCustomer(
   storage: SessionStorage | null, baseUrl: string, warnings: readonly CommandWarning[] | undefined,
 ): boolean {
   const customer = loadDefaultCustomer(storage, baseUrl);
-  if (!warnings?.some((warning) => warning.code === 'customer_ignored' && warning.customerId === customer?.id)) return false;
+  // No default stored: nothing to forget, even for a warning without a customerId.
+  if (!customer || !warnings?.some((warning) => warning.code === 'customer_ignored' && warning.customerId === customer.id)) return false;
   saveDefaultCustomer(storage, baseUrl, null);
   notify();
   return true;

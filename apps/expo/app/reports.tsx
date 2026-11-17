@@ -1,12 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { SalesRoom, type SalesFilters } from '@tallyui/components';
+import { ClosureSheet, SalesRoom, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
 import { ClosureTable } from '../components/closure-table';
 import { EarlierClosures } from '../components/earlier-closures';
-import { closureContext } from '../components/register-close';
+import { closureContext, printClosure } from '../components/register-close';
+import { RegisterStrip } from '../components/register-strip';
 import { loadApprovers } from '../lib/approval';
 import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -31,6 +32,7 @@ export default function ReportsScreen() {
   const [exportError, setExportError] = useState(false);
   const [xBusy, setXBusy] = useState(false);
   const [xError, setXError] = useState<string | null>(null);
+  const [opened, setOpened] = useState<{ closure: Closure; frozen: boolean } | null>(null);
 
   useEffect(() => {
     if (!orders) return;
@@ -59,6 +61,25 @@ export default function ReportsScreen() {
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
     <Stack.Screen options={{ title: 'Reports', headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-5xl gap-4 self-center">
+      {ctx && boundRegisterId ? <>
+        <RegisterStrip register={register} ctx={ctx} action={Platform.OS === 'web' && register.session?.status === 'open' ?
+          <Pressable testID="reports-x-print" accessibilityRole="button" disabled={xBusy}
+            className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
+            onPress={async () => {
+              setXBusy(true);
+              setXError(null);
+              try {
+                await printXReport({ session: register.session!, expected: register.expected,
+                  salesCount: register.salesCount, registerName, context: ctx });
+              } catch (error) {
+                setXError(error instanceof Error ? error.message : X_PRINT_FAILED);
+              } finally { setXBusy(false); }
+            }}>
+            <Text className="text-foreground">{xBusy ? 'Printing…' : 'Print X report'}</Text>
+          </Pressable> : null} />
+        {Platform.OS === 'web' && register.session?.status === 'open' && xError ?
+          <Text testID="reports-x-print-error" accessibilityRole="alert">{xError}</Text> : null}
+      </> : null}
       <Text testID="reports-sales-heading" className="text-lg font-semibold text-foreground">Sales</Text>
       {orders === null ? <Text testID="reports-loading">Loading…</Text>
         : currency === null ? <Text testID="reports-no-currency">Store settings are not loaded yet.</Text>
@@ -73,28 +94,14 @@ export default function ReportsScreen() {
             {`${summary.leftOutCount} ${summary.leftOutCount === 1 ? 'order' : 'orders'} in another currency left out`}
           </Text> : null}
         </> : null}
-      {Platform.OS === 'web' && ctx && register.session?.status === 'open' ? <>
-        <Pressable testID="reports-x-print" accessibilityRole="button" disabled={xBusy}
-          className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
-          onPress={async () => {
-            setXBusy(true);
-            setXError(null);
-            try {
-              await printXReport({ session: register.session!, expected: register.expected,
-                salesCount: register.salesCount, registerName, context: ctx });
-            } catch (error) {
-              setXError(error instanceof Error ? error.message : X_PRINT_FAILED);
-            } finally { setXBusy(false); }
-          }}>
-          <Text className="text-foreground">{xBusy ? 'Printing…' : 'Print X report'}</Text>
-        </Pressable>
-        {xError ? <Text testID="reports-x-print-error" accessibilityRole="alert">{xError}</Text> : null}
-      </> : null}
       <Text testID="closures-heading" className="text-lg font-semibold text-foreground">Closures</Text>
       {orders !== null && ctx ? <>
         {rows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text>
-          : <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx}
-            rows={rows.map((row) => closureTableRow(row, registerNames))} />}
+          : <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx} today={today}
+            rows={rows.map((row) => closureTableRow(row, registerNames))} onOpen={(id) => {
+              const closure = rows.find((row) => row.id === id);
+              if (closure) setOpened({ closure, frozen: true });
+            }} />}
         {Platform.OS === 'web' && rows.length > 0 ? <>
           <Pressable testID="closures-export" accessibilityRole="button"
             className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
@@ -110,8 +117,13 @@ export default function ReportsScreen() {
           {exportError ? <Text testID="closures-export-error" accessibilityRole="alert">Export failed. Try again.</Text> : null}
         </> : null}
         {boundRegisterId ? <EarlierClosures session={session} registerId={boundRegisterId} today={today} ctx={ctx}
-          registerName={registerName ?? ''} cashierNames={loadApprovers(defaultStorage(), session.baseUrl)} /> : null}
+          registerName={registerName ?? ''} cashierNames={loadApprovers(defaultStorage(), session.baseUrl)}
+          localClosures={closures} onOpen={setOpened} /> : null}
       </> : null}
+      {opened && currency ? <ClosureSheet currency={currency} onDone={() => setOpened(null)}
+        register={{ ...register, lastClosure: opened.closure, closureApprovalStatus: register.closureApprovalStatus ?? {} }}
+        onPrint={Platform.OS === 'web' && opened.frozen
+          ? () => printClosure(opened.closure, currency, { name: storeName, address: settings?.location.addressLine }) : undefined} /> : null}
     </View>
   </ScrollView>;
 }

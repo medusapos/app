@@ -2,8 +2,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
 import { createOrderBuilder, exportCsv, finalizeOrder, selectClosureRows, type Closure, type PosOrder } from '@tallyui/pos';
-import { closureScopeFor, closuresCsvFilename, closureTableRow, closureVarianceMinor, csvLabel, downloadCsv, historyTableRow, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures, varianceLabel } from './reports';
+import { closureDayLabel, closureDays, closureDayTotal, closureScopeFor, closuresCsvFilename, closureTableRow, closureVarianceMinor, csvLabel, downloadCsv, historyClosure, historyTableRow, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures, varianceLabel } from './reports';
 import { closureContext } from '../components/register-close';
+import type { ClosureHistoryEntry } from './closure-history';
 
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 
@@ -40,7 +41,7 @@ describe('closureTableRow', () => {
     const row = closure({ breakdowns: { register_name: 'Front till', closed_by_name: 'Ana' },
       counted: { cash: 800, external: 500 }, variance: { cash: -200, external: 50 } });
     expect(closureTableRow(row, { 'register-1': 'Register 1' })).toEqual({
-      id: row.id, number: row.number, closedAt: row.closed_at, registerName: 'Front till', cashierName: 'Ana',
+      id: row.id, number: row.number, day: today, closedAt: row.closed_at, registerName: 'Front till', cashierName: 'Ana',
       salesMinor: 1000, countedMinor: 1300, varianceMinor: -150,
     });
   });
@@ -50,6 +51,11 @@ describe('closureTableRow', () => {
     expect(closureTableRow(closure({ breakdowns: { register_name: '', closed_by_name: '' } }), {}))
       .toMatchObject({ registerName: 'register', cashierName: '—' });
   });
+  it('falls back to the local day of the closed time when the business day is absent', () => {
+    const row = closure({ business_day: undefined, closed_at: new Date(2026, 10, 8, 23, 30).toISOString() });
+    expect(closureTableRow(row, {}).day).toBe('2026-11-08');
+    expect(closureTableRow({ ...row, business_day: '' }, {}).day).toBe('2026-11-08');
+  });
 });
 
 describe('historyTableRow', () => {
@@ -57,7 +63,7 @@ describe('historyTableRow', () => {
     periodSalesTotalMinor: 1000, registerId: 'register-1', closedBy: 'user-1' };
   it('calculates counted and variance and resolves the cashier name', () => {
     expect(historyTableRow({ ...entry, counted: { cash: 800 }, tillExpected: { cash: 1000 } }, 'Register 1', { 'user-1': 'Ana' }))
-      .toEqual({ id: 'c1', number: 1, closedAt: entry.closedAt, registerName: 'Register 1', cashierName: 'Ana',
+      .toEqual({ id: 'c1', number: 1, day: localDay(new Date(entry.closedAt)), closedAt: entry.closedAt, registerName: 'Register 1', cashierName: 'Ana',
         salesMinor: 1000, countedMinor: 800, varianceMinor: -200 });
   });
   it('keeps unknown figures null and falls back to cashier id or a dash', () => {
@@ -68,6 +74,72 @@ describe('historyTableRow', () => {
   it('uses the register id slice or a dash when the register name is empty', () => {
     expect(historyTableRow(entry, '', {}).registerName).toBe('register');
     expect(historyTableRow({ ...entry, registerId: undefined }, '', {}).registerName).toBe('—');
+  });
+  it('uses the business day, else the local day of the closed time', () => {
+    expect(historyTableRow({ ...entry, businessDay: '2026-11-07' }, '', {}).day).toBe('2026-11-07');
+    const closedAt = new Date(2026, 10, 8, 23, 30).toISOString();
+    expect(historyTableRow({ ...entry, closedAt }, '', {}).day).toBe('2026-11-08');
+  });
+});
+
+describe('closureDays', () => {
+  const row = (id: string, day: string, countedMinor: number | null, varianceMinor: number | null) => ({
+    id, number: 1, day, closedAt: '', registerName: '', cashierName: '', salesMinor: 0, countedMinor, varianceMinor });
+  it('groups by day in order of first appearance and sums counted and variance', () => {
+    const [a, b, c] = [row('a', '2026-11-10', 800, -200), row('b', '2026-11-09', 500, 0), row('c', '2026-11-10', 1000, 50)];
+    expect(closureDays([a, b, c])).toEqual([
+      { day: '2026-11-10', rows: [a, c], countedMinor: 1800, varianceMinor: -150 },
+      { day: '2026-11-09', rows: [b], countedMinor: 500, varianceMinor: 0 },
+    ]);
+  });
+  it('keeps nulls when every row is unknown and sums only known figures', () => {
+    expect(closureDays([row('a', 'd', null, null), row('b', 'd', null, null)])[0]).toMatchObject({ countedMinor: null, varianceMinor: null });
+    expect(closureDays([row('a', 'd', null, null), row('b', 'd', 700, null), row('c', 'd', 300, -100)])[0])
+      .toMatchObject({ countedMinor: 1000, varianceMinor: -100 });
+  });
+});
+
+describe('closureDayLabel', () => {
+  it('names today and yesterday and formats earlier days', () => {
+    expect(closureDayLabel(today, today, 'en-GB')).toBe('Today');
+    expect(closureDayLabel('2026-11-09', today, 'en-GB')).toBe('Yesterday');
+    expect(closureDayLabel('2026-11-08', today, 'en-GB')).toBe(new Intl.DateTimeFormat('en-GB',
+      { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date('2026-11-08T00:00:00Z')));
+  });
+});
+
+describe('closureDayTotal', () => {
+  const ctx = closureContext('EUR', { name: 'X' });
+  it('reads counted and variance for the day', () => {
+    expect(closureDayTotal({ countedMinor: null, varianceMinor: null }, ctx)).toBe('');
+    expect(closureDayTotal({ countedMinor: 1800, varianceMinor: null }, ctx)).toBe(`${ctx.formatMoney('18.00')} counted`);
+    expect(closureDayTotal({ countedMinor: 1800, varianceMinor: 0 }, ctx)).toBe(`${ctx.formatMoney('18.00')} counted · Exact`);
+    expect(closureDayTotal({ countedMinor: 1800, varianceMinor: -200 }, ctx))
+      .toBe(`${ctx.formatMoney('18.00')} counted · ${ctx.formatMoney('2.00')} short`);
+  });
+});
+
+describe('historyClosure', () => {
+  const entry: ClosureHistoryEntry = { closureId: 'c12', number: 12, businessDay: '2026-11-09', openedAt: '2026-11-09T09:00:00Z',
+    closedAt: '2026-11-09T18:00:00Z', periodSalesTotalMinor: 4500, registerId: 'register-1', counted: { cash: 4400 }, tillExpected: { cash: 4500 } };
+  it('opens the device\'s own closure by id or server closure id', () => {
+    const own = closure({ id: 'c12' });
+    expect(historyClosure(entry, [closure(), own])).toEqual({ closure: own, frozen: true });
+    const synced = closure({ id: 'local', server_closure_id: 'c12' });
+    expect(historyClosure(entry, [synced])).toEqual({ closure: synced, frozen: true });
+  });
+  it('builds a closure from the store figures', () => {
+    expect(historyClosure(entry, [closure()])).toEqual({ frozen: false, closure: {
+      id: 'c12', session_id: '', register_id: 'register-1', business_day: '2026-11-09', number: 12,
+      opened_at: entry.openedAt, closed_at: entry.closedAt, till_expected: { cash: 4500 }, expected: { cash: 4500 },
+      counted: { cash: 4400 }, variance: { cash: -100 }, period_sales_total_minor: 4500, period_refunds_total_minor: 0,
+      perpetual_sales_total_minor: 0, perpetual_refunds_total_minor: 0, unsynced_count: 0, unsynced_total_minor: 0,
+      software_version: '', breakdowns: {}, order_ids: [], movement_ids: [], print_count: 0,
+    } });
+  });
+  it('opens nothing without counted or till-expected figures', () => {
+    expect(historyClosure({ ...entry, counted: undefined }, [])).toBeNull();
+    expect(historyClosure({ ...entry, tillExpected: undefined }, [])).toBeNull();
   });
 });
 

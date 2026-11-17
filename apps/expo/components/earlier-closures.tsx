@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { Pressable, Text } from 'react-native';
-import type { ClosureContext } from '@tallyui/pos';
+import type { Closure, ClosureContext } from '@tallyui/pos';
 import { ClosureHistoryError, dayBefore, fetchClosureHistory, type ClosureHistoryEntry } from '../lib/closure-history';
-import { historyTableRow } from '../lib/reports';
+import { historyClosure, historyTableRow } from '../lib/reports';
 import type { Session } from '../lib/session';
 import { ClosureTable } from './closure-table';
 
-export function EarlierClosures({ session, registerId, today, ctx, registerName, cashierNames }: {
+export function EarlierClosures({ session, registerId, today, ctx, registerName, cashierNames, localClosures = [], onOpen }: {
   session: Session; registerId: string; today: string; ctx: ClosureContext; registerName: string; cashierNames: Record<string, string>;
+  localClosures?: Closure[]; onOpen?: (opened: { closure: Closure; frozen: boolean }) => void;
 }) {
   const [rows, setRows] = useState<ClosureHistoryEntry[]>([]);
   const [more, setMore] = useState(false);
@@ -36,6 +37,11 @@ export function EarlierClosures({ session, registerId, today, ctx, registerName,
     }
   }
 
+  const opened = (id: string) => {
+    const entry = rows.find((row) => row.closureId === id);
+    return entry ? historyClosure(entry, localClosures) : null;
+  };
+
   useEffect(() => {
     void load();
     return () => { request.current++; };
@@ -44,8 +50,10 @@ export function EarlierClosures({ session, registerId, today, ctx, registerName,
   return <>
     <Text testID="earlier-closures-heading" className="text-lg font-semibold text-foreground">Earlier closures</Text>
     {loading && rows.length === 0 ? <Text testID="earlier-closures-loading" className="text-foreground">Loading…</Text> : null}
-    <ClosureTable testID="earlier-closures-table" rowTestID={(id) => `earlier-closure-${id}`} ctx={ctx}
-      rows={rows.map((r) => historyTableRow(r, registerName, cashierNames))} />
+    <ClosureTable testID="earlier-closures-table" rowTestID={(id) => `earlier-closure-${id}`} ctx={ctx} today={today}
+      rows={rows.map((r) => historyTableRow(r, registerName, cashierNames))}
+      openable={onOpen ? (id) => opened(id) !== null : undefined}
+      onOpen={onOpen ? (id) => { const closure = opened(id); if (closure) onOpen(closure); } : undefined} />
     {!loading && rows.length === 0 && !error ? <Text testID="earlier-closures-empty" className="text-foreground">No earlier closures</Text> : null}
     {more ? <Pressable testID="earlier-closures-more" accessibilityRole="button" disabled={loading}
       className="min-h-11 items-center justify-center rounded-md px-4 border border-border"

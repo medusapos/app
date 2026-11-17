@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PortalHost } from '@tallyui/primitives';
 import { createOrderBuilder, finalizeOrder, type Closure, type PosOrder, type RegisterSession } from '@tallyui/pos';
 import ReportsScreen from '../app/reports';
 import { closureContext } from '../components/register-close';
@@ -10,6 +11,7 @@ import { openOrderStore, closeOrderStores, registerCollections } from '../lib/or
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { downloadCsv, localDay } from '../lib/reports';
+import { varianceLabel } from '../lib/reports';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { saveCachedSettings } from '../lib/store-settings';
@@ -82,6 +84,71 @@ function closure(overrides: Partial<Closure> = {}): Closure {
   };
 }
 
+describe('register strip', () => {
+  it('shows the open session and formatted drawer equation', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z', opened_by: 'Ana' },
+      terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
+        cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
+        paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
+        expected: { cash: 4000 } },
+      lastClosure: null, blind: false,
+    } } as unknown as ReturnType<typeof useRegister>);
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    expect(screen.getByTestId('register-strip-status').textContent).toBe('Open');
+    expect(screen.getByTestId('register-strip-since').textContent).toMatch(/^since /);
+    expect(screen.getByTestId('register-strip-since').textContent).toContain(' · Ana');
+    expect(screen.getByTestId('register-strip-float').textContent).toContain(ctx.formatMoney('10.00'));
+    expect(screen.getByTestId('register-strip-cash-sales').textContent).toContain('Cash sales · 2');
+    expect(screen.getByTestId('register-strip-cash-sales').textContent).toContain(ctx.formatMoney('30.00'));
+    expect(screen.getByTestId('register-strip-expected').textContent).toContain(ctx.formatMoney('40.00'));
+    expect(screen.queryByTestId('register-strip-cash-refunds')).toBeNull();
+    expect(within(screen.getByTestId('register-strip')).getByTestId('reports-x-print')).toBeTruthy();
+  });
+
+  it('shows Closed without an equation when there is no session', () => {
+    mount();
+    expect(screen.getByTestId('register-strip-status').textContent).toBe('Closed');
+    expect(screen.queryByTestId('register-strip-equation')).toBeNull();
+  });
+
+  it('shows the last closure number, Today and its variance', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register,
+      lastClosure: closure({ number: 3, closed_at: new Date().toISOString(), variance: { cash: 1000 } }),
+    } });
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    const line = screen.getByTestId('register-strip-last-closure').textContent;
+    expect(line).toContain('#3');
+    expect(line).toContain('Today');
+    expect(line).toContain(varianceLabel(1000, ctx));
+  });
+
+  it('hides the equation for a blind open session', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z' },
+      terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
+        cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
+        paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
+        expected: { cash: 4000 } },
+      lastClosure: null, blind: true,
+    } } as unknown as ReturnType<typeof useRegister>);
+    mount();
+    expect(screen.getByTestId('register-strip-status').textContent).toBe('Open');
+    expect(screen.queryByTestId('register-strip-equation')).toBeNull();
+  });
+
+  it('hides the strip and print action on an unbound till', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), boundRegisterId: null, register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z' },
+    } } as unknown as ReturnType<typeof useRegister>);
+    mount();
+    expect(screen.queryByTestId('register-strip')).toBeNull();
+    expect(screen.queryByTestId('reports-x-print')).toBeNull();
+  });
+});
+
 describe('ReportsScreen', () => {
   it('shows today\'s sales room and what is left out', async () => {
     await store.orders.insert(order(1200, 'cash'));
@@ -132,6 +199,29 @@ describe('ReportsScreen', () => {
     for (const label of ['Closure', 'Closed', 'Register', 'Cashier', 'Sales', 'Counted', 'Variance'])
       expect(within(screen.getByTestId('closures-table')).getByText(label)).toBeTruthy();
     expect(screen.queryByTestId('closure-row-c3')).toBeNull();
+  });
+  it('groups today\'s closures under a Today header with the day\'s counted and variance totals', async () => {
+    const closures = registerCollections(store.orders).closures;
+    await closures.insert(closure({ variance: { cash: -200 }, counted: { cash: 800 }, closed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }));
+    await closures.insert(closure({ id: 'c2', number: 2 }));
+    mount();
+    const day = `closures-table-day-${localDay(new Date())}`;
+    expect((await screen.findByTestId(`${day}-label`)).textContent).toBe('Today');
+    const { formatMoney } = closureContext('EUR', { name: 'Test shop' });
+    expect(screen.getByTestId(`${day}-total`).textContent).toBe(`${formatMoney('18.00')} counted · ${formatMoney('2.00')} short`);
+    expect(screen.getByTestId(day)).toBeTruthy();
+  });
+  it('a closure row opens that closure in the closure sheet until Done', async () => {
+    const closures = registerCollections(store.orders).closures;
+    await closures.insert(closure());
+    await closures.insert(closure({ id: 'c2', number: 2 }));
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    fireEvent.click(await screen.findByTestId('closure-row-c2-open'));
+    expect(await screen.findByTestId('closure-sheet')).toBeTruthy();
+    expect(screen.getByTestId('closure-number').textContent).toBe('Closure #2');
+    fireEvent.click(screen.getByTestId('closure-done'));
+    await waitFor(() => expect(screen.queryByTestId('closure-sheet')).toBeNull());
   });
   it('Export CSV downloads today\'s rows and reports a failure', async () => {
     await registerCollections(store.orders).closures.insert(closure());

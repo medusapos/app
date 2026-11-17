@@ -58,3 +58,15 @@ From 600 px the existing split stays (a column below 900 px, a row from
 - `e2e/phone-cart.spec.ts` runs at 360 × 740; the other specs stay at
   Desktop Chrome. Unit tests set the jsdom window width, which otherwise
   reads 0, that is, phone mode.
+
+## Amendment 2026-11-17: v2's bottom tab bar
+
+The cart bar and the Cart view's "‹ Products" back button are replaced by
+WCPOS v2's phone tab bar (`docs/v2-parity/demo-shots/17-pos-demo-phone.jpg`):
+two tabs, Products and Cart, under both views while the sale is in the cart
+stage (`apps/expo/components/phone-tab-bar.tsx`). The Cart tab carries
+TallyUI's `InCartBadge` with the sum of line quantities and is named "Cart",
+"Cart, 1 item" or "Cart, 2 items"; it opens an empty cart too, as v2's does.
+The bar shows no total (v2 shows none; the cart's Total is one tap away). The
+Cart view keeps a head row only for the register control. Tender and receipt
+hide the tab bar as before.
