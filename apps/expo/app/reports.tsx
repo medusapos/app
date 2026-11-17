@@ -77,7 +77,8 @@ export default function ReportsScreen() {
     <Stack.Screen options={{ title: 'Reports', headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-5xl gap-4 self-center">
       {ctx && boundRegisterId ? <>
-        <RegisterStrip register={register} ctx={ctx} action={Platform.OS === 'web' && register.session?.status === 'open' ?
+        <RegisterStrip register={register} ctx={ctx}
+          panel={{ currency: currency!, store: { name: storeName, address: settings?.location.addressLine } }} action={Platform.OS === 'web' && register.session?.status === 'open' ?
           <Pressable testID="reports-x-print" accessibilityRole="button" disabled={xBusy}
             className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
             onPress={async () => {
