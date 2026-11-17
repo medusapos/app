@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, TextInput, View } from 'react-native';
-import { Button, CustomerForm, Select, SelectContent, SelectItem, SelectSeparator, SelectTrigger, Text,
-  type CustomerFormValues } from '@tallyui/components';
+import { Pressable, TextInput, View } from 'react-native';
+import { Button, CustomerForm, Text, type CustomerFormValues } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerAddress } from '@tallyui/core';
 import { billingAddress, billingChanged, billingCountryValid, billingFields, hasBilling, BillingNotSavedError,
   BILLING_COUNTRY_HINT, BILLING_LOAD_FAILED, BILLING_NOT_SAVED } from '../lib/customer-billing';
@@ -86,37 +85,42 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadBilling }: 
   </>;
 }
 
+const fold = (text: string) => text.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+/** Up to 6 countries whose code is the query (those first) or whose name or a word of it starts with it, accent-blind. */
+function countryMatches(query: string) {
+  const q = fold(query.trim());
+  return COUNTRIES.filter(({ code, name }) => code.toLowerCase() === q
+    || [fold(name), ...fold(name).split(/[\s\-()[\],'’]+/)].some((part) => q !== '' && part.startsWith(q)))
+    .sort((a, b) => Number(b.code.toLowerCase() === q) - Number(a.code.toLowerCase() === q)).slice(0, 6);
+}
+// Web: pressing a match would blur the field, which closes the list before the press lands; keep the focus instead.
+const keepFieldFocus = { onMouseDown: (event: { preventDefault: () => void }) => event.preventDefault() };
+
 /**
  * Picks the billing country by name from every ISO 3166-1 country; the value is the stored code. A stored code
- * that is not in the list is shown as it is and stays selectable, so opening the form never changes it.
+ * that is not in the list is shown as it is, so opening the form never changes it. Matches sit under the field.
  */
 function CountryPicker({ value, disabled, onChange }: { value: string; disabled: boolean; onChange: (code: string) => void }) {
-  const [width, setWidth] = useState(0);
-  const name = countryName(value);
-  const unlisted = value !== '' && name === undefined;
-  return <Select value={{ value, label: name ?? value }} disabled={disabled}
-    onValueChange={(option) => { if (option) onChange(option.value); }}>
-    <SelectTrigger testID="customer-billing-country" accessibilityLabel="Country"
-      onLayout={(event) => setWidth(event.nativeEvent.layout.width)}
-      className="h-auto rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground">
-      <Text numberOfLines={1} className={`flex-1 text-sm ${value ? 'text-foreground' : 'text-muted-foreground'}`}>
-        {name ?? (value || 'Choose a country')}
-      </Text>
-    </SelectTrigger>
-    <SelectContent style={{ minWidth: width }}>
-      <ScrollView className="max-h-72">
-        <SelectItem testID="customer-billing-country-none" value="" label="No country">
-          <Text className="text-sm">No country</Text>
-        </SelectItem>
-        {unlisted && <SelectItem testID={`customer-billing-country-${value}`} value={value} label={value}>
-          <Text className="text-sm">{value}</Text>
-        </SelectItem>}
-        <SelectSeparator />
-        {COUNTRIES.map((country) => <SelectItem key={country.code} testID={`customer-billing-country-${country.code}`}
-          value={country.code} label={country.name}>
-          <Text className="text-sm">{country.name}</Text>
-        </SelectItem>)}
-      </ScrollView>
-    </SelectContent>
-  </Select>;
+  const shown = (code: string) => countryName(code) ?? code;
+  const [text, setText] = useState(() => shown(value));
+  const [editing, setEditing] = useState(false);
+  useEffect(() => { setText(shown(value)); setEditing(false); }, [value]);
+  const matches = countryMatches(text);
+  const pick = (code: string) => { onChange(code); setText(shown(code)); setEditing(false); };
+  return <>
+    <TextInput testID="customer-billing-country" accessibilityLabel="Country" value={text} editable={!disabled}
+      placeholder="Type a country" onBlur={() => { setText(shown(value)); setEditing(false); }}
+      onChangeText={(next) => { setText(next); setEditing(next !== ''); if (next === '') onChange(''); }}
+      onSubmitEditing={() => { if (matches[0]) pick(matches[0].code); }}
+      className="rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground"
+      placeholderTextColorClassName="accent-muted-foreground" />
+    {!disabled && editing && <View testID="customer-billing-country-matches" {...keepFieldFocus}
+      className="rounded-lg border border-border bg-card py-1">
+      {matches.length === 0 ? <Text className="px-3 py-2 text-sm text-muted-foreground">No matching country</Text>
+        : matches.map((country) => <Pressable key={country.code} testID={`customer-billing-country-${country.code}`}
+          accessibilityRole="button" onPress={() => pick(country.code)} className="px-3 py-2">
+          <Text className="text-sm text-foreground">{country.name}</Text>
+        </Pressable>)}
+    </View>}
+  </>;
 }

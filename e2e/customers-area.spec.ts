@@ -46,7 +46,7 @@ test('the Customers area adds a customer with a billing address', async ({ page 
   await page.getByLabel('Address line 1', { exact: true }).fill('1 Market St');
   await page.getByLabel('City', { exact: true }).fill('Leeds');
   await page.getByLabel('Postal code', { exact: true }).fill('LS1 1AA');
-  await page.getByTestId('customer-billing-country').click();
+  await page.getByTestId('customer-billing-country').fill('gb');
   await page.getByTestId('customer-billing-country-GB').click();
   await page.getByTestId('customer-save').click();
   await expect(page.getByTestId('customer-editor')).not.toBeVisible();
