@@ -23,6 +23,7 @@ import { SCALE_CHOICES, useScaleChoice, type ScaleChoice } from '../lib/scale-ch
 import { averageKeyMs, stripScanAffixes } from '../lib/use-wedge-scan';
 import { playScanBeep } from '../lib/scan-beep';
 import { currencyFormat, separatorLabel } from '../lib/currency-format';
+import { cardPaymentMode, TILL_PAYMENT_METHODS } from '../lib/card-payments';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 // Shown for any value this till does not hold.
@@ -47,6 +48,7 @@ export default function SettingsScreen() {
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
     { id: 'customer', label: 'Customer', element: <DefaultCustomerSection session={session} /> },
     { id: 'printing', label: 'Printing', element: <PrintingSection session={session} /> },
+    { id: 'card-readers', label: 'Card readers', element: <CardReadersSection /> },
     { id: 'scanner', label: 'Scanner', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
@@ -77,6 +79,7 @@ export default function SettingsScreen() {
       <RegisterSection session={session} />
       <DefaultCustomerSection session={session} />
       <PrintingSection session={session} />
+      <CardReadersSection />
       <ScannerSection session={session} />
       <ThemeSection />
       <ClearLocalDataSection />
@@ -192,6 +195,27 @@ function PrintingSection({ session }: { session: Session }) {
     <SettingsRow label="Print method" className="border-t border-border" action={
       <Text testID="settings-printing-method" className="max-w-40 text-right text-sm text-foreground">{printMethodLabel()}</Text>
     } />
+  </SettingsGroup>;
+}
+function CardReadersSection() {
+  const mode = cardPaymentMode(TILL_PAYMENT_METHODS);
+  return <SettingsGroup title="Card readers" testID="settings-card-readers" description="How this till takes card payments. Read-only.">
+    {mode ? <>
+      <SettingsRow label="Card method" action={
+        <Text testID="settings-card-readers-method" className="max-w-40 text-right text-sm text-foreground">{mode.method}</Text>
+      } />
+      <SettingsRow label="Taken on" className="border-t border-border" action={
+        <Text testID="settings-card-readers-capture" className="max-w-40 text-right text-sm text-foreground">{mode.capture}</Text>
+      } />
+      <SettingsRow label="Readers" className="border-t border-border" action={
+        <Text testID="settings-card-readers-readers" className="max-w-40 text-right text-sm text-foreground">{mode.readers}</Text>
+      } />
+      {mode.manual ? <View className="px-4 pb-4">
+        <Text testID="settings-card-readers-how" className="text-sm text-muted-foreground">{`At checkout, pick ${mode.method}, take the payment on the terminal, then type its receipt number in Terminal reference. The terminal works on its own: there is nothing to pair with this till.`}</Text>
+      </View> : null}
+    </> : <View className="px-4 pb-4">
+      <Text testID="settings-card-readers-none" className="text-sm text-muted-foreground">This till takes no card payments.</Text>
+    </View>}
   </SettingsGroup>;
 }
 function ScannerSection({ session }: { session: Session }) {
