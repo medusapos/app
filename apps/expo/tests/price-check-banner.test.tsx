@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { PriceCheckBanner, PRICE_CHECK_ONLY } from '../components/price-check-banner';
+import { PriceCheckBanner, PRICE_CHECK_ONLY, COUNTING_DRAWER } from '../components/price-check-banner';
 import { useRegister } from '../lib/register-context';
 import { OPEN_SESSION, openRegisterFixture } from './register-fixture';
 
@@ -29,12 +29,28 @@ describe('PriceCheckBanner', () => {
     expect(screen.getByTestId('price-check-banner').textContent).toBe(PRICE_CHECK_ONLY);
   });
 
-  it.each(['counting', 'closed'] as const)('shows when the session is %s', (status) => {
+  it('shows the price-check text when the session is closed', () => {
     const fixture = openRegisterFixture();
     vi.mocked(useRegister).mockReturnValue({ ...fixture,
-      register: { ...fixture.register, session: { ...OPEN_SESSION, status } } });
+      register: { ...fixture.register, session: { ...OPEN_SESSION, status: 'closed' } } });
     render(<PriceCheckBanner />);
     expect(screen.getByTestId('price-check-banner').textContent).toBe(PRICE_CHECK_ONLY);
+  });
+
+  it('shows the counting text when the session is counting', () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture,
+      register: { ...fixture.register, session: { ...OPEN_SESSION, status: 'counting' } } });
+    render(<PriceCheckBanner />);
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(COUNTING_DRAWER);
+  });
+
+  it('shows the counting text when an open session is closing', () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture,
+      register: { ...fixture.register, closing: true } });
+    render(<PriceCheckBanner />);
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(COUNTING_DRAWER);
   });
 
   it('renders nothing when the session is open', () => {

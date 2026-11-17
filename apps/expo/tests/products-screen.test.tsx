@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
-import { DEFAULT_CART_SETTINGS, saveCartSettings } from '../lib/cart-settings';
+import { DEFAULT_CART_SETTINGS, loadCartSettings, saveCartSettings } from '../lib/cart-settings';
 import { clearProductCache } from '../lib/product-cache';
 import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { forgetDeletedDefaultCustomer, loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
@@ -138,6 +138,30 @@ describe('ProductsScreen catalogue', () => {
     const record = vi.mocked(useOutboxContext().record);
     expect(record).toHaveBeenCalledTimes(1);
     expect(record.mock.calls[0][0].customer).toBeNull();
+  });
+
+  it('a sale on the default customer sends it without its email, and the receipt email still prefills it', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' });
+    try {
+      vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [] });
+      vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
+        id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
+          prices: [{ amount: 12, currency_code: 'eur' }] }],
+      }] }));
+      await mount();
+      fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+      await payByCard();
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
+      const record = vi.mocked(useOutboxContext().record);
+      expect(record).toHaveBeenCalledTimes(1);
+      const sent = record.mock.calls[0][0].customer;
+      expect(sent).toMatchObject({ id: 'ada', name: 'Ada Lovelace' });
+      expect(sent).not.toHaveProperty('email');
+      fireEvent.click(screen.getByTestId('receipt-email-open'));
+      expect((screen.getByLabelText('Receipt email address') as HTMLInputElement).value).toBe('ada@example.com');
+    } finally {
+      saveDefaultCustomer(localStorage, 'https://store.test', null);
+    }
   });
 
   it('clearing the default never rewrites an open sale', async () => {
@@ -576,12 +600,52 @@ describe('ProductsScreen cart settings', () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-discount-1'));
     fireEvent.change(screen.getByLabelText('Quick discount 1'), { target: { value: '0' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Save quick discounts' }));
+    fireEvent.keyDown(screen.getByLabelText('Quick discount 1'), { key: 'Enter' });
     expect(screen.getByRole('alert').textContent).toBe('Quick discounts must be three whole numbers from 1 to 100.');
+    expect(screen.getByTestId('cart-settings-discount-1').textContent).toBe('−5%');
     fireEvent.click(screen.getByTestId('cart-settings-close'));
     fireEvent.click(within(cartLine('Shirt')).getByTestId('price-popover-trigger'));
     expect(screen.getAllByTestId(/^price-discount-/).map((key) => key.textContent)).toEqual(['−5%', '−10%', '−15%']);
+  });
+
+  it('shows the quick discounts as keys and saves an edited key on Enter', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(screen.getAllByTestId(/^cart-settings-discount-/).map((key) => key.textContent)).toEqual(['−5%', '−10%', '−15%']);
+    expect(screen.queryByLabelText('Quick discount 1')).toBeNull();
+    fireEvent.click(screen.getByTestId('cart-settings-discount-2'));
+    const field = screen.getByLabelText('Quick discount 2') as HTMLInputElement;
+    expect(field.value).toBe('10');
+    fireEvent.change(field, { target: { value: '25' } });
+    fireEvent.keyDown(field, { key: 'Enter' });
+    expect(screen.queryByLabelText('Quick discount 2')).toBeNull();
+    expect(screen.getByTestId('cart-settings-discount-2').textContent).toBe('−25%');
+    fireEvent.click(screen.getByTestId('cart-settings-close'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(within(cartLine('Shirt')).getByTestId('price-popover-trigger'));
+    expect(screen.getAllByTestId(/^price-discount-/).map((key) => key.textContent)).toEqual(['−5%', '−25%', '−15%']);
+  });
+
+  it('saves an edited quick discount when the field loses focus', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-discount-3'));
+    fireEvent.change(screen.getByLabelText('Quick discount 3'), { target: { value: '40' } });
+    fireEvent.blur(screen.getByLabelText('Quick discount 3'));
+    expect(screen.getByTestId('cart-settings-discount-3').textContent).toBe('−40%');
+    expect(loadCartSettings(localStorage, 'https://store.test').quickDiscounts).toEqual([5, 10, 40]);
+  });
+
+  it('closes from the title X and lays the footer out as v2 does', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-x'));
+    expect(screen.queryByTestId('cart-settings-sheet')).toBeNull();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(screen.getByTestId('cart-settings-restore').compareDocumentPosition(screen.getByTestId('cart-settings-close'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
