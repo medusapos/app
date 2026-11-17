@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PortalHost } from '@tallyui/primitives';
 import { createOrderBuilder, finalizeOrder, type Closure, type PosOrder, type RegisterSession } from '@tallyui/pos';
 import ReportsScreen from '../app/reports';
 import { closureContext } from '../components/register-close';
@@ -198,6 +199,29 @@ describe('ReportsScreen', () => {
     for (const label of ['Closure', 'Closed', 'Register', 'Cashier', 'Sales', 'Counted', 'Variance'])
       expect(within(screen.getByTestId('closures-table')).getByText(label)).toBeTruthy();
     expect(screen.queryByTestId('closure-row-c3')).toBeNull();
+  });
+  it('groups today\'s closures under a Today header with the day\'s counted and variance totals', async () => {
+    const closures = registerCollections(store.orders).closures;
+    await closures.insert(closure({ variance: { cash: -200 }, counted: { cash: 800 }, closed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }));
+    await closures.insert(closure({ id: 'c2', number: 2 }));
+    mount();
+    const day = `closures-table-day-${localDay(new Date())}`;
+    expect((await screen.findByTestId(`${day}-label`)).textContent).toBe('Today');
+    const { formatMoney } = closureContext('EUR', { name: 'Test shop' });
+    expect(screen.getByTestId(`${day}-total`).textContent).toBe(`${formatMoney('18.00')} counted · ${formatMoney('2.00')} short`);
+    expect(screen.getByTestId(day)).toBeTruthy();
+  });
+  it('a closure row opens that closure in the closure sheet until Done', async () => {
+    const closures = registerCollections(store.orders).closures;
+    await closures.insert(closure());
+    await closures.insert(closure({ id: 'c2', number: 2 }));
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    fireEvent.click(await screen.findByTestId('closure-row-c2-open'));
+    expect(await screen.findByTestId('closure-sheet')).toBeTruthy();
+    expect(screen.getByTestId('closure-number').textContent).toBe('Closure #2');
+    fireEvent.click(screen.getByTestId('closure-done'));
+    await waitFor(() => expect(screen.queryByTestId('closure-sheet')).toBeNull());
   });
   it('Export CSV downloads today\'s rows and reports a failure', async () => {
     await registerCollections(store.orders).closures.insert(closure());
