@@ -4,6 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { ClosureSheet, SalesRoom, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
+import { ClosureFiltersBar } from '../components/closure-filters';
 import { ClosureTable } from '../components/closure-table';
 import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext, printClosure } from '../components/register-close';
@@ -13,7 +14,7 @@ import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
 import { useRegister } from '../lib/register-context';
-import { closureScopeFor, closuresCsvFilename, closureTableRow, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures } from '../lib/reports';
+import { byCashier, closureCashierOptions, closureHistoryWindow, closureScopeFor, closuresCsvFilename, closureTableRow, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures, showsTodayClosures, type ClosureFilters } from '../lib/reports';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
@@ -33,6 +34,10 @@ export default function ReportsScreen() {
   const [xBusy, setXBusy] = useState(false);
   const [xError, setXError] = useState<string | null>(null);
   const [opened, setOpened] = useState<{ closure: Closure; frozen: boolean } | null>(null);
+  const [closureFilters, setClosureFilters] = useState<ClosureFilters>(() => ({
+    preset: 'today', range: presetRange('today', new Date(), 'device'), registerId: null, cashierId: null,
+  }));
+  const [historyCashiers, setHistoryCashiers] = useState<string[]>([]);
 
   useEffect(() => {
     if (!orders) return;
@@ -56,6 +61,16 @@ export default function ReportsScreen() {
   const scope = closureScopeFor({ today, boundRegisterId, storeKey: session.baseUrl });
   const rows = selectClosureRows(closures, scope, 'device');
   const registerNames = Object.fromEntries(registers.map((r) => [r.id, r.name]));
+  const { range, cashierId } = closureFilters;
+  const chosenRegister = closureFilters.registerId ?? boundRegisterId ?? registers[0]?.id ?? null;
+  const ownRegister = !!boundRegisterId && chosenRegister === boundRegisterId;
+  const showsToday = showsTodayClosures(range, today, ownRegister);
+  const historyWindow = closureHistoryWindow(range, today, ownRegister);
+  const cashierNames = loadApprovers(defaultStorage(), session.baseUrl);
+  const names = { ...cashierNames, ...Object.fromEntries(rows.flatMap((row) => row.closed_by
+    && typeof row.breakdowns.closed_by_name === 'string' ? [[row.closed_by, row.breakdowns.closed_by_name]] : [])) };
+  const cashierOptions = closureCashierOptions([...rows.flatMap((row) => row.closed_by ? [row.closed_by] : []), ...historyCashiers], names);
+  const shownRows = byCashier(rows, cashierId, (row) => row.closed_by);
   const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
 
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
@@ -96,13 +111,16 @@ export default function ReportsScreen() {
         </> : null}
       <Text testID="closures-heading" className="text-lg font-semibold text-foreground">Closures</Text>
       {orders !== null && ctx ? <>
-        {rows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text>
+        <ClosureFiltersBar filters={{ ...closureFilters, registerId: chosenRegister }} onChange={setClosureFilters}
+          registerOptions={registers.map((r) => ({ value: r.id, label: storeName ? `${storeName} · ${r.name}` : r.name }))}
+          cashierOptions={cashierOptions} />
+        {!showsToday ? null : shownRows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text>
           : <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx} today={today}
-            rows={rows.map((row) => closureTableRow(row, registerNames))} onOpen={(id) => {
+            rows={shownRows.map((row) => closureTableRow(row, registerNames))} onOpen={(id) => {
               const closure = rows.find((row) => row.id === id);
               if (closure) setOpened({ closure, frozen: true });
             }} />}
-        {Platform.OS === 'web' && rows.length > 0 ? <>
+        {showsToday && Platform.OS === 'web' && rows.length > 0 ? <>
           <Pressable testID="closures-export" accessibilityRole="button"
             className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
             onPress={() => {
@@ -116,9 +134,10 @@ export default function ReportsScreen() {
           </Pressable>
           {exportError ? <Text testID="closures-export-error" accessibilityRole="alert">Export failed. Try again.</Text> : null}
         </> : null}
-        {boundRegisterId ? <EarlierClosures session={session} registerId={boundRegisterId} today={today} ctx={ctx}
-          registerName={registerName ?? ''} cashierNames={loadApprovers(defaultStorage(), session.baseUrl)}
-          localClosures={closures} onOpen={setOpened} /> : null}
+        {chosenRegister && historyWindow ? <EarlierClosures session={session} registerId={chosenRegister} today={today} ctx={ctx}
+          registerName={registerNames[chosenRegister] ?? ''} cashierNames={cashierNames}
+          localClosures={closures} onOpen={setOpened} from={historyWindow.from} to={historyWindow.to}
+          cashierId={cashierId} onCashiers={setHistoryCashiers} heading={showsToday ? 'Earlier closures' : null} /> : null}
       </> : null}
       {opened && currency ? <ClosureSheet currency={currency} onDone={() => setOpened(null)}
         register={{ ...register, lastClosure: opened.closure, closureApprovalStatus: register.closureApprovalStatus ?? {} }}

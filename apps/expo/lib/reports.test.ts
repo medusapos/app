@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
 import { createOrderBuilder, exportCsv, finalizeOrder, selectClosureRows, type Closure, type PosOrder } from '@tallyui/pos';
-import { closureDayLabel, closureDays, closureDayTotal, closureScopeFor, closuresCsvFilename, closureTableRow, closureVarianceMinor, csvLabel, downloadCsv, historyClosure, historyTableRow, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures, varianceLabel } from './reports';
+import { byCashier, closureCashierOptions, closureDayLabel, closureDays, closureHistoryWindow, closureDayTotal, closureScopeFor, closuresCsvFilename, closureTableRow, closureVarianceMinor, csvLabel, downloadCsv, historyClosure, historyTableRow, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures, showsTodayClosures, varianceLabel } from './reports';
 import { closureContext } from '../components/register-close';
 import type { ClosureHistoryEntry } from './closure-history';
 
@@ -293,5 +293,31 @@ describe('csv', () => {
     expect(blob.type).toBe('text/csv;charset=utf-8');
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:csv');
     expect(document.body.querySelector('a')).toBeNull();
+  });
+});
+
+describe('closure filters', () => {
+  it('closureHistoryWindow clips the own register to yesterday and keeps another register\'s days', () => {
+    expect(closureHistoryWindow({ from: '2026-11-03', to: '2026-11-10' }, today, true)).toEqual({ from: '2026-11-03', to: '2026-11-09' });
+    expect(closureHistoryWindow({ from: '2026-11-03', to: '2026-11-08' }, today, true)).toEqual({ from: '2026-11-03', to: '2026-11-08' });
+    expect(closureHistoryWindow({ from: '2026-11-03', to: '2026-11-10' }, today, false)).toEqual({ from: '2026-11-03', to: '2026-11-10' });
+    expect(closureHistoryWindow({ from: today, to: today }, today, true)).toBeNull();
+    expect(closureHistoryWindow({ from: today, to: today }, today, false)).toEqual({ from: today, to: today });
+  });
+  it('showsTodayClosures only for the own register when the range holds today', () => {
+    expect(showsTodayClosures({ from: today, to: today }, today, true)).toBe(true);
+    expect(showsTodayClosures({ from: '2026-11-03', to: '2026-11-10' }, today, true)).toBe(true);
+    expect(showsTodayClosures({ from: '2026-11-09', to: '2026-11-09' }, today, true)).toBe(false);
+    expect(showsTodayClosures({ from: today, to: today }, today, false)).toBe(false);
+  });
+  it('byCashier keeps every row for null and the cashier\'s rows otherwise', () => {
+    const rows = [{ id: 'a', by: 'user-1' }, { id: 'b', by: 'user-2' }, { id: 'c', by: null }];
+    expect(byCashier(rows, null, (row) => row.by)).toEqual(rows);
+    expect(byCashier(rows, 'user-2', (row) => row.by)).toEqual([{ id: 'b', by: 'user-2' }]);
+  });
+  it('closureCashierOptions dedupes, falls back to the id and sorts by label', () => {
+    expect(closureCashierOptions(['user-2', 'user-1', 'user-2', 'user-9'], { 'user-1': 'Zoe', 'user-2': 'Ana' })).toEqual([
+      { value: 'user-2', label: 'Ana' }, { value: 'user-9', label: 'user-9' }, { value: 'user-1', label: 'Zoe' },
+    ]);
   });
 });
