@@ -107,8 +107,20 @@ it('takes a card part and a cash remainder, shows change from cash only, and rec
   expect(screen.getByLabelText('Card terminal: €10.00')).toBeTruthy();
   expect(screen.getByLabelText('Cash tendered: €20.00')).toBeTruthy();
   expect(screen.getByLabelText('Change: €6.00')).toBeTruthy();
-  expect(screen.getByTestId('paid-change-due').textContent).toContain('Change Due');
-  expect(screen.getByTestId('paid-change-due').textContent).toContain('€6.00');
+  expect(screen.getByTestId('paid-change-figure').textContent).toBe('Change €6.00');
+  expect(screen.getByTestId('paid-change-tendered').textContent).toBe('Paid €24.00 · tendered €20.00 in cash');
+  expect(screen.getByTestId('paid-change-tick')).toBeTruthy();
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('leads a cash sale with change with v2\'s tick, change heading and paid · tendered line', async () => {
+  await startSplit();
+  tender('cash', '30.00');
+  await complete();
+  expect(screen.getByTestId('paid-change-figure').textContent).toBe('Change €6.00');
+  expect(screen.getByTestId('paid-change-tendered').textContent).toBe('Paid €24.00 · tendered €30.00 in cash');
+  expect(screen.getByTestId('paid-change-tick')).toBeTruthy();
+  expect(screen.getByTestId('paid-change-due').textContent).not.toContain('Change Due');
 }, 15000);
 
 // The keypad tender pane's steps exceed the 5 s default on CI runners.
