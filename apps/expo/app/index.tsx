@@ -5,7 +5,7 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
+  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
@@ -21,6 +21,7 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PaidChange } from '../components/paid-change';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../components/frame-drawer-header';
@@ -453,7 +454,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const paidReceipt = sale.stage.kind === 'receipt' ? <>
     {/* v2 leads the paid screen with the change; screen only, not printed. */}
     {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-      <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
+      <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />
     </View>}
     <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
     store={receiptStore}
