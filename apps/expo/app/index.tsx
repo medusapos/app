@@ -36,6 +36,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { playScanBeep } from '../lib/scan-beep';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -302,6 +303,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useEffect(() => { if (!wedgeActive) setScanMiss(null); }, [wedgeActive]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   useWedgeScan(wedgeActive, scannerSettings, (code) => {
+    if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
     if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
   });

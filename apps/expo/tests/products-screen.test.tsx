@@ -12,7 +12,7 @@ import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
 import { clearProductCache } from '../lib/product-cache';
-import { saveScannerSettings } from '../lib/scanner-settings';
+import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
@@ -967,7 +967,7 @@ describe('ProductsScreen search minCodeLength', () => {
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
 
   it.each([[6, false], [3, true]])('with minChars %i, Enter on the 5-character code "AB123" adds the product: %s', async (minChars, adds) => {
-    saveScannerSettings(localStorage, 'https://store.test', { avgKeyMs: 100, minChars });
+    saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars });
     await mount();
     const search = screen.getByRole('searchbox') as HTMLInputElement;
     fireEvent.change(search, { target: { value: 'AB123' } });
