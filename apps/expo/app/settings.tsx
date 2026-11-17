@@ -12,6 +12,7 @@ import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { getDeviceName } from '../lib/register-context';
 import { DEFAULT_SCANNER_SETTINGS, useScannerSettings } from '../lib/scanner-settings';
+import { usePrintingSettings } from '../lib/printing-settings';
 import { loadCachedSettings, loadCachedPricing } from '../lib/store-settings';
 import { useTillName } from '../lib/till-name';
 import { useDefaultCustomer } from '../lib/default-customer';
@@ -44,6 +45,7 @@ export default function SettingsScreen() {
     { id: 'store', label: 'Store', element: <StoreSection session={session} /> },
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
     { id: 'customer', label: 'Customer', element: <DefaultCustomerSection session={session} /> },
+    { id: 'printing', label: 'Printing', element: <PrintingSection session={session} /> },
     { id: 'scanner', label: 'Scanner', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
@@ -73,13 +75,13 @@ export default function SettingsScreen() {
       <StoreSection session={session} />
       <RegisterSection session={session} />
       <DefaultCustomerSection session={session} />
+      <PrintingSection session={session} />
       <ScannerSection session={session} />
       <ThemeSection />
       <ClearLocalDataSection />
     </View>
   </ScrollView>;
 }
-// Printer settings land here later (ADR 0016), with TallyUI printing.
 function StoreSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
   const [format] = useState(() => currencyFormat(held.pricing?.currency));
@@ -170,6 +172,19 @@ function DefaultCustomerSection({ session }: { session: Session }) {
         onPress={() => save(null)} className={`${buttonClass} border border-border`}>
         <Text className="text-foreground">Use Guest</Text>
       </Pressable>}
+    </View>
+  </SettingsGroup>;
+}
+function PrintingSection({ session }: { session: Session }) {
+  const { settings, save } = usePrintingSettings(defaultStorage(), session.baseUrl);
+  return <SettingsGroup title="Printing" testID="settings-printing"
+    description="Receipts print through this device's print dialog. Saved on this till only.">
+    <SettingsRow label="Automatically print receipt after checkout" action={
+      <Switch accessibilityLabel="Automatically print receipt after checkout" testID="settings-printing-auto-print"
+        checked={settings.autoPrintReceipt} onCheckedChange={(checked) => save({ ...settings, autoPrintReceipt: checked })} />
+    } />
+    <View className="px-4 pb-4">
+      <Text className="text-sm text-muted-foreground">The print window opens after each sale.</Text>
     </View>
   </SettingsGroup>;
 }

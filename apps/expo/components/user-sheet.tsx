@@ -21,13 +21,14 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
   signOut: () => void; signOutLocked: boolean; lockMessage: string;
   outbox: SwitchWarningInput['outbox']; parkedSales: number; paidMinor: number;
 }) {
-  const { register, registerName, boundRegisterId } = useRegister();
+  const { register, registerName } = useRegister();
   const { orders } = useOutboxContext();
   const [sales, setSales] = useState<PosOrder[]>([]);
   const filters = useMemo<SalesFilters>(() => ({
     preset: 'today', range: presetRange('today', new Date(), 'device'), compare: 'previous',
-    status: 'all', cashierId: null, registerId: boundRegisterId || null,
-  }), [open, boundRegisterId]);
+    // The local outbox holds only this till's sales, recorded under the device id, not the bound register's id.
+    status: 'all', cashierId: null, registerId: null,
+  }), [open]);
   useEffect(() => {
     if (!open || !orders) return;
     const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(filters.range.from) } } }).subscribe(setSales);
@@ -36,6 +37,8 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
   const [confirm, setConfirm] = useState<'signOut' | 'cashier' | null>(null);
   const warningInput = { outbox, parkedSales, paidMinor, sessionStatus: register.session?.status };
   const drawerOpen = register.session?.status === 'open' || register.session?.status === 'counting';
+  // The signed-in cashier's own sales: the app records every local order with cashierRef = session.email.
+  const totals = salesRoomFigures(sales.filter((order) => order.cashierRef === session.email), filters, currency).figures.totals;
   return <><Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent side="right" testID="user-sheet" className="flex-col gap-4">
       <View className="flex-row items-center gap-2">
@@ -48,8 +51,11 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
         </View>
       </View>
       {orders && <View testID="user-sheet-sales-today" className="flex-row items-center justify-between gap-2">
-        <Text className="text-muted-foreground">Sales today</Text>
-        <Text className="font-semibold tabular-nums">{formatMoney({ amount: salesRoomFigures(sales, filters, currency).figures.totals.grossMinor, currency })}</Text>
+        <View>
+          <Text className="text-muted-foreground">Your sales today</Text>
+          <Text testID="user-sheet-sales-count" className="text-sm text-muted-foreground">{totals.orderCount === 1 ? '1 sale' : `${totals.orderCount} sales`}</Text>
+        </View>
+        <Text className="font-semibold tabular-nums">{formatMoney({ amount: totals.grossMinor, currency })}</Text>
       </View>}
       {drawerOpen && <View testID="user-sheet-drawer" className="gap-2 rounded-md border border-border p-3">
         <Text>In the drawer</Text>

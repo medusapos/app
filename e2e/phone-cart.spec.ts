@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, cartLineQuantity, cartTab, cartTotalRow, discount, productsTab, sellBySku, signIn, tenderCash, test } from './helpers';
+import { addE2E1, cartLineQuantity, cartTab, cartTotalRow, closeStoreRegister, discount, productsTab, sellBySku, signIn, tenderCash, test } from './helpers';
 
 // The sale screen on a phone (ADR 0009): below 600 px the Cart tab opens the cart at full height, its lines and
 // order discount scroll, and the totals and pay buttons stay pinned. Sells only E2E-1 and E2E-2.
@@ -25,16 +25,39 @@ test('the phone tender is titled Checkout Order and its close returns to the car
   expect(box.width).toBeGreaterThanOrEqual(44);
   expect(box.height).toBeGreaterThanOrEqual(44);
   await close.click();
-  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+  await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('cart-checkout')).toBeVisible();
   await expect(page.getByTestId('frame-menu')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Complete sale' })).toHaveCount(0);
 });
 
+test('at 360 px the header title truncates before a closed register state and the account stays in view', async ({ page }) => {
+  await closeStoreRegister();
+  await signIn(page, 'Europe', false);
+  const state = page.getByTestId('header-register-state');
+  await expect(state).toHaveText('Choose register');
+  await page.getByTestId('register-bar-pill').click();
+  await page.getByTestId('register-picker-row-register-1').click();
+  await expect(state).toHaveText('Closed');
+  const heading = page.getByRole('heading', { name: / · Register 1$/ });
+  await expect(heading).toBeVisible();
+  const title = (await heading.boundingBox())!;
+  const stateBox = (await state.boundingBox())!;
+  // The state's pl-3 is the gap, so the title must end before the state's box (1 px for subpixel rounding).
+  expect(title.x + title.width).toBeLessThanOrEqual(stateBox.x + 1);
+  await expectAccountInViewport(page);
+});
+
 test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart tab counts items', async ({ page }) => {
   await signIn(page);
+  await expect(cartTab(page)).toHaveAccessibleName('Cart, New');
+  await expect(page.getByTestId('phone-tab-cart-new')).toHaveText('New');
   await expectAccountInViewport(page);
+  // v2's phone header names the store and register; an open register shows no register state.
+  await expect(page.getByRole('heading', { name: / · Register 1$/ })).toBeVisible();
+  await expect(page.getByTestId('header-register-state')).toHaveCount(0);
   await addE2E1(page);
+  await expect(page.getByTestId('phone-tab-cart-new')).toHaveCount(0);
   await addE2E1(page);
   const cart = cartTab(page);
   await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
@@ -43,14 +66,14 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
   expect([box.x, box.width]).toEqual([0, 360]);
   expect((await cart.boundingBox())!.height).toBeGreaterThanOrEqual(56);
   await cart.click();
-  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+  await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
   await expectAccountInViewport(page);
   await discount(page, 'line', 'Percent', '10');
   await discount(page, 'order', 'Amount', '0.50');
   const orderChip = page.getByRole('button', { name: /^Remove discount .*0\.50/ });
   await expect(orderChip).toBeVisible();
   await productsTab(page).click();
-  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
+  await expect(productsTab(page)).toHaveAttribute('aria-selected', 'true');
   await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
   await cart.click();
   const total = cartTotalRow(page, 'Total');
@@ -77,7 +100,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
   await cancel.click();
   for (const target of [total, checkout]) await expect(target).toBeInViewport();
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(3.88);
-  await expect(cart).toHaveAccessibleName('Cart');
+  await expect(cart).toHaveAccessibleName('Cart, New');
 });
 
 // ADR 0015 (#82 review): an automatic sign-out during a save that can't finish waits, with a note that fits at 360 px.
@@ -122,7 +145,7 @@ test('a keyboard-wedge scan in the cart view adds a product, and an unknown code
   await signIn(page);
   await addE2E1(page);
   await cartTab(page).click();
-  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+  await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
 
   // A tapped Pressable keeps focus in Chromium and activates on Enter; the scan's Enter must not also press it
   // (review follow-up). Set E2E-1 to quantity 2 in its quantity popover (TallyUI 3.19.0), which hands focus back to the
@@ -138,7 +161,7 @@ test('a keyboard-wedge scan in the cart view adds a product, and an unknown code
   await expect(page.getByTestId('quantity-popover')).toHaveCount(0);
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
-  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+  await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
 
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.type('ZZZ-NOPE', { delay: 10 });
