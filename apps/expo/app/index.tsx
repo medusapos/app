@@ -36,6 +36,7 @@ import { StripHeightContext } from '../components/store-refused';
 import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
+import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
 import { useCartSettings } from '../lib/cart-settings';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
@@ -372,7 +373,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // catalogue don't need a store to add lines, so only this pane is gated.
   const tenderPane = orders === null
     ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
-    : <Tender sale={sale} />;
+    : <Tender sale={sale} methods={TILL_PAYMENT_METHODS} />;
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
   const [userSheetOpen, setUserSheetOpen] = useState(false);
