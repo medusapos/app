@@ -5,7 +5,7 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
-  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText,
+  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
@@ -16,15 +16,18 @@ import {
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
+import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PriceCheckBanner } from '../components/price-check-banner';
 import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
+import { useCartSettings } from '../lib/cart-settings';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
@@ -63,8 +66,6 @@ const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
 const PHONE_BREAKPOINT = 600;
 // ADR 0009: from 600 px, products and cart stack in a column below 900 px and sit in a row from 900 px.
 const ROW_BREAKPOINT = 900;
-// WCPOS 2 Cart Settings › Quick Discounts default.
-const QUICK_DISCOUNTS = [5, 10, 15];
 
 // The rate arrives in parts per million (10 000 ppm = 1%).
 const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
@@ -302,6 +303,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [scanMiss, setScanMiss] = useState<string | null>(null);
   useEffect(() => { if (!wedgeActive) setScanMiss(null); }, [wedgeActive]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
   useWedgeScan(wedgeActive, scannerSettings, (code) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
@@ -339,6 +341,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const registerBar = (className?: string) => <TillRegisterBar online={online} onOpenPanel={() => setPanelOpen(true)}
     onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
   const catalogue = <View className="flex-1">
+    <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
@@ -354,34 +357,37 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       onViewStateError={(error) => console.warn('Could not load or save the catalogue view:', error)} />
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
+  const openOrdersRow = <View className="flex-row items-stretch">
+    {parked.length > 0 && <Pressable testID="parked-sales-chip" accessibilityRole="button"
+      accessibilityLabel={`Parked sales (${parked.length})`} onPress={() => setParkedOpen(true)}
+      className="h-14 justify-center border-t border-r border-border bg-card px-3">
+      <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
+    </Pressable>}
+    <View className="min-w-0 flex-1">
+      <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
+        onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
+    </View>
+  </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
+    {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
       {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
         className="min-h-11 justify-center">
         <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
       </Pressable>}
       <CartAddMenu sale={cartSale} />
+      <CartSettingsButton {...cartSettings} />
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
-      quickDiscounts={QUICK_DISCOUNTS}
+      quickDiscounts={cartSettings.settings.quickDiscounts}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
-    <View className="flex-row items-stretch">
-      {parked.length > 0 && <Pressable testID="parked-sales-chip" accessibilityRole="button"
-        accessibilityLabel={`Parked sales (${parked.length})`} onPress={() => setParkedOpen(true)}
-        className="h-14 justify-center border-t border-r border-border bg-card px-3">
-        <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
-      </Pressable>}
-      <View className="min-w-0 flex-1">
-        <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
-          onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
-      </View>
-    </View>
+    {cartSettings.settings.openOrders === 'bottom' && openOrdersRow}
     {switchRefusal ? <Text testID="open-sale-refusal" accessibilityRole="alert" className="px-3 py-1 text-destructive">{switchRefusal}</Text> : null}
     {voidOpen && <AlertDialog open onOpenChange={(next) => { if (!next) setVoidOpen(false); }}>
       <AlertDialogContent testID="cart-void-dialog">
@@ -401,9 +407,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
+      <Stack.Screen options={{
+        // v2's phone tender is "Checkout Order" with a close; MedusaPOS has no order number before payment, so the title carries none.
+        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
-        headerLeft: () => <FrameMenuButton />, headerRight: () => (
+        headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
         <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
@@ -411,6 +419,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
           {!phone && <Text className="text-foreground">{displayName}</Text>}
         </Pressable>
+        {phone && sale.stage.kind === 'tender' && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
+          disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
+          <View className="text-foreground"><XIcon size={24} /></View>
+        </IconButton>}
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
@@ -446,7 +458,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
           {onRetry && sale.idle ? <Pressable accessibilityRole="button" onPress={onRetry}><Text className="text-foreground underline">Retry</Text></Pressable> : null}
-          {!phone ? <View className="flex-1" style={{ flexDirection: width >= ROW_BREAKPOINT ? 'row' : 'column' }}>
+          {/* v2's Panel position; the column and phone layouts ignore it. */}
+          {!phone ? <View testID="till-panels" className="flex-1"
+            style={{ flexDirection: width >= ROW_BREAKPOINT ? (cartSettings.settings.cartSide === 'left' ? 'row-reverse' : 'row') : 'column' }}>
             {catalogue}
             <View className="flex-1 border-t border-border bg-card">
               {sale.stage.kind === 'cart' ? cart : tenderPane}

@@ -6,6 +6,8 @@ import { PortalHost } from '@tallyui/primitives';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { AppFrame } from '../components/app-frame';
+import { FrameDrawerHeader } from '../components/frame-drawer-header';
+import { AppScale } from '../components/app-scale';
 import { ClearLocalDataGate } from '../components/clear-local-data';
 import { LiveTabGate } from '../components/live-tab-gate';
 import { StorageHealth } from '../components/storage-health';
@@ -31,7 +33,7 @@ function GatedApp() {
   const background = useCSSVariable('--color-background');
   return (
     <LiveTabGate scope={session?.baseUrl}>
-      <StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null}><Stack
+      <StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null} drawerHeader={<FrameDrawerHeader />}><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
@@ -50,12 +52,12 @@ function GatedApp() {
 
 export default function RootLayout() {
   return (
-    <ClearLocalDataGate><SessionProvider>
+    <AppScale><ClearLocalDataGate><SessionProvider>
       <StatusBar style="auto" />
       <GatedApp />
       {/* One root host, after navigation and outside every gate (TallyUI's integration doc at 451a0ca): the
           register panel and movement sheet (Dialog) render here, above the screen's header. */}
       <PortalHost />
-    </SessionProvider></ClearLocalDataGate>
+    </SessionProvider></ClearLocalDataGate></AppScale>
   );
 }

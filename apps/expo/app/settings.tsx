@@ -1,7 +1,7 @@
 import { useRef, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { SettingsGroup, SettingsLayout, SettingsRow, Switch } from '@tallyui/components';
+import { SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ThemeTiles } from '../components/theme-tiles';
 import { FrameMenuButton } from '../components/app-frame';
@@ -12,6 +12,7 @@ import { DEFAULT_SCANNER_SETTINGS, useScannerSettings } from '../lib/scanner-set
 import { loadCachedSettings, loadCachedPricing } from '../lib/store-settings';
 import { useTillName } from '../lib/till-name';
 import { THEME_CHOICES, useThemeChoice } from '../lib/theme-choice';
+import { SCALE_CHOICES, useScaleChoice, type ScaleChoice } from '../lib/scale-choice';
 import { averageKeyMs, stripScanAffixes } from '../lib/use-wedge-scan';
 import { playScanBeep } from '../lib/scan-beep';
 
@@ -190,11 +191,25 @@ function ScannerSection({ session }: { session: Session }) {
   </SettingsGroup>;
 }
 
+const SCALE_LABELS: Record<ScaleChoice, string> = { auto: 'Auto', compact: 'Compact', regular: 'Regular', spacious: 'Spacious' };
+
 function ThemeSection() {
   const { choice, save } = useThemeChoice(defaultStorage());
+  const { choice: scale, save: saveScale } = useScaleChoice(defaultStorage());
   return <SettingsGroup title="Theme" description="Light, dark, follow this device's setting, or a colour theme. Saved on this till only." testID="settings-theme">
     <View className="p-4">
       <ThemeTiles choice={choice} choices={THEME_CHOICES} onChoose={(value) => { if (value !== choice) save(value); }} />
+    </View>
+    <View className="border-t border-border p-4 gap-2" testID="settings-scale">
+      <Text className="text-foreground font-medium">Scale</Text>
+      <Text className="text-sm text-muted-foreground">Auto follows the window size. Saved on this till only.</Text>
+      <ToggleGroup type="single" variant="outline" aria-label="Scale" value={scale} className="flex-wrap justify-start"
+        onValueChange={(value) => { if (value && value !== scale) saveScale(value as ScaleChoice); }}>
+        {SCALE_CHOICES.map((id) => <ToggleGroupItem key={id} value={id} testID={`scale-choice-${id}`}
+          className={scale === id ? 'bg-accent' : ''}>
+          <TallyText>{SCALE_LABELS[id]}</TallyText>
+        </ToggleGroupItem>)}
+      </ToggleGroup>
     </View>
   </SettingsGroup>;
 }
