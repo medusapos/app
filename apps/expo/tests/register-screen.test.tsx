@@ -12,7 +12,7 @@ import { APPROVAL_REQUIRED_TEXT } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
-import { COUNTING_DRAWER } from '../components/price-check-banner';
+import { COUNTING_DRAWER, PRICE_CHECK_ONLY } from '../components/price-check-banner';
 import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
@@ -824,6 +824,50 @@ describe('the register control', () => {
     expect(finish.id).toBe('register-column-finish-close-button');
     expect(document.activeElement).toBe(finish);
     expect(screen.queryByTestId('register-panel')).toBeNull();
+  });
+});
+
+// DEMO-PARITY row 17a.3: the phone Products view carries the wide screen's price-check strip (#330) above the catalogue.
+describe('the phone Products view (row 17a.3)', () => {
+  const productsSelected = () => screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected');
+
+  it.each([
+    ['unbound', false, 'Choose a register'],
+    ['bound, not open', true, 'Register closed'],
+  ])('%s: the Products tab shows "Price check only" above the catalogue', async (_label, bound, pillText) => {
+    setWindowWidth(360);
+    if (bound) await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
+    await mount();
+    await waitFor(() => expect(pill()).toBe(pillText));
+    expect(productsSelected()).toBe('true');
+    const banner = screen.getByTestId('price-check-banner');
+    expect(banner.textContent).toBe(PRICE_CHECK_ONLY);
+    expect(banner.compareDocumentPosition(screen.getByRole('searchbox')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('product-tile-Shirt')).toBeTruthy();
+  });
+
+  it('with a session open, the Products tab has no banner', async () => {
+    setWindowWidth(360);
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    expect(await screen.findByRole('button', { name: 'Open register panel' })).toBeTruthy();
+    expect(pill()).toBeNull();
+    expect(productsSelected()).toBe('true');
+    expect(screen.getByTestId('product-tile-Shirt')).toBeTruthy();
+    expect(screen.queryByTestId('price-check-banner')).toBeNull();
+  });
+
+  it('bound, not open: the banner goes with the Cart tab and comes back with Products', async () => {
+    setWindowWidth(360);
+    await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
+    await mount();
+    await waitFor(() => expect(pill()).toBe('Register closed'));
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(PRICE_CHECK_ONLY);
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Cart/ })); });
+    expect(screen.queryByTestId('price-check-banner')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: 'Products' })); });
+    expect(productsSelected()).toBe('true');
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(PRICE_CHECK_ONLY);
   });
 });
 
