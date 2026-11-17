@@ -45,7 +45,7 @@ vi.mock('expo-router', () => ({
   </> },
 }));
 // expo-localization's native module isn't available under vitest.
-vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
+vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }], getLocales: () => [{ languageTag: 'en-GB' }] }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
 // A fixed outbox value, except in the hung-save tests: those run the real OutboxProvider and useOutboxContext
 // (kept in `realOutbox`) over a stand-in for TallyUI's useOrderOutbox.
