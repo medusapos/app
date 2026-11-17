@@ -6,7 +6,7 @@ import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
 import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
-import { createOrderBuilder, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, DEFAULT_CATALOGUE_VIEW_STATE, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
@@ -14,6 +14,7 @@ import { storeConfig } from '../lib/config';
 import { DEFAULT_CART_SETTINGS, saveCartSettings } from '../lib/cart-settings';
 import { clearProductCache } from '../lib/product-cache';
 import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
+import { saveDefaultCustomer } from '../lib/default-customer';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
 import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
@@ -108,6 +109,16 @@ beforeEach(() => {
 });
 
 describe('ProductsScreen catalogue', () => {
+  it('starts the cart on the saved default customer', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace' });
+    try {
+      await mount();
+      expect(screen.getByText('Customer: Ada Lovelace')).toBeTruthy();
+    } finally {
+      saveDefaultCustomer(localStorage, 'https://store.test', null);
+    }
+  });
+
   it('shows a stopped product pull above the sales line', async () => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({
       pullNotice: { code: 'unauthorized', since: 0, fixedBy: 'till' },
@@ -215,8 +226,8 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
-      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : button.dataset.testid === 'user-menu' || button.dataset.testid === 'cart-settings-button' ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'In Stock', 'Apple', 'Zebra', 'Customer: Guest', 'Cart settings']);
+      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'cart-settings-button'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
+      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'In Stock', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -361,6 +372,124 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText(`Cashier: ${name ?? 'admin@store.test'}`)).toBeTruthy();
   });
 });
+describe('Product settings sheet', () => {
+  const viewKey = 'medusapos.catalogue.https://store.test';
+  const settingsKey = 'medusapos.product-settings.https://store.test';
+  const click = (id: string) => fireEvent.click(screen.getByTestId(`product-settings-${id}`));
+  const tiles = () => screen.queryAllByTestId(/^product-tile-/).map((tile) => tile.dataset.testid);
+  beforeEach(() => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [
+      { id: 'apple', title: 'Apple', status: 'published', categories: [{ id: 'fruit', name: 'Fruit' }],
+        variants: [{ id: 'apple-one', title: 'One size', manage_inventory: true, inventory_quantity: 5,
+          prices: [{ amount: 5, currency_code: 'eur' }] }] },
+      { id: 'zebra', title: 'Zebra', status: 'published', categories: [{ id: 'fruit', name: 'Fruit' }],
+        variants: [{ id: 'zebra-one', title: 'One size', manage_inventory: true, inventory_quantity: 0,
+          prices: [{ amount: 20, currency_code: 'eur' }] }] },
+    ] }));
+  });
+
+  it('opens and closes the sheet, switches to Table and shares the catalogue controls and persistence', async () => {
+    await mount();
+    expect(screen.getByRole('button', { name: 'Product settings' })).toBe(screen.getByTestId('product-settings-button'));
+    click('button');
+    expect(within(screen.getByTestId('product-settings-sheet')).getByText('Product settings')).toBeTruthy();
+    for (const option of screen.getAllByTestId(/^product-settings-(view|columns|sort|variations)-/)) {
+      expect(option.hasAttribute('aria-selected')).toBe(true);
+    }
+    expect(screen.getByTestId('product-settings-sort-name').getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByTestId('product-settings-sort-asc').getAttribute('aria-selected')).toBe('false');
+    click('view-table');
+    expect(screen.getByTestId('product-row-apple')).toBeTruthy();
+    expect(tiles()).toEqual([]);
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, view: 'table' });
+    click('close');
+    expect(screen.queryByTestId('product-settings-sheet')).toBeNull();
+    fireEvent.click(screen.getByTestId('product-table-sort-price'));
+    fireEvent.click(screen.getByTestId('category-nav-fruit'));
+    fireEvent.click(screen.getByTestId('view-toggle-grid'));
+    click('button');
+    expect(screen.getByTestId('product-settings-view-grid').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('product-settings-sort-price').getAttribute('aria-selected')).toBe('true');
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE,
+      categoryId: 'fruit', sort: { field: 'price', dir: 'asc' } });
+  });
+
+  it('keeps Show out-of-stock products and the In Stock chip inverse in both directions', async () => {
+    await mount();
+    click('button');
+    expect(screen.getByRole('switch', { name: 'Show out-of-stock products', checked: true })).toBeTruthy();
+    click('out-of-stock');
+    expect(screen.getByRole('button', { name: 'In Stock', pressed: true })).toBeTruthy();
+    expect(tiles()).toEqual(['product-tile-Apple']);
+    click('close');
+    fireEvent.click(screen.getByRole('button', { name: 'In Stock' }));
+    click('button');
+    expect(screen.getByRole('switch', { name: 'Show out-of-stock products', checked: true })).toBeTruthy();
+    expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+    click('close');
+    fireEvent.click(screen.getByRole('button', { name: 'In Stock' }));
+    click('button');
+    expect(screen.getByRole('switch', { name: 'Show out-of-stock products', checked: false })).toBeTruthy();
+    click('out-of-stock');
+    expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
+  });
+
+  it('sorts grid tiles by Price then Descending and defaults a direction-only selection to Name', async () => {
+    await mount();
+    click('button');
+    click('sort-desc');
+    expect(JSON.parse(localStorage.getItem(viewKey)!).sort).toEqual({ field: 'name', dir: 'desc' });
+    click('restore');
+    click('sort-price');
+    expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+    click('sort-desc');
+    expect(tiles()).toEqual(['product-tile-Zebra', 'product-tile-Apple']);
+    expect(JSON.parse(localStorage.getItem(viewKey)!).sort).toEqual({ field: 'price', dir: 'desc' });
+  });
+
+  it('saves Popover and tile size, then restores defaults while retaining the category', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('category-nav-fruit'));
+    click('button');
+    click('variations-popover');
+    expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'popover' });
+    expect(screen.getByTestId('product-settings-variations-popover').getAttribute('aria-selected')).toBe('true');
+    click('columns-4');
+    expect(JSON.parse(localStorage.getItem(viewKey)!).gridColumns).toBe(4);
+    click('view-table');
+    click('sort-price');
+    click('sort-desc');
+    click('out-of-stock');
+    click('restore');
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: 'fruit' });
+    expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list' });
+    expect(screen.getByRole('switch', { name: 'Show out-of-stock products', checked: true })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
+    for (const id of ['view-grid', 'columns-auto', 'variations-list']) {
+      expect(screen.getByTestId(`product-settings-${id}`).getAttribute('aria-selected')).toBe('true');
+    }
+    expect(screen.getByTestId('product-settings-sort-price').getAttribute('aria-selected')).toBe('false');
+    expect(screen.getByTestId('product-settings-sort-desc').getAttribute('aria-selected')).toBe('false');
+    expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+  });
+
+  it('loads saved preferences, but keeps a phone on the grid and hides View Mode even after restore', async () => {
+    setWindowWidth(390, 800);
+    localStorage.setItem(viewKey, JSON.stringify({ ...DEFAULT_CATALOGUE_VIEW_STATE, view: 'table', gridColumns: 3, categoryId: 'fruit' }));
+    localStorage.setItem(settingsKey, JSON.stringify({ variations: 'popover' }));
+    await mount();
+    expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+    click('button');
+    expect(screen.queryByText('View Mode')).toBeNull();
+    expect(screen.queryByTestId('product-settings-view-table')).toBeNull();
+    expect(screen.getByTestId('product-settings-columns-3').getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('product-settings-variations-popover').getAttribute('aria-selected')).toBe('true');
+    click('restore');
+    expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: 'fruit', view: 'grid' });
+    expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+  });
+});
+
 afterEach(() => {
   cleanup();
   localStorage.removeItem('medusapos.cart.https://store.test');

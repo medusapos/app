@@ -117,14 +117,20 @@ describe('ReportsScreen', () => {
   it('lists today\'s closures of the bound register, newest first, with variance', async () => {
     const closures = registerCollections(store.orders).closures;
     await closures.insert(closure({ variance: { cash: -200 }, counted: { cash: 800 }, closed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }));
-    await closures.insert(closure({ id: 'c2', number: 2 }));
+    await closures.insert(closure({ id: 'c2', number: 2, breakdowns: { closed_by_name: 'Ana' } }));
     await closures.insert(closure({ id: 'c3', register_id: 'register-2' }));
     mount();
     await screen.findByTestId('closure-row-c2');
-    expect(screen.getAllByTestId(/^closure-row-/).map((row) => row.getAttribute('data-testid'))).toEqual(['closure-row-c2', 'closure-row-c1']);
-    expect(within(screen.getByTestId('closure-row-c1')).getByText('Closure #1')).toBeTruthy();
-    expect(screen.getByTestId('closure-variance-c1').textContent).toBe(`Short ${closureContext('EUR', { name: 'Test shop' }).formatMoney('2.00')}`);
-    expect(screen.getByTestId('closure-variance-c2').textContent).toBe('Exact');
+    expect(screen.getAllByTestId(/^closure-row-[^-]+$/).map((row) => row.getAttribute('data-testid'))).toEqual(['closure-row-c2', 'closure-row-c1']);
+    const { formatMoney } = closureContext('EUR', { name: 'Test shop' });
+    expect(screen.getByTestId('closure-row-c1-number').textContent).toBe('#1');
+    expect(screen.getByTestId('closure-row-c1-register').textContent).toBe('Register 1');
+    expect(screen.getByTestId('closure-row-c1-counted').textContent).toBe(formatMoney('8.00'));
+    expect(screen.getByTestId('closure-row-c1-variance').textContent).toBe(`${formatMoney('2.00')} short`);
+    expect(screen.getByTestId('closure-row-c2-variance').textContent).toBe('Exact');
+    expect(screen.getByTestId('closure-row-c2-cashier').textContent).toBe('Ana');
+    for (const label of ['Closure', 'Closed', 'Register', 'Cashier', 'Sales', 'Counted', 'Variance'])
+      expect(within(screen.getByTestId('closures-table')).getByText(label)).toBeTruthy();
     expect(screen.queryByTestId('closure-row-c3')).toBeNull();
   });
   it('Export CSV downloads today\'s rows and reports a failure', async () => {

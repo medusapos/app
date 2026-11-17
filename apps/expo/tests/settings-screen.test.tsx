@@ -7,9 +7,16 @@ import { DEFAULT_SCANNER_SETTINGS, loadScannerSettings, useScannerSettings } fro
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { loadTillName, useTillName } from '../lib/till-name';
+import { loadDefaultCustomer } from '../lib/default-customer';
 import SettingsScreen from '../app/settings';
 import { AppFrame } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
+
+const { searchCustomers } = vi.hoisted(() => ({ searchCustomers: vi.fn().mockResolvedValue([]) }));
+vi.mock('../lib/pos-connector', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/pos-connector')>(),
+  createPosConnector: () => ({ id: 'medusa', searchCustomers }),
+}));
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
@@ -58,12 +65,30 @@ function Reader({ label }: { label: string }) {
 }
 
 describe('SettingsScreen', () => {
+  it('saves a picked default customer and clears it back to Guest', async () => {
+    const ada = { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' };
+    searchCustomers.mockResolvedValueOnce([ada]);
+    vi.useFakeTimers();
+    await mount();
+    expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Guest');
+    fireEvent.change(screen.getByTestId('customer-picker-search'), { target: { value: 'ada' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    fireEvent.click(screen.getByText('Ada Lovelace'));
+    expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Ada Lovelace');
+    expect(loadDefaultCustomer(localStorage, baseUrl)).toEqual(ada);
+    fireEvent.click(screen.getByTestId('settings-default-customer-clear'));
+    expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Guest');
+    expect(loadDefaultCustomer(localStorage, baseUrl)).toBeNull();
+  });
+
   it('on a wide window shows section navigation and only the chosen section', async () => {
     setWindowWidth(1024);
     try {
       await mount();
       expect(within(screen.getByTestId('settings-nav')).getAllByRole('button').map((item) => item.textContent))
-        .toEqual(['Store', 'Register', 'Scanner', 'Theme', 'Danger zone']);
+        .toEqual(['Store', 'Register', 'Customer', 'Scanner', 'Theme', 'Danger zone']);
+      expect(within(screen.getByTestId('settings-nav')).getAllByRole('button').slice(1, 4).map((item) => item.dataset.testid))
+        .toEqual(['settings-nav-register', 'settings-nav-customer', 'settings-nav-scanner']);
       expect(screen.getByTestId('settings-store')).toBeTruthy();
       expect(screen.queryByLabelText('Minimum characters')).toBeNull();
       fireEvent.click(screen.getByTestId('settings-nav-scanner'));

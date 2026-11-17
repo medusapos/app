@@ -1,25 +1,21 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { SalesRoom, type SalesFilters } from '@tallyui/components';
-import { buildClosureDocument, comparisonRange, exportCsv, minorToDecimal, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
+import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
+import { ClosureTable } from '../components/closure-table';
 import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext } from '../components/register-close';
+import { loadApprovers } from '../lib/approval';
 import { printXReport, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
 import { useRegister } from '../lib/register-context';
-import { closureScopeFor, closuresCsvFilename, closureVarianceMinor, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures } from '../lib/reports';
+import { closureScopeFor, closuresCsvFilename, closureTableRow, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures } from '../lib/reports';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
-
-const Row = ({ label, value, testID }: { label: string; value: ReactNode; testID?: string }) =>
-  <View className="min-h-11 flex-row items-center justify-between gap-3">
-    <Text className="shrink-0 text-muted-foreground">{label}</Text>
-    <Text testID={testID} className="shrink text-right tabular-nums">{value}</Text>
-  </View>;
 
 export default function ReportsScreen() {
   const { session } = useSession();
@@ -57,6 +53,7 @@ export default function ReportsScreen() {
   if (!session) return <Redirect href="/login" />;
   const scope = closureScopeFor({ today, boundRegisterId, storeKey: session.baseUrl });
   const rows = selectClosureRows(closures, scope, 'device');
+  const registerNames = Object.fromEntries(registers.map((r) => [r.id, r.name]));
   const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
 
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
@@ -95,24 +92,16 @@ export default function ReportsScreen() {
       </> : null}
       <Text testID="closures-heading" className="text-lg font-semibold text-foreground">Closures</Text>
       {orders !== null && ctx ? <>
-        {rows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text> : rows.map((row) => {
-          const { closure: z, fiscal } = buildClosureDocument(row, ctx);
-          const variance = closureVarianceMinor(row);
-          return <View key={row.id} testID={`closure-row-${row.id}`}>
-            <Text className="font-semibold">{`Closure #${fiscal.receipt_number}`}</Text>
-            <Row label="Closed" value={z.closed_at.datetime} />
-            <Row label="Sales" value={z.period_sales_total_display} />
-            <Row label="Variance" testID={`closure-variance-${row.id}`} value={variance === 0 ? 'Exact'
-              : `${variance > 0 ? 'Over' : 'Short'} ${ctx.formatMoney(minorToDecimal(Math.abs(variance), ctx.exponent))}`} />
-          </View>;
-        })}
+        {rows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text>
+          : <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx}
+            rows={rows.map((row) => closureTableRow(row, registerNames))} />}
         {Platform.OS === 'web' && rows.length > 0 ? <>
           <Pressable testID="closures-export" accessibilityRole="button"
             className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
             onPress={() => {
               try {
                 downloadCsv(closuresCsvFilename(scope), exportCsv(rows, ctx.exponent, csvLabel,
-                  Object.fromEntries(registers.map((r) => [r.id, r.name])), storeName));
+                  registerNames, storeName));
                 setExportError(false);
               } catch { setExportError(true); }
             }}>
@@ -120,7 +109,8 @@ export default function ReportsScreen() {
           </Pressable>
           {exportError ? <Text testID="closures-export-error" accessibilityRole="alert">Export failed. Try again.</Text> : null}
         </> : null}
-        {boundRegisterId ? <EarlierClosures session={session} registerId={boundRegisterId} today={today} ctx={ctx} /> : null}
+        {boundRegisterId ? <EarlierClosures session={session} registerId={boundRegisterId} today={today} ctx={ctx}
+          registerName={registerName ?? ''} cashierNames={loadApprovers(defaultStorage(), session.baseUrl)} /> : null}
       </> : null}
     </View>
   </ScrollView>;
