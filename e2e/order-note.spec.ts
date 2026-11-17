@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test,
+import { addE2E1, adminToken, captureCommands, cartTab, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test,
   type PostedCommand } from './helpers';
 
 // The sale's note (v2 parity row 8, ADR 0024): CartNoteInput in the cart, kept with a parked sale, shown on the
@@ -11,8 +11,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
   test.describe(`at ${viewport.width} × ${viewport.height}`, () => {
     test.use({ viewport });
     const phone = viewport.width < 600;
-    // On a phone the cart, and so the note, shows in the cart view, which the cart bar opens.
-    const openCart = async (page: Page) => { if (phone) await page.getByRole('button', { name: /^Open cart, / }).click(); };
+    // On a phone the cart, and so the note, shows in the cart view, which the Cart tab opens.
+    const openCart = async (page: Page) => { if (phone) await cartTab(page).click(); };
     const noteField = (page: Page) => page.getByPlaceholder('Order note', { exact: true });
     const addNote = async (page: Page, note: string) => {
       await page.getByText('Add order note', { exact: true }).click();
