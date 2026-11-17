@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { openRegister, signIn, test } from './helpers';
+import { openRegister, test } from './helpers';
 
 const products = /Up to date · \d[\d,.  ]* products/;
 const timeout = process.env.E2E_BACKEND_URL !== undefined ? 5 * 60_000 : undefined;
@@ -9,10 +9,6 @@ test('one click on /demo reaches the POS with products', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('console', (message) => { if (message.type() === 'error') consoleErrors.push(message.text()); });
   page.on('pageerror', (error) => pageErrors.push(error.message));
-  await page.addInitScript(() => {
-    (window as any).__opened = [];
-    window.open = (u?: string | URL) => { (window as any).__opened.push(String(u)); return null; };
-  });
   await page.goto('/demo');
   await expect(page.getByRole('heading', { name: 'Medusa POS demo store', exact: true })).toBeVisible();
   await expect(page.getByText('cashier@demo.medusapos.com · demo1234', { exact: true })).toBeVisible();
@@ -20,16 +16,6 @@ test('one click on /demo reaches the POS with products', async ({ page }) => {
   await page.getByTestId('demo-enter-cashier').click();
   await expect(page.getByText(products)).toBeVisible({ timeout });
   await expect(page.getByText('Set up this till', { exact: true })).not.toBeVisible();
-  await expect(page.getByTestId('demo-banner')).toBeVisible();
-  await page.getByTestId('demo-banner-site').click();
-  await page.getByTestId('demo-banner-quick-start').click();
-  await page.getByTestId('demo-banner-github').click();
-  expect(await page.evaluate(() => (window as any).__opened)).toEqual([
-    'https://medusapos.com',
-    'https://medusapos.com/docs/quick-start',
-    'https://github.com/medusapos/app',
-  ]);
-  await page.getByTestId('demo-banner-dismiss').click();
   await expect(page.getByTestId('demo-banner')).toHaveCount(0);
   expect(consoleErrors).toEqual([]);
   expect(pageErrors).toEqual([]);
@@ -107,11 +93,6 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await expect(page.getByTestId('tender-method-external')).toBeVisible();
   await expect(page.getByTestId('tender-method-cash')).toBeVisible();
   await expect(page.getByTestId('tender-take')).toBeVisible();
-});
-
-test('a non-demo account does not see the demo banner', async ({ page }) => {
-  await signIn(page);
-  await expect(page.getByTestId('demo-banner')).toHaveCount(0);
 });
 
 test('demo page works at phone width', async ({ page }) => {
