@@ -8,6 +8,7 @@ import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { loadTillName, useTillName } from '../lib/till-name';
 import { loadDefaultCustomer } from '../lib/default-customer';
+import { loadDefaultCustomerIsCashier } from '../lib/cashier-customer';
 import SettingsScreen from '../app/settings';
 import { AppFrame } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
@@ -79,6 +80,30 @@ describe('SettingsScreen', () => {
     fireEvent.click(screen.getByTestId('settings-default-customer-clear'));
     expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Guest');
     expect(loadDefaultCustomer(localStorage, baseUrl)).toBeNull();
+  });
+
+  it('turns on Default customer is cashier and says which Medusa customer new sales start on', async () => {
+    await mount();
+    const toggle = screen.getByRole('switch', { name: 'Default customer is cashier' });
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    expect(screen.queryByTestId('settings-default-customer-cashier-status')).toBeNull();
+    searchCustomers.mockResolvedValueOnce([{ id: 'cus_x', name: 'X Admin', email: 'xadmin@store.test' },
+      { id: 'cus_admin', name: 'Store Admin', email: 'admin@store.test' }]);
+    await act(async () => { fireEvent.click(toggle); });
+    expect(loadDefaultCustomerIsCashier(localStorage, baseUrl)).toBe(true);
+    expect(searchCustomers).toHaveBeenCalledWith(expect.anything(), 'admin@store.test');
+    expect(screen.getByTestId('settings-default-customer-cashier-status').textContent)
+      .toBe('New sales start on Store Admin, the customer in Medusa with your email.');
+    expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Guest');
+  });
+
+  it('says when no Medusa customer has the cashier\'s email', async () => {
+    searchCustomers.mockResolvedValueOnce([{ id: 'cus_x', name: 'X Admin', email: 'xadmin@store.test' }]);
+    localStorage.setItem('medusapos.default-customer-is-cashier.' + baseUrl, 'true');
+    await mount();
+    expect(screen.getByRole('switch', { name: 'Default customer is cashier' }).getAttribute('aria-checked')).toBe('true');
+    expect(screen.getByTestId('settings-default-customer-cashier-status').textContent)
+      .toBe('No customer in Medusa has your email, admin@store.test. New sales start on the default customer above.');
   });
 
   it('on a wide window shows section navigation and only the chosen section', async () => {

@@ -17,6 +17,7 @@ import { usePrintingSettings } from '../lib/printing-settings';
 import { loadCachedSettings, loadCachedPricing } from '../lib/store-settings';
 import { useTillName } from '../lib/till-name';
 import { useDefaultCustomer } from '../lib/default-customer';
+import { useCashierCustomer } from '../lib/cashier-customer';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { THEME_CHOICES, useThemeChoice } from '../lib/theme-choice';
 import { SCALE_CHOICES, useScaleChoice, type ScaleChoice } from '../lib/scale-choice';
@@ -162,6 +163,13 @@ function DefaultCustomerSection({ session }: { session: Session }) {
   const connector = useMemo(() => createPosConnector(), []);
   const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
     headers: authHeaders(session.token) }), [connector.id, session.baseUrl, session.token]);
+  const onError = (error: unknown) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') reportUnauthorized(); };
+  const cashier = useCashierCustomer(defaultStorage(), session,
+    connector.searchCustomers ? (q) => connector.searchCustomers!(context, q) : undefined, onError);
+  const cashierStatus = { off: null, resolving: 'Looking for your customer in Medusa…',
+    found: `New sales start on ${cashier.customer?.name}, the customer in Medusa with your email.`,
+    none: `No customer in Medusa has your email, ${session.email}. New sales start on the default customer above.`,
+    offline: `Couldn't check Medusa. New sales start on ${cashier.customer?.name}.` }[cashier.status];
   return <SettingsGroup title="Default customer" testID="settings-default-customer"
     description="Every new sale on this till starts with this customer. A cashier can still change it on a sale.">
     <View className="gap-4 p-4">
@@ -177,6 +185,13 @@ function DefaultCustomerSection({ session }: { session: Session }) {
         <Text className="text-foreground">Use Guest</Text>
       </Pressable>}
     </View>
+    {connector.searchCustomers && <SettingsRow label="Default customer is cashier" className="border-t border-border" action={
+      <Switch accessibilityLabel="Default customer is cashier" testID="settings-default-customer-is-cashier"
+        checked={cashier.on} onCheckedChange={cashier.setOn} />
+    } />}
+    {connector.searchCustomers && cashierStatus ? <View className="px-4 pb-4">
+      <Text testID="settings-default-customer-cashier-status" className="text-sm text-muted-foreground">{cashierStatus}</Text>
+    </View> : null}
   </SettingsGroup>;
 }
 // Mirrors v2's "Auto — Print Dialog"; receipts print only through window.print() today.

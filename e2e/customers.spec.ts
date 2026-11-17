@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, createAdminCustomer, inventoryLevel, openArea, ordersByClientId, setInventoryLevel, signIn, tenderCash,
-  test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, createAdminCustomer, credentials, inventoryLevel, openArea, ordersByClientId, setInventoryLevel, signIn,
+  tenderCash, test } from './helpers';
 
 type Sale = { clientOrderId: string; customer: { customerId: string } };
 async function payCash(page: Page) {
@@ -93,4 +93,27 @@ test('a sale with the Settings default customer reaches Medusa with the customer
       await setInventoryLevel(token, level.inventoryItemId, level.locationId, level.stockedQuantity);
     }
   }
+});
+
+test('the Default customer is cashier switch starts the sale on the signed-in cashier\'s Medusa customer', async ({ page }) => {
+  const token = await adminToken();
+  type Found = { id: string; email: string; first_name: string | null; last_name: string | null; company_name: string | null };
+  const response = await fetch(`${backend}/admin/customers?q=${encodeURIComponent(credentials.email)}`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  const { customers } = await response.json() as { customers: Found[] };
+  let cashier = customers.find((customer) => customer.email.toLowerCase() === credentials.email.toLowerCase());
+  if (!cashier) {
+    const id = await createAdminCustomer(token, credentials.email, 'E2E', 'Cashier');
+    cashier = { id, email: credentials.email, first_name: 'E2E', last_name: 'Cashier', company_name: null };
+  }
+  // The app's name for a Medusa customer: first and last name, else company, else email.
+  const name = [cashier.first_name, cashier.last_name].filter(Boolean).join(' ') || cashier.company_name || cashier.email;
+  await signIn(page);
+  await openArea(page, 'Settings');
+  await page.getByTestId('settings-nav-customer').click();
+  await page.getByRole('switch', { name: 'Default customer is cashier', exact: true }).click();
+  await expect(page.getByTestId('settings-default-customer-cashier-status'))
+    .toHaveText(`New sales start on ${name}, the customer in Medusa with your email.`);
+  await openArea(page, 'Sale');
+  await expect(page.getByRole('button', { name: `Customer: ${name}`, exact: true })).toBeVisible();
 });
