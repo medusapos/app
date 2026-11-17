@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, type ComponentProps } from 'react';
-import { Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
+import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
@@ -176,6 +176,8 @@ function DefaultCustomerSection({ session }: { session: Session }) {
     </View>
   </SettingsGroup>;
 }
+// Mirrors v2's "Auto — Print Dialog"; receipts print only through window.print() today.
+const printMethodLabel = () => Platform.OS === 'web' ? 'Print dialog (browser)' : 'Not available on this device';
 function PrintingSection({ session }: { session: Session }) {
   const { settings, save } = usePrintingSettings(defaultStorage(), session.baseUrl);
   return <SettingsGroup title="Printing" testID="settings-printing"
@@ -187,6 +189,9 @@ function PrintingSection({ session }: { session: Session }) {
     <View className="px-4 pb-4">
       <Text className="text-sm text-muted-foreground">The print window opens after each sale.</Text>
     </View>
+    <SettingsRow label="Print method" className="border-t border-border" action={
+      <Text testID="settings-printing-method" className="max-w-40 text-right text-sm text-foreground">{printMethodLabel()}</Text>
+    } />
   </SettingsGroup>;
 }
 function ScannerSection({ session }: { session: Session }) {
