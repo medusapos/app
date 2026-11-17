@@ -678,16 +678,20 @@ function savedSale(): PosOrder {
 }
 
 describe('Orders screen and sync status', () => {
-  it('shows only Recent when no orders need attention', async () => {
+  it('shows no attention table when no orders need attention', async () => {
     const order = savedSale();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
       order, { ...order, id: 'applied', syncStatus: 'applied', warnings: [] },
     ] });
     await mount(true, true);
-    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Recent']);
+    expect(screen.queryByText('Needs attention')).toBeNull();
+    expect(screen.queryByTestId('orders-attention')).toBeNull();
+    const table = within(screen.getByTestId('orders-table'));
+    expect(table.getByTestId(`orders-table-row-${order.id}`)).toBeTruthy();
+    expect(table.getByTestId('orders-table-row-applied')).toBeTruthy();
     expect(screen.getByRole('link', { name: 'Send feedback' })).toBeTruthy();
   });
-  it('lists attention first, including errors, both warnings, totals and server display IDs', async () => {
+  it('lists rejected and warned sales under attention and every sale in the table, with statuses, totals and server display IDs', async () => {
     const order = savedSale();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
       { ...order, id: 'rejected', syncStatus: 'rejected', error: { code: 'invalid', message: 'Unknown variant' } },
@@ -697,16 +701,18 @@ describe('Orders screen and sync status', () => {
           { code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }, order,
     ] });
     await mount(true, true);
-    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Recent']);
-    for (const label of ["The online store refused this sale. Ask the store owner to look at the till's sync log.", '2 sold without stock: Blue shirt', 'Store total €10.00 vs POS €12.00', 'Order warned · #42 · 3 items']) {
-      expect(screen.getAllByText(label)).toHaveLength(2);
+    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention']);
+    // needsAttention takes the refused sale and the applied one with store warnings; the plain pending sale stays out.
+    const attention = within(screen.getByTestId('orders-attention'));
+    expect(attention.getByTestId('orders-attention-row-rejected')).toBeTruthy();
+    expect(attention.getByTestId('orders-attention-row-warned')).toBeTruthy();
+    expect(screen.queryByTestId(`orders-attention-row-${order.id}`)).toBeNull();
+    const status = (id: string) => screen.getByTestId(`orders-table-row-${id}-status`).textContent;
+    expect([status('rejected'), status('warned'), status(order.id)]).toEqual(['Cancelled', 'Completed', 'Pending']);
+    expect(screen.getByTestId('orders-table-row-warned-number').textContent).toContain('#42');
+    for (const id of ['rejected', 'warned', order.id]) {
+      expect(screen.getByTestId(`orders-table-row-${id}-total`).textContent).toBe('€12.00');
     }
-    expect(screen.getAllByText('Order rejected · 1 item')).toHaveLength(2);
-    expect(screen.getAllByText(`Order ${order.id.slice(-8)} · 1 item`)).toHaveLength(1);
-    const dateAndTotal = `${new Date(order.createdAt).toLocaleString()} · €12.00`;
-    expect(screen.getByText(`${dateAndTotal} · Waiting to sync`)).toBeTruthy();
-    expect(screen.getAllByText(`${dateAndTotal} · Synced`)).toHaveLength(2);
-    expect(screen.getAllByText(`${dateAndTotal} · Not accepted`)).toHaveLength(2);
   });
 
   it.each(['invalid', 'idempotency_mismatch', 'warnings'])('offers Retry only for requeueable rejections: %s', async (kind) => {
@@ -724,9 +730,6 @@ describe('Orders screen and sync status', () => {
       expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
       expect(requeue).not.toHaveBeenCalled();
     }
-    // In both Needs attention and Recent (#314).
-    expect(screen.queryAllByText("The online store has a different sale under this sale's number. Don't send it again; ask the store owner to compare the two."))
-      .toHaveLength(kind === 'idempotency_mismatch' ? 2 : 0);
   });
 
   it.each([0, 1])('blocks repeat Retry taps until requeue resolves %s or the order leaves rejected', async (result) => {
