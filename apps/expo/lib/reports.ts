@@ -1,5 +1,5 @@
 import type { SalesFilters } from '@tallyui/components';
-import { clampClosureScope, closureVariance, comparisonRange, inRange, minorToDecimal, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureContext, type ClosureScope, type PosOrder, type SalesFigures } from '@tallyui/pos';
+import { clampClosureScope, closureVariance, comparisonRange, inRange, minorToDecimal, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureContext, type ClosureScope, type DatePreset, type DayRange, type PosOrder, type SalesFigures } from '@tallyui/pos';
 import { dayBefore, type ClosureHistoryEntry } from './closure-history';
 
 export function localDay(at: Date): string {
@@ -37,6 +37,29 @@ export function closureScopeFor(input: { today: string; boundRegisterId: string 
   return clampClosureScope({
     from: input.today, to: input.today, registerId: input.boundRegisterId || 'unbound', storeKey: input.storeKey,
   }, input.today);
+}
+
+/** Reports > Closures filters; `registerId: null` is this till's register. */
+export type ClosureFilters = { preset: DatePreset | 'custom'; range: DayRange; registerId: string | null; cashierId: string | null };
+
+/** The days the store's closure list covers: the bound register's today comes from the till's own table instead. */
+export function closureHistoryWindow(range: DayRange, today: string, ownRegister: boolean): { from: string; to: string } | null {
+  const yesterday = dayBefore(today);
+  const to = ownRegister && yesterday < range.to ? yesterday : range.to;
+  return range.from > to ? null : { from: range.from, to };
+}
+
+export function showsTodayClosures(range: DayRange, today: string, ownRegister: boolean): boolean {
+  return ownRegister && range.from <= today && today <= range.to;
+}
+
+export function byCashier<T>(rows: T[], cashierId: string | null, cashierOf: (row: T) => string | null | undefined): T[] {
+  return cashierId === null ? rows : rows.filter((row) => cashierOf(row) === cashierId);
+}
+
+export function closureCashierOptions(ids: Iterable<string>, names: Record<string, string>): { value: string; label: string }[] {
+  return [...new Set(ids)].map((id) => ({ value: id, label: names[id] || id }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 export function closureVarianceMinor(row: Pick<Closure, 'variance'>): number {

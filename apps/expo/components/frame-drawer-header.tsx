@@ -14,6 +14,15 @@ export function storeRegisterTitle(storeName: string, boundRegisterId: string | 
   return typeof boundRegisterId === 'string' ? `${storeName} · ${registerName ?? 'Register'}` : storeName;
 }
 
+// v2's phone header shows the register's state when it is not open: "● Closed" (row 17a.2). Absent while the
+// binding is unknown or the register is open.
+export function phoneRegisterState(boundRegisterId: string | null | undefined, status: string | null | undefined): 'Closed' | 'Counting' | 'Choose register' | null {
+  if (boundRegisterId === undefined) return null;
+  if (boundRegisterId === null) return 'Choose register';
+  const label = registerStateLabel(status);
+  return label === 'Open' ? null : label;
+}
+
 export function FrameDrawerHeader() {
   const { session } = useSession();
   const { register, boundRegisterId, registerName } = useRegister();

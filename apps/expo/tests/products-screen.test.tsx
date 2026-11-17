@@ -923,7 +923,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     act(() => { fireEvent.click(close); });
     expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00']);
-    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Cart');
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Test shop · Register 1');
     expect(screen.queryByTestId('tender-close')).toBeNull();
   });
 
@@ -978,6 +978,45 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
     expect(search()).toBeTruthy();
   }, 15000);
+
+  // v2's phone header (row 17a.2): the store and register on Products and Cart, the register state only when not open.
+  const title = () => screen.getByTestId('screen-title').getAttribute('data-title');
+  const tab = (name: RegExp) => screen.getByRole('tab', { name });
+
+  it('at 360 wide with an open register the title names the store and register on both tabs, with no register state', async () => {
+    setWindowWidth(360);
+    await mount();
+    expect(title()).toBe('Test shop · Register 1');
+    fireEvent.click(tab(/^Cart/));
+    expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('true');
+    expect(title()).toBe('Test shop · Register 1');
+    expect(screen.queryByTestId('header-register-state')).toBeNull();
+    expect(screen.getByTestId('user-menu')).toBeTruthy();
+  });
+
+  it('at 360 wide with a closed register the header shows Closed, and pressing it opens the Cart tab', async () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture,
+      register: { ...fixture.register, session: { ...fixture.register.session!, status: 'closed' } } });
+    setWindowWidth(360);
+    await mount();
+    const control = screen.getByTestId('header-register-state');
+    expect(control.textContent).toBe('Closed');
+    expect(screen.getByRole('button', { name: 'Register: Closed' })).toBe(control);
+    // A closed register opens the cart on a phone by itself, so go back to Products first: the press must bring it back.
+    fireEvent.click(tab(/^Products/));
+    expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('false');
+    act(() => { fireEvent.click(control); });
+    expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('at 360 wide with no register chosen the header reads Choose register', async () => {
+    vi.mocked(useRegister).mockReturnValue({ ...openRegisterFixture(), boundRegisterId: null });
+    setWindowWidth(360);
+    await mount();
+    expect(screen.getByTestId('header-register-state').textContent).toBe('Choose register');
+    expect(screen.getByRole('button', { name: 'Choose register' })).toBe(screen.getByTestId('header-register-state'));
+  });
 
   it('at 1280 wide shows the catalogue and cart with no bar; the discount opens from the menu and pay is pinned', async () => {
     await mount();

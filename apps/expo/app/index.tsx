@@ -5,7 +5,7 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
+  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
@@ -23,7 +23,8 @@ import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
-import { storeRegisterTitle } from '../components/frame-drawer-header';
+import { phoneRegisterState, storeRegisterTitle } from '../components/frame-drawer-header';
+import { HeaderRegisterState } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
@@ -376,8 +377,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useEffect(() => { if (phone && (registerStatus === 'counting' || registerStatus === 'closed')) setCartOpen(true); }, [phone, registerStatus]);
   const [gateFocus, setGateFocus] = useState(0);
   const gateFocusHandled = useRef(0);
+  const openGate = () => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); };
   const registerBar = (className?: string) => <TillRegisterBar online={online} onOpenPanel={() => setPanelOpen(true)}
-    onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
+    onGate={openGate} className={className} />;
+  const headerRegisterState = phone && sale.stage.kind !== 'tender' ? phoneRegisterState(boundRegisterId, registerStatus) : null;
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
     showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
@@ -468,16 +471,24 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
-        // The wide title names the store and register as v2's title bar does; the phone tender is "Checkout Order" with a close.
-        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : phone ? 'Sale' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
+        // The title names the store and register as v2's title bar does, and on a phone as v2's phone header does on
+        // Products and Cart alike; the phone tender is "Checkout Order" with a close.
+        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
+        // React Navigation sizes the title for a 52 px right button; on a phone the title shrinks to what the right controls
+        // leave. native-stack's types omit these, but its web view spreads the options onto elements' Header.
+        ...(phone ? { headerTitleContainerStyle: { flexShrink: 1 }, headerRightContainerStyle: { flexBasis: 'auto', flexShrink: 0 } } : {}),
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
         headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
+        {headerRegisterState && <HeaderRegisterState label={headerRegisterState} onPress={openGate} />}
         <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
           onPress={() => setUserSheetOpen(true)} className="min-h-11 flex-row items-center gap-2">
-          <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
-          {!phone && <Text className="text-foreground">{displayName}</Text>}
+          {/* On a phone, v2's avatar: light initials on a solid primary circle. */}
+          {phone ? <Avatar fallback={initials} tone="primary" size="sm" /> : <>
+            <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
+            <Text className="text-foreground">{displayName}</Text>
+          </>}
         </Pressable>
         {phone && sale.stage.kind === 'tender' && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
           disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
