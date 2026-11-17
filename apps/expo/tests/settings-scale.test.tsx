@@ -56,6 +56,9 @@ describe('SettingsScreen Scale choice', () => {
     }
     expect(document.documentElement.style.getPropertyValue('--text-base')).toBe('14px');
     expect(document.documentElement.style.getPropertyValue('--spacing')).toBe('4px');
+    expect(within(block).getByTestId('settings-scale-current').textContent).toBe('Current scale: Regular');
+    fireEvent.click(within(group).getByRole('button', { name: 'Compact' }));
+    expect(within(block).getByTestId('settings-scale-current').textContent).toBe('Current scale: Compact');
   });
 
   it('applies and stores Compact, Auto and Spacious app-wide', async () => {
@@ -88,6 +91,7 @@ describe('SettingsScreen Scale choice', () => {
     await mount();
     expect(screen.getByTestId('scale-choice-spacious').getAttribute('aria-pressed')).toBe('true');
     expect(document.documentElement.style.getPropertyValue('--text-base')).toBe('16px');
+    expect(screen.getByTestId('settings-scale-current').textContent).toBe('Current scale: Spacious');
   });
 
   it('pressing the pressed Regular writes nothing and notifies nobody', async () => {
