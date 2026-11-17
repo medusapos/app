@@ -1,17 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { Pressable, Text, View } from 'react-native';
-import { formatClosureDate, minorToDecimal, type ClosureContext } from '@tallyui/pos';
+import { useEffect, useRef, useState } from 'react';
+import { Pressable, Text } from 'react-native';
+import type { ClosureContext } from '@tallyui/pos';
 import { ClosureHistoryError, dayBefore, fetchClosureHistory, type ClosureHistoryEntry } from '../lib/closure-history';
+import { historyTableRow } from '../lib/reports';
 import type { Session } from '../lib/session';
+import { ClosureTable } from './closure-table';
 
-const Row = ({ label, value }: { label: string; value: ReactNode }) =>
-  <View className="min-h-11 flex-row items-center justify-between gap-3">
-    <Text className="shrink-0 text-muted-foreground">{label}</Text>
-    <Text className="shrink text-right tabular-nums text-foreground">{value}</Text>
-  </View>;
-
-export function EarlierClosures({ session, registerId, today, ctx }: {
-  session: Session; registerId: string; today: string; ctx: ClosureContext;
+export function EarlierClosures({ session, registerId, today, ctx, registerName, cashierNames }: {
+  session: Session; registerId: string; today: string; ctx: ClosureContext; registerName: string; cashierNames: Record<string, string>;
 }) {
   const [rows, setRows] = useState<ClosureHistoryEntry[]>([]);
   const [more, setMore] = useState(false);
@@ -48,13 +44,8 @@ export function EarlierClosures({ session, registerId, today, ctx }: {
   return <>
     <Text testID="earlier-closures-heading" className="text-lg font-semibold text-foreground">Earlier closures</Text>
     {loading && rows.length === 0 ? <Text testID="earlier-closures-loading" className="text-foreground">Loading…</Text> : null}
-    {rows.map(({ closureId, number, businessDay, openedAt, closedAt, periodSalesTotalMinor }) =>
-      <View key={closureId} testID={`earlier-closure-${closureId}`}>
-        <Text className="font-semibold text-foreground">{`Closure #${number}`}</Text>
-        <Row label="Day" value={businessDay ?? openedAt.slice(0, 10)} />
-        <Row label="Closed" value={formatClosureDate(closedAt, { timezone: ctx.timezone, locale: ctx.locale }).datetime} />
-        <Row label="Sales" value={ctx.formatMoney(minorToDecimal(periodSalesTotalMinor, ctx.exponent))} />
-      </View>)}
+    <ClosureTable testID="earlier-closures-table" rowTestID={(id) => `earlier-closure-${id}`} ctx={ctx}
+      rows={rows.map((r) => historyTableRow(r, registerName, cashierNames))} />
     {!loading && rows.length === 0 && !error ? <Text testID="earlier-closures-empty" className="text-foreground">No earlier closures</Text> : null}
     {more ? <Pressable testID="earlier-closures-more" accessibilityRole="button" disabled={loading}
       className="min-h-11 items-center justify-center rounded-md px-4 border border-border"

@@ -1,7 +1,8 @@
-import { useRef, useState, type ComponentProps } from 'react';
+import { useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Pressable, ScrollView, Text, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { SettingsGroup, SettingsLayout, SettingsRow } from '@tallyui/components';
+import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
@@ -12,7 +13,10 @@ import { getDeviceName } from '../lib/register-context';
 import { DEFAULT_SCANNER_SETTINGS, useScannerSettings } from '../lib/scanner-settings';
 import { loadCachedSettings, loadCachedPricing } from '../lib/store-settings';
 import { useTillName } from '../lib/till-name';
+import { useDefaultCustomer } from '../lib/default-customer';
+import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { THEME_CHOICES, useThemeChoice } from '../lib/theme-choice';
+import { SCALE_CHOICES, useScaleChoice, type ScaleChoice } from '../lib/scale-choice';
 import { averageKeyMs } from '../lib/use-wedge-scan';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
@@ -36,6 +40,7 @@ export default function SettingsScreen() {
   const sections = [
     { id: 'store', label: 'Store', element: <StoreSection session={session} /> },
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
+    { id: 'customer', label: 'Customer', element: <DefaultCustomerSection session={session} /> },
     { id: 'scanner', label: 'Scanner', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
@@ -64,6 +69,7 @@ export default function SettingsScreen() {
     <View className="w-full max-w-md gap-6 self-center">
       <StoreSection session={session} />
       <RegisterSection session={session} />
+      <DefaultCustomerSection session={session} />
       <ScannerSection session={session} />
       <ThemeSection />
       <ClearLocalDataSection />
@@ -115,6 +121,29 @@ function RegisterSection({ session }: { session: Session }) {
           <Text className="font-semibold text-primary-foreground">Save</Text>
         </Pressable>
       </View>
+    </View>
+  </SettingsGroup>;
+}
+function DefaultCustomerSection({ session }: { session: Session }) {
+  const { customer, save } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  const { reportUnauthorized } = useSession();
+  const connector = useMemo(() => createPosConnector(), []);
+  const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
+    headers: authHeaders(session.token) }), [connector.id, session.baseUrl, session.token]);
+  return <SettingsGroup title="Default customer" testID="settings-default-customer"
+    description="Every new sale on this till starts with this customer. A cashier can still change it on a sale.">
+    <View className="gap-4 p-4">
+      <Text testID="settings-default-customer-current" className="text-foreground">{customer?.name ?? 'Guest'}</Text>
+      {connector.searchCustomers ? <CustomerPicker selected={customer}
+        // Settings has no sync state; the picker reports a failed search itself.
+        online={true} search={(q) => connector.searchCustomers!(context, q)}
+        onSelect={(c) => save(c ? { id: c.id, name: c.name, ...(c.email !== undefined ? { email: c.email } : {}) } : null)}
+        onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') reportUnauthorized(); }} />
+        : <Text className="text-muted-foreground">Customers aren't available for this store.</Text>}
+      {customer && <Pressable testID="settings-default-customer-clear" accessibilityRole="button"
+        onPress={() => save(null)} className={`${buttonClass} border border-border`}>
+        <Text className="text-foreground">Use Guest</Text>
+      </Pressable>}
     </View>
   </SettingsGroup>;
 }
@@ -172,11 +201,25 @@ function ScannerSection({ session }: { session: Session }) {
   </SettingsGroup>;
 }
 
+const SCALE_LABELS: Record<ScaleChoice, string> = { auto: 'Auto', compact: 'Compact', regular: 'Regular', spacious: 'Spacious' };
+
 function ThemeSection() {
   const { choice, save } = useThemeChoice(defaultStorage());
+  const { choice: scale, save: saveScale } = useScaleChoice(defaultStorage());
   return <SettingsGroup title="Theme" description="Light, dark, follow this device's setting, or a colour theme. Saved on this till only." testID="settings-theme">
     <View className="p-4">
       <ThemeTiles choice={choice} choices={THEME_CHOICES} onChoose={(value) => { if (value !== choice) save(value); }} />
+    </View>
+    <View className="border-t border-border p-4 gap-2" testID="settings-scale">
+      <Text className="text-foreground font-medium">Scale</Text>
+      <Text className="text-sm text-muted-foreground">Auto follows the window size. Saved on this till only.</Text>
+      <ToggleGroup type="single" variant="outline" aria-label="Scale" value={scale} className="flex-wrap justify-start"
+        onValueChange={(value) => { if (value && value !== scale) saveScale(value as ScaleChoice); }}>
+        {SCALE_CHOICES.map((id) => <ToggleGroupItem key={id} value={id} testID={`scale-choice-${id}`}
+          className={scale === id ? 'bg-accent' : ''}>
+          <TallyText>{SCALE_LABELS[id]}</TallyText>
+        </ToggleGroupItem>)}
+      </ToggleGroup>
     </View>
     <FontPicker />
   </SettingsGroup>;

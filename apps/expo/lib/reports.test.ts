@@ -2,7 +2,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
 import { createOrderBuilder, exportCsv, finalizeOrder, selectClosureRows, type Closure, type PosOrder } from '@tallyui/pos';
-import { closureScopeFor, closuresCsvFilename, closureVarianceMinor, csvLabel, downloadCsv, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures } from './reports';
+import { closureScopeFor, closuresCsvFilename, closureTableRow, closureVarianceMinor, csvLabel, downloadCsv, historyTableRow, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures, varianceLabel } from './reports';
+import { closureContext } from '../components/register-close';
+
+vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 
 const today = '2026-11-10';
 const storeKey = 'https://store.test';
@@ -30,6 +33,51 @@ afterEach(() => {
   URL.createObjectURL = originalCreateObjectURL;
   URL.revokeObjectURL = originalRevokeObjectURL;
   vi.restoreAllMocks();
+});
+
+describe('closureTableRow', () => {
+  it('uses breakdown names and sums counted and variance across tenders', () => {
+    const row = closure({ breakdowns: { register_name: 'Front till', closed_by_name: 'Ana' },
+      counted: { cash: 800, external: 500 }, variance: { cash: -200, external: 50 } });
+    expect(closureTableRow(row, { 'register-1': 'Register 1' })).toEqual({
+      id: row.id, number: row.number, closedAt: row.closed_at, registerName: 'Front till', cashierName: 'Ana',
+      salesMinor: 1000, countedMinor: 1300, varianceMinor: -150,
+    });
+  });
+  it('uses the map or id slice and an unknown cashier when breakdown names are empty', () => {
+    expect(closureTableRow(closure(), { 'register-1': 'Register 1' }))
+      .toMatchObject({ registerName: 'Register 1', cashierName: '—' });
+    expect(closureTableRow(closure({ breakdowns: { register_name: '', closed_by_name: '' } }), {}))
+      .toMatchObject({ registerName: 'register', cashierName: '—' });
+  });
+});
+
+describe('historyTableRow', () => {
+  const entry = { closureId: 'c1', number: 1, openedAt: '2026-11-09T09:00:00Z', closedAt: '2026-11-09T18:00:00Z',
+    periodSalesTotalMinor: 1000, registerId: 'register-1', closedBy: 'user-1' };
+  it('calculates counted and variance and resolves the cashier name', () => {
+    expect(historyTableRow({ ...entry, counted: { cash: 800 }, tillExpected: { cash: 1000 } }, 'Register 1', { 'user-1': 'Ana' }))
+      .toEqual({ id: 'c1', number: 1, closedAt: entry.closedAt, registerName: 'Register 1', cashierName: 'Ana',
+        salesMinor: 1000, countedMinor: 800, varianceMinor: -200 });
+  });
+  it('keeps unknown figures null and falls back to cashier id or a dash', () => {
+    expect(historyTableRow(entry, 'Register 1', {})).toMatchObject({ countedMinor: null, varianceMinor: null, cashierName: 'user-1' });
+    expect(historyTableRow({ ...entry, closedBy: undefined, counted: { cash: 800 } }, 'Register 1', {}))
+      .toMatchObject({ countedMinor: 800, varianceMinor: null, cashierName: '—' });
+  });
+  it('uses the register id slice or a dash when the register name is empty', () => {
+    expect(historyTableRow(entry, '', {}).registerName).toBe('register');
+    expect(historyTableRow({ ...entry, registerId: undefined }, '', {}).registerName).toBe('—');
+  });
+});
+
+describe('varianceLabel', () => {
+  it('labels exact, short and over amounts', () => {
+    const ctx = closureContext('EUR', { name: 'X' });
+    expect(varianceLabel(0, ctx)).toBe('Exact');
+    expect(varianceLabel(-200, ctx)).toBe(`${ctx.formatMoney('2.00')} short`);
+    expect(varianceLabel(50, ctx)).toBe(`${ctx.formatMoney('0.50')} over`);
+  });
 });
 
 describe('localDay', () => {

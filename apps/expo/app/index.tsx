@@ -5,26 +5,31 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
-  CartNoteInput, Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText,
+  CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
 import {
   capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
+  normalizeCatalogueViewState, type CatalogueViewState,
 } from '@tallyui/pos';
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
+import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PriceCheckBanner } from '../components/price-check-banner';
+import { ProductSettingsButton } from '../components/product-settings';
 import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
+import { useCartSettings } from '../lib/cart-settings';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
@@ -34,8 +39,10 @@ import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
+import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { useDefaultCustomer } from '../lib/default-customer';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -62,8 +69,6 @@ const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
 const PHONE_BREAKPOINT = 600;
 // ADR 0009: from 600 px, products and cart stack in a column below 900 px and sit in a row from 900 px.
 const ROW_BREAKPOINT = 900;
-// WCPOS 2 Cart Settings › Quick Discounts default.
-const QUICK_DISCOUNTS = [5, 10, 15];
 
 // The rate arrives in parts per million (10 000 ppm = 1%).
 const taxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
@@ -246,7 +251,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const token = useRef(session.token);
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
-  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
+  const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  const sale = useSale(pricing, { defaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
@@ -284,6 +290,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { width } = useWindowDimensions();
   // Phone mode (ADR 0009): products or the cart at full height, the tender over both; a new sale starts on products.
   const phone = width < PHONE_BREAKPOINT;
+  const [viewState, setViewState] = useState(() => normalizeCatalogueViewState({
+    ...loadCatalogueView(defaultStorage(), session.baseUrl), ...(phone ? { view: 'grid' } : {}),
+  }));
+  const { settings: productSettings, save: saveProductSettings, reset: resetProductSettings } = useProductSettings(defaultStorage(), session.baseUrl);
+  const onViewStateError = (error: unknown) => console.warn('Could not load or save the catalogue view:', error);
+  const onViewStateChange = (next: CatalogueViewState) => {
+    setViewState(next);
+    try { saveCatalogueView(defaultStorage(), session.baseUrl, next); } catch (error) { onViewStateError(error); }
+  };
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
@@ -301,6 +316,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [scanMiss, setScanMiss] = useState<string | null>(null);
   useEffect(() => { if (!wedgeActive) setScanMiss(null); }, [wedgeActive]);
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
   useWedgeScan(wedgeActive, scannerSettings, (code) => {
     const entry = findEntryByCode(entries, code);
     if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
@@ -336,50 +352,56 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const gateFocusHandled = useRef(0);
   const registerBar = (className?: string) => <TillRegisterBar online={online} onOpenPanel={() => setPanelOpen(true)}
     onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
+  const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
+    showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
+    settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
   const catalogue = <View className="flex-1">
+    <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
     {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined}
+      onSelect={add} statusText={statusText} statusAccessory={phone
+        ? <View className="flex-row items-center gap-2">{registerBar(IN_ROW)}{productSettingsButton}</View> : productSettingsButton}
       showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
-      loadViewState={() => phone ? { ...loadCatalogueView(defaultStorage(), session.baseUrl), view: 'grid' }
-        : loadCatalogueView(defaultStorage(), session.baseUrl)}
-      saveViewState={(state) => saveCatalogueView(defaultStorage(), session.baseUrl, state)}
-      onViewStateError={(error) => console.warn('Could not load or save the catalogue view:', error)} />
+      viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
+      onViewStateError={onViewStateError} />
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
+  </View>;
+  const openOrdersRow = <View className="flex-row items-stretch">
+    {parked.length > 0 && <Pressable testID="parked-sales-chip" accessibilityRole="button"
+      accessibilityLabel={`Parked sales (${parked.length})`} onPress={() => setParkedOpen(true)}
+      className="h-14 justify-center border-t border-r border-border bg-card px-3">
+      <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
+    </Pressable>}
+    <View className="min-w-0 flex-1">
+      <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
+        onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
+    </View>
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
+    {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
       {connector.searchCustomers && <Pressable accessibilityRole="button" onPress={() => setCustomerOpen(true)}
         className="min-h-11 justify-center">
         <Text className="text-foreground">Customer: {sale.order.customer?.name ?? 'Guest'}</Text>
       </Pressable>}
       <CartAddMenu sale={cartSale} />
+      <CartSettingsButton {...cartSettings} />
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
-      quickDiscounts={QUICK_DISCOUNTS}
+      quickDiscounts={cartSettings.settings.quickDiscounts}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
-    <View className="flex-row items-stretch">
-      {parked.length > 0 && <Pressable testID="parked-sales-chip" accessibilityRole="button"
-        accessibilityLabel={`Parked sales (${parked.length})`} onPress={() => setParkedOpen(true)}
-        className="h-14 justify-center border-t border-r border-border bg-card px-3">
-        <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
-      </Pressable>}
-      <View className="min-w-0 flex-1">
-        <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
-          onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
-      </View>
-    </View>
+    {cartSettings.settings.openOrders === 'bottom' && openOrdersRow}
     {switchRefusal ? <Text testID="open-sale-refusal" accessibilityRole="alert" className="px-3 py-1 text-destructive">{switchRefusal}</Text> : null}
     {voidOpen && <AlertDialog open onOpenChange={(next) => { if (!next) setVoidOpen(false); }}>
       <AlertDialogContent testID="cart-void-dialog">
@@ -399,9 +421,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
-      <Stack.Screen options={{ title: phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
+      <Stack.Screen options={{
+        // v2's phone tender is "Checkout Order" with a close; MedusaPOS has no order number before payment, so the title carries none.
+        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : phone && cartOpen ? 'Cart' : 'Sale', headerShown: sale.stage.kind !== 'receipt',
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
-        headerLeft: () => <FrameMenuButton />, headerRight: () => (
+        headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className="flex-row items-center gap-4 pr-4">
         <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
@@ -409,6 +433,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
           {!phone && <Text className="text-foreground">{displayName}</Text>}
         </Pressable>
+        {phone && sale.stage.kind === 'tender' && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
+          disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
+          <View className="text-foreground"><XIcon size={24} /></View>
+        </IconButton>}
         </View>
       ) }} />
       {/* Under the header, and above the receipt (which hides the header), so it never widens the header at 360 px. */}
@@ -432,19 +460,26 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         </DialogContent>
       </Dialog>}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
-      {sale.stage.kind === 'receipt' ? <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
+      {sale.stage.kind === 'receipt' ? <>
+        {/* v2 leads the paid screen with the change; screen only, not printed. */}
+        {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
+          <ChangeDisplay testID="paid-change-due" change={{ amount: sale.stage.order.changeDueMinor, currency: sale.stage.order.currency }} />
+        </View>}
+        <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
         store={receiptStore}
         footerSlot={connector.emailReceipt ? <EmailReceipt
           orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
           online={online} defaultEmail={paid?.customer?.email}
           send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-        topInset={topInset} formatDate={formatDate} taxLabel={taxLabel}
-        cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /> :
+        topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
+        cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} /></> :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
           {settingsStatus ? <Text className="text-destructive">{settingsStatus}</Text> : null}
           {/* Only while idle: new settings never land mid-sale (useSale also holds them until then). */}
           {onRetry && sale.idle ? <Pressable accessibilityRole="button" onPress={onRetry}><Text className="text-foreground underline">Retry</Text></Pressable> : null}
-          {!phone ? <View className="flex-1" style={{ flexDirection: width >= ROW_BREAKPOINT ? 'row' : 'column' }}>
+          {/* v2's Panel position; the column and phone layouts ignore it. */}
+          {!phone ? <View testID="till-panels" className="flex-1"
+            style={{ flexDirection: width >= ROW_BREAKPOINT ? (cartSettings.settings.cartSide === 'left' ? 'row-reverse' : 'row') : 'column' }}>
             {catalogue}
             <View className="flex-1 border-t border-border bg-card">
               {sale.stage.kind === 'cart' ? cart : tenderPane}

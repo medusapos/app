@@ -107,6 +107,8 @@ it('takes a card part and a cash remainder, shows change from cash only, and rec
   expect(screen.getByLabelText('Card terminal: €10.00')).toBeTruthy();
   expect(screen.getByLabelText('Cash tendered: €20.00')).toBeTruthy();
   expect(screen.getByLabelText('Change: €6.00')).toBeTruthy();
+  expect(screen.getByTestId('paid-change-due').textContent).toContain('Change Due');
+  expect(screen.getByTestId('paid-change-due').textContent).toContain('€6.00');
 }, 15000);
 
 // The keypad tender pane's steps exceed the 5 s default on CI runners.
@@ -124,6 +126,7 @@ it('caps a card part at the balance due, with no change from card', async () => 
   const { payload } = await complete();
   expect(payload.payments).toEqual([expect.objectContaining({ method: 'external', amountMinor: 2400 })]);
   expect(payload.payments[0].changeMinor ?? 0).toBe(0);
+  expect(screen.queryByTestId('paid-change-due')).toBeNull();
 }, 15000);
 
 it('removing a tender restores the balance due', async () => {
