@@ -10,6 +10,7 @@ import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { useOutboxContext } from '../lib/outbox-context';
+import { formatDate } from '../lib/format-date';
 import OrdersScreen from '../app/orders';
 import { AppFrame } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
@@ -120,11 +121,11 @@ describe('order detail (row 10)', () => {
     const rejected = sale('Red hat', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
     withSales(pending, rejected);
     mount();
-    fireEvent.click(screen.getByTestId(`order-open-${pending.id}`));
+    fireEvent.click(within(screen.getByTestId(`orders-table-row-${pending.id}`)).getByRole('button', { name: `Open order ${orderReference(pending)}` }));
     expect(within(await screen.findByTestId('order-detail-sheet')).getByText('Pending')).toBeTruthy();
     fireEvent.click(screen.getByTestId('order-detail-close'));
     await waitFor(() => expect(screen.queryByTestId('order-detail-sheet')).toBeNull());
-    fireEvent.click(screen.getAllByTestId(`order-open-${rejected.id}`)[0]!);
+    fireEvent.click(within(screen.getByTestId(`orders-table-row-${rejected.id}`)).getByRole('button', { name: `Open order ${orderReference(rejected)}` }));
     expect(within(await screen.findByTestId('order-detail-sheet')).getByText('Cancelled')).toBeTruthy();
   });
 
@@ -142,11 +143,89 @@ describe('order detail (row 10)', () => {
     const red = sale('Red hat', 'applied');
     withSales(blue, red);
     mount();
-    fireEvent.click(screen.getByTestId(`order-open-${red.id}`));
+    fireEvent.click(within(screen.getByTestId(`orders-table-row-${red.id}`)).getByRole('button', { name: `Open order ${orderReference(red)}` }));
     expect(await screen.findByTestId('order-detail-sheet')).toBeTruthy();
     fireEvent.change(screen.getByTestId('orders-search'), { target: { value: 'blue' } });
-    expect(screen.getByTestId(`order-open-${blue.id}`)).toBeTruthy();
-    expect(screen.queryByTestId(`order-open-${red.id}`)).toBeNull();
+    expect(screen.getByTestId(`orders-table-row-${blue.id}`)).toBeTruthy();
+    expect(screen.queryByTestId(`orders-table-row-${red.id}`)).toBeNull();
     expect(within(screen.getByTestId('order-detail-sheet')).getByText('Red hat x1')).toBeTruthy();
+  });
+});
+
+describe('orders table (row 10.1)', () => {
+  function sale(name: string, syncStatus: PosOrder['syncStatus'], extra: Partial<PosOrder> = {}): PosOrder {
+    const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+    builder.addLine({ productId: name, variantId: name, name, unitPrice: { amount: 1200, currency: 'EUR' } });
+    builder.addPayment({ method: 'cash', amountMinor: 1200 });
+    return { ...finalizeOrder(builder.getSnapshot()), syncStatus, ...extra };
+  }
+  function withSales(...recent: PosOrder[]) {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent });
+  }
+  function mount() {
+    render(<SessionProvider><OrdersScreen /><PortalHost /></SessionProvider>);
+  }
+  const sold = () => sale('Blue shirt', 'applied', { cashierRef: 'ann@store.test', customer: { id: 'c1', name: 'Ada Lovelace' } });
+  const openButton = (table: string, order: PosOrder) =>
+    within(screen.getByTestId(`${table}-row-${order.id}`)).getByRole('button', { name: `Open order ${orderReference(order)}` });
+
+  it('shows v2\'s columns and one row of the sale\'s own words, with no attention section', () => {
+    const order = sold();
+    withSales(order);
+    mount();
+    const table = within(screen.getByTestId('orders-table'));
+    for (const label of ['Status', 'Order Number', 'Customer', 'Date Created', 'Cashier', 'Payment Method', 'Total']) {
+      expect(table.getByText(label, { exact: true })).toBeTruthy();
+    }
+    const cell = (name: string) => screen.getByTestId(`orders-table-row-${order.id}-${name}`).textContent;
+    expect(cell('status')).toBe('Completed');
+    expect(cell('number')).toBe(orderReference(order));
+    expect(cell('customer')).toBe('Ada Lovelace');
+    expect(cell('date')).toBe(formatDate(order.createdAt));
+    expect(cell('cashier')).toBe('ann@store.test');
+    expect(cell('payment')).toBe('Cash');
+    expect(cell('total')).toBe(formatMoney({ amount: order.totalMinor, currency: 'EUR' }));
+    expect(screen.queryByText('Needs attention')).toBeNull();
+    expect(screen.queryByTestId('orders-attention')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('pressing a row opens the sale\'s detail sheet', async () => {
+    const order = sold();
+    withSales(order);
+    mount();
+    expect(screen.queryByTestId('order-detail-sheet')).toBeNull();
+    fireEvent.click(openButton('orders-table', order));
+    expect(await screen.findByTestId('order-detail-sheet')).toBeTruthy();
+  });
+
+  it('a refused sale is in both tables, Retry only under attention, once while in flight, without opening the sheet', async () => {
+    const refused = sale('Red hat', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
+    const applied = sale('Blue shirt', 'applied');
+    withSales(refused, applied);
+    let resolve: (count: number) => void = () => {};
+    const requeue = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), requeue });
+    mount();
+    const attention = within(screen.getByTestId('orders-attention'));
+    expect(within(screen.getByTestId('orders-table')).getByTestId(`orders-table-row-${refused.id}`)).toBeTruthy();
+    expect(within(screen.getByTestId('orders-table')).getByTestId(`orders-table-row-${applied.id}`)).toBeTruthy();
+    expect(attention.getByTestId(`orders-attention-row-${refused.id}`)).toBeTruthy();
+    expect(screen.queryByTestId(`orders-attention-row-${applied.id}`)).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
+    const retry = attention.getByRole('button', { name: 'Retry' });
+    await act(async () => { fireEvent.click(retry); });
+    await act(async () => { fireEvent.click(retry); });
+    expect(requeue).toHaveBeenCalledExactlyOnceWith([refused.id]);
+    expect(screen.queryByTestId('order-detail-sheet')).toBeNull();
+    await act(async () => { resolve(1); });
+  });
+
+  it('a refused sale the outbox cannot requeue is under attention with no Retry', () => {
+    const refused = sale('Red hat', 'rejected', { error: { code: 'idempotency_mismatch', message: 'Refused' } });
+    withSales(refused);
+    mount();
+    expect(within(screen.getByTestId('orders-attention')).getByTestId(`orders-attention-row-${refused.id}`)).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 });
