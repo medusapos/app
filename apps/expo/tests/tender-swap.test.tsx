@@ -118,7 +118,7 @@ it('on a phone the tender stays full height with no order summary', async () => 
   await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
   await screen.findByTestId('product-tile-Shirt');
   add();
-  fireEvent.click(screen.getByRole('button', { name: /^Open cart/ }));
+  fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
   await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
   expect(screen.getByTestId('tender-pane')).toBeTruthy();
   expect(screen.queryByTestId('tender-order-summary')).toBeNull();
