@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router, usePathname } from 'expo-router';
 import { AppFrame, FrameMenuButton, frameStep, useFrameBadge } from '../components/app-frame';
@@ -21,7 +21,7 @@ function mount(pathname: string, { signedIn = true, count = 0 } = {}) {
   return render(<AppFrame signedIn={signedIn}><Area count={count} /></AppFrame>);
 }
 
-const navIds = () => Array.from(document.querySelectorAll('[data-testid^="nav-item-"]'))
+const navIds = (root: ParentNode = document) => Array.from(root.querySelectorAll('[data-testid^="nav-item-"]'))
   .map((node) => node.getAttribute('data-testid')).filter((id) => !id!.endsWith('-badge'));
 
 beforeEach(() => setWindowWidth(1440, 900));
@@ -139,6 +139,16 @@ describe('AppFrame on a phone', () => {
     expect(router.push).toHaveBeenCalledExactlyOnceWith('/orders');
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 300)); });
     expect(screen.queryByTestId('nav-drawer')).toBeNull();
+  });
+
+  it('lists Sale, Products, Orders, Customers, Reports and Settings in the drawer in v2\'s order', () => {
+    setWindowWidth(390, 844);
+    mount('/');
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
+    const panel = screen.getByTestId('nav-drawer-panel');
+    expect(navIds(panel)).toEqual(['nav-item-sale', 'nav-item-products', 'nav-item-orders', 'nav-item-customers', 'nav-item-reports', 'nav-item-settings']);
+    expect(['Sale', 'Products', 'Orders', 'Customers', 'Reports', 'Settings'].map((name) => within(panel).getByRole('button', { name }).getAttribute('data-testid')))
+      .toEqual(navIds(panel));
   });
 
   it('a phone on its side (844 x 390) is a phone', () => {
