@@ -12,7 +12,7 @@ import { APPROVAL_REQUIRED_TEXT } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
-import { COUNTING_DRAWER } from '../components/price-check-banner';
+import { COUNTING_DRAWER, PRICE_CHECK_ONLY } from '../components/price-check-banner';
 import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
@@ -58,6 +58,8 @@ const button = (name: string | RegExp) => screen.getByRole('button', { name });
 const checkoutButton = () => screen.getByTestId('cart-checkout');
 async function payByCard() { await act(async () => { fireEvent.click(checkoutButton()); }); pickMethod('external'); take(); }
 const pill = () => screen.queryByTestId('register-bar-pill')?.textContent ?? null;
+// Wide, v2's header state beside the store and register name (row 09a.3); a phone keeps the pill.
+const headerState = () => screen.queryByTestId('header-register-state')?.textContent ?? null;
 
 let sequence = 0;
 let storageData: Map<string, string>;
@@ -125,20 +127,20 @@ describe('the register on the sale screen', () => {
   it('shows the picker while unbound; a pick binds it and shows the open card; opening with a float shows the cart and the bar', async () => {
     await mount();
     expect(await screen.findByTestId('register-picker')).toBeTruthy();
-    expect(pill()).toBe('Choose a register');
+    expect(headerState()).toBe('Choose register');
     await act(async () => { fireEvent.click(screen.getByTestId('register-picker-row-register-1')); });
     expect(await screen.findByTestId('open-register-card')).toBeTruthy();
     expect(screen.queryByTestId('register-picker')).toBeNull();
     const bound = (await readRegister(sessions()))!.stores[baseUrl];
     expect([bound.register_id, bound.register_name]).toEqual(['register-1', 'Register 1']);
-    await waitFor(() => expect(pill()).toBe('Register closed'));
+    await waitFor(() => expect(headerState()).toBe('Closed'));
 
     fireEvent.change(screen.getByTestId('open-register-amount'), { target: { value: '100.00' } });
     await act(async () => { fireEvent.click(screen.getByTestId('open-register-button')); });
     await waitFor(() => expect(screen.queryByTestId('open-register-card')).toBeNull());
     expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
-    expect(screen.getByTestId('register-bar')).toBeTruthy();
-    expect(pill()).toBeNull();
+    expect(screen.queryByTestId('register-bar')).toBeNull(); // wide has no strip under the header
+    expect(headerState()).toBeNull();
     expect(button('Open register panel')).toBeTruthy();
     const [row] = (await sessions().find().exec()).map((doc) => doc.toJSON());
     expect(row).toMatchObject({ register_id: 'register-1', status: 'open', counted_float_minor: 10000, opened_by: 'admin@store.test' });
@@ -247,7 +249,7 @@ describe('the register on the sale screen', () => {
     await mount();
     await startCount();
     expect(screen.queryByTestId('cart-empty')).toBeNull();
-    await waitFor(() => expect(pill()).toBe('Counting'));
+    await waitFor(() => expect(headerState()).toBe('Counting'));
     await act(async () => { fireEvent.click(screen.getByTestId('count-back')); });
     await waitFor(() => expect(screen.queryByTestId('register-count')).toBeNull());
     expect(screen.getByTestId('cart-empty')).toBeTruthy(); // the empty cart is back (it draws no Checkout)
@@ -765,12 +767,12 @@ describe('closing the register', () => {
 
 // The Front desk's review (2026-09-28): the pill is never a dead label, and on a phone the control ends existing rows.
 describe('the register control', () => {
-  it('at 1280, tapping "Choose a register" brings up the gate: the picker, focused', async () => {
+  it('at 1280, tapping "Choose register" in the header brings up the gate: the picker, focused', async () => {
     await mount();
     const picker = await screen.findByTestId('register-picker');
-    await waitFor(() => expect(pill()).toBe('Choose a register'));
-    expect(screen.getByTestId('register-bar').contains(screen.getByTestId('register-bar-pill'))).toBe(true);
-    fireEvent.click(button('Choose a register'));
+    await waitFor(() => expect(headerState()).toBe('Choose register'));
+    expect(screen.getByTestId('wide-header-register').contains(screen.getByTestId('header-register-state'))).toBe(true);
+    fireEvent.click(button('Choose register'));
     expect(picker.contains(document.activeElement)).toBe(true);
   });
 
@@ -801,8 +803,8 @@ describe('the register control', () => {
       stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
     await openTestRegister(store.orders, baseUrl);
     await mount();
-    await waitFor(() => expect(pill()).toBe('Offline'));
-    fireEvent.click(button('Offline'));
+    await waitFor(() => expect(width === 1280 ? headerState() : pill()).toBe('Offline'));
+    fireEvent.click(button(width === 1280 ? 'Register: Offline' : 'Offline'));
     expect(await screen.findByTestId('register-panel')).toBeTruthy();
   });
 
@@ -813,17 +815,72 @@ describe('the register control', () => {
     await startCounting(sessions(), session.id);
     await closeSession(sessions(), session.id, { counted: { cash: 10000 }, closedBy: 'admin@store.test' });
     await mount();
-    await waitFor(() => expect(pill()).toBe('Close not finished'));
+    await waitFor(() => expect(width === 1280 ? headerState() : pill()).toBe('Close not finished'));
     if (width === 360) {
       // The cart view opened for it by itself; leave it, so the pill has to bring it back.
       await act(async () => { fireEvent.click(await screen.findByRole('tab', { name: 'Products' })); });
       expect(screen.queryByTestId('register-column-finish-close')).toBeNull();
     }
-    await act(async () => { fireEvent.click(button('Close not finished')); });
+    await act(async () => { fireEvent.click(button(width === 1280 ? 'Register: Close not finished' : 'Close not finished')); });
     const finish = await screen.findByTestId('register-column-finish-close-button');
     expect(finish.id).toBe('register-column-finish-close-button');
     expect(document.activeElement).toBe(finish);
     expect(screen.queryByTestId('register-panel')).toBeNull();
+  });
+
+  it('at 1280, with a register open, there is no strip and no header state, and "Register ›" in the header opens the panel', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    const open = await screen.findByRole('button', { name: 'Open register panel' });
+    expect(screen.queryByTestId('register-bar')).toBeNull();
+    expect(screen.queryByTestId('header-register-state')).toBeNull();
+    expect(screen.getByTestId('wide-header-register').contains(open)).toBe(true);
+    fireEvent.click(open);
+    expect(await screen.findByTestId('register-panel')).toBeTruthy();
+  });
+});
+
+// DEMO-PARITY row 17a.3: the phone Products view carries the wide screen's price-check strip (#330) above the catalogue.
+describe('the phone Products view (row 17a.3)', () => {
+  const productsSelected = () => screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected');
+
+  it.each([
+    ['unbound', false, 'Choose a register'],
+    ['bound, not open', true, 'Register closed'],
+  ])('%s: the Products tab shows "Price check only" above the catalogue', async (_label, bound, pillText) => {
+    setWindowWidth(360);
+    if (bound) await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
+    await mount();
+    await waitFor(() => expect(pill()).toBe(pillText));
+    expect(productsSelected()).toBe('true');
+    const banner = screen.getByTestId('price-check-banner');
+    expect(banner.textContent).toBe(PRICE_CHECK_ONLY);
+    expect(banner.compareDocumentPosition(screen.getByRole('searchbox')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('product-tile-Shirt')).toBeTruthy();
+  });
+
+  it('with a session open, the Products tab has no banner', async () => {
+    setWindowWidth(360);
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    expect(await screen.findByRole('button', { name: 'Open register panel' })).toBeTruthy();
+    expect(pill()).toBeNull();
+    expect(productsSelected()).toBe('true');
+    expect(screen.getByTestId('product-tile-Shirt')).toBeTruthy();
+    expect(screen.queryByTestId('price-check-banner')).toBeNull();
+  });
+
+  it('bound, not open: the banner goes with the Cart tab and comes back with Products', async () => {
+    setWindowWidth(360);
+    await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
+    await mount();
+    await waitFor(() => expect(pill()).toBe('Register closed'));
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(PRICE_CHECK_ONLY);
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Cart/ })); });
+    expect(screen.queryByTestId('price-check-banner')).toBeNull();
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: 'Products' })); });
+    expect(productsSelected()).toBe('true');
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(PRICE_CHECK_ONLY);
   });
 });
 
@@ -837,7 +894,7 @@ describe('the catalogue status line', () => {
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: 'Failed to fetch', lastSyncedAt: null,
       stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: { count: 2, stale: false } });
     await mount();
-    await waitFor(() => expect(pill()).toBe('Choose a register'));
+    await waitFor(() => expect(width === 1280 ? headerState() : pill()).toBe(width === 1280 ? 'Choose register' : 'Choose a register'));
     expect(within(screen.getByTestId('catalogue-status-row')).getByText(text)).toBeTruthy();
   });
 });
