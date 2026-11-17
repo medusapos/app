@@ -137,6 +137,8 @@ describe('CustomersScreen', () => {
     const row = screen.getByLabelText('Ada Lovelace, ada@example.com, +44 1');
     expect(row).toBe(screen.getByTestId('customer-row-ada'));
     expect(within(row).getByText('AL')).toBeTruthy();
+    expect(within(screen.getByTestId('customers-table')).getByTestId('customer-row-ada')).toBe(row);
+    expect(screen.getByTestId('customer-cell-ada-email').textContent).toBe('ada@example.com');
     typeQuery('');
     expect(screen.queryByTestId('customer-row-ada')).toBeNull();
     expect(screen.getByText(SEARCH_HINT)).toBeTruthy();
