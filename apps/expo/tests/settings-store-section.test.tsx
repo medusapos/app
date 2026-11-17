@@ -2,7 +2,8 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { StoreSettings as PricingSettings } from '@tallyui/core';
+import { currencySymbol, type StoreSettings as PricingSettings } from '@tallyui/core';
+import { currencyFormat, separatorLabel } from '../lib/currency-format';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { saveCachedSettings, saveCachedPricing, type StoreSettings } from '../lib/store-settings';
@@ -156,5 +157,33 @@ describe('SettingsScreen Store section', () => {
     saveCachedPricing(localStorage, baseUrl, pricing);
     await mount();
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("shows the till's currency format under Store, read-only", async () => {
+    saveCachedSettings(localStorage, baseUrl, held);
+    saveCachedPricing(localStorage, baseUrl, pricing);
+    await mount();
+    const format = currencyFormat('EUR')!;
+    expect(screen.getByTestId('settings-store').compareDocumentPosition(screen.getByTestId('settings-currency')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('settings-currency-symbol').textContent).toBe(currencySymbol('EUR'));
+    expect(screen.getByTestId('settings-currency-decimals').textContent).toBe('2');
+    expect(screen.getByTestId('settings-currency-example').textContent).toBe(format.example);
+    expect(screen.getByTestId('settings-currency-thousands').textContent).toBe(separatorLabel(format.thousandsSeparator));
+    expect(screen.getByTestId('settings-currency-decimal').textContent).toBe(separatorLabel(format.decimalSeparator));
+    expect(screen.getByText("Read-only. The currency follows the till's region, set in Medusa Admin; separators follow this device's language.")).toBeTruthy();
+  });
+
+  it('a zero-decimal currency shows 0 decimals and no decimal separator', async () => {
+    saveCachedPricing(localStorage, baseUrl, { ...pricing, currency: 'JPY' });
+    await mount();
+    expect(screen.getByTestId('settings-currency-decimals').textContent).toBe('0');
+    expect(screen.getByTestId('settings-currency-decimal').textContent).toBe('None');
+  });
+
+  it('with nothing cached, every currency-format row shows —', async () => {
+    await mount();
+    for (const id of ['settings-currency-symbol', 'settings-currency-position', 'settings-currency-thousands', 'settings-currency-decimal', 'settings-currency-decimals', 'settings-currency-example']) {
+      expect(screen.getByTestId(id).textContent).toBe('—');
+    }
   });
 });
