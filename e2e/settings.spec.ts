@@ -17,7 +17,7 @@ async function setMinChars(page: Page, value: string) {
 
 async function openCart(page: Page) {
   await cartTab(page).click();
-  await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
+  await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
 }
 
 test('a saved minChars gates the wedge scan, and the test-scan field reports its verdict', async ({ page }) => {
@@ -131,7 +131,7 @@ test('the frame\'s Sale from Settings returns to the same sale, with one Product
 
   await openSettings(page);
   await openArea(page, 'Sale');
-  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: / · Register 1$/ })).toBeVisible();
   await expect(cart).toBeVisible();
   await expect(cart).toHaveAccessibleName(/^Cart, 1 item$/);
   // Hidden stack screens stay in the DOM, so this counts every mounted Products screen.
@@ -144,7 +144,7 @@ test('opening /settings directly by URL still lands back on the sale', async ({ 
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
   await openArea(page, 'Sale');
-  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: / · Register 1$/ })).toBeVisible();
 });
 
 test('Theme: Dark puts the dark class on <html> and its tokens, the first frame after a reload is dark, and System follows the browser', async ({ page }) => {
