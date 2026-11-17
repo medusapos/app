@@ -38,7 +38,9 @@ vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-c
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/',
-  Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() },
+  Stack: { Screen: ({ options }: { options: { title?: string; headerRight?: () => ReactNode } }) => <>
+    <span data-testid="screen-title" data-title={options.title} />{options.headerRight?.()}
+  </> },
 }));
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
@@ -535,6 +537,31 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
   const search = () => screen.queryByRole('searchbox');
   beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  it('at 390 wide the tender is titled Checkout Order and its close returns to the cart', async () => {
+    setWindowWidth(390, 844);
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(button(/^Open cart/));
+    await checkout();
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Checkout Order');
+    const close = screen.getByTestId('tender-close');
+    expect(button('Close')).toBe(close);
+    act(() => { fireEvent.click(close); });
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00']);
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Cart');
+    expect(screen.queryByTestId('tender-close')).toBeNull();
+  });
+
+  it('at 1280 wide the tender keeps the Sale title and has no close', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    expect(button('Complete sale')).toBeTruthy();
+    expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Sale');
+    expect(screen.queryByTestId('tender-close')).toBeNull();
+  });
 
   it('at 360 wide adds stay on Products, the bar opens the cart, Products returns, and tender and new sale take over', async () => {
     setWindowWidth(360);
