@@ -12,6 +12,7 @@ import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInErro
 import {
   capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
   withPricingContext, withStockOverlay,
+  normalizeCatalogueViewState, type CatalogueViewState,
 } from '@tallyui/pos';
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
@@ -19,6 +20,7 @@ import { CartAddMenu } from '../components/cart-add-menu';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { ProductSettingsButton } from '../components/product-settings';
 import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
@@ -34,6 +36,7 @@ import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
+import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
@@ -284,6 +287,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { width } = useWindowDimensions();
   // Phone mode (ADR 0009): products or the cart at full height, the tender over both; a new sale starts on products.
   const phone = width < PHONE_BREAKPOINT;
+  const [viewState, setViewState] = useState(() => normalizeCatalogueViewState({
+    ...loadCatalogueView(defaultStorage(), session.baseUrl), ...(phone ? { view: 'grid' } : {}),
+  }));
+  const { settings: productSettings, save: saveProductSettings, reset: resetProductSettings } = useProductSettings(defaultStorage(), session.baseUrl);
+  const onViewStateError = (error: unknown) => console.warn('Could not load or save the catalogue view:', error);
+  const onViewStateChange = (next: CatalogueViewState) => {
+    setViewState(next);
+    try { saveCatalogueView(defaultStorage(), session.baseUrl, next); } catch (error) { onViewStateError(error); }
+  };
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
@@ -336,6 +348,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const gateFocusHandled = useRef(0);
   const registerBar = (className?: string) => <TillRegisterBar online={online} onOpenPanel={() => setPanelOpen(true)}
     onGate={() => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); }} className={className} />;
+  const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
+    showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
+    settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
   const catalogue = <View className="flex-1">
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
@@ -343,13 +358,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={phone ? registerBar(IN_ROW) : undefined}
+      onSelect={add} statusText={statusText} statusAccessory={phone
+        ? <View className="flex-row items-center gap-2">{registerBar(IN_ROW)}{productSettingsButton}</View> : productSettingsButton}
       showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
-      loadViewState={() => phone ? { ...loadCatalogueView(defaultStorage(), session.baseUrl), view: 'grid' }
-        : loadCatalogueView(defaultStorage(), session.baseUrl)}
-      saveViewState={(state) => saveCatalogueView(defaultStorage(), session.baseUrl, state)}
-      onViewStateError={(error) => console.warn('Could not load or save the catalogue view:', error)} />
+      viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
+      onViewStateError={onViewStateError} />
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
