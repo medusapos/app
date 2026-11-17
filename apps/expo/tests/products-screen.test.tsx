@@ -947,7 +947,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
   it('at 360 wide adds stay on Products, the Cart tab opens the cart, Products returns, and tender and new sale take over', async () => {
     setWindowWidth(360);
     await mount();
-    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
     expect(screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected')).toBe('true');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(screen.getByRole('tab', { name: 'Cart, 1 item' })).toBeTruthy();
@@ -975,7 +975,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     await payByCard();
     await act(async () => { fireEvent.click(button('Complete sale')); });
     fireEvent.click(button('New sale'));
-    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
     expect(search()).toBeTruthy();
   }, 15000);
 
