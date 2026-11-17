@@ -67,6 +67,8 @@ const STATE_LABEL: Record<SyncState, string> = {
 const PLUGIN_NAME = 'the Medusa POS plugin';
 // TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
 const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
+// The till setup screen: its navigation header and its own title say the same words.
+const TILL_SETUP_TITLE = 'Set up this till';
 
 // ADR 0009: phone mode below 600 px.
 const PHONE_BREAKPOINT = 600;
@@ -195,7 +197,8 @@ function PricingScreen(props: PricingProps) {
         actions={region ? { Retry: again, 'Choose another region': () => { clearSettingsRegion(defaultStorage(), session.baseUrl); again(); } } : { Retry: again }} />;
     }
     if (autoChooseDemo) return <SettingsMessage text="Setting up the demo till…" actions={{}} />;
-    return <><EarlierSaleNote /><StoreSettingsChoiceScreen choices={choices} initial={store.initial} title="Set up this till"
+    return <><Stack.Screen options={{ title: TILL_SETUP_TITLE }} /><EarlierSaleNote />
+      <StoreSettingsChoiceScreen choices={choices} initial={store.initial} title={TILL_SETUP_TITLE}
       onSubmit={(choice) => store.choose({ ...choice, country })} /></>;
   }
   if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;

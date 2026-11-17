@@ -6,7 +6,7 @@ import { appliedResponse, saleResults } from './helpers';
 // Europe (dk, exclusive) and Germany (de, inclusive), no default region, the stock location in
 // Copenhagen (dk), one publishable key for the E2E channel, and E2E-U only in another channel.
 // (Medusa 2.21.0 applies the store API's channel filter only with more than one sales channel.)
-const setUp = (page: Page) => page.getByText('Set up this till', { exact: true });
+const setUp = (page: Page) => page.getByRole('heading', { name: 'Set up this till', exact: true });
 const tile = (page: Page) => page.getByTestId('product-tile-E2E product 1');
 
 // E2E-1's price as Medusa's store API calculates it in `region`, with the publishable key,
@@ -29,7 +29,7 @@ async function storePriceLabel(page: Page, token: string, region: string): Promi
 
 test('a fresh till chooses its region; Germany does not cover the Copenhagen location (D1)', async ({ page }) => {
   expect(await signIn(page, null)).toBe(true);
-  await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
+  await expect(setUp(page)).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Europe', exact: true })).toBeVisible();
   await expect(page.getByRole('radio', { name: 'Germany', exact: true })).toBeVisible();
   await expect(page.getByText('Country', { exact: true })).toHaveCount(0);
