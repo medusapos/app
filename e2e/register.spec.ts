@@ -36,13 +36,17 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     const phone = viewport.width < 600;
     // On a phone the register's picker and open card show in the cart view, which the Cart tab opens.
     const openCart = async (page: Page) => { if (phone) await cartTab(page).click(); };
+    // The register's state: TallyUI's pill on a phone; wide, v2's header state beside the store and register (row 09a.3).
+    const registerState = (page: Page) => page.getByTestId(phone ? 'register-bar-pill' : 'header-register-state');
+    // The pill's text, or wide, v2's wording for it.
+    const stateText = (pill: string) => phone ? pill : pill === 'Choose a register' ? 'Choose register' : pill === 'Register closed' ? 'Closed' : pill;
 
     test('bind, open with a float, a cash sale, a paid in and its Undo, and Close register', async ({ page }) => {
       const opens = captureCommands<{ sessionId: string }>(page, 'register.session.open');
       const sales = captureCommands<{ sessionId: string }>(page);
       await closeStoreRegister();
       await signIn(page, 'Europe', false);
-      await expect(page.getByTestId('register-bar-pill')).toHaveText('Choose a register');
+      await expect(registerState(page)).toHaveText(stateText('Choose a register'));
       // On a phone the bar ends Catalogue's status line.
       if (phone) {
         await expect(page.getByTestId('catalogue-status-row').getByTestId('register-bar-pill')).toBeVisible();
@@ -65,7 +69,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
 
       await page.getByTestId('register-picker-row-register-1').click();
       await expect(page.getByTestId('open-register-card')).toBeVisible();
-      await expect(page.getByTestId('register-bar-pill')).toHaveText('Register closed');
+      await expect(registerState(page)).toHaveText(stateText('Register closed'));
       await page.getByTestId('cart-checkout').click();
       await expect(page.getByRole('alert')).toHaveText('Open the register to take payment.');
       await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toHaveCount(0);
@@ -77,7 +81,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
       await expect(page.getByTestId('open-register-card')).toHaveCount(0);
       await expect(page.getByRole('alert')).toHaveCount(0);
-      await expect(page.getByTestId('register-bar-pill')).toHaveCount(0);
+      await expect(registerState(page)).toHaveCount(0);
       await expect(cartLine(page)).toBeVisible();
       await shot(page, 'selling-bar');
 
@@ -119,7 +123,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       // Part B (ADR 0018): count the drawer with the tiles, exactly what's expected, and close under the threshold.
       await panel.getByTestId('register-panel-close').click();
       await expect(panel).toHaveCount(0);
-      await expect(page.getByTestId('register-bar-pill')).toHaveText('Counting');
+      await expect(registerState(page)).toHaveText(stateText('Counting'));
       // On a phone the count opens the cart view itself, even with an empty cart.
       const count = page.getByTestId('register-count');
       await expect(count).toBeVisible();
@@ -147,7 +151,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(closureSheet).toHaveCount(0);
       // Back to selling: the open card, prefilled with the last count.
       await expect(page.getByTestId('open-register-amount')).toHaveValue(counted.toFixed(2));
-      await expect(page.getByTestId('register-bar-pill')).toHaveText('Register closed');
+      await expect(registerState(page)).toHaveText(stateText('Register closed'));
       await shot(page, 'open-after-close');
       // The last closure's figures, from the frozen closure.
       await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
@@ -181,8 +185,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(page.getByTestId('open-register-card')).toHaveCount(0);
       await expect(page.getByTestId('closure-sheet')).toHaveCount(0);
       // TallyUI #175's pill; tapping it focuses the card's button.
-      await expect(page.getByTestId('register-bar-pill')).toHaveText('Close not finished');
-      await page.getByTestId('register-bar-pill').click();
+      await expect(registerState(page)).toHaveText(stateText('Close not finished'));
+      await registerState(page).click();
       await expect(finish.getByTestId('register-column-finish-close-button')).toBeFocused();
       await shot(page, 'finish-close');
       await finish.getByTestId('register-column-finish-close-button').click();
@@ -399,9 +403,9 @@ test('Register 1 taken over by another till: this till\'s paid in is refused sup
   await expect.poll(() => movements.map(({ status, code }) => [status, code])).toEqual([['rejected', 'register_session_superseded']]);
   expect(movements[0].payload.sessionId).toBe(sessionId);
   // TallyUI 3.8.0 has no superseded view: useRegisterSession's current session skips a superseded one, so RegisterColumn
-  // shows OpenRegisterCard as for a closed register, and the bar's pill reads "Register closed".
+  // shows OpenRegisterCard as for a closed register, and the header's state reads "Closed".
   await expect(page.getByTestId('open-register-card')).toBeVisible();
-  await expect(page.getByTestId('register-bar-pill')).toHaveText('Register closed');
+  await expect(page.getByTestId('header-register-state')).toHaveText('Closed');
   await addE2E1(page);
   await page.getByTestId('cart-checkout').click();
   await expect(page.getByRole('alert')).toHaveText('Open the register to take payment.');
