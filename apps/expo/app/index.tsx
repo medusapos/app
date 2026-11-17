@@ -37,6 +37,7 @@ import { StripHeightContext } from '../components/store-refused';
 import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
+import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
 import { useCartSettings } from '../lib/cart-settings';
 import { publishCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
@@ -54,6 +55,7 @@ import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { playScanBeep } from '../lib/scan-beep';
 import { forgetDeletedDefaultCustomer, useDefaultCustomer } from '../lib/default-customer';
+import { forgetDeletedCashierCustomer, useCashierCustomer } from '../lib/cashier-customer';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -268,13 +270,22 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const token = useRef(session.token);
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
-  const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  const { customer: savedDefaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  // v2's "Default customer is cashier": the Medusa customer with the signed-in admin's email, else the picked default.
+  const cashierSearch = useMemo(() => connector.searchCustomers
+    ? (q: string) => connector.searchCustomers!(syncContext, q) : undefined, [connector, syncContext]);
+  const { customer: cashierCustomer } = useCashierCustomer(defaultStorage(), session, cashierSearch,
+    (error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); });
+  const defaultCustomer = cashierCustomer ?? savedDefaultCustomer;
   // The default's stored email stays off the order payload; the paid screen's receipt prefill reads it from storage.
   const saleDefaultCustomer = useMemo(() => defaultCustomer ? { id: defaultCustomer.id, name: defaultCustomer.name } : null, [defaultCustomer]);
   useEffect(() => {
     // The store no longer has this customer: useSale falls back to Guest on an idle cart or the next sale; an open sale keeps its customer.
-    for (const order of recent) forgetDeletedDefaultCustomer(defaultStorage(), session.baseUrl, order.warnings);
-  }, [recent, session.baseUrl]);
+    for (const order of recent) {
+      forgetDeletedDefaultCustomer(defaultStorage(), session.baseUrl, order.warnings);
+      forgetDeletedCashierCustomer(defaultStorage(), session.baseUrl, session.email, order.warnings);
+    }
+  }, [recent, session.baseUrl, session.email]);
   const sale = useSale(pricing, { defaultCustomer: saleDefaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
@@ -379,7 +390,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // catalogue don't need a store to add lines, so only this pane is gated.
   const tenderPane = orders === null
     ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
-    : <Tender sale={sale} />;
+    : <Tender sale={sale} methods={TILL_PAYMENT_METHODS} />;
   // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
   const [panelOpen, setPanelOpen] = useState(false);
   const [userSheetOpen, setUserSheetOpen] = useState(false);
