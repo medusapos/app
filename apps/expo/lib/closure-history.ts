@@ -5,6 +5,7 @@ import { NO_POS_ACCESS_MESSAGE, type Session } from './session';
 export const CLOSURE_HISTORY_PAGE = 20;
 export type ClosureHistoryEntry = {
   closureId: string; number: number; businessDay?: string; openedAt: string; closedAt: string; periodSalesTotalMinor: number;
+  registerId?: string; closedBy?: string; counted?: Record<string, number>; tillExpected?: Record<string, number>;
 };
 export class ClosureHistoryError extends Error {
   constructor(readonly code: 'unauthorized' | 'forbidden' | 'failed', message: string) { super(message); }
@@ -37,7 +38,16 @@ export async function fetchClosureHistory(session: Session, registerId: string, 
       || typeof row.periodSalesTotalMinor !== 'number' || typeof row.openedAt !== 'string' || typeof row.closedAt !== 'string')
       throw new ClosureHistoryError('failed', "Couldn't load earlier closures.");
     const { closureId, number, businessDay, openedAt, closedAt, periodSalesTotalMinor } = row;
-    return { closureId, number, ...(businessDay === undefined ? {} : { businessDay }), openedAt, closedAt, periodSalesTotalMinor };
+    const entry: ClosureHistoryEntry = { closureId, number, ...(businessDay === undefined ? {} : { businessDay }), openedAt, closedAt, periodSalesTotalMinor };
+    for (const key of ['registerId', 'closedBy'] as const) {
+      if (typeof row[key] === 'string') entry[key] = row[key];
+    }
+    for (const key of ['counted', 'tillExpected'] as const) {
+      const value = row[key];
+      if (value !== null && typeof value === 'object' && !Array.isArray(value)
+        && Object.values(value).every((amount) => typeof amount === 'number' && Number.isFinite(amount))) entry[key] = value;
+    }
+    return entry;
   });
   return { closures, more: body.more };
 }

@@ -25,8 +25,17 @@ it('returns the entries and more', async () => {
     closures: [entry, second].map((row) => ({ ...row, orderIds: ['o1'], counted: { cash: 4500 } })), more: true,
   }));
   const result = await fetchClosureHistory(session, 'reg/1', { to: '2026-11-09' }, fetchImpl);
-  expect(result).toEqual({ closures: [entry, second], more: true });
+  expect(result).toEqual({ closures: [entry, second].map((row) => ({ ...row, counted: { cash: 4500 } })), more: true });
   expect(result.closures[1]).not.toHaveProperty('businessDay');
+});
+
+it('keeps well-formed optional fields and omits malformed ones without throwing', async () => {
+  const fields = { registerId: 'register-1', closedBy: 'user-1', counted: { cash: 4400 }, tillExpected: { cash: 4500 } };
+  const fetchImpl = vi.fn<typeof fetch>(async () => response({ closures: [
+    { ...entry, ...fields }, { ...entry, registerId: 1, closedBy: null, counted: 'x', tillExpected: [1] },
+  ], more: false }));
+  await expect(fetchClosureHistory(session, 'reg/1', { to: '2026-11-09' }, fetchImpl))
+    .resolves.toEqual({ closures: [{ ...entry, ...fields }, entry], more: false });
 });
 
 it('maps 401, 403, other statuses, a network error and a bad body to its errors', async () => {
