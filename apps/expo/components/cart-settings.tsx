@@ -18,8 +18,10 @@ const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
   <Line x1={3} y1={18} x2={21} y2={18} /><Circle cx={8} cy={18} r={2} />
 </>);
 
-export function CartSettingsButton({ settings, save, reset }: ReturnType<typeof useCartSettings>) {
+export function CartSettingsButton({ settings, save, reset, phone = false }: ReturnType<typeof useCartSettings> & { phone?: boolean }) {
   const [open, setOpen] = useState(false);
+  // v2's sheet covers the products, never the cart; a phone keeps the right edge.
+  const edge = phone ? 'right' : settings.cartSide === 'left' ? 'right' : 'left';
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +42,8 @@ export function CartSettingsButton({ settings, save, reset }: ReturnType<typeof 
   return <>
     <IconButton testID="cart-settings-button" accessibilityLabel="Cart settings" onPress={() => setOpen(true)}><SlidersIcon /></IconButton>
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent side="right" testID="cart-settings-sheet" className="flex-col gap-4">
+      <DialogContent side="right" testID="cart-settings-sheet" dataSet={{ side: edge }}
+        className={`flex-col gap-4${edge === 'left' ? ' left-0 right-auto border-l-0 border-r' : ''}`}>
         <View className="flex-row items-center justify-between">
           <DialogTitle>Cart Settings</DialogTitle>
           <IconButton testID="cart-settings-x" accessibilityLabel="Close" className="h-11 w-11" onPress={() => setOpen(false)}>
