@@ -623,6 +623,56 @@ describe('ProductsScreen cart settings', () => {
     expect(screen.getByTestId('cart-settings-restore').compareDocumentPosition(screen.getByTestId('cart-settings-close'))
       & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+
+  const heads = () => screen.getAllByRole('columnheader').map((head) => head.textContent);
+  const column = (id: string) => screen.getByTestId(`cart-settings-column-${id}`);
+  const DEFAULT_SWITCHES = { quantity: 'true', 'quantity-split': 'false', image: 'false', name: 'true', 'name-sku': 'false',
+    sku: 'false', price: 'true', total: 'true' };
+  const switches = () => Object.fromEntries(Object.keys(DEFAULT_SWITCHES).map((id) => [id, column(id).getAttribute('aria-checked')]));
+
+  it('shows the Columns switches with v2 defaults', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(screen.getByText('Columns')).toBeTruthy();
+    expect(switches()).toEqual(DEFAULT_SWITCHES);
+  });
+
+  it('shows a SKU column and hides the Total column, and saves both', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(heads()).not.toContain('SKU');
+    expect(within(cartLine('Shirt')).queryByText('BLUE')).toBeNull();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(column('sku'));
+    expect(heads()).toContain('SKU');
+    expect(within(cartLine('Shirt')).getByText('BLUE')).toBeTruthy();
+    fireEvent.click(column('total'));
+    expect(heads()).not.toContain('Total');
+    expect(loadCartSettings(localStorage, 'https://store.test').columns)
+      .toEqual({ ...DEFAULT_CART_SETTINGS.columns, sku: { show: true }, total: { show: false } });
+  });
+
+  it('shows the SKU under the line name', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(within(cartLine('Shirt')).queryByTestId('cart-line-sku')).toBeNull();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(column('name-sku'));
+    expect(within(cartLine('Shirt')).getByTestId('cart-line-sku').textContent).toBe('BLUE');
+  });
+
+  it('restores the default columns', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    const defaults = heads();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(column('image'));
+    fireEvent.click(column('price'));
+    expect(heads()).not.toEqual(defaults);
+    fireEvent.click(screen.getByTestId('cart-settings-restore'));
+    expect(heads()).toEqual(defaults);
+    expect(switches()).toEqual(DEFAULT_SWITCHES);
+  });
 });
 
 async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test', framed = false) {

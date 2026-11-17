@@ -412,7 +412,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
     <Cart sale={cartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
-      quickDiscounts={cartSettings.settings.quickDiscounts}
+      quickDiscounts={cartSettings.settings.quickDiscounts} columns={cartSettings.settings.columns}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
