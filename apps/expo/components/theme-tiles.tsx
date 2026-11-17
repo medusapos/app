@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Pressable, Text, useWindowDimensions, View } from 'react-native';
+import { Pressable, useWindowDimensions, View } from 'react-native';
+import { AppText as Text } from './app-text';
 import { Circle, Line, Path, Rect } from 'react-native-svg';
 import { createSvgIcon } from '@tallyui/components';
 import type { ThemeChoice } from '../lib/theme-choice';

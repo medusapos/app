@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
+import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, SearchInput, Text as ButtonText } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerPatch, type SyncContext } from '@tallyui/core';
