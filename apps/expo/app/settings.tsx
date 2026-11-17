@@ -4,6 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
+import { DirectScannerConnection } from '../components/device-scanner';
 import { ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
 import { FrameMenuButton } from '../components/app-frame';
@@ -211,6 +212,7 @@ function ScannerSection({ session }: { session: Session }) {
           catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
         }} />
       } />
+      <DirectScannerConnection />
       <View className="gap-1 border-t border-border pt-4">
         <Field accessibilityLabel="Test scan here" label="Test scan here" help="Scan a barcode into this field to check it counts as a scan" value={testValue} onChangeText={setTestValue} onKeyPress={onTestKeyPress} />
         {lastScan ? <Text className="text-sm text-muted-foreground">{`Last scan: ${lastScan.code} · ${lastScan.code.length} characters · average ${Math.round(lastScan.avgMs)} ms per key`}</Text> : null}
