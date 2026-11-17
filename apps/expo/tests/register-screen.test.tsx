@@ -12,6 +12,7 @@ import { APPROVAL_REQUIRED_TEXT } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
+import { COUNTING_DRAWER } from '../components/price-check-banner';
 import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
@@ -216,6 +217,29 @@ describe('the register on the sale screen', () => {
     const rows = (await movements.find().exec()).map((doc) => doc.toJSON());
     expect(rows).toHaveLength(2);
     expect(rows.find((row) => row.type === 'void')).toMatchObject({ voids: paidIn.id, amountMinor: 500 });
+  });
+
+  it('while counting, the product side is dimmed and taps and scans add nothing until Back to selling', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await startCount();
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(COUNTING_DRAWER);
+    const catalogue = screen.getByTestId('catalogue-area');
+    expect(catalogue.getAttribute('aria-disabled')).toBe('true');
+    expect(getComputedStyle(catalogue).opacity).toBe('0.5');
+    expect(getComputedStyle(catalogue).pointerEvents).toBe('none');
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    const search = screen.getByRole('searchbox');
+    fireEvent.change(search, { target: { value: 'BLUE' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    await act(async () => { fireEvent.click(screen.getByTestId('count-back')); });
+    await waitFor(() => expect(screen.queryByTestId('register-count')).toBeNull());
+    expect(screen.getByTestId('cart-empty')).toBeTruthy();
+    expect(screen.queryByTestId('price-check-banner')).toBeNull();
+    expect(getComputedStyle(catalogue).opacity).toBe('1');
+    expect(catalogue.getAttribute('aria-disabled')).not.toBe('true');
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   });
 
   it('Close register starts counting, which shows the count until Back to selling', async () => {
