@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
+import { DEFAULT_CART_SETTINGS, saveCartSettings } from '../lib/cart-settings';
 import { clearProductCache } from '../lib/product-cache';
 import { saveScannerSettings } from '../lib/scanner-settings';
 import { login, LoginError, refreshSession, saveSession } from '../lib/session';
@@ -212,8 +213,8 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
-      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'In Stock', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest']);
+      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'cart-settings-button'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
+      .toEqual(['Account: admin@store.test', 'Offline', 'Register ›', 'In Stock', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -478,9 +479,59 @@ describe('Product settings sheet', () => {
 
 afterEach(() => {
   cleanup();
+  localStorage.removeItem('medusapos.cart.https://store.test');
   storeConfig.demo = originalDemoMode;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+
+describe('ProductsScreen cart settings', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  it('uses the saved quick discounts on the line price keypad', async () => {
+    saveCartSettings(localStorage, 'https://store.test', { ...DEFAULT_CART_SETTINGS, quickDiscounts: [20, 30, 40] });
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(within(cartLine('Shirt')).getByTestId('price-popover-trigger'));
+    expect(screen.getAllByTestId(/^price-discount-/).map((key) => key.textContent)).toEqual(['−20%', '−30%', '−40%']);
+  });
+
+  it('moves the wide cart left and restores the default right position', async () => {
+    setWindowWidth(1024);
+    await mount();
+    expect(screen.getByTestId('till-panels').style.flexDirection).toBe('row');
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-side-left'));
+    expect(screen.getByTestId('till-panels').style.flexDirection).toBe('row-reverse');
+    expect(screen.getByTestId('cart-settings-side-left').getAttribute('aria-selected')).toBe('true');
+    fireEvent.click(screen.getByTestId('cart-settings-restore'));
+    expect(screen.getByTestId('till-panels').style.flexDirection).toBe('row');
+    act(() => setWindowWidth(1280));
+  });
+
+  it('moves open orders from below checkout to above the cart header', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(screen.getByTestId('cart-checkout').compareDocumentPosition(screen.getByTestId('open-sale-tabs'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-open-orders-top'));
+    expect(screen.getByTestId('open-sale-tabs').compareDocumentPosition(screen.getByTestId('cart-settings-button'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('rejects zero as a quick discount and keeps the keypad keys unchanged', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.change(screen.getByLabelText('Quick discount 1'), { target: { value: '0' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save quick discounts' }));
+    expect(screen.getByRole('alert').textContent).toBe('Quick discounts must be three whole numbers from 1 to 100.');
+    fireEvent.click(screen.getByTestId('cart-settings-close'));
+    fireEvent.click(within(cartLine('Shirt')).getByTestId('price-popover-trigger'));
+    expect(screen.getAllByTestId(/^price-discount-/).map((key) => key.textContent)).toEqual(['−5%', '−10%', '−15%']);
+  });
 });
 
 async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test', framed = false) {
