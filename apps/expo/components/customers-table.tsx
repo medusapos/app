@@ -1,8 +1,9 @@
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Pressable, ScrollView, View } from 'react-native';
 import {
   Avatar, avatarInitials, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Text as TableText,
 } from '@tallyui/components';
 import type { Customer } from '@tallyui/core';
+import { AppText as Text } from './app-text';
 
 // v2's customers table; Billing address and Date created wait until the connector's search returns them.
 export function CustomersTable({ customers, onOpen }: { customers: Customer[]; onOpen?: (customer: Customer) => void }) {
