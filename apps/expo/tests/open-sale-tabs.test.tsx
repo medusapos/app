@@ -32,6 +32,7 @@ vi.mock('../lib/store-settings', async (original) => ({
 let store: Awaited<ReturnType<typeof openOrderStore>>;
 const record = vi.fn(async (_order: PosOrder) => {});
 const button = (name: string | RegExp) => screen.getByRole('button', { name });
+const saleTabs = () => within(within(screen.getByTestId('open-sale-tabs')).getByRole('tablist'));
 const add = () => fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 const drafts = () => draftsCollection(store.orders)!;
 
@@ -102,7 +103,7 @@ it('counts a parked sale and opens the parked sales sheet from the chip', async 
 
 it('shows the added line as a selected Guest · Shirt tab', async () => {
   await mount(); add();
-  const tabs = within(screen.getByRole('tablist')).getAllByRole('tab');
+  const tabs = saleTabs().getAllByRole('tab');
   expect(tabs).toHaveLength(1);
   expect(tabs[0].getAttribute('aria-selected')).toBe('true');
   expect(within(tabs[0]).getByTestId(/-who$/).textContent).toBe('Guest · Shirt');
@@ -110,14 +111,14 @@ it('shows the added line as a selected Guest · Shirt tab', async () => {
 
 it('parks the current sale with New, keeping its unselected tab', async () => {
   await mount(); add();
-  const tabId = within(screen.getByRole('tablist')).getByRole('tab').getAttribute('data-testid')!;
+  const tabId = saleTabs().getByRole('tab').getAttribute('data-testid')!;
   await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
   expect(screen.getByTestId('cart-empty')).toBeTruthy();
   const parked = await drafts().find().exec();
   expect(parked).toHaveLength(1);
   expect(tabId).toBe(`open-sale-tab-${parked[0].id}`);
   await waitFor(() => expect(screen.getByTestId(tabId).getAttribute('aria-selected')).toBe('false'));
-  expect(within(screen.getByRole('tablist')).getAllByRole('tab')).toHaveLength(1);
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
   expect(within(screen.getByTestId('new-sale-tab')).getByText('New')).toBeTruthy();
 });
 
@@ -139,7 +140,7 @@ it('keeps three tabs in creation order and one draft per non-current sale across
   const tabIds: string[] = [];
   for (const quantity of [1, 2, 3]) {
     for (let count = 0; count < quantity; count++) add();
-    const tab = within(screen.getByRole('tablist')).getByRole('tab', { selected: true });
+    const tab = saleTabs().getByRole('tab', { selected: true });
     tabIds.push(tab.getAttribute('data-testid')!);
     if (quantity < 3) {
       await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
@@ -147,14 +148,14 @@ it('keeps three tabs in creation order and one draft per non-current sale across
       await waitFor(async () => expect(await drafts().find().exec()).toHaveLength(quantity));
     }
   }
-  await waitFor(() => expect(within(screen.getByRole('tablist')).getAllByRole('tab')
+  await waitFor(() => expect(saleTabs().getAllByRole('tab')
     .map((tab) => tab.getAttribute('data-testid'))).toEqual(tabIds));
   expect((await drafts().find().exec()).map((draft) => `open-sale-tab-${draft.id}`).sort()).toEqual(tabIds.slice(0, 2).sort());
   for (const index of [0, 1]) {
     await act(async () => { fireEvent.click(screen.getByTestId(tabIds[index])); });
-    await waitFor(() => expect(within(screen.getByRole('tablist')).getAllByRole('tab')
+    await waitFor(() => expect(saleTabs().getAllByRole('tab')
       .map((tab) => tab.getAttribute('data-testid'))).toEqual(tabIds));
-    expect(within(screen.getByRole('tablist')).getAllByRole('tab')
+    expect(saleTabs().getAllByRole('tab')
       .map((tab) => tab.getAttribute('aria-selected'))).toEqual(tabIds.map((_, i) => String(i === index)));
     expect(cartLineCells('Shirt')).toEqual([String(index + 1), 'Shirt', '€12.00', index === 0 ? '€12.00' : '€24.00']);
     expect((await drafts().find().exec()).map((draft) => `open-sale-tab-${draft.id}`).sort())
@@ -166,14 +167,14 @@ it('keeps three tabs in creation order and one draft per non-current sale across
 it.each([1280, 390])('hides tabs during tender and restores the same tab on cancel at width %i', async (width) => {
   setWindowWidth(width, 800);
   await mount(); add();
-  if (width === 390) fireEvent.click(button(/^Open cart,/));
-  const tabId = within(screen.getByRole('tablist')).getByRole('tab').getAttribute('data-testid')!;
+  if (width === 390) fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
+  const tabId = saleTabs().getByRole('tab').getAttribute('data-testid')!;
   await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
   expect(screen.getByTestId('tender-pane')).toBeTruthy();
   expect(screen.queryByTestId('open-sale-tabs')).toBeNull();
   fireEvent.click(button('Back'));
   expect(screen.queryByTestId('tender-pane')).toBeNull();
   expect(screen.getByTestId('open-sale-tabs')).toBeTruthy();
-  expect(within(screen.getByRole('tablist')).getAllByRole('tab')).toHaveLength(1);
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
   expect(screen.getByTestId(tabId).getAttribute('aria-selected')).toBe('true');
 });

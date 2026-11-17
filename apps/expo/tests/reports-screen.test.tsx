@@ -11,6 +11,7 @@ import { openOrderStore, closeOrderStores, registerCollections } from '../lib/or
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { downloadCsv, localDay } from '../lib/reports';
+import { varianceLabel } from '../lib/reports';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { saveCachedSettings } from '../lib/store-settings';
@@ -82,6 +83,71 @@ function closure(overrides: Partial<Closure> = {}): Closure {
     order_ids: [], movement_ids: [], print_count: 0, ...overrides,
   };
 }
+
+describe('register strip', () => {
+  it('shows the open session and formatted drawer equation', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z', opened_by: 'Ana' },
+      terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
+        cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
+        paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
+        expected: { cash: 4000 } },
+      lastClosure: null, blind: false,
+    } } as unknown as ReturnType<typeof useRegister>);
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    expect(screen.getByTestId('register-strip-status').textContent).toBe('Open');
+    expect(screen.getByTestId('register-strip-since').textContent).toMatch(/^since /);
+    expect(screen.getByTestId('register-strip-since').textContent).toContain(' · Ana');
+    expect(screen.getByTestId('register-strip-float').textContent).toContain(ctx.formatMoney('10.00'));
+    expect(screen.getByTestId('register-strip-cash-sales').textContent).toContain('Cash sales · 2');
+    expect(screen.getByTestId('register-strip-cash-sales').textContent).toContain(ctx.formatMoney('30.00'));
+    expect(screen.getByTestId('register-strip-expected').textContent).toContain(ctx.formatMoney('40.00'));
+    expect(screen.queryByTestId('register-strip-cash-refunds')).toBeNull();
+    expect(within(screen.getByTestId('register-strip')).getByTestId('reports-x-print')).toBeTruthy();
+  });
+
+  it('shows Closed without an equation when there is no session', () => {
+    mount();
+    expect(screen.getByTestId('register-strip-status').textContent).toBe('Closed');
+    expect(screen.queryByTestId('register-strip-equation')).toBeNull();
+  });
+
+  it('shows the last closure number, Today and its variance', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register,
+      lastClosure: closure({ number: 3, closed_at: new Date().toISOString(), variance: { cash: 1000 } }),
+    } });
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    const line = screen.getByTestId('register-strip-last-closure').textContent;
+    expect(line).toContain('#3');
+    expect(line).toContain('Today');
+    expect(line).toContain(varianceLabel(1000, ctx));
+  });
+
+  it('hides the equation for a blind open session', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z' },
+      terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
+        cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
+        paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
+        expected: { cash: 4000 } },
+      lastClosure: null, blind: true,
+    } } as unknown as ReturnType<typeof useRegister>);
+    mount();
+    expect(screen.getByTestId('register-strip-status').textContent).toBe('Open');
+    expect(screen.queryByTestId('register-strip-equation')).toBeNull();
+  });
+
+  it('hides the strip and print action on an unbound till', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), boundRegisterId: null, register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z' },
+    } } as unknown as ReturnType<typeof useRegister>);
+    mount();
+    expect(screen.queryByTestId('register-strip')).toBeNull();
+    expect(screen.queryByTestId('reports-x-print')).toBeNull();
+  });
+});
 
 describe('ReportsScreen', () => {
   it('shows today\'s sales room and what is left out', async () => {

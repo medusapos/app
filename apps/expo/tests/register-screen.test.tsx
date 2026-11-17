@@ -12,6 +12,7 @@ import { APPROVAL_REQUIRED_TEXT } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
+import { COUNTING_DRAWER } from '../components/price-check-banner';
 import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { APPROVE_OFFLINE } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
@@ -216,6 +217,29 @@ describe('the register on the sale screen', () => {
     const rows = (await movements.find().exec()).map((doc) => doc.toJSON());
     expect(rows).toHaveLength(2);
     expect(rows.find((row) => row.type === 'void')).toMatchObject({ voids: paidIn.id, amountMinor: 500 });
+  });
+
+  it('while counting, the product side is dimmed and taps and scans add nothing until Back to selling', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await startCount();
+    expect(screen.getByTestId('price-check-banner').textContent).toBe(COUNTING_DRAWER);
+    const catalogue = screen.getByTestId('catalogue-area');
+    expect(catalogue.getAttribute('aria-disabled')).toBe('true');
+    expect(getComputedStyle(catalogue).opacity).toBe('0.5');
+    expect(getComputedStyle(catalogue).pointerEvents).toBe('none');
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    const search = screen.getByRole('searchbox');
+    fireEvent.change(search, { target: { value: 'BLUE' } });
+    fireEvent.keyDown(search, { key: 'Enter' });
+    await act(async () => { fireEvent.click(screen.getByTestId('count-back')); });
+    await waitFor(() => expect(screen.queryByTestId('register-count')).toBeNull());
+    expect(screen.getByTestId('cart-empty')).toBeTruthy();
+    expect(screen.queryByTestId('price-check-banner')).toBeNull();
+    expect(getComputedStyle(catalogue).opacity).toBe('1');
+    expect(catalogue.getAttribute('aria-disabled')).not.toBe('true');
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   });
 
   it('Close register starts counting, which shows the count until Back to selling', async () => {
@@ -459,7 +483,7 @@ describe('closing the register', () => {
     await mount();
     // On a phone the cart view opens for it by itself.
     const finish = within(await screen.findByTestId('register-column-finish-close'));
-    if (width === 360) expect(button('Products')).toBeTruthy();
+    if (width === 360) expect(screen.getByRole('tab', { name: /^Cart/ }).getAttribute('aria-selected')).toBe('true');
     expect(screen.queryByTestId('open-register-card')).toBeNull();
     await act(async () => { fireEvent.click(finish.getByTestId('register-column-finish-close-button')); });
     const sheet = within(await screen.findByTestId('closure-sheet'));
@@ -541,7 +565,7 @@ describe('closing the register', () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await startCount();
-    expect(button('Products')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: /^Cart/ }).getAttribute('aria-selected')).toBe('true');
     await waitFor(() => expect(pill()).toBe('Counting'));
   });
 
@@ -627,8 +651,8 @@ describe('closing the register', () => {
     const hold = holdClosureWrites();
     await closeWith(count, '100.00');
     await waitFor(() => expect(hold.waiting()).toBe(1));
-    // "‹ Products" unmounts the cart view, and the gate with it.
-    await act(async () => { fireEvent.click(button('Products')); });
+    // The Products tab unmounts the cart view, and the gate with it.
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: 'Products' })); });
     expect(screen.queryByTestId('register-count')).toBeNull();
     await act(async () => { hold.release(); });
     const sheet = within(await screen.findByTestId('closure-sheet'));
@@ -758,16 +782,17 @@ describe('the register control', () => {
     // No strip: the bar ends Catalogue's status line.
     expect(screen.getByTestId('catalogue-status-row').contains(screen.getByTestId('register-bar'))).toBe(true);
     expect(screen.queryByTestId('open-register-card')).toBeNull();
-    // The cart bar stays disabled; only the pill opens the cart view.
-    expect(button('Cart is empty').getAttribute('aria-disabled')).toBe('true');
+    // Only the pill or the Cart tab opens the cart view.
+    expect(screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
     fireEvent.click(button('Register closed'));
     const card = await screen.findByTestId('open-register-card');
     // One tap also focuses the gate, which mounted for it (the float field).
     expect(card.contains(document.activeElement)).toBe(true);
     const empty = screen.getByText('Tap a product to start a sale');
     expect(card.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The control now ends the "‹ Products" row.
-    expect(button('Products').parentElement!.contains(screen.getByTestId('register-bar-pill'))).toBe(true);
+    // The control now ends the cart head row.
+    expect(screen.getByTestId('phone-cart-head').contains(screen.getByTestId('register-bar-pill'))).toBe(true);
   });
 
   it.each([1280, 360])('at %i, with a session open, tapping the pill ("Offline") opens the panel', async (width) => {
@@ -791,7 +816,7 @@ describe('the register control', () => {
     await waitFor(() => expect(pill()).toBe('Close not finished'));
     if (width === 360) {
       // The cart view opened for it by itself; leave it, so the pill has to bring it back.
-      await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Products' })); });
+      await act(async () => { fireEvent.click(await screen.findByRole('tab', { name: 'Products' })); });
       expect(screen.queryByTestId('register-column-finish-close')).toBeNull();
     }
     await act(async () => { fireEvent.click(button('Close not finished')); });

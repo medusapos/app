@@ -4,7 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
   CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
@@ -21,6 +21,7 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../components/frame-drawer-header';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
@@ -242,6 +243,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
   // close during the tender still reaches the stamp, which then makes the sale late.
   const { register, registerOutbox, boundRegisterId, registerName } = useRegister();
+  // v2 dims the product side during the count (row 09e).
+  const counting = register.session?.status === 'counting' || register.closing;
   const drafts = draftsCollection(orders);
   const { parked, discard } = useParkedSales(drafts);
   const [parkedOpen, setParkedOpen] = useState(false);
@@ -288,7 +291,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // setBusy bails out on an unchanged value, so this can't loop.
   useEffect(() => onBusy(!sale.idle));
   // The settings hold starts with the tap, in the same render pass as any settings landing with it (a money rule).
-  const add = (entry: Parameters<typeof sale.add>[0]) => { onBusy(true); sale.add(entry, traits); };
+  const add = (entry: Parameters<typeof sale.add>[0]) => { if (counting) return; onBusy(true); sale.add(entry, traits); };
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
     return () => markBusy('payment', false);
@@ -296,6 +299,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { width } = useWindowDimensions();
   // Phone mode (ADR 0009): products or the cart at full height, the tender over both; a new sale starts on products.
   const phone = width < PHONE_BREAKPOINT;
+  const dimmed = counting && !phone;
   const [viewState, setViewState] = useState(() => normalizeCatalogueViewState({
     ...loadCatalogueView(defaultStorage(), session.baseUrl), ...(phone ? { view: 'grid' } : {}),
   }));
@@ -369,6 +373,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
     {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
+    <View testID="catalogue-area" className="flex-1" pointerEvents={dimmed ? 'none' : 'auto'}
+      aria-disabled={dimmed} style={{ opacity: dimmed ? 0.5 : 1 }}>
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={add} statusText={statusText} statusAccessory={phone
@@ -377,6 +383,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       showFilterBar filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
       onViewStateError={onViewStateError} />
+    </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
   const openOrdersRow = <View className="flex-row items-stretch">
@@ -493,15 +500,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
               {sale.stage.kind === 'cart' ? cart : tenderPane}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
-            : cartOpen ? <View className="flex-1 bg-card">
-              <View className="flex-row items-center justify-between border-b border-border pr-3">
-                <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}
-                  className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
+            : <>{cartOpen ? <View className="flex-1 bg-card">
+              <View testID="phone-cart-head" className="min-h-11 flex-row items-center justify-end border-b border-border pr-3">
                 {registerBar(IN_ROW)}
               </View>
               {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
               {cart}
-            </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
+            </View> : catalogue}
+              <PhoneTabBar active={cartOpen ? 'cart' : 'products'}
+                itemCount={sale.order.lineItems.reduce((count, line) => count + line.quantity, 0)}
+                onSelect={(tab) => setCartOpen(tab === 'cart')} />
+            </>}
         </View>}
     </ConnectorProvider>
   );

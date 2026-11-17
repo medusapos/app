@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, cartLineQuantity, cartTotalRow, discount, sellBySku, signIn, tenderCash, test } from './helpers';
+import { addE2E1, cartLineQuantity, cartTab, cartTotalRow, discount, productsTab, sellBySku, signIn, tenderCash, test } from './helpers';
 
-// The sale screen on a phone (ADR 0009): below 600 px a cart bar opens the cart at full height, its lines and
+// The sale screen on a phone (ADR 0009): below 600 px the Cart tab opens the cart at full height, its lines and
 // order discount scroll, and the totals and pay buttons stay pinned. Sells only E2E-1 and E2E-2.
 test.use({ viewport: { width: 360, height: 740 } });
 
@@ -14,7 +14,7 @@ async function expectAccountInViewport(page: Page) {
 test('the phone tender is titled Checkout Order and its close returns to the cart', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
-  await page.getByRole('button', { name: /^Open cart, / }).click();
+  await cartTab(page).click();
   await page.getByTestId('cart-checkout').click();
   await expect(page.getByRole('heading', { name: 'Checkout Order', exact: true })).toBeVisible();
   await expect(page.getByTestId('frame-menu')).toHaveCount(0);
@@ -31,28 +31,30 @@ test('the phone tender is titled Checkout Order and its close returns to the car
   await expect(page.getByRole('button', { name: 'Complete sale' })).toHaveCount(0);
 });
 
-test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart bar counts items', async ({ page }) => {
+test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart tab counts items', async ({ page }) => {
   await signIn(page);
   await expectAccountInViewport(page);
   await addE2E1(page);
   await addE2E1(page);
-  const bar = page.getByRole('button', { name: /^Open cart, / });
-  await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, /);
-  const box = (await bar.boundingBox())!;
-  // Inset mx-3 each side (12 px) so the bar reads as a button, not a status line (job #69 follow-up).
-  expect([box.width, box.height >= 56]).toEqual([336, true]);
-  await bar.click();
+  const cart = cartTab(page);
+  await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
+  await expect(page.getByTestId('phone-tab-cart-count')).toHaveText('2');
+  const box = (await page.getByTestId('phone-tab-bar').boundingBox())!;
+  expect([box.x, box.width]).toEqual([0, 360]);
+  expect((await cart.boundingBox())!.height).toBeGreaterThanOrEqual(56);
+  await cart.click();
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
   await expectAccountInViewport(page);
   await discount(page, 'line', 'Percent', '10');
   await discount(page, 'order', 'Amount', '0.50');
   const orderChip = page.getByRole('button', { name: /^Remove discount .*0\.50/ });
   await expect(orderChip).toBeVisible();
-  await page.getByRole('button', { name: 'Products', exact: true }).click();
+  await productsTab(page).click();
   await expect(page.getByRole('heading', { name: 'Sale', exact: true })).toBeVisible();
-  await expect(bar).toHaveAccessibleName(/^Open cart, 2 items, \D*3\.88$/);
-  await bar.click();
+  await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
+  await cart.click();
   const total = cartTotalRow(page, 'Total');
+  await expect(total).toContainText('3.88');
   // v2's foot: the ⋮ (44 px) and Checkout (56 px) share one row.
   const checkout = page.getByTestId('cart-checkout');
   const more = page.getByTestId('cart-foot-more');
@@ -62,11 +64,11 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   expect([centreGap <= 1, checkoutBox.height >= 56, Math.round(moreBox.width), Math.round(moreBox.height)]).toEqual([true, true, 44, 44]);
   await orderChip.scrollIntoViewIfNeeded();
   for (const target of [orderChip, total, checkout]) await expect(target).toBeInViewport();
-  await page.getByRole('button', { name: 'Products', exact: true }).click();
+  await productsTab(page).click();
   await page.getByTestId('product-tile-E2E product 2').click();
-  await expect(bar).toHaveAccessibleName(/^Open cart, 3 items, /);
-  await expect(page.getByText('Cart · 3 items', { exact: true })).toBeVisible();
-  await bar.click();
+  await expect(cart).toHaveAccessibleName(/^Cart, 3 items$/);
+  await expect(page.getByTestId('phone-tab-cart-count')).toHaveText('3');
+  await cart.click();
   // The order discount dialog's Cancel fits; closing it restores the pinned total and checkout.
   await page.getByTestId('cart-add-menu').click();
   await page.getByRole('menuitem', { name: 'Add Discount', exact: true }).click();
@@ -75,14 +77,14 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the cart b
   await cancel.click();
   for (const target of [total, checkout]) await expect(target).toBeInViewport();
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(3.88);
-  await expect(page.getByRole('button', { name: 'Cart is empty', exact: true })).toBeVisible();
+  await expect(cart).toHaveAccessibleName('Cart');
 });
 
 // ADR 0015 (#82 review): an automatic sign-out during a save that can't finish waits, with a note that fits at 360 px.
 test('a sign-out requested during a stuck save waits, and its note fits at 360 px and Sign out stays locked', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
-  await page.getByRole('button', { name: /^Open cart, / }).click();
+  await cartTab(page).click();
   await page.getByTestId('cart-checkout').click();
   await tenderCash(page, 'exact');
   // A stuck save: the order's insert waits before its write (an E2E debug hook; a dead storage worker would stop
@@ -119,7 +121,7 @@ test('a sign-out requested during a stuck save waits, and its note fits at 360 p
 test('a keyboard-wedge scan in the cart view adds a product, and an unknown code alerts without adding one', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
-  await page.getByRole('button', { name: /^Open cart, / }).click();
+  await cartTab(page).click();
   await expect(page.getByRole('heading', { name: 'Cart', exact: true })).toBeVisible();
 
   // A tapped Pressable keeps focus in Chromium and activates on Enter; the scan's Enter must not also press it
