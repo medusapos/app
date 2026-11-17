@@ -7,7 +7,6 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { AppFrame } from '../components/app-frame';
 import { ClearLocalDataGate } from '../components/clear-local-data';
-import { DemoBanner } from '../components/demo-banner';
 import { LiveTabGate } from '../components/live-tab-gate';
 import { StorageHealth } from '../components/storage-health';
 import { installLogSinks } from '../lib/logging';
@@ -53,7 +52,6 @@ export default function RootLayout() {
   return (
     <ClearLocalDataGate><SessionProvider>
       <StatusBar style="auto" />
-      <DemoBanner />
       <GatedApp />
       {/* One root host, after navigation and outside every gate (TallyUI's integration doc at 451a0ca): the
           register panel and movement sheet (Dialog) render here, above the screen's header. */}
