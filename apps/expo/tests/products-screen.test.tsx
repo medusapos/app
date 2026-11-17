@@ -140,6 +140,30 @@ describe('ProductsScreen catalogue', () => {
     expect(record.mock.calls[0][0].customer).toBeNull();
   });
 
+  it('a sale on the default customer sends it without its email, and the receipt email still prefills it', async () => {
+    saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' });
+    try {
+      vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [] });
+      vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
+        id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',
+          prices: [{ amount: 12, currency_code: 'eur' }] }],
+      }] }));
+      await mount();
+      fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+      await payByCard();
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
+      const record = vi.mocked(useOutboxContext().record);
+      expect(record).toHaveBeenCalledTimes(1);
+      const sent = record.mock.calls[0][0].customer;
+      expect(sent).toMatchObject({ id: 'ada', name: 'Ada Lovelace' });
+      expect(sent).not.toHaveProperty('email');
+      fireEvent.click(screen.getByTestId('receipt-email-open'));
+      expect((screen.getByLabelText('Receipt email address') as HTMLInputElement).value).toBe('ada@example.com');
+    } finally {
+      saveDefaultCustomer(localStorage, 'https://store.test', null);
+    }
+  });
+
   it('clearing the default never rewrites an open sale', async () => {
     saveDefaultCustomer(localStorage, 'https://store.test', { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' });
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [] });
