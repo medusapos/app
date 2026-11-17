@@ -27,6 +27,7 @@ import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
+import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView } from '../lib/catalogue-view';
 import { useCartSettings } from '../lib/cart-settings';
@@ -482,9 +483,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           {/* v2's Panel position; the column and phone layouts ignore it. */}
           {!phone ? <View testID="till-panels" className="flex-1"
             style={{ flexDirection: width >= ROW_BREAKPOINT ? (cartSettings.settings.cartSide === 'left' ? 'row-reverse' : 'row') : 'column' }}>
-            {catalogue}
+            {/* v2: tender takes the products' side, the order summary stays beside it; phone unchanged. */}
+            {sale.stage.kind === 'tender' ? <View testID="tender-slot" className="flex-1 bg-card">{tenderPane}</View> : catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? cart : tenderPane}
+              {sale.stage.kind === 'cart' ? cart : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : cartOpen ? <View className="flex-1 bg-card">
