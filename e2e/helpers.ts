@@ -112,9 +112,12 @@ export async function openRegister(page: Page, float = '100.00', synced = true, 
   }
   await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
-  if (phone) await page.getByRole('button', { name: 'Products', exact: true }).click();
+  if (phone) await productsTab(page).click();
   return applied;
 }
+
+export const cartTab = (page: Page) => page.getByRole('tab', { name: /^Cart/ });
+export const productsTab = (page: Page) => page.getByRole('tab', { name: 'Products', exact: true });
 
 // On "Set up this till": pick a region and continue.
 export async function chooseRegion(page: Page, region: string) {

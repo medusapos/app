@@ -4,7 +4,7 @@ import { Redirect, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
-  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart, CartBar,
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
   CartNoteInput, Catalogue, ChangeDisplay, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
@@ -21,6 +21,7 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../components/frame-drawer-header';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
@@ -499,15 +500,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
               {sale.stage.kind === 'cart' ? cart : tenderPane}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
-            : cartOpen ? <View className="flex-1 bg-card">
-              <View className="flex-row items-center justify-between border-b border-border pr-3">
-                <Pressable accessibilityRole="button" accessibilityLabel="Products" onPress={() => setCartOpen(false)}
-                  className="min-h-11 self-start justify-center px-3"><Text className="text-primary">‹ Products</Text></Pressable>
+            : <>{cartOpen ? <View className="flex-1 bg-card">
+              <View testID="phone-cart-head" className="min-h-11 flex-row items-center justify-end border-b border-border pr-3">
                 {registerBar(IN_ROW)}
               </View>
               {scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null}
               {cart}
-            </View> : <>{catalogue}<CartBar sale={sale} onOpen={() => setCartOpen(true)} /></>}
+            </View> : catalogue}
+              <PhoneTabBar active={cartOpen ? 'cart' : 'products'}
+                itemCount={sale.order.lineItems.reduce((count, line) => count + line.quantity, 0)}
+                onSelect={(tab) => setCartOpen(tab === 'cart')} />
+            </>}
         </View>}
     </ConnectorProvider>
   );
