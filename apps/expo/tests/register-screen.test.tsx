@@ -786,7 +786,7 @@ describe('the register control', () => {
     expect(screen.queryByTestId('open-register-card')).toBeNull();
     // Only the pill or the Cart tab opens the cart view.
     expect(screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected')).toBe('true');
-    expect(screen.getByRole('tab', { name: 'Cart' })).toBeTruthy();
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
     fireEvent.click(button('Register closed'));
     const card = await screen.findByTestId('open-register-card');
     // One tap also focuses the gate, which mounted for it (the float field).
