@@ -37,6 +37,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { useDefaultCustomer } from '../lib/default-customer';
 import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import {
@@ -247,7 +248,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const token = useRef(session.token);
   token.current = session.token;
   const discountCodes = useMemo(() => createMedusaDiscountCodes({ baseUrl: session.baseUrl, token: () => token.current }), [session.baseUrl]);
-  const sale = useSale(pricing, { registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
+  const { customer: defaultCustomer } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  const sale = useSale(pricing, { defaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
     discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
