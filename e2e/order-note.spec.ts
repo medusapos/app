@@ -2,7 +2,7 @@ import { expect, type Page } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, cartTab, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test,
   type PostedCommand } from './helpers';
 
-// The sale's note (v2 parity row 8, ADR 0024): CartNoteInput in the cart, kept with a parked sale, shown on the
+// The sale's note (v2 parity rows 8 and 04c, ADR 0024): the cart's note dialog and note row, kept with a parked sale, shown on the
 // receipt and sent as order.create v7's `note`, which the store keeps as the order's metadata.tally_note. Sells only E2E-1.
 type Sale = { clientOrderId: string; note?: string };
 const NOTE = 'Leave at reception, gift wrap';
@@ -17,7 +17,9 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     const addNote = async (page: Page, note: string) => {
       await page.getByText('Add order note', { exact: true }).click();
       await noteField(page).fill(note);
+      await page.getByRole('button', { name: 'Done', exact: true }).click();
     };
+    const noteRow = (page: Page) => page.getByTestId('cart-note-row');
     // Cash exact and Complete sale, as sellBySku pays, stopping on the receipt (before New sale).
     const payCashExact = async (page: Page) => {
       await page.getByTestId('cart-checkout').click();
@@ -49,8 +51,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await addE2E1(page);
       await openCart(page);
       await addNote(page, NOTE);
-      await expect(noteField(page)).toHaveValue(NOTE);
-      await expect(noteField(page)).toBeInViewport();
+      await expect(noteRow(page)).toContainText(NOTE);
+      await expect(noteRow(page)).toBeInViewport();
       await page.screenshot({ path: test.info().outputPath(`cart-note-${viewport.width}.png`) });
       await payCashExact(page);
       await expect(page.getByTestId('receipt-note')).toContainText(NOTE);
@@ -64,7 +66,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       if (phone) await addE2E1(page);
       await openCart(page);
       await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
-      await expect(noteField(page)).toHaveCount(0);
+      await expect(noteRow(page)).toHaveCount(0);
       await expect.poll(async () => (await ordersByClientId(token))
         .find((order) => order.metadata.tally_client_id === payload.clientOrderId)?.metadata.tally_note, { timeout: 30_000 })
         .toBe(NOTE);
@@ -79,10 +81,11 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
       await expect(page.getByTestId('cart-empty')).toBeVisible();
       await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
-      await expect(noteField(page)).toHaveCount(0);
+      await expect(noteRow(page)).toHaveCount(0);
       await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
       await page.getByTestId(/^parked-resume-/).click();
-      await expect(noteField(page)).toHaveValue('Park me');
+      await expect(noteRow(page)).toContainText('Park me');
+      await expect(noteRow(page)).toBeInViewport();
       await payCashExact(page);
       await expect.poll(() => commands.length).toBeGreaterThan(0);
       const [{ version, payload }] = commands;
@@ -94,7 +97,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await signIn(page);
       await addE2E1(page);
       await openCart(page);
-      await addNote(page, 'x'.repeat(1001));
+      await page.getByText('Add order note', { exact: true }).click();
+      await noteField(page).fill('x'.repeat(1001));
       await expect(noteField(page)).toHaveValue('x'.repeat(1000));
     });
 
