@@ -85,6 +85,7 @@ beforeEach(() => {
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing, refresh: () => {} });
   vi.mocked(useReplicatedProducts).mockReset();
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
+  setWindowWidth(1024, 768);
 });
 
 afterEach(() => {
@@ -329,5 +330,55 @@ describe('the header', () => {
     const header = screen.getByTestId('header-left');
     expect(header.dataset.headerShown).toBe('true');
     expect(header.contains(screen.getByTestId('frame-menu'))).toBe(true);
+  });
+});
+
+describe('on a phone', () => {
+  beforeEach(() => setWindowWidth(390, 844));
+  const listRows = () => Array.from(document.querySelectorAll('[data-testid^="product-list-row-"]'));
+  const listRowIds = () => listRows().map((row) => row.getAttribute('data-testid')!.replace('product-list-row-', ''));
+  const texts = (id: string) => within(screen.getByTestId(`product-list-row-${id}`)).getAllByText(/./).map((node) => node.textContent);
+
+  it('lists two-line rows instead of the table, by name ascending', () => {
+    sessionState.session = session;
+    const reversed = [{ ...products[1], variants: [...products[1].variants].reverse() }, products[0]];
+    publishCatalogue(sale({ products: reversed }));
+    mount();
+    expect(screen.getByTestId('products-list')).toBeTruthy();
+    expect(screen.queryByTestId('products-table')).toBeNull();
+    expect(listRowIds()).toEqual(['v1', 'v4a', 'v4b']);
+    expect(texts('v1')).toEqual(['E2E product 1', 'E2E-1', '€10.00', '5 · In stock']);
+    expect(texts('v4b')).toEqual(['E2E product 4 · B', 'E2E-4B', '€25.00', 'On backorder']);
+  });
+
+  it('rows open nothing', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    mount();
+    expect(listRows()).toHaveLength(3);
+    for (const row of listRows()) expect(within(row as HTMLElement).queryAllByRole('button')).toEqual([]);
+  });
+
+  it('narrows with the search and the In stock chip, and says when nothing matches', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    mount();
+    fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
+    expect(listRowIds()).toEqual(['v4b']);
+    fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'hat' } });
+    expect(listRowIds()).toEqual([]);
+    expect(screen.getByText(PRODUCTS_NO_MATCH('hat'))).toBeTruthy();
+    fireEvent.change(screen.getByTestId('products-search'), { target: { value: '' } });
+    fireEvent.click(screen.getByTestId('products-in-stock'));
+    expect(listRowIds()).toEqual(['v1', 'v4a']);
+  });
+
+  it('shows the table from 600 px wide', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    setWindowWidth(600, 800);
+    mount();
+    expect(screen.getByTestId('products-table')).toBeTruthy();
+    expect(screen.queryByTestId('products-list')).toBeNull();
   });
 });
