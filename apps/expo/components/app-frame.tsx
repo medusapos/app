@@ -2,12 +2,13 @@
 // slide-over drawer opened from the header's menu button on a phone. Not TallyUI's AppShell: its menu state is read
 // only by TallyUI's RegisterBar (an unexported hook), which would add a second menu button to the register bar.
 // Navigation is modelled on the Tally Woo app's rail-routes.ts: the stack stays at most Sale plus one area.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { View, useWindowDimensions } from 'react-native';
 import { router, usePathname, type Href } from 'expo-router';
 import { Circle, Line, Path, Rect } from 'react-native-svg';
 import { createSvgIcon, IconButton, NavDrawer, NavRail, Text, type ShellNavItem } from '@tallyui/components';
 import { version as appVersion } from '../package.json';
+import { AccountButton } from './account-button';
 
 // TallyUI's one layout boundary (AppShell's WIDE_MIN_WIDTH / WIDE_MIN_HEIGHT, @tallyui/components 3.18.0
 // src/shell/app-shell.tsx l.16-17): at least 768 wide AND 480 tall gets the rail, anything smaller the drawer.
@@ -60,8 +61,13 @@ export function frameStep(from: FrameAreaId, to: FrameAreaId): { method: 'push' 
   return { method: from === 'sale' ? 'push' : 'replace', href: hrefOf(to) };
 }
 
-type FrameState = { openMenu?: () => void; setBadge: (id: FrameAreaId, count: number) => void };
-const FrameContext = createContext<FrameState>({ setBadge: () => {} });
+/** The Sale's account: the avatar's name and initials, and how to open the Sale's user sheet from an area. */
+export type FrameAccount = { displayName: string; initials: string; open: () => void };
+type FrameState = {
+  openMenu?: () => void; setBadge: (id: FrameAreaId, count: number) => void;
+  account: FrameAccount | null; setAccount: (account: FrameAccount | null) => void;
+};
+const FrameContext = createContext<FrameState>({ setBadge: () => {}, account: null, setAccount: () => {} });
 
 /** Opens the phone's drawer; undefined on a wide window and off the frame. */
 export function useFrameMenu(): (() => void) | undefined {
@@ -73,6 +79,31 @@ export function useFrameBadge(id: FrameAreaId, count: number) {
   const { setBadge } = useContext(FrameContext);
   useEffect(() => setBadge(id, count), [setBadge, id, count]);
   useEffect(() => () => setBadge(id, 0), [setBadge, id]);
+}
+
+/** The Sale publishes its account to the frame (cleared on unmount); `open` is read through a ref, so it may change. */
+export function useFrameAccountPublisher(account: FrameAccount | null) {
+  const { setAccount } = useContext(FrameContext);
+  const openRef = useRef(account?.open);
+  openRef.current = account?.open;
+  const open = useCallback(() => openRef.current?.(), []);
+  const { displayName, initials } = account ?? {};
+  const published = !!account;
+  useEffect(() => setAccount(published ? { displayName: displayName!, initials: initials!, open } : null),
+    [setAccount, published, displayName, initials, open]);
+  useEffect(() => () => setAccount(null), [setAccount]);
+}
+
+/** The Sale's account, or null with no Sale under the area, off the frame or signed out. */
+export function useFrameAccount(): FrameAccount | null {
+  return useContext(FrameContext).account;
+}
+
+/** An area's account avatar, opening the Sale's user sheet; nothing when there is no Sale under the area. */
+export function AreaAccountButton() {
+  const account = useFrameAccount();
+  if (!account) return null;
+  return <AccountButton testID="area-user-menu" displayName={account.displayName} initials={account.initials} onPress={account.open} />;
 }
 
 /** An area header's headerLeft: the drawer's 44 px menu button on a phone, nothing on a wide window. */
@@ -96,7 +127,9 @@ export function AppFrame({ signedIn, children }: { signedIn: boolean; children: 
   const setBadge = useCallback((id: FrameAreaId, count: number) =>
     setBadges((prev) => (prev[id] ?? 0) === count ? prev : { ...prev, [id]: count }), []);
   const openMenu = useCallback(() => setMenuOpen(true), []);
-  const state = useMemo(() => ({ setBadge, openMenu: active && !wide ? openMenu : undefined }), [setBadge, openMenu, active, wide]);
+  const [account, setAccount] = useState<FrameAccount | null>(null);
+  const state = useMemo(() => ({ setBadge, openMenu: active && !wide ? openMenu : undefined,
+    account: signedIn ? account : null, setAccount }), [setBadge, openMenu, active, wide, signedIn, account]);
   const items: ShellNavItem[] = FRAME_AREAS.map(({ id, label, Icon, ...area }) => ({
     id, label, icon: <Icon size={24} />, badge: badges[id] || undefined, group: 'group' in area ? area.group : 'top',
   }));

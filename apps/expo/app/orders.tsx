@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { OrderFilterBar, OrdersList, SearchInput } from '@tallyui/components';
 import type { OrderFilterValue } from '@tallyui/pos';
-import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
 import { StripHeightContext } from '../components/store-refused';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -25,10 +25,11 @@ export default function OrdersScreen() {
   const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
   return <View className="flex-1 bg-background" role="main" aria-label="Orders">
-    <Stack.Screen options={{ title: 'Orders', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <Stack.Screen options={{ title: 'Orders', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Orders"
         accessibilityLabel="Search Orders" testID="orders-search" />
+      {!openMenu && <AreaAccountButton />}
     </View>
     <View className="px-4 pb-2">
       <OrderFilterBar value={filters} onChange={setFilters} fields={ORDERS_SCREEN_FILTER_FIELDS}
