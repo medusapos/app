@@ -50,13 +50,13 @@ async function mount(children: ReactNode = <SettingsScreen />) {
 const follows = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
 
 describe('Settings › Printing', () => {
-  it('on a wide window lists Printing between Customer and Scanner and shows its section', async () => {
+  it('on a wide window lists Printing between Tax and Card readers and shows its section', async () => {
     setWindowWidth(1280, 800);
     await mount();
     const printing = screen.getByTestId('settings-nav-printing');
     expect(printing.textContent).toBe('Printing');
-    expect(follows(screen.getByTestId('settings-nav-customer'), printing)).toBe(true);
-    expect(follows(printing, screen.getByTestId('settings-nav-scanner'))).toBe(true);
+    expect(follows(screen.getByTestId('settings-nav-tax'), printing)).toBe(true);
+    expect(follows(printing, screen.getByTestId('settings-nav-card-readers'))).toBe(true);
     expect(screen.queryByTestId('settings-printing')).toBeNull();
     fireEvent.click(printing);
     expect(screen.getByTestId('settings-printing')).toBeTruthy();
@@ -74,12 +74,12 @@ describe('Settings › Printing', () => {
     expect(loadPrintingSettings(localStorage, baseUrl).autoPrintReceipt).toBe(false);
   });
 
-  it('on a phone shows Printing between Default customer and Scanner', async () => {
+  it('on a phone shows Printing between Tax and Card readers', async () => {
     setWindowWidth(390, 844);
     await mount();
     const printing = screen.getByTestId('settings-printing');
-    expect(follows(screen.getByTestId('settings-default-customer'), printing)).toBe(true);
-    expect(follows(printing, screen.getByTestId('settings-scanner'))).toBe(true);
+    expect(follows(screen.getByTestId('settings-tax'), printing)).toBe(true);
+    expect(follows(printing, screen.getByTestId('settings-card-readers'))).toBe(true);
   });
 
   it('names the print dialog as the print method under the auto-print switch', async () => {

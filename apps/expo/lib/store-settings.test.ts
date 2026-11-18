@@ -55,14 +55,43 @@ describe('fetchStoreSettings', () => {
     const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(new Response(null, { status: 500 }));
     await expect(fetchStoreSettings(session, fetchImpl)).rejects.toMatchObject({ code: 'unreachable' });
   });
-  it('reads the store name, default currency, first location, sales channel and region names, with no tax or price-preference reads', async () => {
-    const fetchImpl = fetcher();
-    expect(await fetchStoreSettings(session, fetchImpl)).toEqual(settings);
+  it('reads the store name, default currency, first location, sales channel, region names and tax rate names for display, with no price-preference reads', async () => {
+    const fetchImpl = fetcher([...resources(), { tax_regions: [
+      { id: 'txreg_dk_84', country_code: 'dk', province_code: 'dk-84', tax_rates: [{ id: 'txr_p', name: 'Capital', rate: 30, is_default: true }] },
+      { id: 'txreg_dk', country_code: 'dk', province_code: null, tax_rates: [
+        { id: 'txr_r', name: 'Reduced', code: 'R', rate: 12.5, is_default: false },
+        { id: 'txr_d', name: 'Standard', code: 'S', rate: 25, is_default: true },
+      ] },
+    ] }]);
+    expect(await fetchStoreSettings(session, fetchImpl)).toEqual({ ...settings, taxRates: [
+      { name: 'Standard', rate: 25, isDefault: true }, { name: 'Reduced', rate: 12.5, isDefault: false },
+    ] });
     expect(fetchImpl.mock.calls).toEqual([
       '/admin/stores?fields=id,name,default_sales_channel_id,supported_currencies.currency_code,supported_currencies.is_default',
       '/admin/sales-channels/sc_1?fields=id,name,stock_locations.id,stock_locations.name,stock_locations.address.*',
       '/admin/regions?limit=1000&fields=id,name',
+      '/admin/tax-regions?country_code=dk&limit=1000&fields=id,country_code,province_code,*tax_rates',
     ].map((path) => [`${session.baseUrl}${path}`, { headers: { Authorization: 'Bearer jwt' } }]));
+  });
+  it.each([
+    ['answers 500', null],
+    ['has no tax_regions array', { tax_regions: 'txreg_dk' }],
+    ['has no country-level region', { tax_regions: [{ id: 'txreg_dk_84', province_code: 'dk-84', tax_rates: [{ name: 'Capital', rate: 30, is_default: true }] }] }],
+  ])('opens without tax rates when the tax-rate read %s', async (_, body) => {
+    const fetchImpl = fetcher();
+    fetchImpl.mockResolvedValueOnce(body === null ? new Response(null, { status: 500 }) : new Response(JSON.stringify(body)));
+    const result = await fetchStoreSettings(session, fetchImpl);
+    expect(result).not.toHaveProperty('taxRates');
+    expect(result).toEqual(settings);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
+  });
+  it('drops a tax rate with no name and keeps a rate: null entry by name with no rate', async () => {
+    const result = await fetchStoreSettings(session, fetcher([...resources(), { tax_regions: [{ id: 'txreg_dk', province_code: null, tax_rates: [
+      { id: 'txr_x', rate: 5, is_default: false }, { id: 'txr_e', name: '', rate: 6, is_default: false },
+      { id: 'txr_z', name: 'Zero rated', rate: null, is_default: false }, null,
+    ] }] }]));
+    expect(result.taxRates).toEqual([{ name: 'Zero rated', isDefault: false }]);
+    expect(result.taxRates?.[0]).not.toHaveProperty('rate');
   });
   it('leaves the sales channel out when it has no name', async () => {
     const bodies = resources();
@@ -80,7 +109,8 @@ describe('fetchStoreSettings', () => {
     expect(result).not.toHaveProperty('regions');
     expect(result.salesChannel).toEqual(settings.salesChannel);
     expect(result.location).toEqual(settings.location);
-    expect(fetchImpl).toHaveBeenCalledTimes(3);
+    // The display-only tax-rate read still follows.
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
   it('opens without region names when the regions body has no array', async () => {
     const bodies = resources();
@@ -160,6 +190,20 @@ describe('settings cache', () => {
     expect(storage.getItem(`medusapos.settings.${session.baseUrl}`)).toBe(JSON.stringify(settings));
     expect(loadCachedSettings(storage, session.baseUrl)).toEqual(settings);
     expect(loadCachedSettings(storage, otherUrl)).toEqual(other);
+  });
+  it('round-trips the tax rate names', () => {
+    const storage = memoryStorage();
+    const withRates = { ...settings, taxRates: [{ name: 'Standard', rate: 25, isDefault: true }, { name: 'Zero rated', isDefault: false }] };
+    saveCachedSettings(storage, session.baseUrl, withRates);
+    expect(loadCachedSettings(storage, session.baseUrl)).toEqual(withRates);
+    expect(loadCachedSettings(storage, session.baseUrl)?.taxRates?.[1]).not.toHaveProperty('rate');
+  });
+  it.each([
+    { taxRates: 'Standard' }, { taxRates: [{ name: 25, rate: 25, isDefault: true }] },
+  ])('drops malformed tax rates but keeps the entry %j', (override) => {
+    const storage = memoryStorage();
+    storage.setItem(`medusapos.settings.${session.baseUrl}`, JSON.stringify({ ...settings, ...override }));
+    expect(loadCachedSettings(storage, session.baseUrl)).toEqual(settings);
   });
   it('accepts an older entry that still carries taxRatePpm and pricesIncludeTax, without them', () => {
     const storage = memoryStorage();
