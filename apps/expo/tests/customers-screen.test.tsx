@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer } from '@tallyui/core';
 import type { Session } from '../lib/session';
 import CustomersScreen, { NETWORK_ERROR_TEXT, NO_MATCH_TEXT, SEARCH_HINT, SEARCHING_TEXT } from '../app/customers';
+import { AppFrame } from '../components/app-frame';
+import { setWindowWidth } from './window-width';
 
 const { searchCustomers, updateCustomer, createCustomer, sessionState } = vi.hoisted(() => ({
   searchCustomers: vi.fn(), updateCustomer: vi.fn(), createCustomer: vi.fn(),
@@ -14,8 +16,9 @@ const { searchCustomers, updateCustomer, createCustomer, sessionState } = vi.hoi
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/customers',
-  Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode } }) =>
-    <div data-testid="header-left">{options.headerLeft?.()}</div> },
+  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode } }) =>
+    <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
+      {options.headerLeft?.()}</div> },
 }));
 vi.mock('../lib/pos-connector', () => ({
   createPosConnector: () => ({ id: 'medusa', searchCustomers, updateCustomer, createCustomer }),
@@ -180,5 +183,27 @@ describe('CustomersScreen', () => {
     await act(async () => { resolveFirst([ada]); });
     expect(screen.queryByTestId('customer-row-ada')).toBeNull();
     expect(screen.getAllByTestId(/^customer-row-/)).toEqual([screen.getByTestId('customer-row-grace')]);
+  });
+});
+
+describe('the header', () => {
+  it('on a wide window there is no title bar; the main landmark is named Customers', () => {
+    setWindowWidth(1440, 900);
+    render(<AppFrame signedIn><CustomersScreen /></AppFrame>);
+    const header = screen.getByTestId('header-left');
+    expect(header.dataset.headerShown).toBe('false');
+    expect(header.dataset.title).toBe('Customers');
+    expect(screen.queryByTestId('frame-menu')).toBeNull();
+    const main = screen.getByRole('main', { name: 'Customers' });
+    for (const control of [screen.getByTestId('customers-search'), screen.getByTestId('customers-add'),
+      screen.getByRole('button', { name: 'Customer settings' })]) expect(main.contains(control)).toBe(true);
+  });
+
+  it('on a phone the header stays, with the frame\'s Menu', () => {
+    setWindowWidth(390, 844);
+    render(<AppFrame signedIn><CustomersScreen /></AppFrame>);
+    const header = screen.getByTestId('header-left');
+    expect(header.dataset.headerShown).toBe('true');
+    expect(header.contains(screen.getByTestId('frame-menu'))).toBe(true);
   });
 });

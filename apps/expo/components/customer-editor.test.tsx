@@ -9,7 +9,7 @@ import { CustomerEditor } from './customer-editor';
 
 const { createCustomer, updateCustomer } = vi.hoisted(() => ({ createCustomer: vi.fn(), updateCustomer: vi.fn() }));
 vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
-vi.mock('./app-frame', () => ({ FrameMenuButton: () => null }));
+vi.mock('./app-frame', () => ({ FrameMenuButton: () => null, useFrameMenu: () => undefined }));
 vi.mock('../lib/pos-connector', () => ({ authHeaders: () => ({ Authorization: 'Bearer t' }),
   createPosConnector: () => ({ id: 'medusa', searchCustomers: vi.fn(), createCustomer, updateCustomer }) }));
 vi.mock('../lib/session-context', () => ({ useSession: () => ({

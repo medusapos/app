@@ -22,7 +22,13 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       for (const [area, path] of [['Orders', /\/orders$/], ['Customers', /\/customers$/], ['Reports', /\/reports$/], ['Settings', /\/settings$/]] as const) {
         await openArea(page, area);
         await expect(page).toHaveURL(path);
-        await expect(page.getByRole('heading', { name: area, exact: true })).toBeVisible();
+        if (area === 'Customers' && wide) {
+          // v2's Customers starts at the search row on a wide window: no title bar, a main landmark carries the name.
+          await expect(page.getByRole('main', { name: 'Customers' })).toBeVisible();
+          await expect(page.getByRole('heading', { name: 'Customers', exact: true })).toHaveCount(0);
+        } else {
+          await expect(page.getByRole('heading', { name: area, exact: true })).toBeVisible();
+        }
         await expect(page.getByTestId('nav-drawer')).toHaveCount(0);
       }
       await openArea(page, 'Sale');
