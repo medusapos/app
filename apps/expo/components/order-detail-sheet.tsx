@@ -5,7 +5,9 @@ import {
 } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { buildReceiptDataFromPosOrder, type PosOrder } from '@tallyui/pos';
-import { orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel } from '../lib/order-detail';
+import {
+  canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
+} from '../lib/order-detail';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedSettings } from '../lib/store-settings';
@@ -27,11 +29,13 @@ function injectReceiptPrintStyle() {
 }
 
 // One stored sale, read-only, in a right-hand sheet as WCPOS v2 opens an order.
-export function OrderDetailSheet({ order, onClose, formatDate }: {
+export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush }: {
   order: PosOrder | null; onClose: () => void; formatDate: (iso: string) => string;
+  onRetry: (orderIds: string[]) => Promise<number>; onFlush: () => Promise<void>;
 }) {
   const { session } = useSession();
   const [reprint, setReprint] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   // Each sale opens on its detail; keyed on the id, so a live sync-status update keeps the receipt up.
   useEffect(() => setReprint(false), [order?.id]);
   useEffect(() => { if (reprint) injectReceiptPrintStyle(); }, [reprint]);
@@ -71,6 +75,12 @@ export function OrderDetailSheet({ order, onClose, formatDate }: {
           </View>)}
         </View>}
         footerSlot={<View className="flex-row gap-2">
+          {canSyncOrder(order) ? <Button variant="outline" className="flex-1" testID="order-detail-sync" disabled={syncing}
+            onPress={() => {
+              setSyncing(true);
+              // A failed send shows in the outbox's own state, so the sheet ignores the rejection.
+              syncOrder({ flush: onFlush, requeue: onRetry }, order).catch(() => {}).finally(() => setSyncing(false));
+            }}><Text>Sync</Text></Button> : null}
           <Button variant="outline" className="flex-1" testID="order-detail-close" onPress={onClose}><Text>Close</Text></Button>
           <Button variant="outline" className="flex-1" testID="order-detail-receipt" onPress={() => setReprint(true)}><Text>Receipt</Text></Button>
         </View>} />}
