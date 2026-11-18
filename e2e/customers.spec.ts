@@ -117,3 +117,30 @@ test('the Default customer is cashier switch starts the sale on the signed-in ca
   await openArea(page, 'Sale');
   await expect(page.getByRole('button', { name: `Customer: ${name}`, exact: true })).toBeVisible();
 });
+
+test('the cart customer chip\'s address button edits the customer\'s billing address in Medusa', async ({ page }) => {
+  const token = await adminToken();
+  const email = `chip-address-${crypto.randomUUID()}@example.com`;
+  await createAdminCustomer(token, email, 'Ada', 'Lovelace');
+  await signIn(page);
+  await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
+  await page.getByTestId('customer-picker-search').fill(email);
+  await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Edit customer address', exact: true }).click();
+  const dialog = page.getByTestId('customer-address-dialog');
+  await dialog.getByLabel('Address line 1', { exact: true }).fill('1 Market St');
+  await dialog.getByLabel('City', { exact: true }).fill('Leeds');
+  await dialog.getByLabel('Postal code', { exact: true }).fill('LS1 1AA');
+  await dialog.getByTestId('customer-billing-country').fill('gb');
+  await dialog.getByTestId('customer-billing-country-GB').click();
+  await dialog.getByTestId('customer-save').click();
+  await expect(dialog).not.toBeVisible();
+  const response = await fetch(`${backend}/admin/customers?q=${encodeURIComponent(email)}&fields=*addresses`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  const { customers } = await response.json();
+  expect(customers).toHaveLength(1);
+  expect(customers[0].addresses).toHaveLength(1);
+  expect(customers[0].addresses[0]).toMatchObject({ is_default_billing: true, address_1: '1 Market St',
+    city: 'Leeds', postal_code: 'LS1 1AA', country_code: 'gb' });
+});

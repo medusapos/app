@@ -28,4 +28,25 @@ describe('CustomerChip', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Customer: Ada Lovelace' }));
     expect(onPress).toHaveBeenCalledTimes(1);
   });
+
+  it('has no address button without onAddress, for a named customer or Guest', () => {
+    render(<><CustomerChip name="Ada Lovelace" onPress={() => {}} /><CustomerChip name={null} onPress={() => {}} /></>);
+    expect(screen.queryByTestId('customer-address')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Edit customer address' })).toBeNull();
+  });
+
+  it('with onAddress, the address button sits beside the chip button in the chip row and calls only onAddress', () => {
+    const onPress = vi.fn();
+    const onAddress = vi.fn();
+    render(<CustomerChip name="Ada Lovelace" onPress={onPress} onAddress={onAddress} />);
+    const chip = screen.getByRole('button', { name: 'Customer: Ada Lovelace' });
+    const address = screen.getByRole('button', { name: 'Edit customer address' });
+    expect(chip.contains(address)).toBe(false);
+    const row = screen.getByTestId('customer-chip-row');
+    expect(row.contains(chip)).toBe(true);
+    expect(row.contains(address)).toBe(true);
+    fireEvent.click(address);
+    expect(onAddress).toHaveBeenCalledTimes(1);
+    expect(onPress).not.toHaveBeenCalled();
+  });
 });
