@@ -5,7 +5,7 @@ import { Redirect, Stack } from 'expo-router';
 import { Path } from 'react-native-svg';
 import { ClosureSheet, createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
-import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { AreaAccountButton, FrameMenuButton, useFrameAccount, useFrameMenu } from '../components/app-frame';
 import { ClosureFiltersBar } from '../components/closure-filters';
 import { ClosureTable } from '../components/closure-table';
 import { EarlierClosures } from '../components/earlier-closures';
@@ -74,6 +74,7 @@ export default function ReportsScreen() {
   const ctx = currency ? closureContext(currency, { name: storeName, address: settings?.location.addressLine }) : null;
   // v2's Reports has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
   const openMenu = useFrameMenu();
+  const account = useFrameAccount();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
   const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
@@ -94,7 +95,9 @@ export default function ReportsScreen() {
 
   return <ScrollView className="flex-1 bg-background" role="main" aria-label="Reports" contentContainerClassName="px-6 pb-6"
     contentContainerStyle={{ paddingTop: 24 + topInset }}>
-    <Stack.Screen options={{ title: 'Reports', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <Stack.Screen options={{ title: 'Reports', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
+    {/* v2's avatar ends the window's top row, so it sits outside the centred column. */}
+    {!openMenu && account && <View className="flex-row justify-end"><AreaAccountButton /></View>}
     <View className="w-full max-w-5xl gap-4 self-center">
       {ctx && boundRegisterId ? <>
         <RegisterStrip register={register} ctx={ctx}

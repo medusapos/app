@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, View } from 'react-native';
-import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
+import { Platform, Pressable, useWindowDimensions, View } from 'react-native';
+import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, IconButton, SwitchConfirm, Text, XIcon, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { formatClosureDate, presetRange, switchWarnings, watchFresh, type PosOrder, type SwitchWarningInput } from '@tallyui/pos';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -13,6 +13,8 @@ import { ExternalLinkIcon } from './external-link-icon';
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Read by assistive tech as Sign out's description, out of the layout, so the sheet never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
+// ADR 0009: phone mode below 600 px.
+const PHONE_BREAKPOINT = 600;
 
 export function UserSheet({ session, displayName, initials, storeName, currency, open, onOpenChange, onRegister, onChooseRegister, signOut, signOutLocked, lockMessage, outbox, parkedSales, paidMinor }: {
   session: Session; displayName: string; initials: string; storeName: string; currency: string;
@@ -21,6 +23,7 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
   outbox: SwitchWarningInput['outbox']; parkedSales: number; paidMinor: number;
 }) {
   const { register, registerName, boundRegisterId, unbind } = useRegister();
+  const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
   // Any session, even a closed one with an unfinished closure: unbinding would strand it.
   const sessionExists = register.session != null;
   const { orders } = useOutboxContext();
@@ -46,16 +49,23 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
   const opener = !openedBy ? null : openedBy === session.email ? displayName : openedBy;
   // The signed-in cashier's own sales: the app records every local order with cashierRef = session.email.
   const totals = salesRoomFigures(sales.filter((order) => order.cashierRef === session.email), filters, currency).figures.totals;
+  // On a phone, as v2: Close on top and Sign out under it, both full width; from 600 px Sign out left, Close right.
+  const close = <Button testID="user-sheet-close" variant="outline" className={phone ? 'min-h-11 w-full' : 'min-h-11'}
+    onPress={() => onOpenChange(false)}><Text>Close</Text></Button>;
   return <><Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent side="right" testID="user-sheet" className="flex-col gap-4">
-      <View className="flex-row items-center gap-2">
-        <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text>{initials}</Text></View>
+      {/* As v2: the avatar beside the name and the ✕ at the top right, both on the first line, not centred on the block. */}
+      <View className="flex-row items-start gap-2">
+        <Avatar testID="user-sheet-avatar" aria-hidden size="sm" tone="primary" fallback={initials} />
         <View className="min-w-0 flex-1 gap-2">
           <DialogTitle testID="user-sheet-name">{displayName}</DialogTitle>
           <Text testID="user-sheet-context" className="text-muted-foreground">
             {[session.email !== displayName && session.email, storeName, registerName, since && `since ${since}`].filter(Boolean).join(' · ')}
           </Text>
         </View>
+        <IconButton testID="user-sheet-x" accessibilityLabel="Close" className="h-11 w-11" onPress={() => onOpenChange(false)}>
+          <View className="text-foreground"><XIcon size={24} /></View>
+        </IconButton>
       </View>
       {orders && <View testID="user-sheet-sales-today" className="flex-row items-center justify-between gap-2">
         <View>
@@ -106,8 +116,10 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           else void import('expo-linking').then((Linking) => Linking.openURL(url))
             .catch((error) => console.warn('Failed to open admin URL:', error));
         }}><ExternalLinkIcon size={14} /><Text className="text-sm text-muted-foreground">Medusa Admin</Text></Pressable>
-      <View className="flex-row justify-between gap-2 border-t border-border pt-4">
-        <Button testID="user-sheet-sign-out" variant="outline" className="min-h-11" accessibilityLabel="Sign out"
+      <View testID="user-sheet-footer" dataSet={{ layout: phone ? 'stacked' : 'row' }}
+        className={(phone ? 'flex-col' : 'flex-row justify-between') + ' gap-2 border-t border-border pt-4'}>
+        {phone && close}
+        <Button testID="user-sheet-sign-out" variant="outline" className={phone ? 'min-h-11 w-full border-destructive' : 'min-h-11'} accessibilityLabel="Sign out"
           disabled={signOutLocked} accessibilityHint={signOutLocked ? lockMessage : undefined}
           aria-describedby={signOutLocked ? SIGN_OUT_LOCKED_ID : undefined}
           onPress={() => {
@@ -118,7 +130,7 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           <Text className="text-destructive">Sign out</Text>
         </Button>
         {signOutLocked ? <Text nativeID={SIGN_OUT_LOCKED_ID} style={VISUALLY_HIDDEN}>{lockMessage}</Text> : null}
-        <Button testID="user-sheet-close" variant="outline" className="min-h-11" onPress={() => onOpenChange(false)}><Text>Close</Text></Button>
+        {!phone && close}
       </View>
       </View>
     </DialogContent>

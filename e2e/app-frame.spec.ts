@@ -37,5 +37,29 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       // Back to the sale dismisses to it: one sale screen is mounted (hidden stack screens stay in the DOM).
       await expect(page.getByPlaceholder('Search or scan barcode / SKU', { exact: true })).toHaveCount(1);
     });
+
+    test('every area but Settings has the account avatar at the top right, opening the user sheet (row 14a)', async ({ page }) => {
+      await signIn(page);
+      for (const area of ['Products', 'Orders', 'Customers', 'Reports'] as const) {
+        await openArea(page, area);
+        const avatar = page.getByTestId('area-user-menu');
+        await expect(avatar).toBeVisible();
+        const box = (await avatar.boundingBox())!;
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.y + box.height).toBeLessThanOrEqual(80);
+        expect(box.x).toBeGreaterThanOrEqual(viewport.width - 120);
+        expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+        if (area === 'Orders') {
+          await avatar.click();
+          await expect(page.getByTestId('user-sheet')).toBeVisible();
+          await expect(page.getByTestId('user-sheet-name')).toBeVisible();
+          await page.getByTestId('user-sheet-close').click();
+          await expect(page.getByTestId('user-sheet')).toHaveCount(0);
+        }
+      }
+      await openArea(page, 'Settings');
+      await expect(page).toHaveURL(/\/settings$/);
+      await expect(page.getByTestId('area-user-menu')).toHaveCount(0);
+    });
   });
 }
