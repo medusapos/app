@@ -363,12 +363,11 @@ describe('closing the register', () => {
   const PASSWORD = 'manager-secret-7';
   const TOKEN = 'approver-token-xyz';
   const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
-  /** A stand-in Medusa: a current plugin's info (the gate's contract read, the sign-in's probe), emailpass and /admin/users/me. */
+  /** A stand-in Medusa for the approver's sign-in (emailpass, then the plugin's info: 404) and /admin/users/me. */
   function stubMedusa(signIn: () => Response | Promise<Response> = () => json({ token: TOKEN })) {
     const fetch = vi.fn(async (url: string | URL | Request, _init?: RequestInit) => {
       const path = new URL(String(url)).pathname;
       if (path === '/auth/user/emailpass') return signIn();
-      if (path === '/tally/v1/info') return json({ contracts: {}, pluginContract: 1 });
       if (path === '/admin/users/me') return json({ user: { id: 'user_mgr', first_name: 'Mia', last_name: 'Manager', email: 'mia@store.test' } });
       return json({}, 404);
     });
@@ -507,8 +506,7 @@ describe('closing the register', () => {
       expect(dialog.queryByTestId('approval-approve')).toBeNull();
       expect(dialog.queryByTestId('approval-password')).toBeNull();
       expect(dialog.getAllByRole('button').map((element) => element.textContent)).toEqual(['Cancel']);
-      // Only the gate's plugin-contract read at mount: no sign-in is tried.
-      if (why === 'the catalogue is offline') expect(fetch.mock.calls.map(([url]) => new URL(String(url)).pathname)).toEqual(['/tally/v1/info']);
+      if (why === 'the catalogue is offline') expect(fetch).not.toHaveBeenCalled();
       await act(async () => { fireEvent.click(dialog.getByTestId('approval-cancel')); });
       expect(count.getByTestId('count-manager-line').textContent).toBe('Approval was not granted. The count is unchanged.');
       expect((count.getByTestId('count-amount') as HTMLInputElement).value).toBe('90.00');
