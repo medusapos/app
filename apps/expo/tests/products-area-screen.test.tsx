@@ -6,7 +6,9 @@ import { StoreSettingsError, type ProductTraits, type StoreSettings as PricingSe
 import { useStoreSettings } from '@tallyui/pos';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
-import { PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH } from '../lib/products-area';
+import {
+  PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH, PRODUCTS_NONE_IN_STOCK, saveProductsAreaCategory,
+} from '../lib/products-area';
 import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
@@ -210,5 +212,95 @@ describe('ProductsAreaScreen', () => {
     expect(vi.mocked(useReplicatedProducts).mock.lastCall![1])
       .toMatchObject({ baseUrl: session.baseUrl, pricingContext: pricing.pricingContext });
     expect(loadSettingsChoice(localStorage, session.baseUrl)).toEqual({ region: 'reg_eu' });
+  });
+
+  const categorized: Doc[] = [
+    { ...products[0], categories: [{ id: 'cat_drinks', name: 'Drinks' }] },
+    { ...products[1], categories: [{ id: 'cat_food', name: 'Food' }] },
+  ];
+  const rowIds = () => Array.from(document.querySelectorAll('[data-testid^="product-row-"]'))
+    .map((row) => row.getAttribute('data-testid')!.replace('product-row-', '')).sort();
+  const press = (testID: string) => fireEvent.click(screen.getByTestId(testID));
+  const inStock = () => screen.getByTestId('products-in-stock');
+  // This Node's test environment has no working localStorage (as the till-setup case above), so these cases stub one.
+  const stubStorage = () => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
+  };
+
+  it('restores the category chosen in an earlier visit', () => {
+    stubStorage();
+    sessionState.session = session;
+    publishCatalogue(sale({ products: categorized }));
+    mount();
+    press('category-nav-cat_food');
+    cleanup();
+    mount();
+    expect(screen.getByTestId('category-nav-cat_food').getAttribute('aria-checked')).toBe('true');
+    expect(rowIds()).toEqual(['v4a', 'v4b']);
+    press('category-nav-');
+    cleanup();
+    mount();
+    expect(screen.getByTestId('category-nav-').getAttribute('aria-checked')).toBe('true');
+    expect(rowIds()).toEqual(['v1', 'v4a', 'v4b']);
+  });
+
+  it('keeps the choice per store', () => {
+    stubStorage();
+    saveProductsAreaCategory(localStorage, 'https://other.test', 'cat_food');
+    sessionState.session = session;
+    publishCatalogue(sale({ products: categorized }));
+    mount();
+    expect(screen.getByTestId('category-nav-').getAttribute('aria-checked')).toBe('true');
+    expect(rowIds()).toEqual(['v1', 'v4a', 'v4b']);
+  });
+
+  it('shows All products for a stored category missing from the catalogue', () => {
+    stubStorage();
+    saveProductsAreaCategory(localStorage, session.baseUrl, 'cat_gone');
+    sessionState.session = session;
+    publishCatalogue(sale({ products: categorized }));
+    mount();
+    expect(screen.getByTestId('category-nav-').getAttribute('aria-checked')).toBe('true');
+    expect(rowIds()).toEqual(['v1', 'v4a', 'v4b']);
+  });
+
+  it('narrows to in-stock rows with the In stock chip, with category and search, and does not keep it', () => {
+    stubStorage();
+    sessionState.session = session;
+    publishCatalogue(sale({ products: categorized }));
+    mount();
+    expect(inStock().getAttribute('aria-pressed')).toBe('false');
+    press('products-in-stock');
+    expect(inStock().getAttribute('aria-pressed')).toBe('true');
+    expect(rowIds()).toEqual(['v1', 'v4a']);
+    press('category-nav-cat_food');
+    expect(rowIds()).toEqual(['v4a']);
+    fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
+    expect(rowIds()).toEqual([]);
+    expect(screen.getByText(PRODUCTS_NO_MATCH('E2E-4B'))).toBeTruthy();
+    cleanup();
+    mount();
+    expect(inStock().getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('category-nav-cat_food').getAttribute('aria-checked')).toBe('true');
+    expect(rowIds()).toEqual(['v4a', 'v4b']);
+  });
+
+  it('says nothing is in stock when the In stock chip leaves no row and there is no search', () => {
+    sessionState.session = session;
+    publishCatalogue(sale({ products: [{ ...products[1], variants: [products[1].variants[1]] }] }));
+    mount();
+    press('products-in-stock');
+    expect(rowIds()).toEqual([]);
+    expect(screen.getByText(PRODUCTS_NONE_IN_STOCK)).toBeTruthy();
+  });
+
+  it('shows the In stock chip when the catalogue has no categories', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    mount();
+    expect(inStock()).toBeTruthy();
+    expect(screen.queryByTestId('category-nav-')).toBeNull();
   });
 });

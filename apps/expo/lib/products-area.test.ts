@@ -1,8 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { ProductTraits, VariantSummary } from '@tallyui/core';
 import {
-  filterProductAreaRows, filterProductAreaRowsByCategory, productAreaRows, STOCK_STATUS_DOTS, type ProductAreaRow,
+  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsInStock, loadProductsAreaCategory, productAreaRows,
+  saveProductsAreaCategory, STOCK_STATUS_DOTS, type ProductAreaRow,
 } from './products-area';
+import type { SessionStorage } from './session';
 
 type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[] };
 const traits = {
@@ -107,5 +109,71 @@ describe('STOCK_STATUS_DOTS', () => {
   it("colours the dot as TallyUI's ProductStockBadge does", () => {
     expect(STOCK_STATUS_DOTS.in_stock).toBe('bg-success');
     expect(STOCK_STATUS_DOTS.out_of_stock).toBe('bg-destructive');
+  });
+});
+
+describe('filterProductAreaRowsInStock', () => {
+  const row = (id: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id, name: id, sku: id, price: '€1.00',
+    stock: '1', stockStatus, categories: '', categoryIds: [] });
+  const rows = [row('in', 'in_stock'), row('back', 'backorder'), row('out', 'out_of_stock'), row('unknown', 'unknown')];
+
+  it('returns the same array when off', () => {
+    expect(filterProductAreaRowsInStock(rows, false)).toBe(rows);
+  });
+
+  it('keeps only in-stock rows when on', () => {
+    expect(filterProductAreaRowsInStock(rows, true).map((r) => r.id)).toEqual(['in']);
+  });
+});
+
+describe('loadProductsAreaCategory / saveProductsAreaCategory', () => {
+  const memory = (): SessionStorage & { data: Map<string, string> } => {
+    const data = new Map<string, string>();
+    return { data, getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { data.set(key, value); },
+      removeItem: (key) => { data.delete(key); } };
+  };
+  const store = 'https://store.test';
+
+  it('round-trips a saved category id', () => {
+    const storage = memory();
+    saveProductsAreaCategory(storage, store, 'cat_food');
+    expect(loadProductsAreaCategory(storage, store)).toBe('cat_food');
+  });
+
+  it('loads a saved null (All products) as null', () => {
+    const storage = memory();
+    saveProductsAreaCategory(storage, store, 'cat_food');
+    saveProductsAreaCategory(storage, store, null);
+    expect(loadProductsAreaCategory(storage, store)).toBeNull();
+  });
+
+  it('keeps the choice per store', () => {
+    const storage = memory();
+    saveProductsAreaCategory(storage, store, 'cat_food');
+    expect(loadProductsAreaCategory(storage, 'https://other.test')).toBeNull();
+  });
+
+  it('loads missing, corrupt and wrong-shaped values as null', () => {
+    const storage = memory();
+    expect(loadProductsAreaCategory(storage, store)).toBeNull();
+    for (const value of ['{', '[]', JSON.stringify({ category: 7 }), JSON.stringify({ category: '' })]) {
+      storage.data.set('medusapos.products-area.' + store, value);
+      expect(loadProductsAreaCategory(storage, store)).toBeNull();
+    }
+  });
+
+  it('loads null from a null storage, and saving to it does nothing', () => {
+    expect(loadProductsAreaCategory(null, store)).toBeNull();
+    expect(() => saveProductsAreaCategory(null, store, 'cat_food')).not.toThrow();
+  });
+
+  it('loads null when getItem throws, and swallows a throwing setItem', () => {
+    const fail = () => { throw new Error('denied'); };
+    const broken: SessionStorage = { getItem: fail, setItem: fail, removeItem: fail };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(loadProductsAreaCategory(broken, store)).toBeNull();
+    expect(() => saveProductsAreaCategory(broken, store, 'cat_food')).not.toThrow();
+    expect(warn).toHaveBeenCalledWith('Could not save the Products category:', expect.any(Error));
+    warn.mockRestore();
   });
 });
