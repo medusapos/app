@@ -1133,9 +1133,9 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
   });
 
   it('at 360 wide with a closed register the header shows Closed, and pressing it opens the Cart tab', async () => {
-    const fixture = openRegisterFixture();
-    vi.mocked(useRegister).mockReturnValue({ ...fixture,
-      register: { ...fixture.register, session: { ...fixture.register.session!, status: 'closed' } } });
+    // A finished close leaves no session (sessions still enabled); a session whose status is 'closed' is "Close not finished".
+    const fixture = openRegisterFixture({ enabled: true });
+    vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register, session: null } });
     setWindowWidth(360);
     await mount();
     const control = screen.getByTestId('header-register-state');
@@ -1146,6 +1146,15 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('false');
     act(() => { fireEvent.click(control); });
     expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('at 360 wide with a session still closed the header reads Close not finished, as the wide header does', async () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture,
+      register: { ...fixture.register, session: { ...fixture.register.session!, status: 'closed' } } });
+    setWindowWidth(360);
+    await mount();
+    expect(screen.getByTestId('header-register-state').textContent).toBe('Close not finished');
   });
 
   it('at 360 wide with no register chosen the header reads Choose register', async () => {
