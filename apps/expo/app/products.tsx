@@ -5,7 +5,7 @@ import {
   Button, Card, CategoryNav, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
 } from '@tallyui/components';
 import { listCategories, sortProducts } from '@tallyui/pos';
-import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
@@ -103,10 +103,11 @@ export default function ProductsAreaScreen() {
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
     : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
   return <View className="flex-1 bg-background" role="main" aria-label="Products">
-    <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
+      {!openMenu && <AreaAccountButton />}
     </View>
     {/* In stock first, as in v2's chip row; the category is kept per store, In stock is not. */}
     {ready ? <View className="flex-row items-center pl-4">

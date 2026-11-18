@@ -139,12 +139,56 @@ it.each([['Alex Smith', 'AS', 1280], [undefined, 'A', 1280], ['Alex Smith', 'AS'
     open();
     expect(screen.getByTestId('user-sheet-name').textContent).toBe(displayName);
     expect(screen.getByTestId('user-sheet-context').textContent).toBe(`${name ? 'admin@store.test · ' : ''}Test shop · Register 1 · since ${openedAt}`);
+    expect(screen.getByTestId('user-sheet-avatar').textContent).toBe(initials);
+    expect(screen.getByTestId('user-sheet-x').getAttribute('role')).toBe('button');
     const buttons = screen.getByTestId('user-sheet-sign-out').parentElement!;
-    expect(buttons.firstElementChild).toBe(screen.getByTestId('user-sheet-sign-out'));
-    expect(buttons.lastElementChild).toBe(screen.getByTestId('user-sheet-close'));
+    expect(buttons).toBe(screen.getByTestId('user-sheet-footer'));
+    const phone = width < 600;
+    expect(buttons.getAttribute('data-layout')).toBe(phone ? 'stacked' : 'row');
+    expect(buttons.firstElementChild).toBe(screen.getByTestId(phone ? 'user-sheet-close' : 'user-sheet-sign-out'));
+    expect(buttons.lastElementChild).toBe(screen.getByTestId(phone ? 'user-sheet-sign-out' : 'user-sheet-close'));
     expect(buttons.previousElementSibling).toBe(screen.getByTestId('user-sheet-admin'));
     expect(screen.getByTestId('user-sheet-admin').querySelector('svg')).not.toBeNull();
   });
+
+it.each([1024, 360])('closes the sheet with the ✕ at %i px', async (width) => {
+  setWindowWidth(width, 800);
+  await mount(); open();
+  fireEvent.click(screen.getByTestId('user-sheet-x'));
+  expect(screen.queryByTestId('user-sheet')).toBeNull();
+});
+
+it.each([[599, 'stacked', 'user-sheet-close', 'user-sheet-sign-out'], [600, 'row', 'user-sheet-sign-out', 'user-sheet-close']] as const)(
+  'lays the footer out at %i px as %s', async (width, layout, first, last) => {
+    setWindowWidth(width, 800);
+    await mount(); open();
+    const footer = screen.getByTestId('user-sheet-footer');
+    expect(footer.getAttribute('data-layout')).toBe(layout);
+    expect(footer.firstElementChild).toBe(screen.getByTestId(first));
+    expect(footer.lastElementChild).toBe(screen.getByTestId(last));
+  });
+
+it('signs out from the stacked phone footer without a session', async () => {
+  setWindowWidth(360, 800);
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register, session: null } });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-footer').getAttribute('data-layout')).toBe('stacked');
+  fireEvent.click(screen.getByTestId('user-sheet-sign-out'));
+  expect(screen.queryByTestId('switch-confirm')).toBeNull();
+  expect(localStorage.getItem('medusapos.session')).toBeNull();
+  expect(screen.getByText('redirect:/login')).toBeTruthy();
+});
+
+it('disables sign-out in the stacked phone footer while a save locks it', async () => {
+  setWindowWidth(360, 800);
+  vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), savesInFlight: 1 });
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-footer').getAttribute('data-layout')).toBe('stacked');
+  expect(screen.getByTestId('user-sheet-sign-out').getAttribute('aria-disabled')).toBe('true');
+  fireEvent.click(screen.getByTestId('user-sheet-sign-out'));
+  expect(screen.queryByTestId('switch-confirm')).toBeNull();
+  expect(localStorage.getItem('medusapos.session')).not.toBeNull();
+});
 
 it('omits the drawer without an open session and skips an empty register name', async () => {
   vi.mocked(useRegister).mockReturnValue({ ...useRegister(), registerName: null, register: { ...useRegister().register, session: null } });
