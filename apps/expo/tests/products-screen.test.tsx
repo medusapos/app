@@ -197,7 +197,7 @@ describe('ProductsScreen catalogue', () => {
       expect(sent).toMatchObject({ id: 'ada', name: 'Ada Lovelace' });
       expect(sent).not.toHaveProperty('email');
       fireEvent.click(screen.getByTestId('receipt-email-open'));
-      expect((screen.getByLabelText('Receipt email address') as HTMLInputElement).value).toBe('ada@example.com');
+      expect((screen.getByLabelText('Email Address') as HTMLInputElement).value).toBe('ada@example.com');
     } finally {
       saveDefaultCustomer(localStorage, 'https://store.test', null);
     }
