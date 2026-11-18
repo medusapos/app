@@ -6,7 +6,7 @@ import { router } from 'expo-router';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import SettingsScreen from '../app/settings';
-import { AppFrame } from '../components/app-frame';
+import { AppFrame, useFrameAccountPublisher } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
 
 const { searchCustomers } = vi.hoisted(() => ({ searchCustomers: vi.fn().mockResolvedValue([]) }));
@@ -25,7 +25,7 @@ vi.mock('expo-router', () => ({
   Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
       {options.headerLeft?.()}</div>
-    {options.headerRight?.()}
+    <div data-testid="header-right">{options.headerRight?.()}</div>
   </> },
 }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
@@ -53,9 +53,21 @@ async function mountFramed(width: number, height: number) {
   await act(async () => { render(<SessionProvider><AppFrame signedIn><SettingsScreen /></AppFrame></SessionProvider>); });
 }
 
-// The mocked Stack.Screen draws the header (and its Menu button) in place, inside the list's ScrollView; skip it.
+// The mocked Stack.Screen draws the header (its Menu button and avatar) in place, inside the list's ScrollView; skip it.
 const listRows = () => within(screen.getByTestId('settings-list')).getAllByRole('button')
-  .filter((row) => !screen.getByTestId('header-left').contains(row));
+  .filter((row) => !screen.getByTestId('header-left').contains(row) && !screen.getByTestId('header-right').contains(row));
+
+function AccountPublisher({ open }: { open: () => void }) {
+  useFrameAccountPublisher({ displayName: 'Dana Cole', initials: 'DC', open });
+  return null;
+}
+
+async function mountWithAccount(width: number, height: number, open: () => void) {
+  setWindowWidth(width, height);
+  await act(async () => {
+    render(<SessionProvider><AppFrame signedIn><AccountPublisher open={open} /><SettingsScreen /></AppFrame></SessionProvider>);
+  });
+}
 
 describe('Settings on a phone: a list of sections, each on its own page', () => {
   it('lists the wide nav\'s sections in its order, each with a chevron, under the frame\'s Menu and no section content', async () => {
@@ -131,5 +143,37 @@ describe('Settings on a phone: a list of sections, each on its own page', () => 
     expect(screen.queryByTestId('settings-tax')).toBeNull();
     expect(screen.queryByTestId('settings-list')).toBeNull();
     expect(screen.queryByTestId('settings-back')).toBeNull();
+  });
+});
+
+describe('Settings on a phone carries the account avatar at the top right, as v2 (row 14a)', () => {
+  it('the list header and each section page header have the avatar as their right button, opening the account', async () => {
+    const open = vi.fn();
+    await mountWithAccount(390, 844, open);
+    const avatar = screen.getByTestId('area-user-menu');
+    expect(screen.getByTestId('header-right').contains(avatar)).toBe(true);
+    expect(listRows()).not.toContain(avatar);
+    expect(listRows()).toHaveLength(8);
+    expect(screen.getByTestId('area-user-menu-avatar').textContent).toBe('DC');
+    fireEvent.click(avatar);
+    expect(open).toHaveBeenCalledOnce();
+    cleanup();
+    params.section = 'tax';
+    await mountWithAccount(390, 844, open);
+    expect(screen.getByTestId('settings-tax')).toBeTruthy();
+    const sectionAvatar = screen.getByTestId('area-user-menu');
+    expect(screen.getByTestId('header-right').contains(sectionAvatar)).toBe(true);
+    fireEvent.click(sectionAvatar);
+    expect(open).toHaveBeenCalledTimes(2);
+  });
+
+  it('a wide window has no avatar, and a phone has none until a Sale publishes the account', async () => {
+    await mountWithAccount(1024, 768, vi.fn());
+    expect(screen.getByTestId('settings-nav')).toBeTruthy();
+    expect(screen.queryByTestId('area-user-menu')).toBeNull();
+    cleanup();
+    await mountFramed(390, 844);
+    expect(screen.getByTestId('settings-list')).toBeTruthy();
+    expect(screen.queryByTestId('area-user-menu')).toBeNull();
   });
 });

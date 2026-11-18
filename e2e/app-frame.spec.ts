@@ -1,4 +1,4 @@
-import { expect } from '@playwright/test';
+import { expect, type Locator } from '@playwright/test';
 import { openArea, signIn, test } from './helpers';
 
 // The app frame: the rail beside every signed-in area at 1440 x 900, the drawer behind the header's Menu at 390 x 844.
@@ -38,17 +38,20 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       await expect(page.getByPlaceholder('Search or scan barcode / SKU', { exact: true })).toHaveCount(1);
     });
 
-    test('every area but Settings has the account avatar at the top right, opening the user sheet (row 14a)', async ({ page }) => {
+    test('every area has the account avatar at the top right, Settings on a phone only, opening the user sheet (row 14a)', async ({ page }) => {
       await signIn(page);
-      for (const area of ['Products', 'Orders', 'Customers', 'Reports'] as const) {
-        await openArea(page, area);
-        const avatar = page.getByTestId('area-user-menu');
+      const expectTopRight = async (avatar: Locator) => {
         await expect(avatar).toBeVisible();
         const box = (await avatar.boundingBox())!;
         expect(box.y).toBeGreaterThanOrEqual(0);
         expect(box.y + box.height).toBeLessThanOrEqual(80);
         expect(box.x).toBeGreaterThanOrEqual(viewport.width - 120);
         expect(box.x + box.width).toBeLessThanOrEqual(viewport.width);
+      };
+      for (const area of ['Products', 'Orders', 'Customers', 'Reports'] as const) {
+        await openArea(page, area);
+        const avatar = page.getByTestId('area-user-menu');
+        await expectTopRight(avatar);
         if (area === 'Orders') {
           await avatar.click();
           await expect(page.getByTestId('user-sheet')).toBeVisible();
@@ -59,7 +62,21 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 
       }
       await openArea(page, 'Settings');
       await expect(page).toHaveURL(/\/settings$/);
-      await expect(page.getByTestId('area-user-menu')).toHaveCount(0);
+      if (wide) {
+        await expect(page.getByTestId('area-user-menu')).toHaveCount(0);
+        return;
+      }
+      await expectTopRight(page.getByTestId('area-user-menu'));
+      await page.getByTestId('settings-list').getByRole('button', { name: 'Tax', exact: true }).click();
+      await expect(page.getByRole('heading', { name: 'Tax', exact: true })).toBeVisible();
+      // The list stays mounted under the section page (hidden stack screens stay in the DOM), so take the visible avatar.
+      const sectionAvatar = page.getByTestId('area-user-menu').filter({ visible: true });
+      await expectTopRight(sectionAvatar);
+      await sectionAvatar.click();
+      await expect(page.getByTestId('user-sheet')).toBeVisible();
+      await expect(page.getByTestId('user-sheet-name')).toBeVisible();
+      await page.getByTestId('user-sheet-close').click();
+      await expect(page.getByTestId('user-sheet')).toHaveCount(0);
     });
   });
 }
