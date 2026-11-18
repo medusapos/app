@@ -16,7 +16,8 @@ export function couponDiscountMinor(order: Order): number {
   return (order.display.coupons ?? []).reduce((sum, coupon) => sum + coupon.amountMinor, 0);
 }
 
-export function CouponField({ sale }: { sale: Sale }): JSX.Element {
+/** The one coupon apply path (inline field and the "+" menu dialog): blank and in-flight guards, the refusal as message. */
+export function useCouponEntry(sale: Sale, onApplied?: () => void) {
   const [text, setText] = useState('');
   const [message, setMessage] = useState<string | null>(null);
   const [applying, setApplying] = useState(false);
@@ -28,12 +29,34 @@ export function CouponField({ sale }: { sale: Sale }): JSX.Element {
     try {
       const refusal = await sale.applyCoupon(text);
       setMessage(refusal);
-      if (refusal === null) setText('');
+      if (refusal === null) { setText(''); onApplied?.(); }
     } finally {
       inFlight.current = false;
       setApplying(false);
     }
   }
+  const change = (value: string) => { setText(value); setMessage(null); };
+  return { text, change, message, setMessage, applying, apply };
+}
+
+/** The coupon code field, its Apply button and the refusal alert. */
+export function CouponCodeInput({ entry }: { entry: ReturnType<typeof useCouponEntry> }): JSX.Element {
+  const { text, change, message, applying, apply } = entry;
+  return <>
+    <View className="flex-row items-center gap-2">
+      <Input className="flex-1"><Input.Field value={text} onChangeText={change}
+        accessibilityLabel="Coupon code" placeholder="Coupon code" autoCapitalize="characters" autoComplete="off"
+        autoCorrect={false} onSubmitEditing={() => { void apply(); }} /></Input>
+      <Button variant="outline" testID="coupon-apply" accessibilityLabel="Apply coupon" className="min-h-11" disabled={!text.trim() || applying}
+        onPress={() => { void apply(); }}><Text>Apply</Text></Button>
+    </View>
+    {message !== null ? <Text accessibilityRole="alert" className="text-destructive">{message}</Text> : null}
+  </>;
+}
+
+export function CouponField({ sale }: { sale: Sale }): JSX.Element {
+  const entry = useCouponEntry(sale);
+  const { setMessage } = entry;
   return <View testID="coupon-field" className="gap-2">
     {sale.order.display.coupons?.map(({ code, amountMinor }) => <View key={code} testID={`coupon-row-${code}`} className="flex-row items-center gap-3">
       <Text className="flex-1 text-foreground">Coupon {code.toUpperCase()}</Text>
@@ -47,13 +70,6 @@ export function CouponField({ sale }: { sale: Sale }): JSX.Element {
     {sale.couponsRepricing ? <Text className="text-muted-foreground">Checking coupon prices…</Text> : null}
     {sale.order.couponPricesStale && !sale.couponsRepricing ? <Button variant="outline" testID="coupon-reprice"
       onPress={() => { void sale.repriceCoupons(); }}><Text>Check coupons again</Text></Button> : null}
-    <View className="flex-row items-center gap-2">
-      <Input className="flex-1"><Input.Field value={text} onChangeText={(value) => { setText(value); setMessage(null); }}
-        accessibilityLabel="Coupon code" placeholder="Coupon code" autoCapitalize="characters" autoComplete="off"
-        autoCorrect={false} onSubmitEditing={() => { void apply(); }} /></Input>
-      <Button variant="outline" testID="coupon-apply" accessibilityLabel="Apply coupon" className="min-h-11" disabled={!text.trim() || applying}
-        onPress={() => { void apply(); }}><Text>Apply</Text></Button>
-    </View>
-    {message !== null ? <Text accessibilityRole="alert" className="text-destructive">{message}</Text> : null}
+    <CouponCodeInput entry={entry} />
   </View>;
 }
