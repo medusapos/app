@@ -1,11 +1,12 @@
-// v2's paid-screen headline for a sale saved while the store was unreachable: a clock, what was paid as a heading,
-// and "Awaiting store" with the payment methods. Screen only.
+// v2's paid-screen headline for a sale saved while the store was unreachable: a clock, the change (or what was paid)
+// as a heading, and "Awaiting store" in front of the line the sent sale would show. Screen only.
 import { useRef, type JSX } from 'react';
 import { View } from 'react-native';
 import { Path } from 'react-native-svg';
 import { Text, createSvgIcon } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { capturedMinor, type OutboxState, type PosOrder, type SentOrder } from '@tallyui/pos';
+import { cashTenderedMinor } from './paid-change';
 
 const ClockIcon = createSvgIcon('ClockIcon', () => <>
   <Path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
@@ -34,18 +35,23 @@ export function useAwaitingStore(entry: Pick<PosOrder, 'id' | 'syncStatus'> | un
 
 export function PaidAwaiting({ order, posOrder }: { order: SentOrder; posOrder: PosOrder }): JSX.Element {
   const money = (amount: number) => formatMoney({ amount, currency: order.currency });
-  const change = order.changeDueMinor > 0 ? ` · change ${money(order.changeDueMinor)}` : '';
+  const paid = money(capturedMinor(posOrder.payments));
+  const changeDue = order.changeDueMinor > 0;
+  // As v2: the change stays the headline, and a sale with more than one payment ends the line with the count.
+  const line = changeDue ? `Paid ${paid} · tendered ${money(cashTenderedMinor(posOrder.payments))} in cash`
+    : paymentMethodsLabel(posOrder);
+  const count = posOrder.payments.length > 1 ? ` · ${posOrder.payments.length} payments` : '';
   return <View testID="paid-awaiting" className="items-center gap-3">
     {/* The icon strokes in currentColor, so the circle's text-warning colours the clock. */}
     <View testID="paid-awaiting-clock" className="h-24 w-24 items-center justify-center rounded-full bg-warning/15 text-warning">
       <ClockIcon size={40} strokeWidth={2} />
     </View>
     <Text testID="paid-awaiting-figure" accessibilityRole="header" className="text-5xl font-bold text-foreground">
-      {`Paid ${money(capturedMinor(posOrder.payments))}`}
+      {changeDue ? `Change ${money(order.changeDueMinor)}` : `Paid ${paid}`}
     </Text>
     <Text testID="paid-awaiting-status" className="text-muted-foreground">
       <Text className="text-warning">Awaiting store</Text>
-      {` · ${paymentMethodsLabel(posOrder)}${change}`}
+      {` · ${line}${count}`}
     </Text>
   </View>;
 }

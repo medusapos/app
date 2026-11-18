@@ -116,13 +116,14 @@ it('leads an offline exact cash sale with "Awaiting store", then the normal paid
 }, 15000);
 
 // The keypad tender pane's steps exceed the 5 s default on CI runners.
-it('keeps the change on the awaiting line, and hands back to the change headline once sent', async () => {
+it('keeps the change as the headline while awaiting, and hands back to the sent change headline', async () => {
   syncState('offline');
   await startTender();
   takeLeg('cash', '30.00');
   const order = await complete();
   await outboxNow(order, 'pending');
-  expect(status()).toBe('Awaiting store · Cash · change €6.00');
+  expect(screen.getByTestId('paid-awaiting-figure').textContent).toBe('Change €6.00');
+  expect(status()).toBe('Awaiting store · Paid €24.00 · tendered €30.00 in cash');
   expect(screen.queryByTestId('paid-change-due')).toBeNull();
   syncState('synced');
   await outboxNow(order, 'applied');
@@ -164,5 +165,17 @@ it('names a card terminal part and a cash part in payment order', async () => {
   takeLeg('cash', '14.00');
   const order = await complete();
   await outboxNow(order, 'pending');
-  expect(status()).toBe('Awaiting store · Card terminal + Cash');
+  expect(status()).toBe('Awaiting store · Card terminal + Cash · 2 payments');
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('keeps the change as the headline and counts the payments when two cash payments over-tender', async () => {
+  syncState('offline');
+  await startTender();
+  takeLeg('cash', '10.00');
+  takeLeg('cash', '20.00');
+  const order = await complete();
+  await outboxNow(order, 'pending');
+  expect(screen.getByTestId('paid-awaiting-figure').textContent).toBe('Change €6.00');
+  expect(status()).toBe('Awaiting store · Paid €24.00 · tendered €30.00 in cash · 2 payments');
 }, 15000);
