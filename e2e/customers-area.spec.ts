@@ -88,3 +88,25 @@ test('the Customers area edits a stored billing address in place', async ({ page
   expect(customer.addresses).toHaveLength(1);
   expect(customer.addresses[0]).toMatchObject({ id: addressId, city: 'Leeds', address_1: '1 Old St', first_name: 'Ada' });
 });
+
+test('the Customers settings sheet hides the Email column, and the choice survives a reload', async ({ page }) => {
+  const token = await adminToken();
+  const email = `columns-${crypto.randomUUID()}@example.com`;
+  const id = await createAdminCustomer(token, email, 'Ada', 'Lovelace');
+  await signIn(page);
+  await openArea(page, 'Customers');
+  await page.getByTestId('customers-search').fill(email);
+  await expect(page.getByTestId(`customer-cell-${id}-email`)).toBeVisible();
+  await page.getByTestId('customers-settings-button').click();
+  await page.getByTestId('customers-settings-column-email').click();
+  await expect(page.getByTestId('customers-settings-column-email')).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('customers-settings-close').click();
+  await expect(page.getByTestId('customers-settings-sheet')).not.toBeVisible();
+  await expect(page.getByTestId(`customer-cell-${id}-first`)).toBeVisible();
+  await expect(page.getByTestId(`customer-cell-${id}-email`)).toHaveCount(0);
+  await page.reload();
+  await openArea(page, 'Customers');
+  await page.getByTestId('customers-search').fill(email);
+  await expect(page.getByTestId(`customer-cell-${id}-first`)).toBeVisible();
+  await expect(page.getByTestId(`customer-cell-${id}-email`)).toHaveCount(0);
+});
