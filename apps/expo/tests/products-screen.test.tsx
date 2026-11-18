@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
+import { formatReceiptDate } from '../lib/format-date';
 import { DEFAULT_CART_SETTINGS, loadCartSettings, saveCartSettings } from '../lib/cart-settings';
 import { useCatalogueSnapshot } from '../lib/catalogue-snapshot';
 import { clearProductCache } from '../lib/product-cache';
@@ -469,8 +470,8 @@ describe('ProductsScreen catalogue', () => {
     const [finalized] = record.mock.calls[0];
     expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${finalized.id.slice(-8)}`);
     expect(screen.queryByText(/\(draft\)/)).toBeNull();
-    expect(screen.getByText(new Date(finalized.createdAt).toLocaleString()).textContent)
-      .toBe(new Date(finalized.createdAt).toLocaleString());
+    expect(screen.getByText(formatReceiptDate(finalized.createdAt)).textContent)
+      .toBe(formatReceiptDate(finalized.createdAt));
   });
 
   it.each([undefined, 'Alex Shopkeeper'])('records the cashier email and shows the receipt with name %s', async (name) => {

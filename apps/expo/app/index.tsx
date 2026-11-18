@@ -47,7 +47,7 @@ import { loadCustomerAddresses } from '../lib/customer-billing';
 import { isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
 import { withDemoSaleEvent } from '../lib/demo-analytics';
-import { formatDate } from '../lib/format-date';
+import { formatPaidDate, formatReceiptDate } from '../lib/format-date';
 import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
 import { receiptTaxLabel } from '../lib/order-detail';
@@ -375,7 +375,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       online={online} defaultEmail={paid?.customer?.email
         ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
       send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-    topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
+    topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
     cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
   </> : null;
   const phoneTender = phone && sale.stage.kind === 'tender';
@@ -441,7 +441,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <View className="flex-1">{paidReceipt}</View>
         <View dataSet={{ print: 'hide' }} className="w-96 self-stretch" style={{ paddingTop: topInset }}>
           <PaidSummary order={sale.stage.order} posOrder={sale.stage.posOrder} storeName={receiptStore.name}
-            taxLabel={taxLabel} formatDate={formatDate} />
+            taxLabel={taxLabel} formatDate={(iso) => formatPaidDate(iso)} />
         </View>
       </View> : paidReceipt :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">

@@ -8,6 +8,7 @@ import { buildReceiptDataFromPosOrder, type PosOrder } from '@tallyui/pos';
 import {
   canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
 } from '../lib/order-detail';
+import { formatReceiptDate } from '../lib/format-date';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedSettings } from '../lib/store-settings';
@@ -54,7 +55,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush 
       {reprint ? <ScrollView testID="order-detail-receipt-view" dataSet={{ print: 'receipt' }} className="flex-1">
         {/* A PosOrder keeps no cashier, so the reprint prints no Cashier line. */}
         <Receipt receipt={buildReceiptDataFromPosOrder(order, { storeName: settings?.storeName ?? '', storeAddress: settings?.location.addressLine })}
-          posOrder={order} taxLabel={receiptTaxLabel} formatDate={formatDate} doneLabel="Back" newSale={() => setReprint(false)} />
+          posOrder={order} taxLabel={receiptTaxLabel} formatDate={formatReceiptDate} doneLabel="Back" newSale={() => setReprint(false)} />
       </ScrollView> : <OrderDetail testID="order-detail" orderNumber={`Order ${orderReference(order)}`} status={orderStatusBadge(order)}
         {...orderDetailFigures(order)}
         customerSlot={<View className="gap-1">
