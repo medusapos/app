@@ -365,4 +365,15 @@ describe('ReportsScreen', () => {
     expect(icon.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button.textContent).toBe('Print summary');
   });
+
+  it('Print X report shows v2\'s printer icon before its label', async () => {
+    openRegister();
+    mount();
+    const button = await screen.findByTestId('reports-x-print');
+    const icon = within(button).getByTestId('reports-x-print-icon');
+    expect(icon.querySelector('svg')).toBeTruthy();
+    const label = within(button).getByText('Print X report');
+    expect(icon.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(button.textContent).toBe('Print X report');
+  });
 });
