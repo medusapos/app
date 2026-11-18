@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
-import { Path } from 'react-native-svg';
-import { Avatar, avatarInitials, Button, createSvgIcon, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
+import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { formatClosureDate, presetRange, switchWarnings, watchFresh, type PosOrder, type SwitchWarningInput } from '@tallyui/pos';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -9,9 +8,8 @@ import { useRegister } from '../lib/register-context';
 import { localDayStartIso, salesRoomFigures } from '../lib/reports';
 import type { Session } from '../lib/session';
 import { closureContext } from './register-close';
+import { ExternalLinkIcon } from './external-link-icon';
 
-const ExternalLinkIcon = createSvgIcon('ExternalLinkIcon', () => <><Path d="M12 6h-6a2 2 0 0 0 -2 2v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2 -2v-6" />
-  <Path d="M11 13l9 -9" /><Path d="M15 4h5v5" /></>);
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Read by assistive tech as Sign out's description, out of the layout, so the sheet never shifts.
 const VISUALLY_HIDDEN = { position: 'absolute', width: 1, height: 1, overflow: 'hidden', opacity: 0 } as const;
