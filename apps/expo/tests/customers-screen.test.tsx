@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+// @ts-expect-error no @types/react-dom in this Expo/React Native app
+import { createPortal } from 'react-dom';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
 import type { ReactNode } from 'react';
@@ -6,7 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer } from '@tallyui/core';
 import type { Session } from '../lib/session';
 import CustomersScreen, { NETWORK_ERROR_TEXT, NO_MATCH_TEXT, SEARCH_HINT, SEARCHING_TEXT } from '../app/customers';
-import { AppFrame } from '../components/app-frame';
+import { AppFrame, useFrameAccountPublisher } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
 
 const { searchCustomers, updateCustomer, createCustomer, sessionState } = vi.hoisted(() => ({
@@ -16,10 +18,17 @@ const { searchCustomers, updateCustomer, createCustomer, sessionState } = vi.hoi
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/customers',
-  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode } }) =>
-    <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
-      {options.headerLeft?.()}</div> },
+  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) =>
+    <><div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
+      {options.headerLeft?.()}</div>
+      {/* The stack draws headerRight only when the header shows, outside the screen's main landmark. */}
+      {createPortal(<div data-testid="header-right">{options.headerShown && options.headerRight?.()}</div>, document.body)}</> },
 }));
+
+function AccountPublisher({ open }: { open: () => void }) {
+  useFrameAccountPublisher({ displayName: 'Dana Cole', initials: 'DC', open });
+  return null;
+}
 vi.mock('../lib/pos-connector', () => ({
   createPosConnector: () => ({ id: 'medusa', searchCustomers, updateCustomer, createCustomer }),
   authHeaders: () => ({ Authorization: 'Bearer t' }),
@@ -206,4 +215,23 @@ describe('the header', () => {
     expect(header.dataset.headerShown).toBe('true');
     expect(header.contains(screen.getByTestId('frame-menu'))).toBe(true);
   });
+  it('the account avatar ends the search row on a wide window and is the header\'s right button on a phone (row 14a)', () => {
+    const open = vi.fn();
+    const mountFramed = () => render(<AppFrame signedIn><AccountPublisher open={open} /><CustomersScreen /></AppFrame>);
+    setWindowWidth(1440, 900);
+    const { unmount } = mountFramed();
+    const avatar = screen.getByTestId('area-user-menu');
+    expect(screen.getByRole('main', { name: 'Customers' }).contains(avatar)).toBe(true);
+    expect(avatar.parentElement!.contains(screen.getByTestId('customers-search'))).toBe(true);
+    expect(avatar.parentElement!.lastElementChild).toBe(avatar);
+    fireEvent.click(avatar);
+    expect(open).toHaveBeenCalledOnce();
+    unmount();
+    setWindowWidth(390, 844);
+    mountFramed();
+    const phoneAvatar = screen.getByTestId('area-user-menu');
+    expect(screen.getByRole('main', { name: 'Customers' }).contains(phoneAvatar)).toBe(false);
+    expect(screen.getByTestId('header-right').contains(phoneAvatar)).toBe(true);
+  });
+
 });
