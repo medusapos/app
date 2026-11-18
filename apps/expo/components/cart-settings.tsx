@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { Circle, Line } from 'react-native-svg';
-import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Input, Label, Switch, Text, XIcon } from '@tallyui/components';
-import type { CartSettings, useCartSettings } from '../lib/cart-settings';
+import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Input, Label, Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue, Switch, Text, XIcon } from '@tallyui/components';
+import type { CartSettings, CartSortItems, useCartSettings } from '../lib/cart-settings';
 
 type Column = keyof CartSettings['columns'];
 // v2's Columns rows in order: [column, flag, label]; split and name's SKU are indented under their column.
@@ -11,6 +12,9 @@ const COLUMN_ROWS: [Column, 'show' | 'split' | 'sku', string][] = [['quantity', 
   ['total', 'show', 'Total']];
 // TallyUI's default for a missing flag: Qty, Name, Price and Total show; everything else is off.
 const SHOWN_BY_DEFAULT: Column[] = ['quantity', 'name', 'price', 'total'];
+// v2's Sort items choices, in v2's order and words.
+const SORT_ITEMS: [CartSortItems, string][] = [['newest-bottom', 'Newest at bottom'], ['newest-top', 'Newest at top'],
+  ['name', 'Name'], ['price', 'Price']];
 
 const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
   <Line x1={3} y1={6} x2={21} y2={6} /><Circle cx={8} cy={6} r={2} />
@@ -73,6 +77,16 @@ export function CartSettingsButton({ settings, save, reset, phone = false }: Ret
             </Pressable>;
           })}
         </View>
+        <Text>Sort items</Text>
+        <Select value={{ value: settings.sortItems, label: SORT_ITEMS.find(([value]) => value === settings.sortItems)?.[1] ?? '' }}
+          onValueChange={(option) => { if (option) save({ ...settings, sortItems: option.value as CartSortItems }); }}>
+          <SelectTrigger testID="cart-settings-sort-items" accessibilityLabel="Sort items"><SelectValue placeholder="Sort items" /></SelectTrigger>
+          <SelectContent>
+            {SORT_ITEMS.map(([value, label]) => <SelectItem key={value} testID={`cart-settings-sort-${value}`} value={value} label={label}>
+              <Text>{label}</Text>
+            </SelectItem>)}
+          </SelectContent>
+        </Select>
         <Text>Quick Discounts</Text>
         {/* The price keypad's own quick-discount keys (TallyUI QuickDiscountKeys); a tapped key becomes its field. */}
         <View className="flex-row gap-2">

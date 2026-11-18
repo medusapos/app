@@ -818,6 +818,61 @@ describe('ProductsScreen cart settings', () => {
     fireEvent.click(screen.getByTestId('cart-settings-button'));
     expect(sheetSide()).toBe('right');
   });
+
+  // Three products, added Zebra, Apple, Mango: the cart's lines in DOM order, read from their quantity triggers.
+  const fruit = (id: string, title: string, amount: number) => ({ id, title, status: 'published',
+    variants: [{ id: `${id}-one`, title: 'One size', sku: id, prices: [{ amount, currency_code: 'eur' }] }] });
+  async function addFruit() {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [fruit('zebra', 'Zebra', 3), fruit('apple', 'Apple', 5),
+      fruit('mango', 'Mango', 1)] }));
+    await mount();
+    for (const title of ['Zebra', 'Apple', 'Mango']) fireEvent.click(screen.getByTestId(`product-tile-${title}`));
+  }
+  const lineOrder = () => screen.getAllByRole('button', { name: /^Edit quantity of / })
+    .map((button) => button.getAttribute('aria-label')!.replace('Edit quantity of ', ''));
+
+  it('shows the cart lines in the order added by default', async () => {
+    await addFruit();
+    expect(lineOrder()).toEqual(['Zebra', 'Apple', 'Mango']);
+  });
+
+  it('shows the cart lines in name order when Sort items is Name', async () => {
+    saveCartSettings(localStorage, 'https://store.test', { ...DEFAULT_CART_SETTINGS, sortItems: 'name' });
+    await addFruit();
+    expect(lineOrder()).toEqual(['Apple', 'Mango', 'Zebra']);
+  });
+
+  it('shows Sort items with the saved choice, Newest at bottom by default', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(screen.getByTestId('cart-settings-sort-items').textContent).toBe('Newest at bottom');
+    cleanup();
+    saveCartSettings(localStorage, 'https://store.test', { ...DEFAULT_CART_SETTINGS, sortItems: 'name' });
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    expect(screen.getByTestId('cart-settings-sort-items').textContent).toBe('Name');
+  });
+
+  it('saves Name from the Sort items select and re-orders the cart lines', async () => {
+    await addFruit();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-sort-items'));
+    expect(screen.getAllByTestId(/^cart-settings-sort-(?!items)/).map((item) => item.textContent))
+      .toEqual(['Newest at bottom', 'Newest at top', 'Name', 'Price']);
+    fireEvent.click(screen.getByTestId('cart-settings-sort-name'));
+    expect(loadCartSettings(localStorage, 'https://store.test').sortItems).toBe('name');
+    expect(screen.getByTestId('cart-settings-sort-items').textContent).toBe('Name');
+    expect(lineOrder()).toEqual(['Apple', 'Mango', 'Zebra']);
+  });
+
+  it('restores Sort items to Newest at bottom', async () => {
+    saveCartSettings(localStorage, 'https://store.test', { ...DEFAULT_CART_SETTINGS, sortItems: 'name' });
+    await mount();
+    fireEvent.click(screen.getByTestId('cart-settings-button'));
+    fireEvent.click(screen.getByTestId('cart-settings-restore'));
+    expect(loadCartSettings(localStorage, 'https://store.test').sortItems).toBe('newest-bottom');
+    expect(screen.getByTestId('cart-settings-sort-items').textContent).toBe('Newest at bottom');
+  });
 });
 
 async function mount(signedIn = true, orders = false, name?: string, email = 'admin@store.test', framed = false) {

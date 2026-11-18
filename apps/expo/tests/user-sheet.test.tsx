@@ -178,6 +178,34 @@ it('names another cashier who opened the drawer by the stored id', async () => {
   expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`Register 1 · opened ${openedAt} by ana@store.test`);
 });
 
+it('ends the opened line with the signed-in opener’s initials avatar', async () => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, opened_by: 'admin@store.test' } } });
+  await mount('Alex Smith'); open();
+  const avatar = screen.getByTestId('user-sheet-drawer-opener-avatar');
+  expect(avatar.textContent).toBe('AS');
+  expect(screen.getByTestId('user-sheet-drawer-opened').nextElementSibling).toBe(avatar);
+});
+
+it('shows another opener’s initials from the stored id', async () => {
+  const register = useRegister().register;
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, opened_by: 'ana@store.test' } } });
+  await mount('Alex Smith'); open();
+  expect(screen.getByTestId('user-sheet-drawer-opener-avatar').textContent).toBe('A');
+});
+
+it('shows no opener avatar when the session records no opener', async () => {
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-drawer-opened')).toBeTruthy();
+  expect(screen.queryByTestId('user-sheet-drawer-opener-avatar')).toBeNull();
+});
+
+it('shows no opener avatar without a session', async () => {
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register, session: null } });
+  await mount(); open();
+  expect(screen.queryByTestId('user-sheet-drawer-opener-avatar')).toBeNull();
+});
+
 it('shows the opening time in the header and the drawer while counting', async () => {
   const register = useRegister().register;
   vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, status: 'counting' } } });

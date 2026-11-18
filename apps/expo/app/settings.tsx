@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type ComponentProps } from 'react';
+import { Fragment, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
@@ -45,13 +45,14 @@ export default function SettingsScreen() {
   const [chosenSection, setChosenSection] = useState('store');
   if (!session) return <Redirect href="/login" />;
   const sections = [
-    { id: 'store', label: 'Store', element: <StoreSection session={session} /> },
-    { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
-    { id: 'customer', label: 'Customer', element: <DefaultCustomerSection session={session} /> },
+    { id: 'store', label: 'General', element: <StoreSection session={session} /> },
+    { id: 'tax', label: 'Tax', element: <TaxSection session={session} /> },
     { id: 'printing', label: 'Printing', element: <PrintingSection session={session} /> },
     { id: 'card-readers', label: 'Card readers', element: <CardReadersSection /> },
-    { id: 'scanner', label: 'Scanner', element: <ScannerSection session={session} /> },
+    { id: 'scanner', label: 'Barcode Scanning', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
+    { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
+    { id: 'customer', label: 'Customer', element: <DefaultCustomerSection session={session} /> },
     { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
   ];
   if (width >= SETTINGS_SPLIT_MIN_WIDTH) return <>
@@ -76,14 +77,7 @@ export default function SettingsScreen() {
   return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
     <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-md gap-6 self-center">
-      <StoreSection session={session} />
-      <RegisterSection session={session} />
-      <DefaultCustomerSection session={session} />
-      <PrintingSection session={session} />
-      <CardReadersSection />
-      <ScannerSection session={session} />
-      <ThemeSection />
-      <ClearLocalDataSection />
+      {sections.map(({ id, element }) => <Fragment key={id}>{element}</Fragment>)}
     </View>
   </ScrollView>;
 }
@@ -97,12 +91,6 @@ function StoreSection({ session }: { session: Session }) {
     } />
     <SettingsRow label="Currency" className="border-t border-border" action={
       <Text testID="settings-store-currency" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.currency || UNKNOWN}</Text>
-    } />
-    <SettingsRow label="Region" className="border-t border-border" action={
-      <Text testID="settings-store-region" className="max-w-40 text-right text-sm text-foreground">{held.settings?.regions?.find((region) => region.id === held.pricing?.pricingContext?.region_id)?.name || UNKNOWN}</Text>
-    } />
-    <SettingsRow label="Prices include tax" className="border-t border-border" action={
-      <Text testID="settings-store-prices-include-tax" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.pricesIncludeTax === true ? 'Yes' : held.pricing?.pricesIncludeTax === false ? 'No' : UNKNOWN}</Text>
     } />
     <SettingsRow label="Stock location" className="border-t border-border" action={
       <View className="max-w-40 items-end">
@@ -135,6 +123,23 @@ function StoreSection({ session }: { session: Session }) {
     } />
   </SettingsGroup>
   </>;
+}
+function TaxSection({ session }: { session: Session }) {
+  const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
+  const taxRates = held.settings?.taxRates;
+  return <SettingsGroup title="Tax" description="Read-only. Set per region in Medusa Admin." testID="settings-tax">
+    <SettingsRow label="Region" action={
+      <Text testID="settings-store-region" className="max-w-40 text-right text-sm text-foreground">{held.settings?.regions?.find((region) => region.id === held.pricing?.pricingContext?.region_id)?.name || UNKNOWN}</Text>
+    } />
+    <SettingsRow label="Prices include tax" className="border-t border-border" action={
+      <Text testID="settings-store-prices-include-tax" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.pricesIncludeTax === true ? 'Yes' : held.pricing?.pricesIncludeTax === false ? 'No' : UNKNOWN}</Text>
+    } />
+    {taxRates?.length ? taxRates.map((taxRate, index) => <SettingsRow key={index} label={taxRate.name} className="border-t border-border" action={
+      <Text testID={`settings-tax-rate-${index}`} className="max-w-40 text-right text-sm text-foreground">{`${taxRate.rate !== undefined ? `${taxRate.rate}%` : UNKNOWN}${taxRate.isDefault ? ' · Default' : ''}`}</Text>
+    } />) : <SettingsRow label="Tax rates" className="border-t border-border" action={
+      <Text testID="settings-tax-rates-none" className="max-w-40 text-right text-sm text-foreground">{taxRates ? 'None' : UNKNOWN}</Text>
+    } />}
+  </SettingsGroup>;
 }
 function RegisterSection({ session }: { session: Session }) {
   const { tillName, save } = useTillName(defaultStorage(), session.baseUrl);
@@ -271,7 +276,7 @@ function ScannerSection({ session }: { session: Session }) {
     timing.current.buffer += key; timing.current.lastAt = now;
   }
   const counts = lastScan !== null && lastScan.code.length >= settings.minChars && lastScan.avgMs <= settings.avgKeyMs;
-  return <SettingsGroup title="Scanner" testID="settings-scanner">
+  return <SettingsGroup title="Barcode Scanning" testID="settings-scanner">
     <View className="gap-4 p-4">
       <Field accessibilityLabel="Average time per key (ms)" label="Average time per key (ms)" help="A scan is faster than typing. Raise this for slow Bluetooth scanners."
         value={avgKeyMsInput} onChangeText={setAvgKeyMsInput} keyboardType="number-pad" />

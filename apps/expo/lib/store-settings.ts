@@ -8,6 +8,8 @@ export type StoreSettings = {
   location: { id: string; name: string; addressLine?: string; countryCode: string };
   salesChannel?: { id: string; name: string };
   regions?: { id: string; name: string }[];
+  // Display only (Settings › Tax); the cart never reads it.
+  taxRates?: { name: string; rate?: number; isDefault: boolean }[];
 };
 export class StoreSettingsError extends Error {
   constructor(readonly code: 'unauthorized' | 'forbidden' | 'unreachable' | 'misconfigured', message: string) { super(message); }
@@ -71,13 +73,26 @@ export async function fetchStoreSettings(session: Session, fetchImpl = globalThi
     if (Array.isArray(body.regions)) regions = body.regions.flatMap((entry) =>
       isRecord(entry) && typeof entry.id === 'string' && typeof entry.name === 'string' ? [{ id: entry.id, name: entry.name }] : []);
   } catch {}
-  // Tax, tax inclusivity and the sale currency come from TallyUI's store settings (TV4), not from here.
+  let taxRates: StoreSettings['taxRates'];
+  // Tax rate names for the country, likewise display only and never blocking.
+  try {
+    const body = await request(`/admin/tax-regions?country_code=${encodeURIComponent(countryCode)}&limit=1000&fields=id,country_code,province_code,*tax_rates`);
+    const country = Array.isArray(body.tax_regions) ? body.tax_regions.find((entry) => isRecord(entry) && entry.province_code === null) : undefined;
+    if (isRecord(country) && Array.isArray(country.tax_rates)) {
+      const rates = country.tax_rates.flatMap((entry) => isRecord(entry) && typeof entry.name === 'string' && entry.name
+        ? [{ name: entry.name, ...(Number.isFinite(entry.rate) && { rate: entry.rate as number }), isDefault: entry.is_default === true }] : []);
+      taxRates = [...rates.filter((rate) => rate.isDefault), ...rates.filter((rate) => !rate.isDefault)];
+    }
+  } catch {}
+  // The tax rate names here are for display only; the cart's tax, tax inclusivity and the sale currency still come
+  // from TallyUI's store settings (TV4).
   return {
     storeName: store.name, currency,
     location: { id: location.id, name: location.name, addressLine, countryCode },
     ...(isRecord(salesChannel) && typeof salesChannel.id === 'string' && typeof salesChannel.name === 'string' && salesChannel.name
       ? { salesChannel: { id: salesChannel.id, name: salesChannel.name } } : {}),
     ...(regions !== undefined && { regions }),
+    ...(taxRates !== undefined && { taxRates }),
   };
 }
 
@@ -94,12 +109,17 @@ export function loadCachedSettings(storage: SessionStorage | null, baseUrl: stri
     const regions = Array.isArray(value.regions) && value.regions.every((entry) =>
       isRecord(entry) && typeof entry.id === 'string' && typeof entry.name === 'string')
       ? value.regions.map(({ id, name }) => ({ id, name })) : undefined;
+    const taxRates = Array.isArray(value.taxRates) && value.taxRates.every((entry) =>
+      isRecord(entry) && typeof entry.name === 'string' && typeof entry.isDefault === 'boolean'
+      && (entry.rate === undefined || Number.isFinite(entry.rate)))
+      ? value.taxRates.map(({ name, rate, isDefault }) => ({ name, ...(rate !== undefined && { rate }), isDefault })) : undefined;
     return {
       storeName: value.storeName, currency: value.currency,
       location: { id: location.id, name: location.name, countryCode: location.countryCode, addressLine: location.addressLine },
       ...(isRecord(salesChannel) && typeof salesChannel.id === 'string' && typeof salesChannel.name === 'string'
         ? { salesChannel: { id: salesChannel.id, name: salesChannel.name } } : {}),
       ...(regions !== undefined && { regions }),
+      ...(taxRates !== undefined && { taxRates }),
     };
   } catch { return null; }
 }
