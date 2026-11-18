@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { ConnectorUnauthorizedError, type TallyConnector } from '@tallyui/core';
+import { ConnectorUnauthorizedError, type Customer, type TallyConnector } from '@tallyui/core';
 import type { useSale } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
+import { loadCustomerAddresses } from '../lib/customer-billing';
 import { openOrderStore } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
@@ -17,15 +18,20 @@ import { openRegisterFixture } from './register-fixture';
 import { pickMethod, take } from './tender-pane';
 import { setWindowWidth } from './window-width';
 
-const { searchCustomers, createCustomer, observed } = vi.hoisted(() => ({
+const { searchCustomers, createCustomer, getCustomer, updateCustomer, observed } = vi.hoisted(() => ({
   searchCustomers: vi.fn<NonNullable<TallyConnector['searchCustomers']>>(),
   createCustomer: vi.fn<NonNullable<TallyConnector['createCustomer']>>(),
+  getCustomer: vi.fn<NonNullable<TallyConnector['getCustomer']>>(),
+  updateCustomer: vi.fn<NonNullable<TallyConnector['updateCustomer']>>(),
   observed: { sale: null as ReturnType<typeof useSale> | null },
 }));
 vi.mock('../lib/pos-connector', async (original) => {
   const mock = await (await import('./pos-connector-mock')).mockPosConnector(original);
-  return { ...mock, createPosConnector: () => ({ ...mock.createPosConnector(), searchCustomers, createCustomer }) };
+  return { ...mock, createPosConnector: () => ({ ...mock.createPosConnector(), searchCustomers, createCustomer, getCustomer, updateCustomer }) };
 });
+vi.mock('../lib/customer-billing', async (original) => ({
+  ...await original<typeof import('../lib/customer-billing')>(), loadCustomerAddresses: vi.fn(),
+}));
 // Observe the real hook's state, including any extra customer fields passed to it.
 vi.mock('@tallyui/pos', async (original) => {
   const actual = await original<typeof import('@tallyui/pos')>();
@@ -49,6 +55,7 @@ vi.mock('../lib/store-settings', async (original) => ({
 let store: Awaited<ReturnType<typeof openOrderStore>>;
 const customer = { id: 'cus_1', name: 'Ada Lovelace', email: 'ada@example.com', phone: '+44123456789' };
 const summary = { id: customer.id, name: customer.name, email: customer.email };
+const stored: Customer = { id: 'cus_1', name: 'Ada Lovelace', firstName: 'Ada', lastName: 'Lovelace', email: 'ada@example.com' };
 const unauthorized = vi.fn();
 const button = (name: string) => screen.getByRole('button', { name });
 beforeEach(async () => {
@@ -74,6 +81,8 @@ beforeEach(async () => {
     recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn() });
   searchCustomers.mockResolvedValue([customer]);
   createCustomer.mockResolvedValue(customer);
+  getCustomer.mockResolvedValue(stored);
+  vi.mocked(loadCustomerAddresses).mockResolvedValue({});
 });
 afterEach(async () => {
   cleanup(); await store.close(); vi.unstubAllGlobals(); vi.resetAllMocks(); observed.sale = null;
@@ -169,4 +178,36 @@ it('a hand-picked customer is sent with its email when the sale completes', asyn
   const record = vi.mocked(useOutboxContext().record);
   expect(record).toHaveBeenCalledTimes(1);
   expect(record.mock.calls[0][0].customer?.email).toBe('ada@example.com');
+});
+
+it('the address pin is offered in the cart, not while a tender is open', async () => {
+  await mount(); await pick();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  expect(button('Edit customer address')).toBeTruthy();
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  expect(screen.queryByRole('button', { name: 'Edit customer address' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Customer: Ada Lovelace' })).toBeNull();
+  await act(async () => { observed.sale!.cancelTender(); });
+  expect(button('Edit customer address')).toBeTruthy();
+  expect(screen.queryByTestId('customer-address-dialog')).toBeNull();
+});
+
+it('an address save in flight when a tender starts does not change the sale customer', async () => {
+  await mount(); await pick();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  fireEvent.click(button('Edit customer address'));
+  await screen.findByTestId('customer-save');
+  fireEvent.change(screen.getByPlaceholderText('First name'), { target: { value: 'Grace' } });
+  let resolveUpdate!: (customer: Customer) => void;
+  updateCustomer.mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve; }));
+  await act(async () => { fireEvent.click(screen.getByTestId('customer-save')); });
+  expect(updateCustomer).toHaveBeenCalledTimes(1);
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  await act(async () => { resolveUpdate({ ...stored, firstName: 'Grace', name: 'Grace Lovelace' }); });
+  expect(observed.sale!.order.customer).toEqual(summary);
+  expect(observed.sale!.stage.kind).toBe('tender');
+  expect(screen.queryByTestId('customer-address-dialog')).toBeNull();
+  await act(async () => { observed.sale!.cancelTender(); });
+  expect(button('Edit customer address')).toBeTruthy();
+  expect(screen.queryByTestId('customer-address-dialog')).toBeNull();
 });

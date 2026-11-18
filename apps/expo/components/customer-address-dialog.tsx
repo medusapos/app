@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { ScrollView } from 'react-native';
 import { Dialog, DialogContent, DialogTitle, Text } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type Customer, type CustomerAddress, type CustomerPatch } from '@tallyui/core';
@@ -23,6 +23,8 @@ export function CustomerAddressDialog({ customerId, onClose, getCustomer, loadAd
   onUnauthorized: () => void;
 }) {
   const [loaded, setLoaded] = useState<{ id: string; customer: Customer | null | 'failed' } | null>(null);
+  const currentId = useRef(customerId); // the save outlives its render, so it reads the dialog's customer now
+  currentId.current = customerId;
   useEffect(() => {
     setLoaded(null);
     if (customerId === null) return;
@@ -45,6 +47,7 @@ export function CustomerAddressDialog({ customerId, onClose, getCustomer, loadAd
               : <CustomerEditor key={customer.id} customer={customer} onUnauthorized={onUnauthorized}
                 loadAddresses={() => loadAddresses(customer.id)} save={async (values, billing, shipping) => {
                   const updated = await saveCustomerEdits(update, customer, values, billing, shipping);
+                  if (currentId.current !== customer.id) return; // settled after the dialog closed or moved on: changes nothing
                   if (updated) onSaved(updated);
                   onClose();
                 }} />}
