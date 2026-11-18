@@ -38,7 +38,7 @@ import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
 import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
-import { useCartSettings } from '../lib/cart-settings';
+import { sortCartLines, useCartSettings } from '../lib/cart-settings';
 import { publishCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
@@ -362,6 +362,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
+  // Sort items (Cart Settings) is display order only: Cart gets a re-ordered copy, the sale's stored order is untouched.
+  const sortedCartSale = useMemo(() => {
+    const lines = sortCartLines(cartSale.order.lineItems, cartSettings.settings.sortItems);
+    // A sorted result is always a fresh copy, so Cart may have it as its (mutable) LineItem[].
+    return lines === cartSale.order.lineItems ? cartSale
+      : { ...cartSale, order: { ...cartSale.order, lineItems: lines as typeof cartSale.order.lineItems } };
+  }, [cartSale, cartSettings.settings.sortItems]);
   // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
   // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
   useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
@@ -452,7 +459,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
       onChangeText={(text) => sale.setNote(clampNote(text))} />
-    <Cart sale={cartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
+    <Cart sale={sortedCartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       quickDiscounts={cartSettings.settings.quickDiscounts} columns={cartSettings.settings.columns}
       afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
