@@ -42,7 +42,7 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
     );
   };
   return <SettingsGroup title="Receipt templates" testID="settings-receipt-templates"
-    description="Choose which printer each template prints to. Sales print the Standard Receipt.">
+    description="Each template and the printer it prints to. Sales print the Standard Receipt.">
     {RECEIPT_TEMPLATES.map((template, index) => <SettingsRow key={template.id} label={template.name}
       testID={`settings-receipt-template-${template.id}`} className={index > 0 ? 'border-t border-border' : undefined} action={
         <View className="flex-row flex-wrap items-center justify-end gap-3">

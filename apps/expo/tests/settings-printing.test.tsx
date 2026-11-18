@@ -192,6 +192,41 @@ describe('Settings › Printing › Receipt templates', () => {
     expect(failed.textContent).toBe("Couldn't print. Try again.");
   });
 
+  it('Test print is pressed once while a print is pending, and is ready again when it settles', async () => {
+    let settle!: () => void;
+    const pending = new Promise<void>((resolve) => { settle = resolve; });
+    vi.mocked(printReceiptPage).mockReturnValueOnce(pending);
+    const sheet = await openPreview('Thermal Receipt (80mm)');
+    const button = within(sheet).getByTestId('receipt-template-test-print');
+    expect(button.getAttribute('aria-disabled')).not.toBe('true');
+    await act(async () => { fireEvent.click(button); });
+    expect(within(sheet).getByTestId('receipt-template-test-print').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { fireEvent.click(within(sheet).getByTestId('receipt-template-test-print')); });
+    expect(printReceiptPage).toHaveBeenCalledOnce();
+    await act(async () => { settle(); });
+    expect(within(sheet).getByTestId('receipt-template-test-print').getAttribute('aria-disabled')).not.toBe('true');
+    expect(within(sheet).getByTestId('receipt-template-print-status').textContent).toBe('Sent to Print dialog');
+  });
+
+  it("an earlier opening's pending print never shows its outcome in a later opening", async () => {
+    let settle!: () => void;
+    vi.mocked(printReceiptPage).mockReturnValueOnce(new Promise<void>((resolve) => { settle = resolve; }));
+    let sheet = await openPreview('Thermal Receipt (80mm)');
+    await act(async () => { fireEvent.click(within(sheet).getByTestId('receipt-template-test-print')); });
+    fireEvent.click(within(sheet).getByTestId('receipt-template-close'));
+    await waitFor(() => expect(screen.queryByTestId('receipt-template-preview')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Preview Thermal Receipt (80mm)' }));
+    sheet = await screen.findByTestId('receipt-template-preview');
+    await act(async () => { settle(); });
+    expect(within(sheet).queryByTestId('receipt-template-print-status')).toBeNull();
+    expect(within(sheet).getByTestId('receipt-template-test-print').getAttribute('aria-disabled')).not.toBe('true');
+  });
+
+  it('sandboxes the preview frame, so a script in a receipt cannot run', async () => {
+    const sheet = await openPreview('Thermal Receipt (58mm)');
+    expect(within(sheet).getByTestId('receipt-template-preview-frame').getAttribute('sandbox')).toBe('');
+  });
+
   it('on a native till lists the templates with no printer and no Preview', async () => {
     const original = Platform.OS;
     Platform.OS = 'ios';
