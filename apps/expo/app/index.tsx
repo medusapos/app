@@ -21,6 +21,7 @@ import { CartAddMenu } from '../components/cart-add-menu';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerChip } from '../components/customer-chip';
+import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidChange } from '../components/paid-change';
@@ -266,6 +267,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [switchRefusal, setSwitchRefusal] = useState<string | null>(null);
   const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
   const [customerOpen, setCustomerOpen] = useState(false);
+  const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
@@ -453,7 +455,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
       {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)} />}
-      <CartAddMenu sale={cartSale} />
+      <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined} />
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
@@ -547,6 +549,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           </ScrollView>
         </DialogContent>
       </Dialog>}
+      {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen} onOpenChange={setNewCustomerOpen}
+        create={(input) => connector.createCustomer!(syncContext, input)}
+        update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}
+        onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
+        onUnauthorized={onUnauthorized} />}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row items-start">
         <View className="flex-1">{paidReceipt}</View>
