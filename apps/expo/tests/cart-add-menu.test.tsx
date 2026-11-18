@@ -15,7 +15,14 @@ import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
-vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
+const { createCustomer, connectorOptions } = vi.hoisted(() => ({ createCustomer: vi.fn(), connectorOptions: { createCustomer: true } }));
+vi.mock('../lib/pos-connector', async (original) => {
+  const mocked = await (await import('./pos-connector-mock')).mockPosConnector(original);
+  return { ...mocked, createPosConnector: () => {
+    const { createCustomer: _real, ...connector } = mocked.createPosConnector();
+    return connectorOptions.createCustomer ? { ...connector, createCustomer } : connector;
+  } };
+});
 vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
@@ -32,6 +39,8 @@ let store: Awaited<ReturnType<typeof openOrderStore>>;
 const click = (name: string) => fireEvent.click(screen.getByRole('button', { name }));
 beforeEach(async () => {
   setWindowWidth(1280);
+  connectorOptions.createCustomer = true;
+  createCustomer.mockReset().mockResolvedValue({ id: 'nia', name: 'Nia', firstName: 'Nia', email: 'new@example.com' });
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -70,15 +79,52 @@ function openMenu(name?: string) {
   fireEvent.click(screen.getByTestId('cart-add-menu'));
   if (name) fireEvent.click(screen.getByRole('menuitem', { name }));
 }
-it('lists the four actions in order and hides the inline controls', async () => {
+const FIVE_ROWS = ['Add new customer', 'Add Miscellaneous Product', 'Add Fee', 'Add Discount', 'Add Shipping'];
+it('lists the five actions in order and hides the inline controls', async () => {
   await start();
   fireEvent.click(screen.getByTestId('product-tile-Shirt'));
   expect(screen.queryByRole('button', { name: /^(Add charge|Order discount)$/ })).toBeNull();
-  expect(screen.getByRole('button', { name: 'Add to cart' }).textContent).toBe('+');
+  const trigger = screen.getByRole('button', { name: 'Add to cart' });
+  expect(trigger.textContent).toBe('');
+  expect(trigger.querySelector('svg')).toBeTruthy();
   openMenu();
-  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual([
-    'Add Miscellaneous Product', 'Add Fee', 'Add Discount', 'Add Shipping',
-  ]);
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(FIVE_ROWS);
+});
+it('lists all five rows on an empty cart, Add Discount enabled', async () => {
+  await start();
+  openMenu();
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(FIVE_ROWS);
+  expect(screen.getByRole('menuitem', { name: 'Add Discount' }).getAttribute('aria-disabled')).not.toBe('true');
+});
+it('marks the trigger open only while its menu is open', async () => {
+  await start();
+  const trigger = screen.getByTestId('cart-add-menu');
+  expect(trigger.getAttribute('data-open')).toBe('false');
+  openMenu();
+  expect(trigger.getAttribute('data-open')).toBe('true');
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Add Fee' }));
+  expect(screen.getByTestId('cart-add-menu').getAttribute('data-open')).toBe('false');
+});
+it('Add new customer creates the customer and makes it the sale\'s customer', async () => {
+  await start();
+  openMenu('Add new customer');
+  const dialog = screen.getByTestId('new-customer-dialog');
+  expect(within(dialog).getByText('Add new customer')).toBeTruthy();
+  fireEvent.change(screen.getByPlaceholderText('email@example.com'), { target: { value: 'new@example.com' } });
+  fireEvent.change(screen.getByPlaceholderText('First name'), { target: { value: 'Nia' } });
+  await act(async () => { fireEvent.click(screen.getByTestId('customer-save')); });
+  expect(createCustomer).toHaveBeenCalledExactlyOnceWith(expect.anything(), { email: 'new@example.com', firstName: 'Nia' });
+  expect(screen.getByTestId('customer-chip').getAttribute('aria-label')).toBe('Customer: Nia');
+  expect(screen.queryByTestId('new-customer-dialog')).toBeNull();
+});
+it('greys Add new customer when the connector cannot create customers', async () => {
+  connectorOptions.createCustomer = false;
+  await start();
+  openMenu();
+  const item = screen.getByRole('menuitem', { name: 'Add new customer' });
+  expect(item.getAttribute('aria-disabled')).toBe('true');
+  fireEvent.click(item);
+  expect(screen.queryByTestId('new-customer-dialog')).toBeNull();
 });
 it.each([
   ['Add Fee', 'Add fee', 'Gift wrap'],
@@ -104,14 +150,12 @@ it('applies an order discount and closes the dialog', async () => {
   expect(screen.getByRole('button', { name: /^Remove discount Order discount 10%/ })).toBeTruthy();
   expect(screen.queryByTestId('cart-add-dialog')).toBeNull();
 });
-it('below order.create 5 offers only a discount with lines and no trigger without lines', async () => {
+it('below order.create 5 offers only Add new customer and a discount, on an empty cart too', async () => {
   const context = vi.mocked(useSession).getMockImplementation()!();
   const session = { ...context.session!, capabilities: { ...context.session!.capabilities, orderCreate: 4 } };
   vi.mocked(useSession).mockReturnValue({ ...context, session });
   capabilities.mockResolvedValue(session.capabilities);
   await start();
-  expect(screen.queryByTestId('cart-add-menu')).toBeNull();
-  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
   openMenu();
-  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Add Discount']);
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Add new customer', 'Add Discount']);
 });
