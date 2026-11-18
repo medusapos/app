@@ -87,7 +87,7 @@ export async function submitSignIn(page: Page, as = credentials) {
 
 // ADR 0017: paying needs an open register session. Binds this fresh till to Register 1 through the picker and
 // opens it with `float` through the open card, both above the cart. On a phone they show in the cart view, which
-// the register pill opens even with an empty cart; it then returns to Products. The store keeps one open session per
+// the header's register state opens even with an empty cart (the state is gone once open); it then returns to Products. The store keeps one open session per
 // register (spec-42) and every earlier till left Register 1 open there, so this first closes the store's session, then
 // waits for the store to apply this till's open (unless not `synced`): a refused open (ADR-078's conflict) fails here, not in a later sale; a missing open times out in 30 seconds.
 // Not `picker`: the till is bound already (a demo cashier's own register, D0), so its open card shows with no picker.
@@ -97,7 +97,7 @@ export async function openRegister(page: Page, float = '100.00', synced = true, 
   await closeStoreRegister();
   const opened = synced && page.waitForResponse(response => isCommandPost(response.request())
     && (response.request().postDataJSON().commands as PostedCommand<unknown>[]).some(({ type }) => type === 'register.session.open'), { timeout: 30_000 });
-  if (phone) await page.getByTestId('register-bar-pill').click();
+  if (phone) await page.getByTestId('header-register-state').click();
   if (picker) await page.getByTestId('register-picker-row-register-1').click();
   await page.getByTestId('open-register-amount').fill(float);
   await page.getByTestId('open-register-button').click();
@@ -110,10 +110,21 @@ export async function openRegister(page: Page, float = '100.00', synced = true, 
     expect(result?.status, `The store refused this till's register.session.open: ${JSON.stringify(result)}`).toBe('applied');
     applied = opens.find(({ id }) => id === result!.id);
   }
-  await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+  if (phone) await expect(page.getByTestId('header-register-state')).toHaveCount(0);
+  else await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
   await expect(page.getByTestId('open-register-card')).toHaveCount(0);
   if (phone) await productsTab(page).click();
   return applied;
+}
+
+// The register panel: wide, the header's "Register ›"; a phone has no register row (row 17a), so the user sheet's
+// "Pay in · Pay out · Close register" row.
+export async function openRegisterPanel(page: Page) {
+  if ((page.viewportSize()?.width ?? 1280) < 600) {
+    await page.getByTestId('user-menu').click();
+    await page.getByTestId('user-sheet-register').click();
+  } else await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+  await expect(page.getByTestId('register-panel')).toBeVisible();
 }
 
 export const cartTab = (page: Page) => page.getByRole('tab', { name: /^Cart/ });
