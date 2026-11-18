@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as Linking from 'expo-linking';
 import { saveSession } from '../lib/session';
@@ -7,6 +7,8 @@ import { SessionProvider } from '../lib/session-context';
 import { useOutboxContext } from '../lib/outbox-context';
 import LoginScreen from '../app/login';
 import OrdersScreen from '../app/orders';
+import SettingsScreen from '../app/settings';
+import { version as appVersion } from '../package.json';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
@@ -60,9 +62,9 @@ describe('Send feedback link', () => {
     expect(url.searchParams.get('backend-host')).toBe('store.example.com');
   });
 
-  it('renders on the Orders screen and opens the issue form with the signed-in backend host', () => {
+  it('renders in Settings → General and opens the issue form with the signed-in backend host', async () => {
     saveSession(localStorage, { baseUrl: 'https://signed-in.test', email: 'cashier@test.com', token: 'token' });
-    render(<SessionProvider><OrdersScreen /></SessionProvider>);
+    await act(async () => { render(<SessionProvider><SettingsScreen /></SessionProvider>); });
     fireEvent.click(screen.getByRole('link', { name: 'Send feedback' }));
     expect(window.open).toHaveBeenCalledTimes(1);
     expect(window.open).toHaveBeenCalledWith(expect.any(String), '_blank', 'noopener,noreferrer');
@@ -70,6 +72,15 @@ describe('Send feedback link', () => {
     const openedUrl = vi.mocked(window.open).mock.calls[0][0];
     expect(openedUrl).toBeDefined();
     const url = new URL(String(openedUrl));
+    expect(url.origin + url.pathname).toBe('https://github.com/medusapos/app/issues/new');
+    expect(url.searchParams.get('template')).toBe('tester-feedback.yml');
     expect(url.searchParams.get('backend-host')).toBe('signed-in.test');
+    expect(url.searchParams.get('app-version')).toBe(appVersion);
+  });
+
+  it('is not drawn on the Orders screen', () => {
+    saveSession(localStorage, { baseUrl: 'https://signed-in.test', email: 'cashier@test.com', token: 'token' });
+    render(<SessionProvider><OrdersScreen /></SessionProvider>);
+    expect(screen.queryByRole('link', { name: 'Send feedback' })).toBeNull();
   });
 });

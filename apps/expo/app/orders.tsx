@@ -1,13 +1,10 @@
 import { useMemo, useState } from 'react';
-import { Platform, Pressable, View } from 'react-native';
-import { AppText as Text } from '../components/app-text';
+import { View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { OrderFilterBar, OrdersList, SearchInput } from '@tallyui/components';
 import type { OrderFilterValue } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
-import { version as appVersion } from '../package.json';
-import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
 import { formatDate } from '../lib/format-date';
@@ -33,15 +30,7 @@ export default function OrdersScreen() {
         options={options} timezone="device" testID="orders-filter-bar" />
     </View>
     <OrdersList orders={orders} onRetry={requeue} formatDate={formatDate}
-      onOpen={(row) => { if ('lines' in row) setOpenId(row.id); }} footer={
-        <Pressable accessibilityRole="link" className="min-h-11 justify-center" onPress={() => { openFeedbackUrl(feedbackUrl({
-          appVersion, platform: Platform.OS,
-          userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
-          backendUrl: session.baseUrl,
-        })); }}>
-          <Text className="text-center text-sm text-muted-foreground">Send feedback</Text>
-        </Pressable>
-    } />
+      onOpen={(row) => { if ('lines' in row) setOpenId(row.id); }} />
     {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. */}
     <OrderDetailSheet order={recent.find((order) => order.id === openId) ?? null} onClose={() => setOpenId(null)}
       formatDate={formatDate} onRetry={requeue} onFlush={flush} />

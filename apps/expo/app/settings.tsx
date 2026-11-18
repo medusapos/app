@@ -9,6 +9,9 @@ import { DirectScannerConnection } from '../components/device-scanner';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
 import { FrameMenuButton } from '../components/app-frame';
+import { ExternalLinkIcon } from '../components/external-link-icon';
+import { version as appVersion } from '../package.json';
+import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { getDeviceName } from '../lib/register-context';
@@ -127,6 +130,19 @@ function StoreSection({ session }: { session: Session }) {
     } />
     <SettingsRow label="Example" className="border-t border-border" action={
       <Text testID="settings-currency-example" className="max-w-40 text-right text-sm text-foreground">{format ? format.example : UNKNOWN}</Text>
+    } />
+  </SettingsGroup>
+  <SettingsGroup title="Feedback" description="Report a problem or suggest a change. Opens the tester feedback form on GitHub." testID="settings-feedback">
+    <SettingsRow label="Send feedback" action={
+      <Pressable testID="settings-feedback-link" accessibilityRole="link" accessibilityLabel="Send feedback"
+        className="min-h-11 flex-row items-center gap-1" onPress={() => { openFeedbackUrl(feedbackUrl({
+          appVersion, platform: Platform.OS,
+          userAgent: Platform.OS === 'web' ? navigator.userAgent : undefined,
+          backendUrl: session.baseUrl,
+        })); }}>
+        <Text className="text-sm text-primary">Open</Text>
+        <ExternalLinkIcon size={14} className="text-primary" />
+      </Pressable>
     } />
   </SettingsGroup>
   </>;

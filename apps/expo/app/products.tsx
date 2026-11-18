@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { CategoryNav, ProductTable, SearchInput, Text, type ProductTableColumn } from '@tallyui/components';
+import { Button, CategoryNav, Loader, ProductTable, SearchInput, Text, type ProductTableColumn } from '@tallyui/components';
 import { listCategories } from '@tallyui/pos';
 import { FrameMenuButton } from '../components/app-frame';
-import { useCatalogueSnapshot } from '../lib/catalogue-snapshot';
+import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
+import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
-  filterProductAreaRows, filterProductAreaRowsByCategory, productAreaRows, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_NO_MATCH,
-  PRODUCTS_NOT_LOADED, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
+  filterProductAreaRows, filterProductAreaRowsByCategory, productAreaRows, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING,
+  PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
 } from '../lib/products-area';
 import { useSession } from '../lib/session-context';
+import { useReplicatedProducts } from '../lib/use-replicated-products';
 
 const COLUMNS: ProductTableColumn<ProductAreaRow>[] = [
   { id: 'name', header: 'Product', flex: 3, sortValue: (row) => row.name, render: (row) => <Text>{row.name}</Text> },
@@ -25,36 +27,66 @@ const COLUMNS: ProductTableColumn<ProductAreaRow>[] = [
   { id: 'price', header: 'Price', align: 'right', flex: 1, render: (row) => <Text className="tabular-nums">{row.price}</Text> },
 ];
 
-// v2's Products area, read-only: the catalogue the Sale screen already holds; editing happens in Medusa Admin.
+// The area's own catalogue read, while no Sale holds one: the Sale's replication over the same cache, read-only.
+// It publishes what it reads and renders nothing.
+function ProductsCatalogue({ session, connector, syncContext, onUnauthorized, pricing, retry }: TillCatalogueLeafProps & { retry: () => void }) {
+  const { products, state, error, stockOverlay } = useReplicatedProducts(connector, syncContext, onUnauthorized);
+  const catalogue = useMemo(() => sellableCatalogue(products, connector, stockOverlay), [products, connector, stockOverlay]);
+  const status = catalogueStatus(products.length, state);
+  useEffect(() => {
+    publishCatalogue({ owner: 'products', baseUrl: session.baseUrl, products: catalogue, traits: connector.traits.product,
+      currency: pricing.currency, status, error: error ?? undefined, retry });
+  }, [session.baseUrl, catalogue, connector, pricing.currency, status, error, retry]);
+  useEffect(() => () => withdrawCatalogue('products'), []);
+  return null;
+}
+
+// v2's Products area, read-only: the Sale's catalogue when the Sale holds one, else its own read of the same cache;
+// editing happens in Medusa Admin.
 export default function ProductsAreaScreen() {
-  const { session } = useSession();
+  const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
   const snapshot = useCatalogueSnapshot();
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  // Retry remounts the read (a fresh useReplicatedProducts); the gate and its store settings stay.
+  const [read, setRead] = useState(0);
+  const retry = useCallback(() => setRead((count) => count + 1), []);
+  const Leaf = useMemo(() => (props: TillCatalogueLeafProps) => <ProductsCatalogue key={read} {...props} retry={retry} />, [read, retry]);
   const loaded = snapshot && session && snapshot.baseUrl === session.baseUrl ? snapshot : null;
-  const rows = useMemo(() => loaded ? productAreaRows(loaded.products, loaded.traits, loaded.currency) : [], [loaded]);
-  const categories = useMemo(() => loaded ? listCategories(loaded.products, loaded.traits) : [], [loaded]);
+  const ready = loaded?.status === 'ready' ? loaded : null;
+  const rows = useMemo(() => ready ? productAreaRows(ready.products, ready.traits, ready.currency) : [], [ready]);
+  const categories = useMemo(() => ready ? listCategories(ready.products, ready.traits) : [], [ready]);
   // A chosen category no longer in the catalogue counts as All, as the Sale's chips do.
   const activeId = categoryId !== null && categories.some((category) => category.id === categoryId) ? categoryId : null;
   const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsByCategory(rows, activeId), search), [rows, activeId, search]);
   if (!session) return <Redirect href="/login" />;
+  // One cache per store and pricing context: the area reads only while the Sale holds no catalogue for this store.
+  const saleHolds = loaded?.owner === 'sale';
   return <View className="flex-1 bg-background">
     <Stack.Screen options={{ title: 'Products', headerLeft: () => <FrameMenuButton /> }} />
     <View className="flex-row items-center gap-2 px-4 pt-4 pb-2">
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
     </View>
-    {loaded && categories.length ? <View><CategoryNav className="px-1" testID="products-categories"
+    {ready && categories.length ? <View><CategoryNav className="px-1" testID="products-categories"
       categories={[{ id: '', name: 'All products' }, ...categories]} selectedId={activeId ?? ''}
       onSelect={(id) => setCategoryId(id === '' ? null : id)} /></View> : null}
     <View className="px-4 pb-2">
       <Text className="text-sm text-muted-foreground" testID="products-admin-note">{PRODUCTS_ADMIN_NOTE}</Text>
     </View>
-    {loaded ? <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
+    {saleHolds ? null : <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
+      onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
+    {ready ? <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
       defaultSort={{ field: 'name', dir: 'asc' }} emptyState={
         <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search) : PRODUCTS_EMPTY}</Text>
-      } /> : <View className="flex-1 items-center justify-center px-4">
-      <Text className="text-center text-muted-foreground" testID="products-not-loaded">{PRODUCTS_NOT_LOADED}</Text>
-    </View>}
+      } /> : null}
+    {loaded?.status === 'loading' ? <View className="flex-1 items-center justify-center gap-3 px-4" testID="products-loading">
+      <Loader />
+      <Text className="text-center text-muted-foreground">{PRODUCTS_LOADING}</Text>
+    </View> : null}
+    {loaded?.status === 'error' ? <View className="flex-1 items-center justify-center gap-4 px-4">
+      <Text className="text-center text-destructive" testID="products-error">{loaded.error ?? PRODUCTS_LOAD_FAILED}</Text>
+      {loaded.retry ? <Button variant="outline" testID="products-retry" onPress={loaded.retry}><Text>Retry</Text></Button> : null}
+    </View> : null}
   </View>;
 }

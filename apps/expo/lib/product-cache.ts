@@ -18,6 +18,8 @@ const pendingCloses = new Set<Promise<void>>();
 // Opens from `openProductCache` still in flight: resolves to the registered
 // `{ close }`, or `undefined` if the open failed (which counts as closed).
 const pendingOpens = new Set<Promise<{ close: () => Promise<void> } | undefined>>();
+// Per cache name, the turn of the latest `openProductCache`: settles once that open failed or its close settled.
+const turns = new Map<string, Promise<void>>();
 
 /**
  * Persistent storage on web (ADR-061's SQLite-wasm); memory on native. Web without SQLite-wasm
@@ -124,7 +126,7 @@ function startClose(name: string, db: CachedDb): Promise<void> {
   if (openCaches.get(name) === db) openCaches.delete(name);
   const closing = Promise.resolve(db.close()).then(() => undefined);
   pendingCloses.add(closing);
-  void closing.finally(() => pendingCloses.delete(closing));
+  void closing.finally(() => pendingCloses.delete(closing)).catch(() => {}); // the caller sees the rejection
   return closing;
 }
 
@@ -141,6 +143,16 @@ export function registerOpenCache(name: string, db: CachedDb): () => Promise<voi
   return close;
 }
 
+// Long enough for a normal RxDB close; short enough that a hung close surfaces as the old open error (DB8) and Retry.
+const SAME_NAME_OPEN_WAIT_MS = 5_000;
+
+/** Settles when the previous same-name turn settles or `SAME_NAME_OPEN_WAIT_MS` passes, whichever comes first. */
+function waitForTurn(previous: Promise<void>): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<void>((resolve) => { timer = setTimeout(resolve, SAME_NAME_OPEN_WAIT_MS); });
+  return Promise.race([previous, bound]).finally(() => clearTimeout(timer));
+}
+
 /**
  * Opens a cache, tracked while in flight so `closeProductCaches` can wait
  * for it, and registers the result through the same once-close as `registerOpenCache`.
@@ -148,7 +160,25 @@ export function registerOpenCache(name: string, db: CachedDb): () => Promise<voi
 export function openProductCache<T extends CachedDb>(
   name: string, open: () => Promise<T>,
 ): Promise<{ db: T; close: () => Promise<void> }> {
-  const opened = open().then((db) => ({ db, close: registerOpenCache(name, db) }));
+  // RxDB throws DB8 when a database of this name is still open (its name is freed only when close() completes), so a
+  // same-name open (the Sale taking the cache over from the Products area) waits for every earlier one to close or fail.
+  const previous = turns.get(name);
+  const started = previous ? waitForTurn(previous).then(() => open()) : open();
+  let release!: () => void;
+  const turn = new Promise<void>((resolve) => { release = resolve; });
+  turns.set(name, turn);
+  void turn.then(() => { if (turns.get(name) === turn) turns.delete(name); });
+  const opened = started.then((db) => {
+    const once = registerOpenCache(name, db);
+    const close = () => {
+      const closing = once();
+      void closing.then(release, release);
+      return closing;
+    };
+    closers.set(name, close);
+    return { db, close };
+  });
+  void opened.catch(() => release());
   const tracked = opened.catch(() => undefined);
   pendingOpens.add(tracked);
   void tracked.finally(() => pendingOpens.delete(tracked));

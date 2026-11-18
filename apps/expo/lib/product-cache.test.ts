@@ -405,3 +405,123 @@ describe('closeProductCaches', () => {
     await expect(opened).rejects.toThrow('open failed');
   });
 });
+
+describe('openProductCache same-name serialisation', () => {
+  const flush = async () => { for (let i = 0; i < 10; i++) await Promise.resolve(); };
+  const fakeDb = () => {
+    let finishClose!: () => void;
+    const db = { remove: vi.fn(), close: vi.fn(() => new Promise<void>((resolve) => { finishClose = resolve; })) };
+    return { db, finishClose: () => finishClose() };
+  };
+
+  it('does not open a second cache of the same name until the first has finished closing', async () => {
+    const name = pricedCacheName('medusa', 'https://same-name.test', { region_id: 'reg_eu' });
+    const first = fakeDb();
+    const second = fakeDb();
+    const openFirst = vi.fn(async () => first.db);
+    const openSecond = vi.fn(async () => second.db);
+    const opened = openProductCache(name, openFirst);
+    expect(openFirst).toHaveBeenCalledOnce();
+    const queued = openProductCache(name, openSecond);
+    await flush();
+    expect(openSecond).not.toHaveBeenCalled();
+
+    const closing = (await opened).close();
+    await flush();
+    expect(openSecond).not.toHaveBeenCalled(); // closing, not closed: the name is not free yet
+    first.finishClose();
+    await closing;
+    await flush();
+    expect(openSecond).toHaveBeenCalledOnce();
+    const { db, close } = await queued;
+    expect(db).toBe(second.db);
+    const done = close();
+    second.finishClose();
+    await done;
+  });
+
+  it('does not hold an open of another name', async () => {
+    const held = fakeDb();
+    const opened = openProductCache(pricedCacheName('medusa', 'https://held.test'), async () => held.db);
+    const other = vi.fn(async () => fakeDb().db);
+    void openProductCache(pricedCacheName('medusa', 'https://free.test'), other);
+    expect(other).toHaveBeenCalledOnce();
+    const done = (await opened).close();
+    held.finishClose();
+    await done;
+  });
+
+  it('releases the next open at once when the first open fails', async () => {
+    const name = pricedCacheName('medusa', 'https://first-fails.test');
+    const failed = openProductCache(name, vi.fn().mockRejectedValue(new Error('DB8')));
+    failed.catch(() => {});
+    const next = fakeDb();
+    const openNext = vi.fn(async () => next.db);
+    const queued = openProductCache(name, openNext);
+    await expect(failed).rejects.toThrow('DB8');
+    await flush();
+    expect(openNext).toHaveBeenCalledOnce();
+    const done = (await queued).close();
+    next.finishClose();
+    await done;
+  });
+
+  describe('bounded by 5 s', () => {
+    // Fake timers only here: RxDB's own close uses setTimeout, and these caches are fakes.
+    beforeEach(() => { vi.useFakeTimers(); });
+    afterEach(() => { vi.useRealTimers(); });
+
+    it('opens after 5 s, not before, when the previous close never settles, and passes the open error on', async () => {
+      const name = pricedCacheName('medusa', 'https://hung-close.test');
+      const hung = fakeDb();
+      void (await openProductCache(name, async () => hung.db)).close();
+      const openNext = vi.fn().mockRejectedValue(new Error('DB8'));
+      const queued = openProductCache(name, openNext);
+      queued.catch(() => {});
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(openNext).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(openNext).toHaveBeenCalledOnce();
+      await expect(queued).rejects.toThrow('DB8');
+      hung.finishClose(); // let closeProductCaches in later tests settle
+    });
+
+    it('releases the next open at once when the previous close rejects', async () => {
+      const name = pricedCacheName('medusa', 'https://close-rejects.test');
+      const db = { remove: vi.fn(), close: vi.fn().mockRejectedValue(new Error('close failed')) };
+      const closing = (await openProductCache(name, async () => db)).close();
+      const next = fakeDb();
+      const openNext = vi.fn(async () => next.db);
+      const queued = openProductCache(name, openNext);
+      await expect(closing).rejects.toThrow('close failed');
+      await flush();
+      expect(openNext).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0); // the 5 s timer was cleared
+      const done = (await queued).close();
+      next.finishClose();
+      await done;
+    });
+
+    it('runs three queued same-name opens in order, each only after the previous close', async () => {
+      const name = pricedCacheName('medusa', 'https://three-queued.test');
+      const caches = [fakeDb(), fakeDb(), fakeDb()];
+      const opens = caches.map((cache) => vi.fn(async () => cache.db));
+      const opened = opens.map((open) => openProductCache(name, open));
+      const calls = () => opens.map((open) => open.mock.calls.length);
+      await flush();
+      expect(calls()).toEqual([1, 0, 0]);
+      for (const i of [0, 1]) {
+        const closing = (await opened[i]).close();
+        await flush();
+        expect(opens[i + 1]).not.toHaveBeenCalled();
+        caches[i].finishClose();
+        await closing;
+        await flush();
+        expect(calls()).toEqual(i === 0 ? [1, 1, 0] : [1, 1, 1]);
+      }
+      const done = (await opened[2]).close();
+      caches[2].finishClose();
+      await done;
+    });
+  });
+});

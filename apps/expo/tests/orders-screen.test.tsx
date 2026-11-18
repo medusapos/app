@@ -50,7 +50,7 @@ describe('OrdersScreen', () => {
     mount();
     expect(screen.getAllByText(emptyText)).toHaveLength(1);
     expect(screen.queryByText('No sales on this till yet. Completed sales show here.')).toBeNull();
-    expect(screen.getByRole('link', { name: 'Send feedback' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Send feedback' })).toBeNull();
   });
 
   it('hides the empty state once there is a sale (#195)', () => {
