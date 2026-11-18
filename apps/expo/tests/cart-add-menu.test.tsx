@@ -96,6 +96,30 @@ it('lists all six rows on an empty cart, Add Discount enabled', async () => {
   expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(SIX_ROWS);
   expect(screen.getByRole('menuitem', { name: 'Add Discount' }).getAttribute('aria-disabled')).not.toBe('true');
 });
+it('each + menu row leads with its own icon', async () => {
+  await start();
+  openMenu();
+  const rows = screen.getAllByRole('menuitem');
+  expect(rows.map((item) => item.textContent)).toEqual(SIX_ROWS);
+  const icons = rows.map((row) => {
+    const svgs = row.querySelectorAll('svg');
+    expect(svgs).toHaveLength(1);
+    expect(svgs[0].getAttribute('aria-hidden')).toBe('true');
+    const first = row.firstElementChild!;
+    expect(first === svgs[0] || first.contains(svgs[0])).toBe(true);
+    expect(first.textContent).toBe('');
+    return svgs[0].innerHTML;
+  });
+  expect(new Set(icons).size).toBe(SIX_ROWS.length);
+});
+it('a greyed row keeps its icon', async () => {
+  connectorOptions.createCustomer = false;
+  await start();
+  openMenu();
+  const item = screen.getByRole('menuitem', { name: 'Add new customer' });
+  expect(item.getAttribute('aria-disabled')).toBe('true');
+  expect(item.querySelector('svg')).toBeTruthy();
+});
 it('marks the trigger open only while its menu is open', async () => {
   await start();
   const trigger = screen.getByTestId('cart-add-menu');

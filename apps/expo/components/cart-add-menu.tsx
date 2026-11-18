@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { View } from 'react-native';
-import { Line } from 'react-native-svg';
+import { Circle, Line, Path } from 'react-native-svg';
 import type { useSale } from '@tallyui/pos';
 import {
   Button, ChargeForm, createSvgIcon, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DiscountForm, DropdownMenu,
@@ -9,6 +9,24 @@ import {
 import { CouponCodeInput, couponsEnabled, useCouponEntry } from './coupon-field';
 
 const PlusIcon = createSvgIcon('PlusIcon', () => <><Line x1={12} y1={5} x2={12} y2={19} /><Line x1={5} y1={12} x2={19} y2={12} /></>);
+// lucide user-plus
+const UserPlusIcon = createSvgIcon('UserPlusIcon', () => <><Path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" /><Circle cx={9} cy={7} r={4} />
+  <Line x1={19} y1={8} x2={19} y2={14} /><Line x1={22} y1={11} x2={16} y2={11} /></>);
+// lucide box
+const BoxIcon = createSvgIcon('BoxIcon', () => <><Path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z" />
+  <Path d="m3.3 7 8.7 5 8.7-5" /><Path d="M12 22V12" /></>);
+// lucide receipt-text
+const ReceiptIcon = createSvgIcon('ReceiptIcon', () => <><Path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z" />
+  <Path d="M14 8H8" /><Path d="M16 12H8" /><Path d="M13 16H8" /></>);
+// lucide tag
+const TagIcon = createSvgIcon('TagIcon', () => <><Path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z" />
+  <Circle cx={7.5} cy={7.5} r={0.5} fill="currentColor" /></>);
+// lucide ticket-percent
+const TicketPercentIcon = createSvgIcon('TicketPercentIcon', () => <><Path d="M2 9a3 3 0 1 1 0 6v2a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-2a3 3 0 1 1 0-6V7a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z" />
+  <Path d="M9 9h.01" /><Path d="m15 9-6 6" /><Path d="M15 15h.01" /></>);
+// lucide truck
+const TruckIcon = createSvgIcon('TruckIcon', () => <><Path d="M14 18V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v11a1 1 0 0 0 1 1h2" /><Path d="M15 18H9" />
+  <Path d="M19 18h2a1 1 0 0 0 1-1v-3.65a1 1 0 0 0-.22-.624l-3.48-4.35A1 1 0 0 0 17.52 8H14" /><Circle cx={17} cy={18} r={2} /><Circle cx={7} cy={18} r={2} /></>);
 
 /** The dialog's coupon entry: the inline field's own apply path, closing the dialog once a code applies. */
 function CouponDialogBody({ sale, onClose }: { sale: ReturnType<typeof useSale>; onClose: () => void }) {
@@ -36,16 +54,20 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {/* Greyed when customers can't be created here (no createCustomer, or offline). */}
-        <DropdownMenuItem testID="cart-add-new-customer" disabled={!onAddCustomer} className={onAddCustomer ? undefined : 'opacity-50'}
-          onPress={() => onAddCustomer?.()}><Text>Add new customer</Text></DropdownMenuItem>
+        <DropdownMenuItem testID="cart-add-new-customer" disabled={!onAddCustomer} className={onAddCustomer ? 'gap-2' : 'gap-2 opacity-50'}
+          onPress={() => onAddCustomer?.()}><View className="text-foreground"><UserPlusIcon size={16} /></View><Text>Add new customer</Text></DropdownMenuItem>
         <DropdownMenuSeparator />
-        {chargesOffered && <DropdownMenuItem onPress={() => setKind('custom')}><Text>Add Miscellaneous Product</Text></DropdownMenuItem>}
-        {chargesOffered && <DropdownMenuItem onPress={() => setKind('fee')}><Text>Add Fee</Text></DropdownMenuItem>}
-        <DropdownMenuItem onPress={() => setKind('discount')}><Text>Add Discount</Text></DropdownMenuItem>
+        {chargesOffered && <DropdownMenuItem className="gap-2" onPress={() => setKind('custom')}>
+          <View className="text-foreground"><BoxIcon size={16} /></View><Text>Add Miscellaneous Product</Text></DropdownMenuItem>}
+        {chargesOffered && <DropdownMenuItem className="gap-2" onPress={() => setKind('fee')}>
+          <View className="text-foreground"><ReceiptIcon size={16} /></View><Text>Add Fee</Text></DropdownMenuItem>}
+        <DropdownMenuItem className="gap-2" onPress={() => setKind('discount')}>
+          <View className="text-foreground"><TagIcon size={16} /></View><Text>Add Discount</Text></DropdownMenuItem>
         {/* Greyed when the till does not offer coupons: the rule that hides the inline coupon field. */}
-        <DropdownMenuItem testID="cart-add-coupon" disabled={!coupons} className={coupons ? undefined : 'opacity-50'}
-          onPress={() => setKind('coupon')}><Text>Add Coupon</Text></DropdownMenuItem>
-        {chargesOffered && <DropdownMenuItem onPress={() => setKind('shipping')}><Text>Add Shipping</Text></DropdownMenuItem>}
+        <DropdownMenuItem testID="cart-add-coupon" disabled={!coupons} className={coupons ? 'gap-2' : 'gap-2 opacity-50'}
+          onPress={() => setKind('coupon')}><View className="text-foreground"><TicketPercentIcon size={16} /></View><Text>Add Coupon</Text></DropdownMenuItem>
+        {chargesOffered && <DropdownMenuItem className="gap-2" onPress={() => setKind('shipping')}>
+          <View className="text-foreground"><TruckIcon size={16} /></View><Text>Add Shipping</Text></DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
     <Dialog open={kind !== null} onOpenChange={(open) => { if (!open) close(); }}>
