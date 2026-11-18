@@ -92,17 +92,18 @@ describe('EmailReceipt', () => {
     send.mockRejectedValueOnce(new CustomerServiceError('server', message, { status: 503 }));
     render(<EmailReceipt {...props} />);
     fireEvent.click(screen.getByTestId('receipt-email-open'));
-    fireEvent.click(screen.getByTestId('receipt-email-send'));
-    // 5 s waits: the default 1 s findBy timeout flaked on loaded CI runners.
-    expect((await screen.findByRole('alert', {}, { timeout: 5000 })).textContent).toBe(message);
+    // act, not findBy: findBy resumes on the DOM change, but react-native-web's Pressable re-reads
+    // disabled/onPress in a passive effect, so on a stalled runner the retry press hit the stale handler.
+    await act(async () => { fireEvent.click(screen.getByTestId('receipt-email-send')); });
+    expect(screen.getByRole('alert').textContent).toBe(message);
     expect((screen.getByLabelText('Receipt email address') as HTMLInputElement).value).toBe('buyer@example.com');
     expect(screen.getByTestId('receipt-email-send').getAttribute('aria-disabled')).not.toBe('true');
     expect(send).toHaveBeenCalledTimes(1);
     expect(onUnauthorized).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByTestId('receipt-email-send'));
-    expect((await screen.findByText('Receipt sent to buyer@example.com.', {}, { timeout: 5000 })).getAttribute('role')).toBe('alert');
+    await act(async () => { fireEvent.click(screen.getByTestId('receipt-email-send')); });
+    expect(screen.getByText('Receipt sent to buyer@example.com.').getAttribute('role')).toBe('alert');
     expect(send).toHaveBeenCalledTimes(2);
-  }, 15_000);
+  });
 
   it.each([401, 403] as const)('handles HTTP %s without signing out for forbidden access', async (status) => {
     send.mockRejectedValue(new ConnectorUnauthorizedError('Credentials refused', status));
