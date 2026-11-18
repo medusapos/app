@@ -1,9 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, View } from 'react-native';
-import { Path } from 'react-native-svg';
 import { AppText as Text } from './app-text';
 import {
-  ClosureSheet, createSvgIcon, OpenRegisterCard, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
+  ClosureSheet, OpenRegisterCard, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';
 import { RegisterSessionRequiredError, type ApprovalNeeded, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { printXReport } from '../lib/closure-print';
@@ -11,6 +10,7 @@ import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
 import { closureContext, LastClosureSheet, printClosure, storeApproval, useApprove } from './register-close';
 import { RegisterConflictCard } from './register-conflict';
+import { WarningIcon } from './warning-icon';
 
 // RegisterColumn's Finish closing button's nativeID (TallyUI #175).
 const FINISH_CLOSE_BUTTON = 'register-column-finish-close-button';
@@ -29,11 +29,6 @@ export function openCartsWarning(count: number): string | null {
   if (count <= 0) return null;
   return count === 1 ? '1 cart still open · it stays open after the close' : `${count} carts still open · they stay open after the close`;
 }
-
-const WarningIcon = createSvgIcon('WarningIcon', () => <>
-  <Path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-  <Path d="M12 9v4M12 17h.01" />
-</>);
 
 /**
  * The sale the Cart gets: its Cash and Card start the tender only once `requireSaleSession()` confirms an open
