@@ -206,9 +206,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   };
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
-  // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so does the
-  // address dialog, so leaving the cart closes it and a cancelled tender does not reopen it.
-  useEffect(() => { if (sale.stage.kind !== 'cart') setAddressCustomerId(null); }, [sale.stage.kind]);
+  // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so do the
+  // customer picker, the new-customer dialog and the address dialog, so leaving the cart closes them and a cancelled
+  // tender does not reopen them.
+  useEffect(() => {
+    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setCustomerOpen(false); setNewCustomerOpen(false); }
+  }, [sale.stage.kind]);
+  // Read at pick time: the picker's New customer create can settle after its dialog closed, and that late pick is dropped.
+  const pickerLive = useRef(false);
+  pickerLive.current = customerOpen && sale.stage.kind === 'cart';
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
 
   // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
@@ -410,17 +416,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
         open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />
-      {connector.searchCustomers && <Dialog open={customerOpen} onOpenChange={setCustomerOpen}>
+      {connector.searchCustomers && <Dialog open={customerOpen && sale.stage.kind === 'cart'} onOpenChange={setCustomerOpen}>
         <DialogContent testID="customer-dialog"><DialogTitle>Customer</DialogTitle>
           <ScrollView><CustomerPicker selected={sale.order.customer} online={online}
             search={(q) => connector.searchCustomers!(syncContext, q)}
             create={(input) => connector.createCustomer!(syncContext, input)}
-            onSelect={(c) => { sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
+            onSelect={(c) => { if (!pickerLive.current) return; sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
             onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); }} />
           </ScrollView>
         </DialogContent>
       </Dialog>}
-      {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen} onOpenChange={setNewCustomerOpen}
+      {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen && sale.stage.kind === 'cart'} onOpenChange={setNewCustomerOpen}
         create={(input) => connector.createCustomer!(syncContext, input)}
         update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}

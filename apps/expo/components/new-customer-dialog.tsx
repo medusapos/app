@@ -14,14 +14,19 @@ export function NewCustomerDialog({ open, onOpenChange, create, update, onSaved,
   onSaved: (customer: Customer) => void;
   onUnauthorized: () => void;
 }) {
-  const created = useRef<Customer | null>(null);
-  return <Dialog open={open} onOpenChange={(next) => { if (!next) created.current = null; onOpenChange(next); }}>
+  // A save belongs to the opening it started in: each opening gets its own `created` holder (the customer an earlier Save
+  // created, so a retry patches it), and a save that settles after the dialog closed reports nothing and leaks nothing.
+  const session = useRef<{ current: Customer | null } | null>(null);
+  if (!open) session.current = null;
+  else if (!session.current) session.current = { current: null };
+  return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent testID="new-customer-dialog" className="max-h-[90%]">
       <DialogTitle>Add new customer</DialogTitle>
       <ScrollView keyboardShouldPersistTaps="handled">
         {open && <CustomerEditor customer={null} onUnauthorized={onUnauthorized} save={async (values, billing, shipping) => {
-          await saveNewCustomer({ create, update }, values, billing, shipping, created, onSaved);
-          created.current = null;
+          const created = session.current!;
+          await saveNewCustomer({ create, update }, values, billing, shipping, created, (c) => { if (session.current === created) onSaved(c); });
+          if (session.current !== created) return;
           onOpenChange(false);
         }} />}
       </ScrollView>
