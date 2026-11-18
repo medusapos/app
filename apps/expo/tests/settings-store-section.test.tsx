@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { currencySymbol, type StoreSettings as PricingSettings } from '@tallyui/core';
@@ -62,12 +62,14 @@ describe('SettingsScreen Store section', () => {
     await mount();
     expect(screen.getByText('Store')).toBeTruthy();
     expect(screen.getByText('Register')).toBeTruthy();
-    expect(screen.getByText('Scanner')).toBeTruthy();
+    expect(screen.getByText('Barcode Scanning')).toBeTruthy();
     const store = screen.getByTestId('settings-store');
+    const tax = screen.getByTestId('settings-tax');
     const register = screen.getByTestId('settings-register');
     const scanner = screen.getByTestId('settings-scanner');
-    expect(store.compareDocumentPosition(register) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(register.compareDocumentPosition(scanner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(store.compareDocumentPosition(tax) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tax.compareDocumentPosition(scanner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(scanner.compareDocumentPosition(register) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows the cached store, currency, tax inclusivity and location', async () => {
@@ -101,8 +103,9 @@ describe('SettingsScreen Store section', () => {
     expect(screen.queryByText(/reg_eu/)).toBeNull();
     expect(screen.queryByText(/sc_pos/)).toBeNull();
     expect(screen.queryByText(/pk_secret_test/)).toBeNull();
-    expect(screen.getByTestId('settings-store-currency').compareDocumentPosition(region) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(region.compareDocumentPosition(screen.getByTestId('settings-store-prices-include-tax')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const tax = within(screen.getByTestId('settings-tax'));
+    expect(tax.getByTestId('settings-store-region')).toBe(region);
+    expect(region.compareDocumentPosition(tax.getByTestId('settings-store-prices-include-tax')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByTestId('settings-store-location').compareDocumentPosition(channel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
