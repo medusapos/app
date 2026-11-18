@@ -201,6 +201,7 @@ describe('sale', () => {
     expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
   });
 
+  // A long synchronous tender sequence; a loaded CI runner took >5 s (#390, #391, #395).
   it('keeps an underpaid tender on finalize failure, replaces amounts and removes it on Back', async () => {
     const completed = vi.fn();
     render(<SaleHarness onSaleCompleted={completed} />);
@@ -233,7 +234,7 @@ describe('sale', () => {
     expect(sale.stage.kind).toBe('cart');
     expect(sale.order.payments).toEqual([]);
     expect(sale.order.balanceDueMinor).toBe(sale.order.totalMinor);
-  });
+  }, 15_000);
 
   it('records quick cash amounts through the same single pending payment', async () => {
     render(<SaleHarness />);
