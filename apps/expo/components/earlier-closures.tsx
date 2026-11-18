@@ -3,9 +3,11 @@ import { Pressable } from 'react-native';
 import { AppText as Text } from './app-text';
 import type { Closure, ClosureContext } from '@tallyui/pos';
 import { ClosureHistoryError, dayBefore, fetchClosureHistory, type ClosureHistoryEntry } from '../lib/closure-history';
-import { byCashier, historyClosure, historyTableRow } from '../lib/reports';
+import { historyClosure, historyTableRow } from '../lib/reports';
 import type { Session } from '../lib/session';
 import { ClosureTable } from './closure-table';
+
+const closedByOf = (rows: ClosureHistoryEntry[]) => [...new Set(rows.flatMap((row) => row.closedBy ? [row.closedBy] : []))];
 
 export function EarlierClosures({ session, registerId, today, ctx, registerName, cashierNames, localClosures = [], onOpen,
   from, to = dayBefore(today), cashierId = null, heading = 'Earlier closures', onCashiers }: {
@@ -19,6 +21,11 @@ export function EarlierClosures({ session, registerId, today, ctx, registerName,
   const [error, setError] = useState<string | null>(null);
   const [failedBefore, setFailedBefore] = useState<number>();
   const request = useRef(0);
+  // The cashier picker's list comes from unfiltered pages only: `listedFor` is the inputs whose unfiltered list
+  // onCashiers already has, and `listRequest` drops a stale unfiltered fetch made while a cashier is chosen.
+  const inputs = JSON.stringify([session.baseUrl, session.token, registerId, today, from, to]);
+  const listedFor = useRef<string | null>(null);
+  const listRequest = useRef(0);
 
   async function load(before?: number) {
     const id = ++request.current;
@@ -26,8 +33,10 @@ export function EarlierClosures({ session, registerId, today, ctx, registerName,
     setError(null);
     if (before === undefined) { setRows([]); setMore(false); }
     try {
-      const page = await fetchClosureHistory(session, registerId, { ...(from === undefined ? {} : { from }), to, ...(before === undefined ? {} : { before }) });
+      const page = await fetchClosureHistory(session, registerId, { ...(from === undefined ? {} : { from }), to,
+        ...(before === undefined ? {} : { before }), ...(cashierId === null ? {} : { cashier: cashierId }) });
       if (id !== request.current) return;
+      if (cashierId === null && before === undefined) listedFor.current = inputs;
       setRows((current) => before === undefined ? page.closures
         : [...current, ...page.closures.filter((row) => !current.some((entry) => entry.closureId === row.closureId))]);
       setMore(page.more);
@@ -48,20 +57,30 @@ export function EarlierClosures({ session, registerId, today, ctx, registerName,
   useEffect(() => {
     void load();
     return () => { request.current++; };
-  }, [session.baseUrl, session.token, registerId, today, from, to]);
+  }, [session.baseUrl, session.token, registerId, today, from, to, cashierId]);
   useEffect(() => {
-    onCashiers?.([...new Set(rows.flatMap((row) => row.closedBy ? [row.closedBy] : []))]);
+    if (cashierId === null) onCashiers?.(closedByOf(rows));
   }, [rows]);
-  const shown = byCashier(rows, cashierId, (row) => row.closedBy);
+  const filtered = cashierId !== null;
+  useEffect(() => {
+    if (!onCashiers || !filtered || listedFor.current === inputs) return;
+    const id = ++listRequest.current;
+    fetchClosureHistory(session, registerId, { ...(from === undefined ? {} : { from }), to }).then((page) => {
+      if (id !== listRequest.current) return;
+      listedFor.current = inputs;
+      onCashiers(closedByOf(page.closures));
+    }, () => {});
+    return () => { listRequest.current++; };
+  }, [inputs, filtered]);
 
   return <>
     {heading === null ? null : <Text testID="earlier-closures-heading" className="text-lg font-semibold text-foreground">{heading}</Text>}
     {loading && rows.length === 0 ? <Text testID="earlier-closures-loading" className="text-foreground">Loading…</Text> : null}
     <ClosureTable testID="earlier-closures-table" rowTestID={(id) => `earlier-closure-${id}`} ctx={ctx} today={today}
-      rows={shown.map((r) => historyTableRow(r, registerName, cashierNames))}
+      rows={rows.map((r) => historyTableRow(r, registerName, cashierNames))}
       openable={onOpen ? (id) => opened(id) !== null : undefined}
       onOpen={onOpen ? (id) => { const closure = opened(id); if (closure) onOpen(closure); } : undefined} />
-    {!loading && shown.length === 0 && !error ? <Text testID="earlier-closures-empty" className="text-foreground">
+    {!loading && rows.length === 0 && !error ? <Text testID="earlier-closures-empty" className="text-foreground">
       {heading === null ? 'No closures in this period' : 'No earlier closures'}</Text> : null}
     {more ? <Pressable testID="earlier-closures-more" accessibilityRole="button" disabled={loading}
       className="min-h-11 items-center justify-center rounded-md px-4 border border-border"

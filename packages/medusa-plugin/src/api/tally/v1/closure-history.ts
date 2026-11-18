@@ -5,10 +5,10 @@ export const CLOSURES_DEFAULT_LIMIT = 50
 // Rows carry orderIds, so cap the page to bound the response size.
 export const CLOSURES_MAX_LIMIT = 100
 
-export type ClosuresQuery = { limit: number; before?: number; from?: string; to?: string }
+export type ClosuresQuery = { limit: number; before?: number; from?: string; to?: string; cashier?: string }
 
 export function parseClosuresQuery(query: Record<string, unknown>): { ok: true; query: ClosuresQuery } | { ok: false; message: string } {
-  const { limit, before, from, to } = query
+  const { limit, before, from, to, cashier } = query
   const parsed: ClosuresQuery = { limit: CLOSURES_DEFAULT_LIMIT }
   if (limit !== undefined) {
     if (typeof limit !== 'string' || !/^\d+$/.test(limit) || !Number.isSafeInteger(Number(limit))
@@ -30,6 +30,12 @@ export function parseClosuresQuery(query: Record<string, unknown>): { ok: true; 
     if (typeof to !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(to))
       return { ok: false, message: 'to must be a day (YYYY-MM-DD)' }
     parsed.to = to
+  }
+  // cashier is the closing user's id (closed_by); 200 characters bounds the query.
+  if (cashier !== undefined) {
+    if (typeof cashier !== 'string' || cashier.length < 1 || cashier.length > 200)
+      return { ok: false, message: 'cashier must be a user id' }
+    parsed.cashier = cashier
   }
   if (parsed.from !== undefined && parsed.to !== undefined && parsed.from > parsed.to)
     return { ok: false, message: 'from must not be after to' }
