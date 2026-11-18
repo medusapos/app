@@ -1,6 +1,6 @@
 import type { ExecArgs } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules } from "@medusajs/framework/utils"
-import { updateRegionsWorkflow, updateStoresWorkflow } from "@medusajs/medusa/core-flows"
+import { updateProductsWorkflow, updateRegionsWorkflow, updateStoresWorkflow } from "@medusajs/medusa/core-flows"
 
 // Matches the /demo page's wording.
 export const DEMO_STORE_NAME = 'Medusa POS demo store'
@@ -41,6 +41,24 @@ export function firstScreenTopUps(
   return [...plan.values()]
 }
 
+// The hosted demo keeps the E2E fixtures because its smoke checks sell E2E-1 and E2E-4 by SKU and
+// handle; only their public titles change here. seed-e2e.ts finds them by handle, and e2e runs never
+// run this step, so every e2e spec still sees "E2E product N".
+export const DEMO_FIXTURE_TITLES: Record<string, string> = {
+  "e2e-1": "Sparkling Water · 330 ml",
+  "e2e-2": "Cold Brew Coffee",
+  "e2e-3": "Almond Croissant",
+  "e2e-4": "Seasonal Gift Box",
+  "e2e-5": "Olive Oil · 500 ml",
+}
+
+export function fixtureRetitles(products: { id: string; handle: string; title: string }[]) {
+  return products.flatMap(({ id, handle, title }) => {
+    const wanted = Object.prototype.hasOwnProperty.call(DEMO_FIXTURE_TITLES, handle) ? DEMO_FIXTURE_TITLES[handle] : undefined
+    return wanted !== undefined && wanted !== title ? [{ id, title: wanted }] : []
+  })
+}
+
 export default async function seedDemoPresentation({ container }: ExecArgs) {
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const [store] = await container.resolve(Modules.STORE).listStores()
@@ -61,6 +79,13 @@ export default async function seedDemoPresentation({ container }: ExecArgs) {
   logger.info(`Renamed store to "${DEMO_STORE_NAME}" and set Europe region and EUR currency prices to include VAT.`)
 
   const query = container.resolve(ContainerRegistrationKeys.QUERY)
+  const { data: fixtures } = await query.graph({
+    entity: "product", filters: { handle: Object.keys(DEMO_FIXTURE_TITLES) }, fields: ["id", "handle", "title"],
+  })
+  const retitles = fixtureRetitles(fixtures)
+  if (retitles.length) await updateProductsWorkflow(container).run({ input: { products: retitles } })
+  logger.info(`Gave ${retitles.length} E2E fixtures their demo shop titles.`)
+
   const { data: [channel] } = await query.graph({
     entity: "sales_channel", fields: ["id", "stock_locations.id"], filters: { id: store.default_sales_channel_id! },
   })
