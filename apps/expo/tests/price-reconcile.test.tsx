@@ -7,7 +7,7 @@ import type { FingerprintReconcileAdapter } from '@tallyui/core';
 import { MEDUSA_CALCULATED_PRICE_RECONCILE_INTERVAL_MS } from '@tallyui/connector-medusa';
 import { startFingerprintReconcile, startReplication } from '@tallyui/database';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
-import { clearProductCache } from '../lib/product-cache';
+import { clearProductCache, closeProductCaches } from '../lib/product-cache';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
 vi.mock('@tallyui/database', async (importOriginal) => {
@@ -110,7 +110,8 @@ it('re-checks calculated prices within 45 minutes of the last pass, and not befo
   expect(calculatedPrices.fetchPages).toHaveBeenCalledTimes(startCalls);
   await act(async () => { await vi.advanceTimersByTimeAsync(16 * 60 * 1000); });
   expect(calculatedPrices.fetchPages).toHaveBeenCalledTimes(startCalls + 1);
-  unmount();
+  // RxDB's close waits on a (fake) setTimeout; finish it before afterEach drops fake timers.
+  await act(async () => { unmount(); await closeProductCaches(); });
 });
 
 it('runs one calculated-price pass once the first sync has settled, and none of the base-price runner', async () => {

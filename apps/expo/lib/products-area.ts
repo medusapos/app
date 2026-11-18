@@ -7,7 +7,9 @@ export type ProductAreaRow = {
 };
 
 export const PRODUCTS_ADMIN_NOTE = 'Products are read-only here. Edit names, prices and stock in Medusa Admin.';
-export const PRODUCTS_NOT_LOADED = 'The catalogue loads with the Sale. Open the Sale, then come back.';
+export const PRODUCTS_LOADING = 'Loading the catalogue…';
+// Shown when the catalogue read failed without a message of its own.
+export const PRODUCTS_LOAD_FAILED = 'The catalogue could not load.';
 export const PRODUCTS_EMPTY = 'No products in the catalogue yet.';
 export const PRODUCTS_NO_MATCH =(query: string) => `No products match “${query}”.`;
 

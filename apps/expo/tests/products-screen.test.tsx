@@ -349,7 +349,7 @@ describe('ProductsScreen catalogue', () => {
     const Probe = () => { seen = useCatalogueSnapshot(); return null; };
     await mount();
     render(<Probe />);
-    expect(seen).toMatchObject({ baseUrl: 'https://store.test', currency: 'EUR' });
+    expect(seen).toMatchObject({ owner: 'sale', baseUrl: 'https://store.test', currency: 'EUR', status: 'ready' });
     expect((seen!.products as { id: string }[]).map(({ id }) => id)).toEqual(['a', 'zebra']);
     cleanup();
     render(<Probe />);
