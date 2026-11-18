@@ -234,6 +234,25 @@ describe('salesRoomFigures', () => {
   });
 });
 
+describe('salesRoomFigures periodOrders', () => {
+  const filters: SalesFilters = { preset: 'today', range: { from: today, to: today }, compare: 'previous',
+    status: 'all', cashierId: null, registerId: null };
+  const at = (day: number, hour: number) => new Date(2026, 10, day, hour, 0).toISOString();
+  it('lists the period\'s orders newest first', () => {
+    const { periodOrders } = salesRoomFigures([
+      order({ id: 'noon', createdAt: at(10, 12) }), order({ id: 'evening', createdAt: at(10, 18) }),
+      order({ id: 'morning', createdAt: at(10, 9) }),
+    ], filters, 'EUR');
+    expect(periodOrders.map((row) => row.id)).toEqual(['evening', 'noon', 'morning']);
+  });
+  it('leaves out an order from an earlier day', () => {
+    const { periodOrders } = salesRoomFigures([
+      order({ id: 'earlier', createdAt: at(9, 12) }), order({ id: 'today', createdAt: at(10, 12) }),
+    ], filters, 'EUR');
+    expect(periodOrders.map((row) => row.id)).toEqual(['today']);
+  });
+});
+
 describe('closureScopeFor', () => {
   it('scopes today, the bound register and the store', () => {
     expect(closureScopeFor({ today, boundRegisterId: 'register-1', storeKey }))

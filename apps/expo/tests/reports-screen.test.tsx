@@ -528,6 +528,38 @@ describe('ReportsScreen', () => {
     expect(icon.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button.textContent).toBe('Print X report');
   });
+
+  async function openProductsReport() {
+    await store.orders.insert(order(1200, 'cash'));
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('12.00')));
+    fireEvent.click(screen.getByTestId('card-products-open'));
+    return screen.findByTestId('report-sheet');
+  }
+
+  it('a Sales card opens its report in the side sheet until Close', async () => {
+    const sheet = await openProductsReport();
+    expect(within(sheet).getByTestId('report-sheet-title').textContent).toBe('Top products');
+    const covers = within(sheet).getByTestId('report-sheet-covers').textContent ?? '';
+    expect(covers.startsWith('Today')).toBe(true);
+    expect(covers.endsWith('· All registers')).toBe(true);
+    expect(within(sheet).getAllByTestId('report-sheet-row')).toHaveLength(1);
+    fireEvent.click(within(sheet).getByTestId('report-sheet-close'));
+    await waitFor(() => expect(screen.queryByTestId('report-sheet')).toBeNull());
+  });
+
+  it('the report sheet\'s Export CSV downloads the listed rows', async () => {
+    const today = localDay(new Date());
+    const sheet = await openProductsReport();
+    fireEvent.click(within(sheet).getByTestId('report-sheet-export'));
+    expect(downloadCsv).toHaveBeenCalledTimes(1);
+    const [filename, csv] = vi.mocked(downloadCsv).mock.calls[0];
+    expect(filename).toBe(`top-products-${today}-${today}.csv`);
+    // csvFromCells quotes every cell.
+    expect(csv.split('\r\n')[0]).toBe('"Product","Qty","Amount"');
+  });
 });
 
 describe('the header', () => {

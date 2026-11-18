@@ -23,4 +23,20 @@ test.describe('at 1280 × 800', () => {
     await expect(frame.locator('table.total th')).toHaveText('Total sales');
     await expect(page.getByTestId('reports-print-summary-error')).toHaveCount(0);
   });
+
+  test('a Sales card opens its report in the side sheet, which prints it', async ({ page }) => {
+    await signIn(page);
+    await openArea(page, 'Reports');
+    await page.getByTestId('card-products-open').click();
+    const sheet = page.getByTestId('report-sheet');
+    await expect(sheet).toBeVisible();
+    await expect(sheet.getByTestId('report-sheet-title')).toHaveText('Top products');
+    await expect(sheet.getByTestId('report-sheet-status')).toBeVisible();
+    await expect(sheet.getByTestId('report-sheet-export')).toBeVisible();
+    await expect(sheet.getByTestId('report-sheet-print')).toBeVisible();
+    await sheet.getByTestId('report-sheet-print').click();
+    await expect(page.frameLocator('#closure-print-frame').locator('h2')).toHaveText('Top products');
+    await sheet.getByTestId('report-sheet-close').click();
+    await expect(page.getByTestId('report-sheet')).toHaveCount(0);
+  });
 });

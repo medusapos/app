@@ -6,6 +6,7 @@ import {
 } from '@tallyui/components';
 import { listCategories, sortProducts } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { ProductsAreaColumnsButton } from '../components/products-area-columns-settings';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
@@ -15,6 +16,7 @@ import {
   PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
   PRODUCTS_NONE_IN_STOCK, PRODUCTS_SHOWING, saveProductsAreaCategory, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
 } from '../lib/products-area';
+import { useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
@@ -78,6 +80,10 @@ export default function ProductsAreaScreen() {
   const [categoryId, setCategoryId] = useState<string | null>(() =>
     session ? loadProductsAreaCategory(defaultStorage(), session.baseUrl) : null);
   const [inStockOnly, setInStockOnly] = useState(false);
+  const columns = useProductsAreaColumns(defaultStorage(), session?.baseUrl ?? '');
+  // The Product column always shows; the rest follow the settings sheet, in table order.
+  const tableColumns = useMemo(() => COLUMNS.filter(({ id }) =>
+    id === 'name' || columns.settings[id as ProductsAreaColumn]), [columns.settings]);
   // Retry remounts the read (a fresh useReplicatedProducts); the gate and its store settings stay.
   const [read, setRead] = useState(0);
   const retry = useCallback(() => setRead((count) => count + 1), []);
@@ -107,6 +113,7 @@ export default function ProductsAreaScreen() {
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
+      {!phone && <ProductsAreaColumnsButton {...columns} />}
       {!openMenu && <AreaAccountButton />}
     </View>
     {/* In stock first, as in v2's chip row; the category is kept per store, In stock is not. */}
@@ -135,7 +142,7 @@ export default function ProductsAreaScreen() {
       renderItem={(row: ProductAreaRow) => <PhoneRow row={row} />} /> : null}
     {/* v2's table sits in a bordered box, inset as the search row; its phone rows run full width. */}
     {ready && !phone ? <Card testID="products-table-card" className="mx-4 flex-1 overflow-hidden">
-      <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
+      <ProductTable testID="products-table" items={items} columns={tableColumns as ProductTableColumn[]}
         defaultSort={{ field: 'name', dir: 'asc' }} emptyState={emptyState} />
     </Card> : null}
     {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue. */}
