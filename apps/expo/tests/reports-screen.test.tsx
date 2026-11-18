@@ -236,14 +236,13 @@ describe('ReportsScreen', () => {
     await screen.findByTestId('closure-row-c2');
     expect(screen.getAllByTestId(/^closure-row-[^-]+$/).map((row) => row.getAttribute('data-testid'))).toEqual(['closure-row-c2', 'closure-row-c1']);
     const { formatMoney } = closureContext('EUR', { name: 'Test shop' });
-    expect(screen.getByTestId('closure-row-c1-number').textContent).toBe('#1');
-    expect(screen.getByTestId('closure-row-c1-register').textContent).toBe('Register 1');
+    expect(screen.getByTestId('closure-row-c1-title').textContent).toBe('Closure 1 · Register 1');
     expect(screen.getByTestId('closure-row-c1-counted').textContent).toBe(formatMoney('8.00'));
     expect(screen.getByTestId('closure-row-c1-variance').textContent).toBe(`${formatMoney('2.00')} short`);
     expect(screen.getByTestId('closure-row-c2-variance').textContent).toBe('Exact');
     expect(screen.getByTestId('closure-row-c2-cashier').textContent).toBe('Ana');
-    for (const label of ['Closure', 'Closed', 'Register', 'Cashier', 'Sales', 'Counted', 'Variance'])
-      expect(within(screen.getByTestId('closures-table')).getByText(label)).toBeTruthy();
+    for (const label of ['Closed', 'Sales'])
+      expect(within(screen.getByTestId('closures-table')).queryByText(label)).toBeNull();
     expect(screen.queryByTestId('closure-row-c3')).toBeNull();
   });
   it('groups today\'s closures under a Today header with the day\'s counted and variance totals', async () => {

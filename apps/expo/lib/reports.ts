@@ -67,14 +67,14 @@ export function closureVarianceMinor(row: Pick<Closure, 'variance'>): number {
 }
 
 export type ClosureTableRow = {
-  id: string; number: number; day: string; closedAt: string; registerName: string; cashierName: string;
+  id: string; number: number; day: string; openedAt: string; closedAt: string; registerName: string; cashierName: string;
   salesMinor: number; countedMinor: number | null; varianceMinor: number | null;
 };
 
 export function closureTableRow(row: Closure, registerNames: Record<string, string>): ClosureTableRow {
   const { register_name, closed_by_name } = row.breakdowns;
   return {
-    id: row.id, number: row.number, day: row.business_day || localDay(new Date(row.closed_at)), closedAt: row.closed_at,
+    id: row.id, number: row.number, day: row.business_day || localDay(new Date(row.closed_at)), openedAt: row.opened_at, closedAt: row.closed_at,
     registerName: typeof register_name === 'string' && register_name ? register_name : registerNames[row.register_id] || row.register_id.slice(0, 8),
     cashierName: typeof closed_by_name === 'string' && closed_by_name ? closed_by_name : '—',
     salesMinor: row.period_sales_total_minor, countedMinor: Object.values(row.counted).reduce((total, amount) => total + amount, 0),
@@ -85,7 +85,7 @@ export function closureTableRow(row: Closure, registerNames: Record<string, stri
 export function historyTableRow(entry: ClosureHistoryEntry, registerName: string, cashierNames: Record<string, string>): ClosureTableRow {
   const countedMinor = entry.counted ? Object.values(entry.counted).reduce((total, amount) => total + amount, 0) : null;
   return {
-    id: entry.closureId, number: entry.number, day: entry.businessDay || localDay(new Date(entry.closedAt)), closedAt: entry.closedAt,
+    id: entry.closureId, number: entry.number, day: entry.businessDay || localDay(new Date(entry.closedAt)), openedAt: entry.openedAt, closedAt: entry.closedAt,
     registerName: registerName || entry.registerId?.slice(0, 8) || '—',
     cashierName: entry.closedBy ? cashierNames[entry.closedBy] ?? entry.closedBy : '—',
     salesMinor: entry.periodSalesTotalMinor, countedMinor,
