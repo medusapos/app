@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { formatClosureDate, type Closure } from '@tallyui/pos';
 import { EarlierClosures } from '../components/earlier-closures';
@@ -138,7 +138,8 @@ it('a cashier shows only that cashier\'s rows and onCashiers gets the fetched ca
     registerName="Register 1" cashierNames={{ 'user-1': 'Ana' }} cashierId="user-1" onCashiers={onCashiers} />);
   await screen.findByTestId('earlier-closure-c12');
   expect(rowIds()).toEqual(['earlier-closure-c12']);
-  expect(onCashiers).toHaveBeenLastCalledWith(['user-1']);
+  // The fetched cashiers are reported by an effect that runs after the rows render.
+  await waitFor(() => expect(onCashiers).toHaveBeenLastCalledWith(['user-1']));
 });
 
 it('without a heading the empty text names the period', async () => {

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { useSale } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -64,28 +64,28 @@ afterEach(async () => {
   cleanup(); await store.close(); vi.unstubAllGlobals(); vi.resetAllMocks(); observed.sale = null;
 });
 
-const button = (name: string) => screen.getByRole('button', { name });
 const field = () => screen.getByTestId('cart-note-field') as HTMLTextAreaElement;
+const side = () => screen.getByTestId('cart-note-sheet').getAttribute('data-side');
 async function mount({ shirt = true } = {}) {
   await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
   await screen.findByTestId('product-tile-Shirt');
   if (shirt) fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 }
-/** The link opens the dialog; the note is typed and Done closes it. */
+/** The link opens the sheet; the note is typed and Close closes it. */
 function addNote(note: string) {
   fireEvent.click(screen.getByTestId('cart-note-add'));
-  expect(screen.getByTestId('cart-note-dialog')).toBeTruthy();
+  expect(screen.getByTestId('cart-note-sheet')).toBeTruthy();
   fireEvent.change(field(), { target: { value: note } });
-  fireEvent.click(button('Done'));
+  fireEvent.click(screen.getByTestId('cart-note-close'));
 }
 const rowText = () => screen.getByTestId('cart-note-text').textContent;
 
-it('the link opens the note dialog, and Done shows the note as its own row in place of the link', async () => {
+it('the link opens the note sheet, and Close shows the note as its own row in place of the link', async () => {
   await mount();
   expect(screen.getByText('Add order note')).toBeTruthy();
   expect(screen.queryByTestId('cart-note-row')).toBeNull();
   addNote('Gift wrap, please');
-  expect(screen.queryByTestId('cart-note-dialog')).toBeNull();
+  expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
   expect(screen.getByTestId('cart-note-row')).toBeTruthy();
   expect(rowText()).toBe('Gift wrap, please');
   expect(screen.queryByTestId('cart-note-add')).toBeNull();
@@ -93,22 +93,44 @@ it('the link opens the note dialog, and Done shows the note as its own row in pl
   expect(observed.sale!.order.note).toBe('Gift wrap, please');
 });
 
-it('pressing the row opens the dialog holding the note, to edit it', async () => {
+it("the sheet is v2's Order details: title, ✕, the note field and a Close footer, over the products", async () => {
+  await mount();
+  fireEvent.click(screen.getByTestId('cart-note-add'));
+  expect(within(screen.getByTestId('cart-note-sheet')).getByText('Order details')).toBeTruthy();
+  expect(screen.getByTestId('cart-note-x')).toBeTruthy();
+  expect(screen.getByTestId('cart-note-field')).toBeTruthy();
+  expect(within(screen.getByTestId('cart-note-footer')).getByTestId('cart-note-close')).toBeTruthy();
+  expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
+  expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
+  expect(side()).toBe('left');
+});
+
+it('✕ closes the sheet and keeps the note', async () => {
+  await mount();
+  fireEvent.click(screen.getByTestId('cart-note-add'));
+  fireEvent.change(field(), { target: { value: 'Gift wrap, please' } });
+  fireEvent.click(screen.getByTestId('cart-note-x'));
+  expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
+  expect(rowText()).toBe('Gift wrap, please');
+});
+
+it('pressing the row opens the sheet holding the note, to edit it', async () => {
   await mount(); addNote('Gift wrap, please');
   fireEvent.click(screen.getByTestId('cart-note-row'));
-  expect(screen.getByTestId('cart-note-dialog')).toBeTruthy();
+  expect(screen.getByTestId('cart-note-sheet')).toBeTruthy();
   expect(field().value).toBe('Gift wrap, please');
   fireEvent.change(field(), { target: { value: 'Ring the bell' } });
-  fireEvent.click(button('Done'));
-  expect(screen.queryByTestId('cart-note-dialog')).toBeNull();
+  fireEvent.click(screen.getByTestId('cart-note-close'));
+  expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
   expect(rowText()).toBe('Ring the bell');
 });
 
-it('Clear empties the note, closes the dialog, removes the row and brings the link back', async () => {
+it('emptying the field and Close removes the row and brings the link back', async () => {
   await mount(); addNote('Gift wrap, please');
   fireEvent.click(screen.getByTestId('cart-note-row'));
-  fireEvent.click(button('Clear'));
-  expect(screen.queryByTestId('cart-note-dialog')).toBeNull();
+  fireEvent.change(field(), { target: { value: '' } });
+  fireEvent.click(screen.getByTestId('cart-note-close'));
+  expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
   expect(screen.queryByTestId('cart-note-row')).toBeNull();
   expect(screen.getByTestId('cart-note-add')).toBeTruthy();
   expect(observed.sale!.order.note ?? '').toBe('');
@@ -123,26 +145,27 @@ it('an empty cart shows the note row too', async () => {
   expect(screen.queryByTestId('cart-note-add')).toBeNull();
 });
 
-it('starting a tender closes the dialog, and a cancelled tender does not reopen it', async () => {
+it('starting a tender closes the sheet, and a cancelled tender does not reopen it', async () => {
   await mount(); addNote('Gift wrap, please');
   fireEvent.click(screen.getByTestId('cart-note-row'));
-  expect(screen.getByTestId('cart-note-dialog')).toBeTruthy();
+  expect(screen.getByTestId('cart-note-sheet')).toBeTruthy();
   await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
-  expect(screen.queryByTestId('cart-note-dialog')).toBeNull();
+  expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
   expect(screen.getByTestId('tender-pane')).toBeTruthy();
   await act(async () => { observed.sale!.cancelTender(); });
   expect(screen.queryByTestId('tender-pane')).toBeNull();
-  expect(screen.queryByTestId('cart-note-dialog')).toBeNull();
+  expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
   expect(rowText()).toBe('Gift wrap, please');
 });
 
-it('on a phone, the Cart tab shows the link, and the note row opens the dialog', async () => {
+it('on a phone, the Cart tab shows the link, and the note row opens the sheet', async () => {
   setWindowWidth(360, 780);
   await mount();
   fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
   addNote('Gift wrap, please');
   expect(rowText()).toBe('Gift wrap, please');
   fireEvent.click(screen.getByTestId('cart-note-row'));
-  expect(screen.getByTestId('cart-note-dialog')).toBeTruthy();
+  expect(screen.getByTestId('cart-note-sheet')).toBeTruthy();
   expect(field().value).toBe('Gift wrap, please');
+  expect(side()).toBe('right');
 });

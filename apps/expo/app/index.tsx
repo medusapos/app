@@ -17,7 +17,7 @@ import {
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
-import { CartNoteDialog, CartNoteLink, CartNoteRow } from '../components/cart-note';
+import { CartNoteLink, CartNoteRow, CartNoteSheet } from '../components/cart-note';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
@@ -442,8 +442,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         update={(id, patch) => connector.updateCustomer!(syncContext, id, patch)}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
         onUnauthorized={onUnauthorized} cartSide={cartSettings.settings.cartSide} phone={phone} />}
-      <CartNoteDialog open={noteOpen && sale.stage.kind === 'cart'} onOpenChange={setNoteOpen} value={sale.order.note ?? ''}
-        onChangeText={(text) => sale.setNote(clampNote(text))} />
+      <CartNoteSheet open={noteOpen && sale.stage.kind === 'cart'} onOpenChange={setNoteOpen} value={sale.order.note ?? ''}
+        onChangeText={(text) => sale.setNote(clampNote(text))} cartSide={cartSettings.settings.cartSide} phone={phone} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row items-start">
         <View className="flex-1">{paidReceipt}</View>

@@ -2,8 +2,9 @@ import { expect, type Page } from '@playwright/test';
 import { addE2E1, adminToken, captureCommands, cartTab, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test,
   type PostedCommand } from './helpers';
 
-// The sale's note (v2 parity rows 8 and 04c, ADR 0024): the cart's note dialog and note row, kept with a parked sale, shown on the
-// receipt and sent as order.create v7's `note`, which the store keeps as the order's metadata.tally_note. Sells only E2E-1.
+// The sale's note (v2 parity rows 8 and 04c, ADR 0024): the cart's note sheet (v2's Order details) and note row, kept with a
+// parked sale, shown on the receipt and sent as order.create v7's `note`, which the store keeps as the order's
+// metadata.tally_note. Sells only E2E-1.
 type Sale = { clientOrderId: string; note?: string };
 const NOTE = 'Leave at reception, gift wrap';
 
@@ -17,7 +18,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     const addNote = async (page: Page, note: string) => {
       await page.getByText('Add order note', { exact: true }).click();
       await noteField(page).fill(note);
-      await page.getByRole('button', { name: 'Done', exact: true }).click();
+      await page.getByTestId('cart-note-close').click();
     };
     const noteRow = (page: Page) => page.getByTestId('cart-note-row');
     // Cash exact and Complete sale, as sellBySku pays, stopping on the receipt (before New sale).
