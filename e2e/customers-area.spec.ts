@@ -110,3 +110,26 @@ test('the Customers settings sheet hides the Email column, and the choice surviv
   await expect(page.getByTestId(`customer-cell-${id}-first`)).toBeVisible();
   await expect(page.getByTestId(`customer-cell-${id}-email`)).toHaveCount(0);
 });
+
+test('the Customers table sorts by a header tap, and a second tap reverses', async ({ page }) => {
+  const token = await adminToken();
+  const uuid = crypto.randomUUID();
+  const young = await createAdminCustomer(token, `sort-a-${uuid}@example.com`, 'Ada', 'Young');
+  const abbott = await createAdminCustomer(token, `sort-b-${uuid}@example.com`, 'Zoe', 'Abbott');
+  await signIn(page);
+  await openArea(page, 'Customers');
+  await page.getByTestId('customers-search').fill(uuid);
+  await expect(page.getByTestId(`customer-row-${young}`)).toBeVisible();
+  await expect(page.getByTestId(`customer-row-${abbott}`)).toBeVisible();
+  const rows = page.locator('[data-testid^="customer-row-"]');
+  const header = page.getByTestId('customers-sort-lastName');
+  await header.click();
+  await expect(header).toContainText('▲');
+  await expect(rows).toHaveCount(2);
+  await expect.poll(() => rows.evaluateAll((els) => els.map((el) => el.getAttribute('data-testid'))))
+    .toEqual([`customer-row-${abbott}`, `customer-row-${young}`]);
+  await header.click();
+  await expect(header).toContainText('▼');
+  await expect.poll(() => rows.evaluateAll((els) => els.map((el) => el.getAttribute('data-testid'))))
+    .toEqual([`customer-row-${young}`, `customer-row-${abbott}`]);
+});
