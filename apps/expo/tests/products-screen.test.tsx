@@ -1186,6 +1186,43 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
   });
 });
 
+// v2's header "● Offline": the browser's offline event shows it at once, before any pull fails.
+describe('ProductsScreen network offline header', () => {
+  const setOnLine = (value: boolean) => Object.defineProperty(window.navigator, 'onLine', { configurable: true, get: () => value });
+  const goNetwork = (online: boolean) => act(() => { setOnLine(online); window.dispatchEvent(new Event(online ? 'online' : 'offline')); });
+  const headerState = () => screen.queryByTestId('header-register-state');
+  const statusLine = () => screen.getByTestId('catalogue-status-row').textContent;
+  // jsdom's own getter is on Navigator.prototype; dropping the instance override restores it.
+  afterEach(() => { delete (window.navigator as { onLine?: boolean }).onLine; });
+
+  it('wide: going offline shows Offline with the sales to send and the cached catalogue, and coming back clears both', async () => {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending: 2, sending: false } });
+    await mount();
+    expect(headerState()).toBeNull();
+    expect(statusLine()).toContain('Up to date');
+    goNetwork(false);
+    expect(headerState()?.textContent).toBe('Offline · 2 sales to send');
+    expect(statusLine()).toContain('Offline · cached catalogue');
+    goNetwork(true);
+    expect(headerState()).toBeNull();
+    expect(statusLine()).toContain('Up to date');
+  });
+
+  it('phone: going offline with nothing to send shows Offline in the header', async () => {
+    setWindowWidth(360);
+    await mount();
+    expect(headerState()).toBeNull();
+    goNetwork(false);
+    expect(headerState()?.textContent).toBe('Offline');
+  });
+
+  it('a till that starts with no network shows Offline in the wide header straight away', async () => {
+    setOnLine(false);
+    await mount();
+    expect(within(screen.getByTestId('wide-header-register')).getByTestId('header-register-state').textContent).toBe('Offline');
+  });
+});
+
 describe('ProductsScreen session routing', () => {
   it('redirects to login without a session', async () => {
     await mount(false);
