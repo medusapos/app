@@ -4,6 +4,7 @@ import { Circle, Line } from 'react-native-svg';
 import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Input, Label, Select, SelectContent, SelectItem,
   SelectTrigger, SelectValue, Switch, Text, XIcon } from '@tallyui/components';
 import type { CartSettings, CartSortItems, useCartSettings } from '../lib/cart-settings';
+import { sheetEdge, sheetEdgeClass } from '../lib/sheet-edge';
 
 type Column = keyof CartSettings['columns'];
 // v2's Columns rows in order: [column, flag, label]; split and name's SKU are indented under their column.
@@ -24,8 +25,7 @@ const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
 
 export function CartSettingsButton({ settings, save, reset, phone = false }: ReturnType<typeof useCartSettings> & { phone?: boolean }) {
   const [open, setOpen] = useState(false);
-  // v2's sheet covers the products, never the cart; a phone keeps the right edge.
-  const edge = phone ? 'right' : settings.cartSide === 'left' ? 'right' : 'left';
+  const edge = sheetEdge(settings.cartSide, phone);
   const [editing, setEditing] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +47,7 @@ export function CartSettingsButton({ settings, save, reset, phone = false }: Ret
     <IconButton testID="cart-settings-button" accessibilityLabel="Cart settings" onPress={() => setOpen(true)}><SlidersIcon /></IconButton>
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent side="right" testID="cart-settings-sheet" dataSet={{ side: edge }}
-        className={`flex-col gap-4${edge === 'left' ? ' left-0 right-auto border-l-0 border-r' : ''}`}>
+        className={`flex-col gap-4 ${sheetEdgeClass(edge)}`.trimEnd()}>
         <View className="flex-row items-center justify-between">
           <DialogTitle>Cart Settings</DialogTitle>
           <IconButton testID="cart-settings-x" accessibilityLabel="Close" className="h-11 w-11" onPress={() => setOpen(false)}>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
 import { Button, CustomerForm, Text, type CustomerFormValues } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerAddress } from '@tallyui/core';
@@ -13,12 +13,14 @@ type Addresses = { billing?: CustomerAddress; shipping?: CustomerAddress };
 /** Shipping starts as "Same as billing" when there is none stored or its six fields match billing's. */
 const shippingIsBilling = ({ billing, shipping }: Addresses) => !shipping || !billingChanged(billingFields(shipping), billing);
 
-export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses }: {
+export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, layout }: {
   customer: Customer | null;
   save: (values: CustomerFormValues, billing: CustomerAddress | undefined, shipping: CustomerAddress | undefined) => Promise<void>;
   onUnauthorized: () => void;
   /** Reads the stored billing and shipping addresses of `customer`; used only when `customer` is not null. */
   loadAddresses?: () => Promise<Addresses>;
+  /** Places the editor's parts; without it they render in order: form, message, save. */
+  layout?: (parts: { form: ReactNode; message: ReactNode; save: ReactNode }) => ReactNode;
 }) {
   const [values, setValues] = useState<CustomerFormValues>({ firstName: customer?.firstName ?? '',
     lastName: customer?.lastName ?? '', email: customer?.email ?? '', phone: customer?.phone ?? '', address: '' });
@@ -77,7 +79,7 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses }
       setSaving(false);
     }
   }
-  return <>
+  const form = <>
     <CustomerForm values={values} onChangeField={(field, value) => setValues((current) => ({ ...current, [field]: value }))}
       showAddress={false} />
     <View className="gap-3 p-4">
@@ -106,12 +108,13 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses }
         </Button>
       </>}
     </View>
-    {message ? <Text accessibilityRole="alert" className="text-sm text-destructive">{message}</Text> : null}
-    <Button testID="customer-save" disabled={saving || values.email.trim() === '' || !countryValid || !shippingCountryValid}
-      onPress={submit}>
-      <Text>Save customer</Text>
-    </Button>
   </>;
+  const shown = message ? <Text accessibilityRole="alert" className="text-sm text-destructive">{message}</Text> : null;
+  const saveButton = <Button testID="customer-save" disabled={saving || values.email.trim() === '' || !countryValid || !shippingCountryValid}
+    onPress={submit}>
+    <Text>Save customer</Text>
+  </Button>;
+  return layout ? <>{layout({ form, message: shown, save: saveButton })}</> : <>{form}{shown}{saveButton}</>;
 }
 
 /**

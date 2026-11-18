@@ -11,15 +11,17 @@ const stored = { firstName: 'Ada', address1: '1 Old St', city: 'London', postcod
 
 afterEach(() => { cleanup(); });
 
-function setup(getCustomer: (id: string) => Promise<Customer | null> = async () => ada) {
+function setup(getCustomer: (id: string) => Promise<Customer | null> = async () => ada,
+  { cartSide = 'right', phone = false }: { cartSide?: 'left' | 'right'; phone?: boolean } = {}) {
   const fakes = {
     getCustomer: vi.fn(getCustomer),
     loadAddresses: vi.fn(async () => ({ billing: stored })),
     update: vi.fn(async (_id: string, patch: CustomerPatch): Promise<Customer> => ({ ...ada, ...patch })),
     onSaved: vi.fn(), onClose: vi.fn(), onUnauthorized: vi.fn(),
   };
-  const view = render(<><CustomerAddressDialog customerId="ada" {...fakes} /><PortalHost /></>);
-  const rerender = (customerId: string | null) => view.rerender(<><CustomerAddressDialog customerId={customerId} {...fakes} /><PortalHost /></>);
+  const view = render(<><CustomerAddressDialog customerId="ada" {...fakes} cartSide={cartSide} phone={phone} /><PortalHost /></>);
+  const rerender = (customerId: string | null) => view.rerender(<><CustomerAddressDialog customerId={customerId} {...fakes}
+    cartSide={cartSide} phone={phone} /><PortalHost /></>);
   return { ...fakes, rerender };
 }
 const settle = () => act(async () => {});
@@ -99,5 +101,48 @@ describe('CustomerAddressDialog', () => {
     await act(async () => { resolveUpdate({ ...ada, billing: { ...stored, city: 'Leeds' } }); });
     expect(onSaved).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  const side = () => screen.getByTestId('customer-address-dialog').getAttribute('data-side');
+
+  it('opens from the left, over the products, when the cart is on the right', async () => {
+    setup();
+    expect(side()).toBe('left');
+    await settle();
+    const footer = screen.getByTestId('customer-address-footer');
+    expect(within(footer).getByTestId('customer-save')).toBeTruthy();
+    expect(within(footer).getByTestId('customer-address-close')).toBeTruthy();
+    expect(screen.getByTestId('customer-address-x')).toBeTruthy();
+  });
+
+  it('opens from the right when the cart is on the left', () => {
+    setup(undefined, { cartSide: 'left' });
+    expect(side()).toBe('right');
+  });
+
+  it('keeps the right edge on a phone', () => {
+    setup(undefined, { cartSide: 'right', phone: true });
+    expect(side()).toBe('right');
+  });
+
+  for (const [name, testID] of [['✕', 'customer-address-x'], ['Close', 'customer-address-close']]) {
+    it(`${name} closes without saving`, async () => {
+      const { update, onSaved, onClose } = setup();
+      await settle();
+      fireEvent.change(input('City'), { target: { value: 'Leeds' } });
+      await act(async () => { fireEvent.click(screen.getByTestId(testID)); });
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(update).not.toHaveBeenCalled();
+      expect(onSaved).not.toHaveBeenCalled();
+    });
+  }
+
+  it('offers Close while the customer loads', () => {
+    const { onClose } = setup(() => new Promise(() => {}));
+    const footer = screen.getByTestId('customer-address-footer');
+    expect(within(footer).getByTestId('customer-address-close')).toBeTruthy();
+    expect(screen.queryByTestId('customer-save')).toBeNull();
+    fireEvent.click(screen.getByTestId('customer-address-close'));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });
