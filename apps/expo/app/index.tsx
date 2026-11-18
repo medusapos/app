@@ -441,7 +441,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         loadAddresses={(id) => loadCustomerAddresses(syncContext, id)}
         update={(id, patch) => connector.updateCustomer!(syncContext, id, patch)}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
-        onUnauthorized={onUnauthorized} />}
+        onUnauthorized={onUnauthorized} cartSide={cartSettings.settings.cartSide} phone={phone} />}
       <CartNoteDialog open={noteOpen && sale.stage.kind === 'cart'} onOpenChange={setNoteOpen} value={sale.order.note ?? ''}
         onChangeText={(text) => sale.setNote(clampNote(text))} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />

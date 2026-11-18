@@ -212,6 +212,21 @@ it('an address save in flight when a tender starts does not change the sale cust
   expect(screen.queryByTestId('customer-address-dialog')).toBeNull();
 });
 
+it('the address sheet opens over the products, away from the cart', async () => {
+  await mount(); await pick();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  const side = () => screen.getByTestId('customer-address-dialog').getAttribute('data-side');
+  fireEvent.click(button('Edit customer address'));
+  expect(side()).toBe('left');
+  fireEvent.click(screen.getByTestId('customer-address-close'));
+  expect(screen.queryByTestId('customer-address-dialog')).toBeNull();
+  fireEvent.click(screen.getByTestId('cart-settings-button'));
+  fireEvent.click(screen.getByTestId('cart-settings-side-left'));
+  fireEvent.click(screen.getByTestId('cart-settings-close'));
+  fireEvent.click(button('Edit customer address'));
+  expect(side()).toBe('right');
+});
+
 it('the customer picker closes when a tender starts and a cancelled tender does not reopen it', async () => {
   await mount();
   fireEvent.click(screen.getByTestId('product-tile-Shirt'));
