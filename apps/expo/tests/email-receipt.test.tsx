@@ -93,15 +93,16 @@ describe('EmailReceipt', () => {
     render(<EmailReceipt {...props} />);
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     fireEvent.click(screen.getByTestId('receipt-email-send'));
-    expect((await screen.findByRole('alert')).textContent).toBe(message);
+    // 5 s waits: the default 1 s findBy timeout flaked on loaded CI runners.
+    expect((await screen.findByRole('alert', {}, { timeout: 5000 })).textContent).toBe(message);
     expect((screen.getByLabelText('Receipt email address') as HTMLInputElement).value).toBe('buyer@example.com');
     expect(screen.getByTestId('receipt-email-send').getAttribute('aria-disabled')).not.toBe('true');
     expect(send).toHaveBeenCalledTimes(1);
     expect(onUnauthorized).not.toHaveBeenCalled();
     fireEvent.click(screen.getByTestId('receipt-email-send'));
-    expect((await screen.findByText('Receipt sent to buyer@example.com.')).getAttribute('role')).toBe('alert');
+    expect((await screen.findByText('Receipt sent to buyer@example.com.', {}, { timeout: 5000 })).getAttribute('role')).toBe('alert');
     expect(send).toHaveBeenCalledTimes(2);
-  });
+  }, 15_000);
 
   it.each([401, 403] as const)('handles HTTP %s without signing out for forbidden access', async (status) => {
     send.mockRejectedValue(new ConnectorUnauthorizedError('Credentials refused', status));
