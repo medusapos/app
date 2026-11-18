@@ -1221,6 +1221,41 @@ describe('ProductsScreen network offline header', () => {
     await mount();
     expect(within(screen.getByTestId('wide-header-register')).getByTestId('header-register-state').textContent).toBe('Offline');
   });
+
+  // v2's "Device went offline" toast: after CONNECTIVITY_SETTLE_MS (5 s), closable, back after the next outage.
+  const toast = () => screen.queryByTestId('offline-toast');
+  it('wide: the offline toast shows after 5 s offline, closes, and shows again after the next outage', async () => {
+    await mount();
+    vi.useFakeTimers();
+    try {
+      goNetwork(false);
+      expect(toast()).toBeNull();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Device went offline');
+      expect(headerState()?.textContent).toBe('Offline');
+      fireEvent.click(screen.getByTestId('offline-toast-close'));
+      expect(toast()).toBeNull();
+      goNetwork(true);
+      goNetwork(false);
+      expect(toast()).toBeNull();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Device went offline');
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('wide: with the network up but the pull offline, the toast reads Website is unreachable after 5 s', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ state: 'offline' }));
+    // The outage starts with the screen, so the clock is faked before mount.
+    vi.useFakeTimers();
+    try {
+      await mount();
+      expect(toast()).toBeNull();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Website is unreachable');
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe('ProductsScreen session routing', () => {
