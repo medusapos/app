@@ -87,7 +87,7 @@ beforeEach(() => {
     useLayoutEffect(() => { if (id === 'reg_de') onGermanyCommit?.(); }, [id]);
     useEffect(() => { if (id === 'reg_de') onGermanyEffect?.(); }, [id]);
     return { products: catalogue(id), state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined,
-      lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined };
+      lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn(), unlisted: undefined };
   });
 });
 afterEach(() => {

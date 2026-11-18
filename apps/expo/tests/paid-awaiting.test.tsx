@@ -57,7 +57,7 @@ beforeEach(async () => {
   replicated = { products: [{ id: 'shirt', title: 'Shirt', status: 'published',
     variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 19.2, currency_code: 'eur' }] }] }],
     state: 'synced', error: null, lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null,
-    reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined };
+    reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn(), unlisted: undefined };
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated);
   store = await openOrderStore(session.baseUrl);
   record.mockReset().mockResolvedValue(undefined);

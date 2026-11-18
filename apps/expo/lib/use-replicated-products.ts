@@ -68,6 +68,25 @@ export function useReplicatedProducts(
       if (stockRunner.current === runner) console.warn('Stock reconcile failed:', err);
     }
   }, []);
+  const syncNow = useCallback(() => {
+    const replication = currentReplication.current;
+    if (!replication) return;
+    if (currentNotice.current?.fixedBy === 'till') resumePull();
+    else replication.reSync();
+    void reconcileStock();
+  }, [resumePull, reconcileStock]);
+  // Clear and Refresh: this mount's cache once open; `requested` makes the effect's cleanup remove the database instead
+  // of closing it, and a bumped `refreshes` reopens it empty. Ignored until that fresh cache is open.
+  const openCache = useRef<{ requested: boolean }>(undefined);
+  const [refreshes, setRefreshes] = useState(0);
+  const clearAndRefresh = useCallback(() => {
+    const cache = openCache.current;
+    if (!cache || cache.requested) return;
+    cache.requested = true;
+    setProducts([]);
+    setState('connecting');
+    setRefreshes((count) => count + 1);
+  }, []);
   const debug = useRef<{
     lastProductsEmission: string | null; lastReplicationError: string | null;
     lastIdReconcile: (IdReconcileResult & { at: string }) | null;
@@ -107,7 +126,7 @@ export function useReplicatedProducts(
       try {
         const name = pricedCacheName(connector.id, baseUrl, context.pricingContext);
         recordProductCache(baseUrl, name); // before its first sync, so a sweep or sign-out finds it
-        const { db, close: closeCache } = await openProductCache(
+        const { db, close: closeCache, remove: removeCache } = await openProductCache(
           name, () => createTallyDatabase({ connector, name, storage: productCacheStorage() }),
         );
         // Unmounted while opening: cleanup has already run, so start nothing that would outlive it.
@@ -115,7 +134,13 @@ export function useReplicatedProducts(
           await closeCache();
           return;
         }
-        cleanup.push(() => { void closeCache(); });
+        const cache = { requested: false };
+        openCache.current = cache;
+        cleanup.push(() => {
+          if (openCache.current === cache) openCache.current = undefined;
+          if (!cache.requested) void closeCache();
+          else void removeCache().catch((err) => console.warn('Product cache removal failed:', err));
+        });
         const health$ = getStorageHealth(db);
         if (health$) cleanup.push(watchStorageHealth(health$));
         const subscription = db.products.find().$.subscribe((docs) => {
@@ -274,7 +299,10 @@ export function useReplicatedProducts(
       currentNotice.current = undefined;
       setPullNotice(undefined);
     };
-  }, [connector, baseUrl, context, onUnauthorized, reconcileStock]);
+  }, [connector, baseUrl, context, onUnauthorized, reconcileStock, refreshes]);
 
-  return { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull };
+  return {
+    products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull, syncNow,
+    clearAndRefresh,
+  };
 }

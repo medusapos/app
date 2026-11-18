@@ -20,6 +20,7 @@ import { FrameMenuButton, useFrameAccountPublisher, useFrameBadge } from '../com
 import { CartAddMenu } from '../components/cart-add-menu';
 import { CartNoteLink, CartNoteRow, CartNoteSheet } from '../components/cart-note';
 import { CartSettingsButton } from '../components/cart-settings';
+import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerChip } from '../components/customer-chip';
@@ -101,8 +102,10 @@ export default function ProductsScreen() {
 function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: TillCatalogueLeafProps) {
   const traits = connector.traits.product;
   const { setSaleHold } = useSession();
-  const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
-    useReplicatedProducts(connector, syncContext, onUnauthorized);
+  const {
+    products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull, syncNow,
+    clearAndRefresh,
+  } = useReplicatedProducts(connector, syncContext, onUnauthorized);
   // v2's header "● Offline": the browser losing the network shows offline at once, not only after a pull fails.
   const networkOnline = useNetworkOnline();
   const pullState: SyncState = networkOnline ? state : 'offline';
@@ -145,6 +148,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
   const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
+  // Clear and Refresh (v2): the search is Catalogue's own state, so a new key empties it; the filters go back to the start.
+  const [catalogueKey, setCatalogueKey] = useState(0);
+  const clearCatalogue = () => {
+    clearAndRefresh();
+    setFilters({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
+    setCatalogueKey((key) => key + 1);
+  };
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
   token.current = session.token;
@@ -308,6 +318,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
     showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
+  // v2's sync arrow sits right after the count, before the product settings.
+  const statusAccessory = <View className="flex-row items-center">
+    <CatalogueSyncButton onSync={syncNow} onClearAndRefresh={clearCatalogue} syncing={pullState === 'syncing' || pullState === 'connecting'} />
+    {productSettingsButton}
+  </View>;
   const catalogue = <View className="flex-1">
     <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
@@ -315,9 +330,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
     <View testID="catalogue-area" className="flex-1" pointerEvents={dimmed ? 'none' : 'auto'}
       aria-disabled={dimmed} style={{ opacity: dimmed ? 0.5 : 1 }}>
-    <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
+    <Catalogue key={catalogueKey} products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={productSettingsButton}
+      onSelect={add} statusText={statusText} statusAccessory={statusAccessory}
       showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}

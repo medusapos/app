@@ -156,10 +156,12 @@ function waitForTurn(previous: Promise<void>): Promise<void> {
 /**
  * Opens a cache, tracked while in flight so `closeProductCaches` can wait
  * for it, and registers the result through the same once-close as `registerOpenCache`.
+ * `remove` removes the whole database instead (Clear and Refresh); like the close, it holds the name's turn until it
+ * settles, and a later close returns the same removal.
  */
 export function openProductCache<T extends CachedDb>(
   name: string, open: () => Promise<T>,
-): Promise<{ db: T; close: () => Promise<void> }> {
+): Promise<{ db: T; close: () => Promise<void>; remove: () => Promise<void> }> {
   // RxDB throws DB8 when a database of this name is still open (its name is freed only when close() completes), so a
   // same-name open (the Sale taking the cache over from the Products area) waits for every earlier one to close or fail.
   const previous = turns.get(name);
@@ -170,13 +172,24 @@ export function openProductCache<T extends CachedDb>(
   void turn.then(() => { if (turns.get(name) === turn) turns.delete(name); });
   const opened = started.then((db) => {
     const once = registerOpenCache(name, db);
+    let removing: Promise<void> | undefined;
     const close = () => {
-      const closing = once();
+      const closing = removing ?? once();
       void closing.then(release, release);
       return closing;
     };
+    const remove = () => {
+      if (!removing) {
+        if (openCaches.get(name) === db) openCaches.delete(name);
+        removing = Promise.resolve(db.remove()).then(() => undefined);
+        const settled = removing;
+        pendingCloses.add(settled);
+        void settled.finally(() => pendingCloses.delete(settled)).catch(() => {}); // the caller sees the rejection
+      }
+      return close();
+    };
     closers.set(name, close);
-    return { db, close };
+    return { db, close, remove };
   });
   void opened.catch(() => release());
   const tracked = opened.catch(() => undefined);

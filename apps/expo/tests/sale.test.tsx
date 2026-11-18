@@ -33,7 +33,7 @@ vi.mock('../lib/register-context', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
 vi.mock('../lib/use-replicated-products', () => ({
-  useReplicatedProducts: () => ({ products: [], state: 'synced', error: null, pullNotice: undefined, resumePull: vi.fn() }),
+  useReplicatedProducts: () => ({ products: [], state: 'synced', error: null, pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn() }),
 }));
 // store-settings-flow.test.tsx covers the settings states; here the store settings are ready.
 vi.mock('@tallyui/pos', async (importOriginal) => ({
