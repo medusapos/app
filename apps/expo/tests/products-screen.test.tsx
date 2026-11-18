@@ -1267,6 +1267,41 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     escape();
     expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
   });
+
+  it('at 1280 wide Escape does nothing while the sale saves, as the disabled close; the save then shows the receipt', async () => {
+    let save!: () => void;
+    const record = vi.fn(() => new Promise<void>((resolve) => { save = resolve; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await payByCard();
+    await act(async () => { fireEvent.click(button('Complete sale')); });
+    expect(record).toHaveBeenCalledTimes(1);
+    const refused = 'This sale is being saved. Retry to finish it.';
+    expect(screen.queryByText(refused)).toBeNull();
+    escape();
+    expect(button('Complete sale')).toBeTruthy();
+    expect(screen.queryByTestId('cart-checkout')).toBeNull();
+    // A cancelTender while saving is refused with this error: Escape must not even try.
+    expect(screen.queryByText(refused)).toBeNull();
+    await act(async () => { save(); });
+    expect(button('Print receipt')).toBeTruthy();
+  });
+
+  // On the phone every Checkout is pressed in the cart view, so the cart is already open; a window narrowed to a
+  // phone during a wide tender is the one way in with Products the open view, and Escape still lands on the cart.
+  it('Escape from a tender started wide and narrowed to 390 lands on the cart, not Products', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    act(() => setWindowWidth(390, 844));
+    expect(screen.getByTestId('tender-close')).toBeTruthy();
+    escape();
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00']);
+    expect(search()).toBeNull();
+    expect(screen.getByRole('tab', { name: /^Cart, / }).getAttribute('aria-selected')).toBe('true');
+  });
 });
 
 // v2's header "● Offline": the browser's offline event shows it at once, before any pull fails.
