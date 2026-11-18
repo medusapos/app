@@ -21,7 +21,7 @@ import { openRegisterFixture } from './register-fixture';
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 // Stack.Screen renders nothing but records its options, so a test can read the header title.
 const { stackScreen } = vi.hoisted(() => ({ stackScreen: vi.fn((_props: { options?: { title?: string } }) => null) }));
-vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: stackScreen } }));
+vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, router: { replace: vi.fn(), push: vi.fn() }, Stack: { Screen: stackScreen } }));
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));

@@ -24,7 +24,7 @@ vi.mock('@tallyui/pos', async (original) => {
     const sale = actual.useSale(...args); observed.sale = sale; return sale;
   } };
 });
-vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
+vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, Stack: { Screen: () => null } }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));

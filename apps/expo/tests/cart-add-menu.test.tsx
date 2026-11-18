@@ -23,7 +23,7 @@ vi.mock('../lib/pos-connector', async (original) => {
     return connectorOptions.createCustomer ? { ...connector, createCustomer } : connector;
   } };
 });
-vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
+vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, Stack: { Screen: () => null } }));
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));

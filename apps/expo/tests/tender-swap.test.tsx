@@ -14,10 +14,10 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
-import { tenderPane } from './tender-pane';
+import { takeLeg, tenderPane } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
-vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
+vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, Stack: { Screen: () => null } }));
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
@@ -124,3 +124,75 @@ it('on a phone the tender stays full height with no order summary', async () => 
   expect(screen.queryByTestId('tender-order-summary')).toBeNull();
   expect(screen.queryByTestId('tender-slot')).toBeNull();
 });
+
+/** The tender summary's payment rows (each `summary-payment-<id>`, not its -status or -tendered parts). */
+const summaryRows = () => within(screen.getByTestId('tender-summary-payments')).queryAllByTestId(/^summary-payment-/)
+  .filter((row) => !/-(status|tendered)$/.test(row.getAttribute('data-testid')!));
+const openTender = async () => {
+  await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
+  await screen.findByTestId('product-tile-Shirt');
+  add();
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+};
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('after a cash part payment the tender summary lists it under Payments with Total, Paid and Remaining', async () => {
+  await openTender();
+  takeLeg('cash', '5.00');
+  const summary = within(screen.getByTestId('tender-order-summary'));
+  const payments = summary.getByTestId('tender-summary-payments');
+  expect(payments.textContent).toContain('Payments');
+  const [cash] = summaryRows();
+  expect(summaryRows()).toHaveLength(1);
+  const cashId = cash.getAttribute('data-testid');
+  expect(cash.textContent).toContain('Cash');
+  expect(cash.textContent).toContain('€5.00');
+  expect(summary.getByTestId(`${cashId}-status`).textContent).toBe('Captured');
+  // An open sale's cash leg carries no tendered or change until the sale is completed.
+  expect(summary.queryByTestId(`${cashId}-tendered`)).toBeNull();
+  expect(summary.getByTestId('summary-total').textContent).toBe('Total€24.00');
+  expect(summary.getByTestId('summary-paid').textContent).toBe('Paid€5.00');
+  expect(summary.getByTestId('summary-remaining').textContent).toBe('Remaining€19.00');
+  expect(summary.queryByTestId('summary-change')).toBeNull();
+  // CartTotal's own Total row is hidden, so the payments block carries the only Total.
+  expect(summary.getByTestId('tender-summary-totals').textContent!.match(/Total/g)).toHaveLength(1);
+  takeLeg('external', '10.00');
+  const rows = summaryRows();
+  expect(rows).toHaveLength(2);
+  const cardId = rows[1].getAttribute('data-testid');
+  expect(rows[1].textContent).toContain('Card terminal');
+  expect(rows[1].textContent).toContain('€10.00');
+  expect(summary.getByTestId(`${cardId}-status`).textContent).toBe('Captured');
+  expect(summary.queryByTestId(`${cardId}-tendered`)).toBeNull();
+  expect(summary.getByTestId('summary-paid').textContent).toBe('Paid€15.00');
+  expect(summary.getByTestId('summary-remaining').textContent).toBe('Remaining€9.00');
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('an overpaid cash payment shows Paid above the total, Remaining €0.00 and the Change row', async () => {
+  await openTender();
+  takeLeg('cash', '30.00');
+  const summary = within(screen.getByTestId('tender-order-summary'));
+  const rows = summaryRows();
+  expect(rows).toHaveLength(1);
+  expect(rows[0].textContent).toContain('Cash');
+  expect(rows[0].textContent).toContain('€30.00');
+  expect(summary.getByTestId(`${rows[0].getAttribute('data-testid')}-status`).textContent).toBe('Captured');
+  expect(summary.getByTestId('summary-paid').textContent).toBe('Paid€30.00');
+  expect(summary.getByTestId('summary-remaining').textContent).toBe('Remaining€0.00');
+  expect(summary.getByTestId('summary-change').textContent).toBe('Change€6.00');
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('with no payment, or only a cancelled one, the tender summary has no Payments block', async () => {
+  await openTender();
+  const summary = within(screen.getByTestId('tender-order-summary'));
+  expect(summary.queryByTestId('tender-summary-payments')).toBeNull();
+  expect(summary.getByTestId('tender-summary-totals').textContent).toContain('Total');
+  expect(summary.getByTestId('tender-summary-totals').textContent).toContain('€24.00');
+  takeLeg('external', '10.00');
+  expect(summary.getByTestId('tender-summary-payments')).toBeTruthy();
+  fireEvent.click(screen.getByTestId(/^tender-leg-.*-void$/));
+  expect(summary.queryByTestId('tender-summary-payments')).toBeNull();
+  expect(summary.getByTestId('tender-summary-totals').textContent).toContain('Total');
+}, 15000);

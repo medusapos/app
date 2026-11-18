@@ -95,8 +95,10 @@ After `seed-e2e.js`, the demo seed runs `seed-demo-presentation.js` to name
 the store "Medusa POS demo store" for the receipt header and make Europe's
 region and EUR currency price preferences tax-inclusive, as Danish retail prices
 are. Medusa uses a region preference only for prices with a region rule, so plain
-EUR prices need the currency preference too. This step is demo-only; e2e keeps
-its tax-exclusive Europe pricing.
+EUR prices need the currency preference too. The step also gives the five E2E
+fixtures shop titles (Sparkling Water, Cold Brew Coffee and so on), keeping their
+handles and SKUs, so the hosted smoke checks still find them. This step is
+demo-only; e2e keeps its tax-exclusive Europe pricing and "E2E product N" titles.
 
 For the **live** demo, the front desk must run
 `medusa exec ./src/scripts/seed-demo-presentation.js` once in the running
@@ -108,7 +110,8 @@ reset restores the old store name and tax-exclusive prices.
 
 `seed-showcase.sh` adds 26 curated products across six categories, eight fictional
 customers and four historic orders. It keeps the starter's four apparel products
-and the E2E fixtures (including `E2E-1` for smoke sales). Five showcase products
+and the E2E fixtures (including `E2E-1` for smoke sales), which show there under
+the shop titles the demo presentation step gives them. Five showcase products
 have three sizes; the lemon cake is out of stock. EUR prices are shelf prices,
 including VAT. Re-running fills only missing data and skips existing users.
 

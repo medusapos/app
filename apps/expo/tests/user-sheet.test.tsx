@@ -19,6 +19,7 @@ import { setWindowWidth } from './window-width';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
+  usePathname: () => '/',
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() },
@@ -465,4 +466,53 @@ it('omits the register row while the till is unbound', async () => {
   await mount(); open();
   expect(screen.getByTestId('user-sheet')).toBeTruthy();
   expect(screen.queryByTestId('user-sheet-register-row')).toBeNull();
+});
+
+const pendingSales = (pending: number) =>
+  vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), state: { pending, sending: false } });
+
+it('shows the amber awaiting-store card for one unsent sale', async () => {
+  pendingSales(1);
+  await mount(); open();
+  const card = screen.getByTestId('user-sheet-awaiting');
+  expect(screen.getByTestId('user-sheet-awaiting-title').textContent).toBe('Awaiting store · 1 sale');
+  expect(card.textContent).toContain('Sent when you are signed in online');
+});
+
+it('counts several unsent sales in the plural', async () => {
+  pendingSales(3);
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-awaiting-title').textContent).toBe('Awaiting store · 3 sales');
+});
+
+it('shows no awaiting-store card with nothing pending', async () => {
+  await mount(); open();
+  expect(screen.queryByTestId('user-sheet-awaiting')).toBeNull();
+});
+
+it('puts the awaiting-store card after the drawer card and before the register row', async () => {
+  pendingSales(1);
+  await mount(); open();
+  const card = screen.getByTestId('user-sheet-awaiting');
+  expect(screen.getByTestId('user-sheet-drawer').compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(card.compareDocumentPosition(screen.getByTestId('user-sheet-register-row')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('drops the awaiting-store card once the outbox empties', async () => {
+  pendingSales(2);
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-awaiting-title').textContent).toBe('Awaiting store · 2 sales');
+  fireEvent.click(screen.getByTestId('user-sheet-close'));
+  pendingSales(0);
+  open();
+  expect(screen.getByTestId('user-sheet')).toBeTruthy();
+  expect(screen.queryByTestId('user-sheet-awaiting')).toBeNull();
+});
+
+it('shows the awaiting-store card without a drawer card', async () => {
+  noSession();
+  pendingSales(1);
+  await mount(); open();
+  expect(screen.getByTestId('user-sheet-awaiting')).toBeTruthy();
+  expect(screen.queryByTestId('user-sheet-drawer')).toBeNull();
 });

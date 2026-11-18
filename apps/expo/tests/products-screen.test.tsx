@@ -8,7 +8,7 @@ import { SignInError, type StoreSettings as PricingSettings } from '@tallyui/cor
 import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
 import { createOrderBuilder, DEFAULT_CATALOGUE_VIEW_STATE, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { router } from 'expo-router';
+import { router, usePathname } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { storeConfig } from '../lib/config';
 import { formatReceiptDate } from '../lib/format-date';
@@ -32,7 +32,7 @@ import { OutboxStrip, StoreRefused } from '../components/store-refused';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
-import { cartLine, cartLineCells, pickMethod, take } from './tender-pane';
+import { cartLine, cartLineCells, pickMethod, take, tenderBalance, tenderEntry } from './tender-pane';
 
 // v2's cart foot (TallyUI 3.18.0): Checkout opens the tender on Cash through the register gate; the Card terminal
 // tile then takes the whole balance, as the cart's old Card terminal button did.
@@ -42,7 +42,7 @@ async function payByCard() { await checkout(); pickMethod('external'); take(); }
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
-  router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/',
+  router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: vi.fn(() => '/'),
   Stack: { Screen: ({ options }: { options: { title?: string; headerRight?: () => ReactNode } }) => <>
     <span data-testid="screen-title" data-title={options.title} />{options.headerRight?.()}
   </> },
@@ -1252,6 +1252,41 @@ describe('ProductsScreen network offline header', () => {
     await mount();
     expect(within(screen.getByTestId('wide-header-register')).getByTestId('header-register-state').textContent).toBe('Offline');
   });
+
+  // v2's "Device went offline" toast: after CONNECTIVITY_SETTLE_MS (5 s), closable, back after the next outage.
+  const toast = () => screen.queryByTestId('offline-toast');
+  it('wide: the offline toast shows after 5 s offline, closes, and shows again after the next outage', async () => {
+    await mount();
+    vi.useFakeTimers();
+    try {
+      goNetwork(false);
+      expect(toast()).toBeNull();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Device went offline');
+      expect(headerState()?.textContent).toBe('Offline');
+      fireEvent.click(screen.getByTestId('offline-toast-close'));
+      expect(toast()).toBeNull();
+      goNetwork(true);
+      goNetwork(false);
+      expect(toast()).toBeNull();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Device went offline');
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('wide: with the network up but the pull offline, the toast reads Website is unreachable after 5 s', async () => {
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ state: 'offline' }));
+    // The outage starts with the screen, so the clock is faked before mount.
+    vi.useFakeTimers();
+    try {
+      await mount();
+      expect(toast()).toBeNull();
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Website is unreachable');
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
 });
 
 describe('ProductsScreen session routing', () => {
@@ -1935,7 +1970,7 @@ describe('ProductsScreen tender gated on the order store opening', () => {
 });
 
 // Settings > Scanner's direct connection: a device scan reaches the sale through the app's ScanHubProvider, on the
-// wide window too (the wedge listener is phone-cart-only), with no search-box focus.
+// wide window too, with no search-box focus.
 describe('ProductsScreen device scans', () => {
   beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
@@ -1966,6 +2001,86 @@ describe('ProductsScreen device scans', () => {
     const scan = await mountWithHub();
     scan('NOPE1');
     expect(screen.getByText('No product matches "NOPE1"')).toBeTruthy();
+  });
+});
+
+// v2 scans anywhere in the POS: on a non-phone window the wedge listener takes a scan wherever focus is, except an
+// editable field (the search box handles its own), and stays off with an area over the Sale or in the tender stage.
+describe('ProductsScreen wedge scan anywhere (wide)', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+  afterEach(() => { vi.mocked(usePathname).mockReturnValue('/'); });
+
+  // A keyboard-wedge scan: one keyDown per character, then Enter, on whatever has focus.
+  function wedgeScan(code: string) {
+    const target = document.activeElement ?? document.body;
+    for (const key of code) fireEvent.keyDown(target, { key });
+    fireEvent.keyDown(target, { key: 'Enter' });
+  }
+  const blurSearch = () => act(() => { screen.getByRole('searchbox').blur(); });
+  const noShirtLine = () => expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
+
+  it('adds the scanned product with nothing focused, at 1024 × 768', async () => {
+    setWindowWidth(1024, 768);
+    await mount();
+    blurSearch();
+    expect(document.activeElement).toBe(document.body);
+    wedgeScan('AB123');
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  });
+
+  it('adds to the line with its quantity button focused, and the Enter does not open the quantity popover', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    const quantity = screen.getByRole('button', { name: 'Edit quantity of Shirt' });
+    act(() => { quantity.focus(); });
+    expect(document.activeElement).toBe(quantity);
+    wedgeScan('AB123');
+    expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
+    expect(screen.queryByTestId('quantity-popover')).toBeNull();
+  });
+
+  it('says no product matches an unknown code, and the cart stays empty', async () => {
+    await mount();
+    blurSearch();
+    wedgeScan('NOPE1');
+    expect(screen.getByText('No product matches "NOPE1"')).toBeTruthy();
+    noShirtLine();
+  });
+
+  it('ignores a scan typed into the search box (no double add)', async () => {
+    saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS });
+    await mount();
+    const search = screen.getByRole('searchbox');
+    act(() => { search.focus(); });
+    expect(document.activeElement).toBe(search);
+    wedgeScan('AB123');
+    noShirtLine();
+  });
+
+  it('adds nothing while an area is over the Sale', async () => {
+    vi.mocked(usePathname).mockReturnValue('/orders');
+    await mount();
+    blurSearch();
+    wedgeScan('AB123');
+    noShirtLine();
+    expect(screen.queryByText('No product matches "AB123"')).toBeNull();
+  });
+
+  // A scan here would change the amount due under the cashier, so the line, its total and the balance all stay put.
+  it('adds nothing in the tender stage', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    act(() => { (document.activeElement as HTMLElement | null)?.blur(); });
+    // The tender's summary line has no quantity button: quantity, name, unit price, total.
+    const tenderLine = () => screen.getByText('Shirt').parentElement!.parentElement!.textContent;
+    expect([tenderLine(), tenderBalance(), tenderEntry()]).toEqual(['1Shirt€12.00€12.00', '€15.00', '€15.00']);
+    wedgeScan('AB123');
+    expect([tenderLine(), tenderBalance(), tenderEntry()]).toEqual(['1Shirt€12.00€12.00', '€15.00', '€15.00']);
+    expect(screen.getAllByText('Shirt')).toHaveLength(1);
+    expect(screen.queryByText('No product matches "AB123"')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
   });
 });
 
