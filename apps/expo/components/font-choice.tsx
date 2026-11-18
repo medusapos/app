@@ -4,10 +4,11 @@ import { FontProvider, RadioGroup, RadioGroupItem, Text } from '@tallyui/compone
 import { fontFamilyStyle, TYPE_SETS } from '@tallyui/theme';
 import { defaultStorage } from '../lib/session';
 import { FONT_CHOICES, FONT_LABELS, isFontChoice, loadFontFaces, useFontChoice } from '../lib/font-choice';
+import { InputFontStyle } from './input-font';
 
 export function AppFontProvider({ children }: { children: ReactNode }) {
   const { choice } = useFontChoice(defaultStorage());
-  return <FontProvider font={choice} loadFonts={loadFontFaces}>{children}</FontProvider>;
+  return <FontProvider font={choice} loadFonts={loadFontFaces}><InputFontStyle />{children}</FontProvider>;
 }
 
 export function FontPicker() {
