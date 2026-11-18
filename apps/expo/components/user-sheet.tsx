@@ -10,6 +10,7 @@ import { localDayStartIso, salesRoomFigures } from '../lib/reports';
 import type { Session } from '../lib/session';
 import { closureContext } from './register-close';
 import { ExternalLinkIcon } from './external-link-icon';
+import { WarningIcon } from './warning-icon';
 
 const SIGN_OUT_LOCKED_ID = 'sign-out-locked';
 // Read by assistive tech as Sign out's description, out of the layout, so the sheet never shifts.
@@ -93,6 +94,16 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           onPress={() => { if (!signOutLocked) { onOpenChange(false); setConfirm('cashier'); } }}>
           <Text>Hand the till to the next cashier</Text><Text>›</Text>
         </Pressable>
+      </View>}
+      {/* As v2 offline: the till's unsent sales (stuck ones included), never till updates or rejected sales. */}
+      {outbox.sales.pending > 0 && <View testID="user-sheet-awaiting" className="flex-row items-start gap-2 rounded-md border border-warning bg-warning/15 p-3">
+        <View className="text-foreground"><WarningIcon size={16} /></View>
+        <View className="min-w-0 flex-1">
+          <Text testID="user-sheet-awaiting-title" className="font-semibold">
+            {outbox.sales.pending === 1 ? 'Awaiting store · 1 sale' : `Awaiting store · ${outbox.sales.pending} sales`}
+          </Text>
+          <Text className="text-sm text-muted-foreground">Sent when you are signed in online</Text>
+        </View>
       </View>}
       {boundRegisterId ? <View testID="user-sheet-register-row">
         <View className="min-h-11 flex-row items-center gap-2">
