@@ -86,3 +86,28 @@ test('on a phone the Products area lists two-line rows, not the table, and finds
   await expect(rows).toHaveCount(1);
   await expect(rows).toContainText('E2E product 4 · B');
 });
+
+test('the Products area\'s settings sheet hides a column, keeps it across a page load, and restores the defaults', async ({ page }) => {
+  await signIn(page);
+  await openArea(page, 'Products');
+  const table = page.getByTestId('products-table');
+  // A head's text, past the sort arrow the sorted column carries ("Product ▲").
+  const head = (name: string) => table.getByRole('columnheader').filter({ hasText: new RegExp(`^${name}( [▲▼])?$`) });
+  await expect(head('SKU')).toBeVisible();
+  await page.getByTestId('products-settings-button').click();
+  await expect(page.getByRole('dialog').getByText('Product Settings', { exact: true })).toBeVisible();
+  await page.getByTestId('products-settings-column-sku').click();
+  await expect(page.getByTestId('products-settings-column-sku')).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('products-settings-close').click();
+  await expect(page.getByTestId('products-settings-sheet')).not.toBeVisible();
+  await expect(head('Product')).toBeVisible();
+  await expect(head('SKU')).toHaveCount(0);
+  // A fresh page load: the choice is read back from this device's storage.
+  await page.reload();
+  await expect(head('Product')).toBeVisible();
+  await expect(head('SKU')).toHaveCount(0);
+  await page.getByTestId('products-settings-button').click();
+  await page.getByTestId('products-settings-restore').click();
+  await page.getByTestId('products-settings-close').click();
+  await expect(head('SKU')).toBeVisible();
+});
