@@ -112,10 +112,10 @@ describe('SettingsScreen', () => {
     try {
       await mount();
       expect(within(screen.getByTestId('settings-nav')).getAllByRole('button').map((item) => item.textContent))
-        .toEqual(['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Customer', 'Danger zone']);
+        .toEqual(['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Danger zone']);
       expect(within(screen.getByTestId('settings-nav')).getAllByRole('button').map((item) => item.dataset.testid))
         .toEqual(['settings-nav-store', 'settings-nav-tax', 'settings-nav-printing', 'settings-nav-card-readers', 'settings-nav-scanner',
-          'settings-nav-theme', 'settings-nav-register', 'settings-nav-customer', 'settings-nav-danger']);
+          'settings-nav-theme', 'settings-nav-register', 'settings-nav-danger']);
       expect(screen.getByTestId('settings-store')).toBeTruthy();
       expect(screen.queryByLabelText('Minimum characters')).toBeNull();
       fireEvent.click(screen.getByTestId('settings-nav-scanner'));
@@ -139,6 +139,26 @@ describe('SettingsScreen', () => {
       expect(within(screen.getByTestId('settings-section-card')).getByTestId('settings-tax')).toBeTruthy();
       fireEvent.click(screen.getByTestId('settings-nav-danger'));
       expect(screen.getByTestId('settings-section-title').textContent).toBe('Danger zone');
+    } finally {
+      act(() => setWindowWidth(0));
+    }
+  });
+
+  it('on a wide window General holds the default customer between Store and Currency & numbers, and no Customer section is left', async () => {
+    setWindowWidth(1024);
+    try {
+      await mount();
+      const card = screen.getByTestId('settings-section-card');
+      const store = within(card).getByTestId('settings-store');
+      const defaultCustomer = within(card).getByTestId('settings-default-customer');
+      const currency = within(card).getByTestId('settings-currency');
+      expect(store.compareDocumentPosition(defaultCustomer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(defaultCustomer.compareDocumentPosition(currency) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.getByTestId('settings-section-title').textContent).toBe('General');
+      expect(within(card).getByRole('switch', { name: 'Default customer is cashier' })).toBeTruthy();
+      expect(screen.queryByTestId('settings-nav-customer')).toBeNull();
+      fireEvent.click(screen.getByTestId('settings-nav-tax'));
+      expect(screen.queryByTestId('settings-default-customer')).toBeNull();
     } finally {
       act(() => setWindowWidth(0));
     }

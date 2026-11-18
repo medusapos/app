@@ -55,10 +55,9 @@ export default function SettingsScreen() {
     { id: 'scanner', label: 'Barcode Scanning', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
-    { id: 'customer', label: 'Customer', element: <DefaultCustomerSection session={session} /> },
     { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
   ];
-  const chosen = sections.find(({ id }) => id === chosenSection);
+  const chosen = sections.find(({ id }) => id === chosenSection) ?? sections[0];
   if (width >= SETTINGS_SPLIT_MIN_WIDTH) return <>
     <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
     <SettingsLayout layout="split" navSlot={
@@ -112,6 +111,8 @@ function StoreSection({ session }: { session: Session }) {
       <Text testID="settings-store-sales-channel" className="max-w-40 text-right text-sm text-foreground">{held.settings?.salesChannel?.name || UNKNOWN}</Text>
     } />
   </SettingsGroup>
+  {/* v2's General holds the default customer between Store and Currency & numbers. */}
+  <DefaultCustomerSection session={session} />
   <SettingsGroup title="Currency & numbers" description="Read-only. The currency follows the till's region, set in Medusa Admin; separators follow this device's language." testID="settings-currency">
     <SettingsRow label="Symbol" action={
       <Text testID="settings-currency-symbol" className="max-w-40 text-right text-sm text-foreground">{format ? format.symbol : UNKNOWN}</Text>

@@ -65,7 +65,7 @@ test('a sale with the Settings default customer reaches Medusa with the customer
   try {
     await signIn(page);
     await openArea(page, 'Settings');
-    await page.getByTestId('settings-nav-customer').click();
+    await page.getByTestId('settings-nav-store').click();
     await page.getByTestId('customer-picker-search').fill(email);
     await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
     await expect(page.getByTestId('settings-default-customer-current')).toHaveText('Ada Lovelace');
@@ -83,7 +83,7 @@ test('a sale with the Settings default customer reaches Medusa with the customer
     expect(order.email).toBe(expectedEmail);
     expect(order.customer_id).toBe(id);
     await openArea(page, 'Settings');
-    await page.getByTestId('settings-nav-customer').click();
+    await page.getByTestId('settings-nav-store').click();
     await page.getByTestId('settings-default-customer-clear').click();
     await expect(page.getByTestId('settings-default-customer-current')).toHaveText('Guest');
   } finally {
@@ -110,7 +110,7 @@ test('the Default customer is cashier switch starts the sale on the signed-in ca
   const name = [cashier.first_name, cashier.last_name].filter(Boolean).join(' ') || cashier.company_name || cashier.email;
   await signIn(page);
   await openArea(page, 'Settings');
-  await page.getByTestId('settings-nav-customer').click();
+  await page.getByTestId('settings-nav-store').click();
   await page.getByRole('switch', { name: 'Default customer is cashier', exact: true }).click();
   await expect(page.getByTestId('settings-default-customer-cashier-status'))
     .toHaveText(`New sales start on ${name}, the customer in Medusa with your email.`);
