@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProductTraits, VariantSummary } from '@tallyui/core';
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsInStock, loadProductsAreaCategory, productAreaRows,
-  saveProductsAreaCategory, STOCK_STATUS_DOTS, type ProductAreaRow,
+  productAreaStockLine, saveProductsAreaCategory, STOCK_STATUS_DOTS, type ProductAreaRow,
 } from './products-area';
 import type { SessionStorage } from './session';
 
@@ -57,6 +57,21 @@ describe('productAreaRows', () => {
       { id: 'b-1', stockStatus: 'backorder', categories: 'Drinks, Food', categoryIds: ['c1', 'c2'] },
       { id: 'n-1', stockStatus: 'out_of_stock', categories: '', categoryIds: [] },
     ]);
+  });
+});
+
+describe('productAreaStockLine', () => {
+  const row = (stock: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id: 'v', name: 'P', sku: 'P',
+    price: '€1.00', stock, stockStatus, categories: '', categoryIds: [] });
+
+  it('puts the quantity before the status when the variant has one', () => {
+    expect(productAreaStockLine(row('5', 'in_stock'))).toBe('5 · In stock');
+    expect(productAreaStockLine(row('0', 'out_of_stock'))).toBe('0 · Out of stock');
+  });
+
+  it('gives the status alone with no quantity', () => {
+    expect(productAreaStockLine(row('On backorder', 'backorder'))).toBe('On backorder');
+    expect(productAreaStockLine(row('—', 'unknown'))).toBe('—');
   });
 });
 

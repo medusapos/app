@@ -1,14 +1,17 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, View, useWindowDimensions } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { Button, CategoryNav, Loader, ProductTable, SearchInput, Text, type ProductTableColumn } from '@tallyui/components';
-import { listCategories } from '@tallyui/pos';
+import {
+  Button, CategoryNav, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
+} from '@tallyui/components';
+import { listCategories, sortProducts } from '@tallyui/pos';
 import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsInStock, loadProductsAreaCategory, productAreaRows,
+  productAreaStockLine,
   PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
   PRODUCTS_NONE_IN_STOCK, saveProductsAreaCategory, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
 } from '../lib/products-area';
@@ -29,6 +32,28 @@ const COLUMNS: ProductTableColumn<ProductAreaRow>[] = [
     render: (row) => <Text numberOfLines={1}>{row.categories}</Text> },
   { id: 'price', header: 'Price', align: 'right', flex: 1, render: (row) => <Text className="tabular-nums">{row.price}</Text> },
 ];
+
+// ADR 0009: phone mode below 600 px.
+const PHONE_BREAKPOINT = 600;
+// The table's default order, so both layouts list rows alike.
+const NAME_SORT = { field: 'name', dir: 'asc' } as const;
+
+// v2's phone row: name over SKU, price over the stock line. Rows open nothing, as the table's do.
+function PhoneRow({ row }: { row: ProductAreaRow }) {
+  return <View className="flex-row gap-3 px-4 py-3" testID={`product-list-row-${row.id}`}>
+    <View className="min-w-0 flex-1">
+      <Text>{row.name}</Text>
+      {row.sku ? <Text className="text-sm text-muted-foreground">{row.sku}</Text> : null}
+    </View>
+    <View className="items-end">
+      <Text className="tabular-nums">{row.price}</Text>
+      <View className="flex-row items-center gap-1.5" testID={`product-stock-status-${row.id}`}>
+        <View className={`h-2 w-2 rounded-full ${STOCK_STATUS_DOTS[row.stockStatus]}`} />
+        <Text className={`text-sm${row.stockStatus === 'unknown' ? ' text-muted-foreground' : ''}`}>{productAreaStockLine(row)}</Text>
+      </View>
+    </View>
+  </View>;
+}
 
 // The area's own catalogue read, while no Sale holds one: the Sale's replication over the same cache, read-only.
 // It publishes what it reads and renders nothing.
@@ -66,6 +91,8 @@ export default function ProductsAreaScreen() {
   const items = useMemo(() => filterProductAreaRows(
     filterProductAreaRowsInStock(filterProductAreaRowsByCategory(rows, activeId), inStockOnly), search),
   [rows, activeId, inStockOnly, search]);
+  const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
+  const phoneItems = useMemo(() => phone ? sortProducts(items, NAME_SORT, (row) => row.name) : [], [phone, items]);
   // v2's Products has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
   const openMenu = useFrameMenu();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
@@ -73,6 +100,8 @@ export default function ProductsAreaScreen() {
   if (!session) return <Redirect href="/login" />;
   // One cache per store and pricing context: the area reads only while the Sale holds no catalogue for this store.
   const saleHolds = loaded?.owner === 'sale';
+  const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
+    : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
   return <View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
@@ -101,11 +130,10 @@ export default function ProductsAreaScreen() {
     </View>
     {saleHolds ? null : <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
       onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
-    {ready ? <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
-      defaultSort={{ field: 'name', dir: 'asc' }} emptyState={
-        <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
-          : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>
-      } /> : null}
+    {ready && phone ? <ProductList testID="products-list" items={phoneItems} emptyState={emptyState}
+      renderItem={(row: ProductAreaRow) => <PhoneRow row={row} />} /> : null}
+    {ready && !phone ? <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
+      defaultSort={{ field: 'name', dir: 'asc' }} emptyState={emptyState} /> : null}
     {loaded?.status === 'loading' ? <View className="flex-1 items-center justify-center gap-3 px-4" testID="products-loading">
       <Loader />
       <Text className="text-center text-muted-foreground">{PRODUCTS_LOADING}</Text>

@@ -25,6 +25,12 @@ export const STOCK_STATUS_DOTS: Record<StockLevel['status'], string> = {
   in_stock: 'bg-success', out_of_stock: 'bg-destructive', backorder: 'bg-warning', unknown: 'bg-muted',
 };
 
+/** The phone row's stock line: "<quantity> · <status>" when the variant has a quantity, else the status alone. */
+export function productAreaStockLine(row: ProductAreaRow): string {
+  const label = STOCK_STATUS_LABELS[row.stockStatus];
+  return row.stock === label ? label : `${row.stock} · ${label}`;
+}
+
 /** One row per sellable variant, as the Sale's catalogue lists them. */
 export function productAreaRows(products: readonly unknown[], traits: ProductTraits, currency: string): ProductAreaRow[] {
   return catalogueEntries([...products], traits).map(({ product, variant }) => {

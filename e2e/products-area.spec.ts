@@ -69,3 +69,18 @@ test('the Products area keeps its category across a page load and narrows with a
   await chip('All products').click();
   await expect(chip('All products')).toBeChecked();
 });
+
+test('on a phone the Products area lists two-line rows, not the table, and finds a variant by SKU', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 });
+  await signIn(page);
+  await openArea(page, 'Products');
+  await expect(page.getByTestId('products-list')).toBeVisible();
+  await expect(page.getByTestId('products-table')).toHaveCount(0);
+  const rows = page.locator('[data-testid^="product-list-row-"]');
+  const first = rows.filter({ hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first();
+  await expect(first).toBeVisible();
+  await expect(first.locator('[data-testid^="product-stock-status-"]')).toContainText('In stock');
+  await page.getByTestId('products-search').fill('E2E-4B');
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('E2E product 4 · B');
+});
