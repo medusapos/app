@@ -7,9 +7,13 @@ import { exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, ty
 import { AreaAccountButton, useFrameMenu } from './app-frame';
 import { ClosureFiltersBar, ClosureRegisterSelect } from './closure-filters';
 import { ClosureTable } from './closure-table';
+import { OpenSessionRow } from './closures-open-session';
+import { ClosuresTabs, type ClosuresTab } from './closures-tabs';
 import { EarlierClosures } from './earlier-closures';
 import { printClosure } from './register-close';
 import { loadApprovers } from '../lib/approval';
+import { printXReport } from '../lib/closure-print';
+import { openSessionOf } from '../lib/open-session';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
 import type { RegisterContextValue } from '../lib/register-context';
@@ -32,6 +36,8 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
     preset: 'today', range: presetRange('today', new Date(), 'device'), registerId: null, cashierId: null,
   }));
   const [historyCashiers, setHistoryCashiers] = useState<string[]>([]);
+  const [tab, setTab] = useState<ClosuresTab>('all');
+  const [earlierCount, setEarlierCount] = useState(0);
   // A phone keeps the avatar in the stack header; a wide window has no header, so this row carries it.
   const openMenu = useFrameMenu();
 
@@ -54,6 +60,18 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
     && typeof row.breakdowns.closed_by_name === 'string' ? [[row.closed_by, row.breakdowns.closed_by_name]] : [])) };
   const cashierOptions = closureCashierOptions([...rows.flatMap((row) => row.closed_by ? [row.closed_by] : []), ...historyCashiers], names);
   const shownRows = byCashier(rows, cashierId, (row) => row.closed_by);
+  // v2's open session heads Today: the register strip's own session, kept to the chosen cashier like the closures.
+  const liveSession = showsToday ? openSessionOf(register) : null;
+  const openSession = liveSession && (cashierId === null || liveSession.openedBy === cashierId) ? liveSession : null;
+  const openRegisterName = chosenRegister ? registerNames[chosenRegister] ?? '' : '';
+  const openRow = openSession ? <OpenSessionRow summary={openSession} registerName={openRegisterName} ctx={ctx}
+    cashierName={openSession.openedBy ? names[openSession.openedBy] ?? openSession.openedBy : null}
+    print={Platform.OS === 'web' && openSession.status === 'open' ? () => printXReport({ session: register.session!,
+      expected: register.expected, salesCount: register.salesCount, registerName: openRegisterName, context: ctx }) : undefined} /> : null;
+  const showsEarlier = tab !== 'open' && !!chosenRegister && !!historyWindow;
+  const count = (tab !== 'closed' && openRow ? 1 : 0)
+    + (tab === 'open' ? 0 : (showsToday ? shownRows.length : 0) + (showsEarlier ? earlierCount : 0));
+  const exports = tab !== 'open' && showsToday && Platform.OS === 'web' && rows.length > 0;
 
   return <View testID="closures-view" className="gap-4">
     <View testID="closures-header" className="flex-row items-center gap-2">
@@ -66,7 +84,7 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
       {!openMenu ? <View className="ml-auto"><AreaAccountButton /></View> : null}
     </View>
     <ClosureFiltersBar filters={{ ...closureFilters, registerId: chosenRegister }} onChange={setClosureFilters}
-      cashierOptions={cashierOptions} trailing={showsToday && Platform.OS === 'web' && rows.length > 0 ?
+      cashierOptions={cashierOptions} trailing={exports ?
         <Pressable testID="closures-export" accessibilityRole="button"
           className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
           onPress={() => {
@@ -78,18 +96,22 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
           }}>
           <Text className="text-foreground">Export CSV</Text>
         </Pressable> : undefined} />
-    {showsToday && Platform.OS === 'web' && rows.length > 0 && exportError ?
+    {exports && exportError ?
       <Text testID="closures-export-error" accessibilityRole="alert">Export failed. Try again.</Text> : null}
-    {!showsToday ? null : shownRows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text>
+    <ClosuresTabs value={tab} onChange={setTab} count={count} />
+    {tab === 'open' ? openRow ? <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx}
+      today={today} rows={[]} todayLead={openRow} /> : <Text testID="closures-open-empty">No open session</Text>
+      : !showsToday ? null : shownRows.length === 0 && !(tab === 'all' && openRow) ? <Text testID="closures-empty">No closures yet today</Text>
       : <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx} today={today}
         rows={shownRows.map((row) => closureTableRow(row, registerNames))} onOpen={(id) => {
           const closure = rows.find((row) => row.id === id);
           if (closure) setOpened({ closure, frozen: true });
-        }} />}
-    {chosenRegister && historyWindow ? <EarlierClosures session={session} registerId={chosenRegister} today={today} ctx={ctx}
+        }} todayLead={tab === 'all' && openRow ? openRow : undefined} />}
+    {showsEarlier && chosenRegister && historyWindow ? <EarlierClosures session={session} registerId={chosenRegister} today={today} ctx={ctx}
       registerName={registerNames[chosenRegister] ?? ''} cashierNames={cashierNames}
       localClosures={closures} onOpen={setOpened} from={historyWindow.from} to={historyWindow.to}
-      cashierId={cashierId} onCashiers={setHistoryCashiers} heading={showsToday ? 'Earlier closures' : null} /> : null}
+      cashierId={cashierId} onCashiers={setHistoryCashiers} onCount={setEarlierCount}
+      heading={showsToday ? 'Earlier closures' : null} /> : null}
     {opened ? <ClosureSheet currency={currency} onDone={() => setOpened(null)}
       register={{ ...register, lastClosure: opened.closure, closureApprovalStatus: register.closureApprovalStatus ?? {} }}
       onPrint={Platform.OS === 'web' && opened.frozen

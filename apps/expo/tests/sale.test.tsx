@@ -21,7 +21,7 @@ import { setWindowWidth } from './window-width';
 import { cartLineCells, keyIn, take, tenderBalance, tenderEntry } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
-vi.mock('expo-router', () => ({ Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
+vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
 // expo-localization's native module isn't available under vitest.
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));

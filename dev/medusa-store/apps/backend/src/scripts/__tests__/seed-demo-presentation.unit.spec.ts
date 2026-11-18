@@ -1,4 +1,6 @@
-import { FIRST_SCREEN_PRODUCTS, FIRST_SCREEN_STOCK_FLOOR, firstScreenTopUps } from "../seed-demo-presentation"
+import {
+  DEMO_FIXTURE_TITLES, FIRST_SCREEN_PRODUCTS, FIRST_SCREEN_STOCK_FLOOR, firstScreenTopUps, fixtureRetitles,
+} from "../seed-demo-presentation"
 
 const variant = (id: string, manage_inventory = true, sku = id) => ({
   sku, manage_inventory, inventory_items: [{ inventory_item_id: id }],
@@ -75,5 +77,39 @@ describe("first-screen stock top-ups", () => {
     expect(FIRST_SCREEN_STOCK_FLOOR).toBe(25)
     const products = Array.from({ length: 49 }, (_, index) => product(`Product ${String(index).padStart(2, "0")}`))
     expect(firstScreenTopUps(products, [])).toEqual(products.slice(0, 48).map(item => planned(item.title)))
+  })
+})
+
+describe("fixture retitles", () => {
+  const fixture = (n: number, title = `E2E product ${n}`) => ({ id: `prod_${n}`, handle: `e2e-${n}`, title })
+  const shopTitles = [
+    "Sparkling Water · 330 ml", "Cold Brew Coffee", "Almond Croissant", "Seasonal Gift Box", "Olive Oil · 500 ml",
+  ]
+
+  it("retitles all five fixtures from their E2E titles to the map's titles", () => {
+    const fixtures = [1, 2, 3, 4, 5].map(n => fixture(n))
+    expect(fixtureRetitles(fixtures)).toEqual(shopTitles.map((title, i) => ({ id: `prod_${i + 1}`, title })))
+    expect(Object.values(DEMO_FIXTURE_TITLES)).toEqual(shopTitles)
+  })
+
+  it("plans nothing for fixtures that already carry their shop titles", () => {
+    expect(fixtureRetitles(shopTitles.map((title, i) => fixture(i + 1, title)))).toEqual([])
+  })
+
+  it("ignores products whose handle is not a listed fixture", () => {
+    const products = [
+      { id: "prod_x", handle: "e2e-unlisted", title: "E2E product X" },
+      { id: "prod_bun", handle: "showcase-cinnamon-bun", title: "Cinnamon Bun" },
+      { id: "prod_proto", handle: "toString", title: "Prototype key" },
+      fixture(2),
+    ]
+    expect(fixtureRetitles(products)).toEqual([{ id: "prod_2", title: "Cold Brew Coffee" }])
+  })
+
+  it("does not mutate its inputs", () => {
+    const products = [fixture(1), fixture(4), { id: "prod_bun", handle: "showcase-cinnamon-bun", title: "Cinnamon Bun" }]
+    const before = JSON.parse(JSON.stringify(products))
+    fixtureRetitles(products)
+    expect(products).toEqual(before)
   })
 })

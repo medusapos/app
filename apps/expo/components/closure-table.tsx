@@ -1,4 +1,4 @@
-import type { ReactElement } from 'react';
+import { Fragment, type ReactElement } from 'react';
 import { Pressable, useWindowDimensions } from 'react-native';
 import { AppText as Text } from './app-text';
 import { Table, TableBody, TableRow, TableCell } from '@tallyui/components';
@@ -11,12 +11,14 @@ const PHONE_BREAKPOINT = 600;
 const varianceClass = (varianceMinor: number | null) =>
   varianceMinor === null || varianceMinor === 0 ? 'text-muted-foreground' : varianceMinor < 0 ? 'text-destructive' : 'text-success';
 
-export function ClosureTable({ rows, ctx, testID, rowTestID, today, onOpen, openable }: {
+export function ClosureTable({ rows, ctx, testID, rowTestID, today, onOpen, openable, todayLead }: {
   rows: ClosureTableRow[]; ctx: ClosureContext; testID: string; rowTestID: (id: string) => string; today: string;
   onOpen?: (id: string) => void; openable?: (id: string) => boolean;
+  /** A row shown first under the Today header (Closures' open session); the table draws that header when today has no rows. */
+  todayLead?: ReactElement;
 }) {
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
-  if (rows.length === 0) return null;
+  if (rows.length === 0 && !todayLead) return null;
   const openFor = (id: string) => onOpen && (openable ? openable(id) : true) ? onOpen : undefined;
   const pressable = (row: ClosureTableRow, line: ReactElement) => {
     const open = openFor(row.id);
@@ -63,7 +65,12 @@ export function ClosureTable({ rows, ctx, testID, rowTestID, today, onOpen, open
       </TableCell> : null}
     </TableRow>;
   };
+  const days = closureDays(rows);
+  // Without a closure today the lead still sits under its own Today header (no total), ahead of the earlier days.
+  const groups = todayLead && !days.some((group) => group.day === today)
+    ? [{ day: today, rows: [], countedMinor: null, varianceMinor: null }, ...days] : days;
   return <Table testID={testID}>
-    <TableBody>{closureDays(rows).flatMap((group) => [dayHeader(group), ...group.rows.map((row) => pressable(row, closureRow(row)))])}</TableBody>
+    <TableBody>{groups.flatMap((group) => [dayHeader(group), ...(todayLead && group.day === today ? [<Fragment key="today-lead">{todayLead}</Fragment>] : []),
+      ...group.rows.map((row) => pressable(row, closureRow(row)))])}</TableBody>
   </Table>;
 }

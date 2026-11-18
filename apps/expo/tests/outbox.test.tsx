@@ -43,6 +43,7 @@ vi.mock('../lib/order-store', async (importOriginal) => {
   } };
 });
 vi.mock('expo-router', () => ({
+  usePathname: () => '/',
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
   Stack: { Screen: ({ options }: { options: { headerRight?: () => ReactNode } }) => options.headerRight?.() ?? null },

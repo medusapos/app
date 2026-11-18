@@ -8,10 +8,15 @@ import { capturedMinor, type PosOrder, type SentOrder } from '@tallyui/pos';
 
 const TickIcon = createSvgIcon('TickIcon', () => <Path d="M5 12l5 5l10 -10" />);
 
+/** What the customer handed over in cash: each cash payment's tendered amount, or its amount when none was keyed. */
+export function cashTenderedMinor(payments: PosOrder['payments']): number {
+  return payments.filter(payment => payment.method === 'cash')
+    .reduce((sum, payment) => sum + (payment.tenderedMinor ?? payment.amountMinor), 0);
+}
+
 export function PaidChange({ order, posOrder }: { order: SentOrder; posOrder: PosOrder }): JSX.Element {
   const money = (amount: number) => formatMoney({ amount, currency: order.currency });
-  const tenderedMinor = posOrder.payments.filter(payment => payment.method === 'cash')
-    .reduce((sum, payment) => sum + (payment.tenderedMinor ?? payment.amountMinor), 0);
+  const tenderedMinor = cashTenderedMinor(posOrder.payments);
   return <View testID="paid-change-due" className="items-center gap-3">
     {/* The icon strokes in currentColor, so the circle's text-success colours the tick. */}
     <View testID="paid-change-tick" className="h-24 w-24 items-center justify-center rounded-full bg-success/15 text-success">

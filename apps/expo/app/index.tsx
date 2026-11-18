@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
-import { Redirect, router, Stack } from 'expo-router';
+import { Redirect, router, Stack, usePathname } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
@@ -24,8 +24,10 @@ import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerChip } from '../components/customer-chip';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
+import { OfflineToast, useOfflineToast } from '../components/offline-toast';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PaidAwaiting, useAwaitingStore } from '../components/paid-awaiting';
 import { PaidChange } from '../components/paid-change';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
@@ -104,6 +106,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's header "● Offline": the browser losing the network shows offline at once, not only after a pull fails.
   const networkOnline = useNetworkOnline();
   const pullState: SyncState = networkOnline ? state : 'offline';
+  const offline = useOfflineToast(networkOnline, state);
   const online = pullState !== 'offline';
   const previousToken = useRef(session.token);
   useEffect(() => {
@@ -235,12 +238,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       status: catalogueState, error: error ?? undefined });
   }, [session.baseUrl, sorted, traits, pricing.currency, catalogueState, error]);
   useEffect(() => () => withdrawCatalogue('sale'), []);
-  // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
-  const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
   // The miss line shows over the cart in the cart stage (on a phone, only in the cart view); it starts empty each time it shows.
   const scanMissShown = sale.stage.kind === 'cart' && (!phone || cartOpen);
   useEffect(() => { setScanMiss(null); }, [scanMissShown]);
+  const pathname = usePathname();
+  // v2 scans anywhere in the POS; an editable target (search box, coupon field) keeps its own input, so no double add; off while an area is over the Sale and in tender.
+  const wedgeActive = scanMissShown && pathname === '/';
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
@@ -320,6 +324,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       onViewStateError={onViewStateError} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
+    {/* v2's "Device went offline" toast, floating over the top of the products; the empty sides stay tappable. */}
+    {offline.kind && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center px-2">
+      <OfflineToast kind={offline.kind} onClose={offline.close} />
+    </View>}
   </View>;
   // The till's open sales: the strip's tabs, and the count's "carts still open" line (row 09e.2).
   const tillSales = openSales(sale.order, parked);
@@ -376,11 +384,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const scanMissLine = scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
+  // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
+  const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
   const wide = width >= ROW_BREAKPOINT;
+  const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || sale.stage.order.changeDueMinor > 0);
   const paidReceipt = sale.stage.kind === 'receipt' ? <>
-    {/* v2 leads the paid screen with the change; screen only, not printed. */}
-    {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-      <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />
+    {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
+    {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
+      {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
+        : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
     </View>}
     <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
     store={receiptStore}
@@ -389,7 +401,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       online={online} defaultEmail={paid?.customer?.email
         ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
       send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-    topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
+    topInset={paidHeadline ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
     cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
   </> : null;
   const phoneTender = phone && sale.stage.kind === 'tender';
