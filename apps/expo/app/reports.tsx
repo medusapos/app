@@ -3,21 +3,17 @@ import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { Path } from 'react-native-svg';
-import { ClosureSheet, createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
-import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
+import { createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
+import { comparisonRange, presetRange, watchFresh, type PosOrder } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, useFrameAccount, useFrameMenu } from '../components/app-frame';
-import { ClosureFiltersBar } from '../components/closure-filters';
-import { ClosureTable } from '../components/closure-table';
-import { EarlierClosures } from '../components/earlier-closures';
+import { ClosuresView } from '../components/closures-view';
 import { closureContext, printClosure } from '../components/register-close';
 import { RegisterStrip } from '../components/register-strip';
 import { StripHeightContext } from '../components/store-refused';
-import { loadApprovers } from '../lib/approval';
 import { PRINT_FAILED, printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
-import { registerCollections } from '../lib/order-store';
 import { useRegister } from '../lib/register-context';
-import { byCashier, closureCashierOptions, closureDayLabel, closureHistoryWindow, closureScopeFor, closuresCsvFilename, closureTableRow, csvLabel, downloadCsv, localDay, localDayStartIso, salesRoomFigures, showsTodayClosures, type ClosureFilters } from '../lib/reports';
+import { closureDayLabel, localDay, localDayStartIso, salesRoomFigures } from '../lib/reports';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
@@ -42,19 +38,14 @@ export default function ReportsScreen() {
     status: 'all', cashierId: null, registerId: null,
   }));
   const [sales, setSales] = useState<PosOrder[]>([]);
-  const [closures, setClosures] = useState<Closure[]>([]);
-  const [exportError, setExportError] = useState(false);
+  // v2 opens Closures from the strip's › as its own view; it is state here, so the rail keeps Reports active.
+  const [view, setView] = useState<'sales' | 'closures'>('sales');
   const [xBusy, setXBusy] = useState(false);
   const [xError, setXError] = useState<string | null>(null);
   const [zBusy, setZBusy] = useState(false);
   const [zError, setZError] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
-  const [opened, setOpened] = useState<{ closure: Closure; frozen: boolean } | null>(null);
-  const [closureFilters, setClosureFilters] = useState<ClosureFilters>(() => ({
-    preset: 'today', range: presetRange('today', new Date(), 'device'), registerId: null, cashierId: null,
-  }));
-  const [historyCashiers, setHistoryCashiers] = useState<string[]>([]);
 
   useEffect(() => {
     if (!orders) return;
@@ -63,11 +54,6 @@ export default function ReportsScreen() {
     const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(from) } } }).subscribe(setSales);
     return () => subscription.unsubscribe();
   }, [orders, filters]);
-  useEffect(() => {
-    if (!orders) return;
-    const subscription = watchFresh(registerCollections(orders).closures, { selector: {} }).subscribe(setClosures);
-    return () => subscription.unsubscribe();
-  }, [orders]);
 
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
   const pricing = session?.baseUrl ? loadCachedPricing(defaultStorage(), session.baseUrl) : null;
@@ -80,19 +66,6 @@ export default function ReportsScreen() {
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
   const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
-  const scope = closureScopeFor({ today, boundRegisterId, storeKey: session.baseUrl });
-  const rows = selectClosureRows(closures, scope, 'device');
-  const registerNames = Object.fromEntries(registers.map((r) => [r.id, r.name]));
-  const { range, cashierId } = closureFilters;
-  const chosenRegister = closureFilters.registerId ?? boundRegisterId ?? registers[0]?.id ?? null;
-  const ownRegister = !!boundRegisterId && chosenRegister === boundRegisterId;
-  const showsToday = showsTodayClosures(range, today, ownRegister);
-  const historyWindow = closureHistoryWindow(range, today, ownRegister);
-  const cashierNames = loadApprovers(defaultStorage(), session.baseUrl);
-  const names = { ...cashierNames, ...Object.fromEntries(rows.flatMap((row) => row.closed_by
-    && typeof row.breakdowns.closed_by_name === 'string' ? [[row.closed_by, row.breakdowns.closed_by_name]] : [])) };
-  const cashierOptions = closureCashierOptions([...rows.flatMap((row) => row.closed_by ? [row.closed_by] : []), ...historyCashiers], names);
-  const shownRows = byCashier(rows, cashierId, (row) => row.closed_by);
   const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
   // v2's closed strip offers Print closure where the open strip has Print X report (reports/index.mdx#closures).
   const lastClosure = register.lastClosure;
@@ -102,11 +75,11 @@ export default function ReportsScreen() {
   return <ScrollView className="flex-1 bg-background" role="main" aria-label="Reports" contentContainerClassName="px-6 pb-6"
     contentContainerStyle={{ paddingTop: 24 + topInset }}>
     <Stack.Screen options={{ title: 'Reports', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
-    {/* v2's avatar ends the window's top row, so it sits outside the centred column. */}
-    {!openMenu && account && <View className="flex-row justify-end"><AreaAccountButton /></View>}
+    {/* v2's avatar ends the window's top row, so it sits outside the centred column; Closures' header carries its own. */}
+    {view === 'sales' && !openMenu && account && <View className="flex-row justify-end"><AreaAccountButton /></View>}
     <View className="w-full max-w-5xl gap-4 self-center">
-      {ctx && boundRegisterId ? <>
-        <RegisterStrip register={register} ctx={ctx}
+      {view === 'sales' && ctx && boundRegisterId ? <>
+        <RegisterStrip register={register} ctx={ctx} onOpenClosures={() => setView('closures')}
           panel={{ currency: currency!, store: { name: storeName, address: settings?.location.addressLine } }} action={Platform.OS === 'web' && register.session?.status === 'open' ?
           <Pressable testID="reports-x-print" accessibilityRole="button" disabled={xBusy}
             className="min-h-11 flex-row items-center justify-center gap-2 rounded-md px-4 border border-border"
@@ -141,8 +114,14 @@ export default function ReportsScreen() {
           <Text testID="reports-x-print-error" accessibilityRole="alert">{xError}</Text> : null}
         {closurePrint && zError ? <Text testID="reports-closure-print-error" accessibilityRole="alert">{zError}</Text> : null}
       </> : null}
-      <Text testID="reports-sales-heading" className="text-lg font-semibold text-foreground">Sales</Text>
-      {orders === null ? <Text testID="reports-loading">Loading…</Text>
+      {/* An unbound till has no strip, so Closures opens from a button in its place. */}
+      {view === 'sales' && ctx && !boundRegisterId ? <Pressable testID="reports-open-closures" accessibilityRole="button"
+        className="min-h-11 flex-row items-center justify-between rounded-md border border-border px-4"
+        onPress={() => setView('closures')}>
+        <Text className="text-foreground">Closures</Text>
+        <Text className="text-muted-foreground">›</Text>
+      </Pressable> : null}
+      {view === 'closures' ? null : orders === null ? <Text testID="reports-loading">Loading…</Text>
         : currency === null ? <Text testID="reports-no-currency">Store settings are not loaded yet.</Text>
         : ctx && summary ? <>
           <View testID="sales-room" className="gap-4">
@@ -185,40 +164,9 @@ export default function ReportsScreen() {
             {`${summary.leftOutCount} ${summary.leftOutCount === 1 ? 'order' : 'orders'} in another currency left out`}
           </Text> : null}
         </> : null}
-      <Text testID="closures-heading" className="text-lg font-semibold text-foreground">Closures</Text>
-      {orders !== null && ctx ? <>
-        <ClosureFiltersBar filters={{ ...closureFilters, registerId: chosenRegister }} onChange={setClosureFilters}
-          registerOptions={registers.map((r) => ({ value: r.id, label: storeName ? `${storeName} · ${r.name}` : r.name }))}
-          cashierOptions={cashierOptions} />
-        {!showsToday ? null : shownRows.length === 0 ? <Text testID="closures-empty">No closures yet today</Text>
-          : <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx} today={today}
-            rows={shownRows.map((row) => closureTableRow(row, registerNames))} onOpen={(id) => {
-              const closure = rows.find((row) => row.id === id);
-              if (closure) setOpened({ closure, frozen: true });
-            }} />}
-        {showsToday && Platform.OS === 'web' && rows.length > 0 ? <>
-          <Pressable testID="closures-export" accessibilityRole="button"
-            className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
-            onPress={() => {
-              try {
-                downloadCsv(closuresCsvFilename(scope), exportCsv(rows, ctx.exponent, csvLabel,
-                  registerNames, storeName));
-                setExportError(false);
-              } catch { setExportError(true); }
-            }}>
-            <Text className="text-foreground">Export CSV</Text>
-          </Pressable>
-          {exportError ? <Text testID="closures-export-error" accessibilityRole="alert">Export failed. Try again.</Text> : null}
-        </> : null}
-        {chosenRegister && historyWindow ? <EarlierClosures session={session} registerId={chosenRegister} today={today} ctx={ctx}
-          registerName={registerNames[chosenRegister] ?? ''} cashierNames={cashierNames}
-          localClosures={closures} onOpen={setOpened} from={historyWindow.from} to={historyWindow.to}
-          cashierId={cashierId} onCashiers={setHistoryCashiers} heading={showsToday ? 'Earlier closures' : null} /> : null}
-      </> : null}
-      {opened && currency ? <ClosureSheet currency={currency} onDone={() => setOpened(null)}
-        register={{ ...register, lastClosure: opened.closure, closureApprovalStatus: register.closureApprovalStatus ?? {} }}
-        onPrint={Platform.OS === 'web' && opened.frozen
-          ? () => printClosure(opened.closure, currency, { name: storeName, address: settings?.location.addressLine }) : undefined} /> : null}
+      {view === 'closures' && orders !== null && ctx ? <ClosuresView session={session} registers={registers}
+        boundRegisterId={boundRegisterId} register={register} ctx={ctx} currency={currency!} storeName={storeName}
+        storeAddress={settings?.location.addressLine} today={today} onBack={() => setView('sales')} /> : null}
     </View>
   </ScrollView>;
 }
