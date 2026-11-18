@@ -13,7 +13,7 @@ import { closureContext, printClosure } from '../components/register-close';
 import { RegisterStrip } from '../components/register-strip';
 import { StripHeightContext } from '../components/store-refused';
 import { loadApprovers } from '../lib/approval';
-import { printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
+import { PRINT_FAILED, printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
 import { useRegister } from '../lib/register-context';
@@ -25,7 +25,7 @@ import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
 // The Sales room's status menu; the printed summary's scope line reads the same labels.
 const STATUS_OPTIONS = [{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }];
 
-// v2's outline printer on the Print summary and Print X report buttons: paper tray, body, output sheet.
+// v2's outline printer on the Print summary, Print X report and Print closure buttons: paper tray, body, output sheet.
 const PrinterIcon = createSvgIcon('PrinterIcon', () => <>
   <Path d="M6 9V2h12v7" />
   <Path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
@@ -46,6 +46,8 @@ export default function ReportsScreen() {
   const [exportError, setExportError] = useState(false);
   const [xBusy, setXBusy] = useState(false);
   const [xError, setXError] = useState<string | null>(null);
+  const [zBusy, setZBusy] = useState(false);
+  const [zError, setZError] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
   const [opened, setOpened] = useState<{ closure: Closure; frozen: boolean } | null>(null);
@@ -91,6 +93,10 @@ export default function ReportsScreen() {
   const cashierOptions = closureCashierOptions([...rows.flatMap((row) => row.closed_by ? [row.closed_by] : []), ...historyCashiers], names);
   const shownRows = byCashier(rows, cashierId, (row) => row.closed_by);
   const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
+  // v2's closed strip offers Print closure where the open strip has Print X report (reports/index.mdx#closures).
+  const lastClosure = register.lastClosure;
+  const closurePrint = Platform.OS === 'web' && !!lastClosure
+    && !['open', 'counting', 'conflict'].includes(register.session?.status ?? '');
 
   return <ScrollView className="flex-1 bg-background" role="main" aria-label="Reports" contentContainerClassName="px-6 pb-6"
     contentContainerStyle={{ paddingTop: 24 + topInset }}>
@@ -113,9 +119,24 @@ export default function ReportsScreen() {
             }}>
             <View testID="reports-x-print-icon" className="text-foreground"><PrinterIcon size={18} /></View>
             <Text className="text-foreground">{xBusy ? 'Printing…' : 'Print X report'}</Text>
+          </Pressable> : closurePrint ?
+          <Pressable testID="reports-closure-print" accessibilityRole="button" disabled={zBusy}
+            className="min-h-11 flex-row items-center justify-center gap-2 rounded-md px-4 border border-border"
+            onPress={async () => {
+              setZBusy(true);
+              setZError(null);
+              try {
+                await printClosure(lastClosure!, currency!, { name: storeName, address: settings?.location.addressLine });
+              } catch (error) {
+                setZError(error instanceof Error ? error.message : PRINT_FAILED);
+              } finally { setZBusy(false); }
+            }}>
+            <View testID="reports-closure-print-icon" className="text-foreground"><PrinterIcon size={18} /></View>
+            <Text className="text-foreground">{zBusy ? 'Printing…' : 'Print closure'}</Text>
           </Pressable> : null} />
         {Platform.OS === 'web' && register.session?.status === 'open' && xError ?
           <Text testID="reports-x-print-error" accessibilityRole="alert">{xError}</Text> : null}
+        {closurePrint && zError ? <Text testID="reports-closure-print-error" accessibilityRole="alert">{zError}</Text> : null}
       </> : null}
       <Text testID="reports-sales-heading" className="text-lg font-semibold text-foreground">Sales</Text>
       {orders === null ? <Text testID="reports-loading">Loading…</Text>

@@ -8,7 +8,7 @@ import ReportsScreen from '../app/reports';
 import { AppFrame } from '../components/app-frame';
 import { closureContext } from '../components/register-close';
 import { dayBefore } from '../lib/closure-history';
-import { X_PRINT_FAILED } from '../lib/closure-print';
+import { PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { openOrderStore, closeOrderStores, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
@@ -183,6 +183,28 @@ describe('register strip', () => {
     mount();
     expect(screen.getByTestId('register-strip-status')).toBeTruthy();
     expect(screen.queryByTestId('register-strip-open-panel')).toBeNull();
+  });
+
+  it('the strip is v2\'s three rows: Register and Last closure on the left, the action and › at the top right, the chips below', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z', opened_by: 'Ana' },
+      terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
+        cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
+        paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
+        expected: { cash: 4000 } },
+      lastClosure: closure({ number: 3 }), blind: false, expected: {}, movements: [],
+    } } as unknown as ReturnType<typeof useRegister>);
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    const header = screen.getByTestId('register-strip-header');
+    const equation = screen.getByTestId('register-strip-equation');
+    const [status, last, print, chevron] = ['register-strip-status', 'register-strip-last-closure', 'reports-x-print',
+      'register-strip-open-panel'].map((id) => within(header).getByTestId(id));
+    expect(status).toBeTruthy();
+    expect(header.contains(equation)).toBe(false);
+    expect(header.compareDocumentPosition(equation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(last.compareDocumentPosition(print) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(print.compareDocumentPosition(chevron) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
 
@@ -367,6 +389,55 @@ describe('ReportsScreen', () => {
     const label = within(button).getByText('Print summary');
     expect(icon.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button.textContent).toBe('Print summary');
+  });
+
+  it('the closed strip offers Print closure, with v2\'s printer icon before its label, in place of Print X report', () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register,
+      lastClosure: closure({ number: 3 }) } });
+    mount();
+    const button = within(screen.getByTestId('register-strip-header')).getByTestId('reports-closure-print');
+    const icon = within(button).getByTestId('reports-closure-print-icon');
+    expect(icon.querySelector('svg')).toBeTruthy();
+    const label = within(button).getByText('Print closure');
+    expect(icon.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(button.textContent).toBe('Print closure');
+    expect(screen.queryByTestId('reports-x-print')).toBeNull();
+    cleanup();
+    openRegister();
+    mount();
+    expect(screen.queryByTestId('reports-closure-print')).toBeNull();
+    cleanup();
+    vi.mocked(useRegister).mockReturnValue({ boundRegisterId: 'register-1', registers: [{ id: 'register-1', name: 'Register 1' }],
+      register: { session: null, expected: {}, salesCount: 0 }, registerName: 'Register 1' } as ReturnType<typeof useRegister>);
+    mount();
+    expect(screen.getByTestId('register-strip')).toBeTruthy();
+    expect(screen.queryByTestId('reports-closure-print')).toBeNull();
+  });
+
+  it('Print closure prints the last closure in the frame', async () => {
+    document.getElementById('closure-print-frame')?.remove();
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register,
+      lastClosure: closure({ number: 3 }) } });
+    mount();
+    fireEvent.click(screen.getByTestId('reports-closure-print'));
+    const frame = document.getElementById('closure-print-frame') as HTMLIFrameElement;
+    const print = vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => {});
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    expect(frame.contentDocument!.querySelector('h2')?.textContent).toBe('Z report · Closure #3');
+    await waitFor(() => expect(screen.getByTestId('reports-closure-print').textContent).toBe('Print closure'));
+  });
+
+  it('a failed Print closure says why', async () => {
+    document.getElementById('closure-print-frame')?.remove();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register,
+      lastClosure: closure({ number: 3 }) } });
+    mount();
+    fireEvent.click(screen.getByTestId('reports-closure-print'));
+    const frame = document.getElementById('closure-print-frame') as HTMLIFrameElement;
+    vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => { throw new Error('boom'); });
+    expect((await screen.findByTestId('reports-closure-print-error')).textContent).toBe(PRINT_FAILED);
+    warn.mockRestore();
   });
 
   it('Print X report shows v2\'s printer icon before its label', async () => {
