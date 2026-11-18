@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
-import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, SearchInput, Text as ButtonText } from '@tallyui/components';
+import { Button, Dialog, DialogContent, DialogTitle, SearchInput, Text as ButtonText } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerPatch, type SyncContext } from '@tallyui/core';
 import { FrameMenuButton } from '../components/app-frame';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
+import { CustomersTable } from '../components/customers-table';
 import { BillingNotSavedError, loadCustomerBilling } from '../lib/customer-billing';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
@@ -76,22 +77,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
     {message ? <View className="flex-1 items-center justify-center">
       <Text className="text-sm text-muted-foreground" accessibilityRole={failed ? 'alert' : undefined}>{message}</Text>
     </View> : <ScrollView>
-      {customers.map((customer) => {
-        const props = { testID: `customer-row-${customer.id}`,
-          accessibilityLabel: [customer.name, customer.email, customer.phone].filter(Boolean).join(', '),
-          className: 'min-h-14 flex-row items-center gap-3 border-b border-border px-4 py-2' };
-        const children = <>
-          <Avatar fallback={avatarInitials(customer.name)} tone="primary" />
-          <View className="flex-1">
-            <Text className="text-foreground font-medium">{customer.name}</Text>
-            {customer.email ? <Text className="text-sm text-muted-foreground">{customer.email}</Text> : null}
-            {customer.phone ? <Text className="text-sm text-muted-foreground">{customer.phone}</Text> : null}
-          </View>
-        </>;
-        return connector.updateCustomer
-          ? <Pressable key={customer.id} {...props} accessibilityRole="button" onPress={() => { createdCustomer.current = null; setEditing(customer); }}>{children}</Pressable>
-          : <View key={customer.id} {...props}>{children}</View>;
-      })}
+      <CustomersTable customers={customers} onOpen={connector.updateCustomer ? (customer) => { createdCustomer.current = null; setEditing(customer); } : undefined} />
     </ScrollView>}
     <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) { createdCustomer.current = null; setEditing(null); } }}>
       <DialogContent testID="customer-editor" className="max-h-[90%]">
