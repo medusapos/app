@@ -10,10 +10,12 @@ import { ClosureTable } from './closure-table';
 const closedByOf = (rows: ClosureHistoryEntry[]) => [...new Set(rows.flatMap((row) => row.closedBy ? [row.closedBy] : []))];
 
 export function EarlierClosures({ session, registerId, today, ctx, registerName, cashierNames, localClosures = [], onOpen,
-  from, to = dayBefore(today), cashierId = null, heading = 'Earlier closures', onCashiers }: {
+  from, to = dayBefore(today), cashierId = null, heading = 'Earlier closures', onCashiers, onCount }: {
   session: Session; registerId: string; today: string; ctx: ClosureContext; registerName: string; cashierNames: Record<string, string>;
   localClosures?: Closure[]; onOpen?: (opened: { closure: Closure; frozen: boolean }) => void;
   from?: string; to?: string; cashierId?: string | null; heading?: string | null; onCashiers?: (ids: string[]) => void;
+  /** Told how many rows are loaded, whenever they change (Closures' session count). */
+  onCount?: (count: number) => void;
 }) {
   const [rows, setRows] = useState<ClosureHistoryEntry[]>([]);
   const [more, setMore] = useState(false);
@@ -60,6 +62,7 @@ export function EarlierClosures({ session, registerId, today, ctx, registerName,
   }, [session.baseUrl, session.token, registerId, today, from, to, cashierId]);
   useEffect(() => {
     if (cashierId === null) onCashiers?.(closedByOf(rows));
+    onCount?.(rows.length);
   }, [rows]);
   const filtered = cashierId !== null;
   useEffect(() => {
