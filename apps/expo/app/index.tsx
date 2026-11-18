@@ -378,30 +378,31 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
     cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
   </> : null;
+  const phoneTender = phone && sale.stage.kind === 'tender';
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
         // The title names the store and register as v2's title bar does, and on a phone as v2's phone header does on
-        // Products and Cart alike; the phone tender is "Checkout Order" with a close.
-        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
+        // Products and Cart alike; the phone tender's header, as v2's, carries only "Checkout Order" and a close.
+        title: phoneTender ? 'Checkout Order' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
         // React Navigation sizes the title for a 52 px right button; on a phone the title shrinks to what the right controls
         // leave. native-stack's types omit these, but its web view spreads the options onto elements' Header.
         ...(phone ? { headerTitleContainerStyle: { flexShrink: 1 }, headerRightContainerStyle: { flexBasis: 'auto', flexShrink: 0 } } : {}),
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
-        headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
+        headerLeft: () => phoneTender ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className={phone ? 'flex-row items-center gap-4 pr-4' : 'flex-1 flex-row items-center gap-4 pr-4'}>
         {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
         {headerRegisterState && <HeaderRegisterState label={headerRegisterState} onPress={openGate} />}
-        <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
+        {!phoneTender && <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
           onPress={() => setUserSheetOpen(true)} className="min-h-11 flex-row items-center gap-2">
           {/* On a phone, v2's avatar: light initials on a solid primary circle. */}
           {phone ? <Avatar fallback={initials} tone="primary" size="sm" /> : <>
             <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
             <Text className="text-foreground">{displayName}</Text>
           </>}
-        </Pressable>
-        {phone && sale.stage.kind === 'tender' && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
+        </Pressable>}
+        {phoneTender && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
           disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
           <View className="text-foreground"><XIcon size={24} /></View>
         </IconButton>}
