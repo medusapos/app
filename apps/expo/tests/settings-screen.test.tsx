@@ -2,12 +2,13 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { PortalHost } from '@tallyui/primitives';
 import { router } from 'expo-router';
 import { DEFAULT_SCANNER_SETTINGS, loadScannerSettings, useScannerSettings } from '../lib/scanner-settings';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { loadTillName, useTillName } from '../lib/till-name';
-import { loadDefaultCustomer } from '../lib/default-customer';
+import { loadDefaultCustomer, saveDefaultCustomer } from '../lib/default-customer';
 import { loadDefaultCustomerIsCashier } from '../lib/cashier-customer';
 import SettingsScreen from '../app/settings';
 import { AppFrame } from '../components/app-frame';
@@ -76,16 +77,32 @@ describe('SettingsScreen', () => {
     const ada = { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' };
     searchCustomers.mockResolvedValueOnce([ada]);
     vi.useFakeTimers();
-    await mount();
+    await mount(<><SettingsScreen /><PortalHost /></>);
     expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Guest');
+    expect(screen.getByText('Pre-selected on every new cart.')).toBeTruthy();
+    expect(screen.queryByTestId('customer-picker-search')).toBeNull();
+    fireEvent.click(screen.getByTestId('settings-default-customer-field'));
+    expect(screen.getByTestId('settings-default-customer-dialog')).toBeTruthy();
     fireEvent.change(screen.getByTestId('customer-picker-search'), { target: { value: 'ada' } });
     await act(async () => { await vi.advanceTimersByTimeAsync(250); });
     fireEvent.click(screen.getByText('Ada Lovelace'));
+    expect(screen.queryByTestId('customer-picker-search')).toBeNull();
     expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Ada Lovelace');
     expect(loadDefaultCustomer(localStorage, baseUrl)).toEqual(ada);
-    fireEvent.click(screen.getByTestId('settings-default-customer-clear'));
+    fireEvent.click(screen.getByTestId('settings-default-customer-field'));
+    fireEvent.click(screen.getByTestId('settings-default-customer-guest'));
+    expect(screen.queryByTestId('customer-picker-search')).toBeNull();
     expect(screen.getByTestId('settings-default-customer-current').textContent).toBe('Guest');
     expect(loadDefaultCustomer(localStorage, baseUrl)).toBeNull();
+    expect(screen.queryByTestId('settings-default-customer-clear')).toBeNull();
+  });
+
+  it('the field\'s accessible name carries the saved default customer and the dialog\'s Guest choice is not selected then', async () => {
+    params.section = 'store';
+    saveDefaultCustomer(localStorage, baseUrl, { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' });
+    await mount(<><SettingsScreen /><PortalHost /></>);
+    fireEvent.click(screen.getByRole('button', { name: 'Default customer: Ada Lovelace' }));
+    expect(screen.getByTestId('settings-default-customer-guest').getAttribute('aria-selected')).toBe('false');
   });
 
   it('turns on Default customer is cashier and says which Medusa customer new sales start on', async () => {
@@ -163,6 +180,7 @@ describe('SettingsScreen', () => {
       expect(defaultCustomer.compareDocumentPosition(currency) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(screen.getByTestId('settings-section-title').textContent).toBe('General');
       expect(within(card).getByRole('switch', { name: 'Default customer is cashier' })).toBeTruthy();
+      expect(within(card).getByTestId('settings-default-customer-field')).toBeTruthy();
       expect(screen.queryByTestId('settings-nav-customer')).toBeNull();
       fireEvent.click(screen.getByTestId('settings-nav-tax'));
       expect(screen.queryByTestId('settings-default-customer')).toBeNull();

@@ -66,6 +66,7 @@ test('a sale with the Settings default customer reaches Medusa with the customer
     await signIn(page);
     await openArea(page, 'Settings');
     await page.getByTestId('settings-nav-store').click();
+    await page.getByTestId('settings-default-customer-field').click();
     await page.getByTestId('customer-picker-search').fill(email);
     await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
     await expect(page.getByTestId('settings-default-customer-current')).toHaveText('Ada Lovelace');
@@ -84,7 +85,8 @@ test('a sale with the Settings default customer reaches Medusa with the customer
     expect(order.customer_id).toBe(id);
     await openArea(page, 'Settings');
     await page.getByTestId('settings-nav-store').click();
-    await page.getByTestId('settings-default-customer-clear').click();
+    await page.getByTestId('settings-default-customer-field').click();
+    await page.getByTestId('settings-default-customer-guest').click();
     await expect(page.getByTestId('settings-default-customer-current')).toHaveText('Guest');
   } finally {
     try {

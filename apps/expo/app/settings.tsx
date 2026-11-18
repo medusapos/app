@@ -3,7 +3,7 @@ import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, 
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import { Path } from 'react-native-svg';
-import { Card, createSvgIcon, CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { Card, ChevronDownIcon, createSvgIcon, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
@@ -236,6 +236,7 @@ function RegisterSection({ session }: { session: Session }) {
 }
 function DefaultCustomerSection({ session }: { session: Session }) {
   const { customer, save } = useDefaultCustomer(defaultStorage(), session.baseUrl);
+  const [open, setOpen] = useState(false);
   const { reportUnauthorized } = useSession();
   const connector = useMemo(() => createPosConnector(), []);
   const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
@@ -247,21 +248,38 @@ function DefaultCustomerSection({ session }: { session: Session }) {
     found: `New sales start on ${cashier.customer?.name}, the customer in Medusa with your email.`,
     none: `No customer in Medusa has your email, ${session.email}. New sales start on the default customer above.`,
     offline: `Couldn't check Medusa. New sales start on ${cashier.customer?.name}.` }[cashier.status];
-  return <SettingsGroup title="Default customer" testID="settings-default-customer"
-    description="Every new sale on this till starts with this customer. A cashier can still change it on a sale.">
-    <View className="gap-4 p-4">
-      <Text testID="settings-default-customer-current" className="text-foreground">{customer?.name ?? 'Guest'}</Text>
-      {connector.searchCustomers ? <CustomerPicker selected={customer}
-        // Settings has no sync state; the picker reports a failed search itself.
-        online={true} search={(q) => connector.searchCustomers!(context, q)}
-        onSelect={(c) => save(c ? { id: c.id, name: c.name, ...(c.email !== undefined ? { email: c.email } : {}) } : null)}
-        onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') reportUnauthorized(); }} />
-        : <Text className="text-muted-foreground">Customers aren't available for this store.</Text>}
-      {customer && <Pressable testID="settings-default-customer-clear" accessibilityRole="button"
-        onPress={() => save(null)} className={`${buttonClass} border border-border`}>
-        <Text className="text-foreground">Use Guest</Text>
-      </Pressable>}
-    </View>
+  const name = customer?.name ?? 'Guest';
+  const available = !!connector.searchCustomers;
+  const wide = useWindowDimensions().width >= SETTINGS_SPLIT_MIN_WIDTH;
+  // v2's one select-style field: the current default, opening a dialog to choose Guest or a customer.
+  return <SettingsGroup title="Customer" testID="settings-default-customer">
+    <SettingsRow label="Default customer" description="Pre-selected on every new cart." action={
+      <Pressable testID="settings-default-customer-field" accessibilityRole="button" accessibilityLabel={`Default customer: ${name}`}
+        disabled={!available} accessibilityState={{ disabled: !available }} onPress={() => setOpen(true)}
+        className={`min-h-11 ${wide ? 'w-72' : 'w-44'} flex-row items-center justify-between gap-2 rounded-md border border-border bg-background px-3${available ? '' : ' opacity-50'}`}>
+        <Text testID="settings-default-customer-current" numberOfLines={1} className="shrink text-sm text-foreground">{name}</Text>
+        <View className="text-muted-foreground"><ChevronDownIcon size={18} /></View>
+      </Pressable>
+    } />
+    {!available && <View className="px-4 pb-4">
+      <Text className="text-muted-foreground">Customers aren't available for this store.</Text>
+    </View>}
+    {available && <Dialog open={open} onOpenChange={setOpen}>
+      <DialogContent testID="settings-default-customer-dialog"><DialogTitle>Default customer</DialogTitle>
+        <ScrollView contentContainerClassName="gap-3">
+          <Pressable testID="settings-default-customer-guest" accessibilityRole="button" aria-selected={!customer}
+            accessibilityState={{ selected: !customer }} onPress={() => { save(null); setOpen(false); }}
+            className="items-center rounded-lg border border-border px-4 py-3">
+            <Text className="text-sm font-semibold text-foreground">Guest</Text>
+          </Pressable>
+          <CustomerPicker selected={customer}
+            // Settings has no sync state; the picker reports a failed search itself.
+            online={true} search={(q) => connector.searchCustomers!(context, q)}
+            onSelect={(c) => { save(c ? { id: c.id, name: c.name, ...(c.email !== undefined ? { email: c.email } : {}) } : null); setOpen(false); }}
+            onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') reportUnauthorized(); }} />
+        </ScrollView>
+      </DialogContent>
+    </Dialog>}
     {connector.searchCustomers && <SettingsRow label="Default customer is cashier" className="border-t border-border" action={
       <Switch accessibilityLabel="Default customer is cashier" testID="settings-default-customer-is-cashier"
         checked={cashier.on} onCheckedChange={cashier.setOn} />
