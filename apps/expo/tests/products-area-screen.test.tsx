@@ -2,14 +2,14 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ProductTraits, StoreSettings as PricingSettings, VariantSummary } from '@tallyui/core';
+import { StoreSettingsError, type ProductTraits, type StoreSettings as PricingSettings, type VariantSummary } from '@tallyui/core';
 import { useStoreSettings } from '@tallyui/pos';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
 import { PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH } from '../lib/products-area';
-import { fetchStoreSettings, type StoreSettings } from '../lib/store-settings';
+import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
-import { capabilities } from './pos-connector-mock';
+import { capabilities, storeSettings } from './pos-connector-mock';
 import ProductsAreaScreen from '../app/products';
 
 const { sessionState } = vi.hoisted(() => ({ sessionState: {
@@ -86,6 +86,7 @@ afterEach(() => {
   cleanup();
   act(() => { withdrawCatalogue('sale'); withdrawCatalogue('products'); });
   sessionState.session = null;
+  vi.unstubAllGlobals();
 });
 
 describe('ProductsAreaScreen', () => {
@@ -185,5 +186,29 @@ describe('ProductsAreaScreen', () => {
     expect(screen.getByTestId('products-loading')).toBeTruthy();
     expect(screen.queryByTestId('product-row-v1')).toBeNull();
     expect(screen.getByTestId('products-admin-note')).toBeTruthy();
+  });
+
+  // Intended (ruling on #414): the catalogue read needs the till's region, channel and location, as the Sale does,
+  // so a till with no saved choice is set up here, and the choice is the same per-store one the Sale reads.
+  it('sets the till up when opened without the Sale and no saved choice, then reads the catalogue with it', async () => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
+    const actual = await vi.importActual<typeof import('@tallyui/pos')>('@tallyui/pos');
+    vi.mocked(useStoreSettings).mockImplementation(actual.useStoreSettings);
+    capabilities.mockResolvedValue({ orderCreate: 3, taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' } });
+    storeSettings.mockReset()
+      .mockRejectedValueOnce(new StoreSettingsError('choice_required', 'Choose', { regions: [{ id: 'reg_eu', name: 'Europe' }] }))
+      .mockResolvedValueOnce(pricing);
+    sessionState.session = session;
+    await mountRead();
+    expect(await screen.findByText('Set up this till')).toBeTruthy();
+    expect(useReplicatedProducts).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('radio', { name: 'Europe' }));
+    await act(async () => { fireEvent.click(screen.getByText('Continue')); });
+    expect(await screen.findByTestId('products-loading')).toBeTruthy();
+    expect(vi.mocked(useReplicatedProducts).mock.lastCall![1])
+      .toMatchObject({ baseUrl: session.baseUrl, pricingContext: pricing.pricingContext });
+    expect(loadSettingsChoice(localStorage, session.baseUrl)).toEqual({ region: 'reg_eu' });
   });
 });
