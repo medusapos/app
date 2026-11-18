@@ -206,9 +206,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   };
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
-  // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so does the
-  // address dialog, so leaving the cart closes it and a cancelled tender does not reopen it.
-  useEffect(() => { if (sale.stage.kind !== 'cart') setAddressCustomerId(null); }, [sale.stage.kind]);
+  // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so do the
+  // customer picker, the new-customer dialog and the address dialog, so leaving the cart closes them and a cancelled
+  // tender does not reopen them.
+  useEffect(() => {
+    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setCustomerOpen(false); setNewCustomerOpen(false); }
+  }, [sale.stage.kind]);
+  // Read at pick time: the picker's New customer create can settle after its dialog closed, and that late pick is dropped.
+  const pickerLive = useRef(false);
+  pickerLive.current = customerOpen && sale.stage.kind === 'cart';
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
 
   // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
@@ -372,28 +378,29 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatDate} taxLabel={taxLabel}
     cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
   </> : null;
+  const phoneTender = phone && sale.stage.kind === 'tender';
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
         // The title names the store and register as v2's title bar does, and on a phone as v2's phone header does on
-        // Products and Cart alike; the phone tender is "Checkout Order" with a close.
-        title: phone && sale.stage.kind === 'tender' ? 'Checkout Order' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
+        // Products and Cart alike; the phone tender's header, as v2's, carries only "Checkout Order" and a close.
+        title: phoneTender ? 'Checkout Order' : storeRegisterTitle(storeName, boundRegisterId, registerName), headerShown: sale.stage.kind !== 'receipt',
         // React Navigation sizes the title for a 52 px right button; on a phone the title shrinks to what the right controls
         // leave. native-stack's types omit these, but its web view spreads the options onto elements' Header.
         ...(phone ? { headerTitleContainerStyle: { flexShrink: 1 }, headerRightContainerStyle: { flexBasis: 'auto', flexShrink: 0 } } : {}),
         // Orders, Reports and Settings are in the app frame (the rail, or on a phone the drawer this button opens).
-        headerLeft: () => phone && sale.stage.kind === 'tender' ? null : <FrameMenuButton />, headerRight: () => (
+        headerLeft: () => phoneTender ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className={phone ? 'flex-row items-center gap-4 pr-4' : 'flex-1 flex-row items-center gap-4 pr-4'}>
         {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
         {headerRegisterState && <HeaderRegisterState label={headerRegisterState} onPress={openGate} />}
-        <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
+        {!phoneTender && <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
           onPress={() => setUserSheetOpen(true)} className="min-h-11 min-w-11 flex-row items-center justify-center">
           {/* At every width, v2's avatar: light initials on a solid primary circle; the signed-in user's name is the
               button's accessible name. */}
           <Avatar testID="user-menu-avatar" fallback={initials} tone="primary" size="sm" />
-        </Pressable>
-        {phone && sale.stage.kind === 'tender' && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
+        </Pressable>}
+        {phoneTender && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
           disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
           <View className="text-foreground"><XIcon size={24} /></View>
         </IconButton>}
@@ -408,17 +415,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
         open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />
-      {connector.searchCustomers && <Dialog open={customerOpen} onOpenChange={setCustomerOpen}>
+      {connector.searchCustomers && <Dialog open={customerOpen && sale.stage.kind === 'cart'} onOpenChange={setCustomerOpen}>
         <DialogContent testID="customer-dialog"><DialogTitle>Customer</DialogTitle>
           <ScrollView><CustomerPicker selected={sale.order.customer} online={online}
             search={(q) => connector.searchCustomers!(syncContext, q)}
             create={(input) => connector.createCustomer!(syncContext, input)}
-            onSelect={(c) => { sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
+            onSelect={(c) => { if (!pickerLive.current) return; sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
             onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); }} />
           </ScrollView>
         </DialogContent>
       </Dialog>}
-      {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen} onOpenChange={setNewCustomerOpen}
+      {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen && sale.stage.kind === 'cart'} onOpenChange={setNewCustomerOpen}
         create={(input) => connector.createCustomer!(syncContext, input)}
         update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}

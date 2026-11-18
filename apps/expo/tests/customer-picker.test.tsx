@@ -211,3 +211,55 @@ it('an address save in flight when a tender starts does not change the sale cust
   expect(button('Edit customer address')).toBeTruthy();
   expect(screen.queryByTestId('customer-address-dialog')).toBeNull();
 });
+
+it('the customer picker closes when a tender starts and a cancelled tender does not reopen it', async () => {
+  await mount();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  expect(screen.getByTestId('customer-dialog')).toBeTruthy();
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  expect(observed.sale!.stage.kind).toBe('tender');
+  expect(screen.queryByTestId('customer-dialog')).toBeNull();
+  await act(async () => { observed.sale!.cancelTender(); });
+  expect(screen.queryByTestId('customer-dialog')).toBeNull();
+  expect(button('Customer: Guest')).toBeTruthy();
+});
+
+it('a new customer the picker is still creating when a tender starts does not become the sale customer', async () => {
+  await mount();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  newCustomer();
+  let resolveCreate!: (created: Customer) => void;
+  createCustomer.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+  await act(async () => { fireEvent.click(button('Save Customer')); });
+  expect(createCustomer).toHaveBeenCalledTimes(1);
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  await act(async () => { resolveCreate(customer); });
+  expect(observed.sale!.order.customer).toBeNull();
+  expect(observed.sale!.stage.kind).toBe('tender');
+  expect(screen.queryByTestId('customer-dialog')).toBeNull();
+  await act(async () => { observed.sale!.cancelTender(); });
+  expect(screen.queryByTestId('customer-dialog')).toBeNull();
+  expect(button('Customer: Guest')).toBeTruthy();
+});
+
+it('the Add new customer dialog closes when a tender starts and a late save leaves the sale customer alone', async () => {
+  await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
+  await screen.findByTestId('product-tile-Shirt');
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  fireEvent.click(screen.getByTestId('cart-add-menu'));
+  fireEvent.click(screen.getByRole('menuitem', { name: 'Add new customer' }));
+  fireEvent.change(screen.getByPlaceholderText('email@example.com'), { target: { value: customer.email } });
+  fireEvent.change(screen.getByPlaceholderText('First name'), { target: { value: 'Ada' } });
+  let resolveCreate!: (created: Customer) => void;
+  createCustomer.mockReturnValue(new Promise((resolve) => { resolveCreate = resolve; }));
+  await act(async () => { fireEvent.click(screen.getByTestId('customer-save')); });
+  expect(createCustomer).toHaveBeenCalledTimes(1);
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  expect(observed.sale!.stage.kind).toBe('tender');
+  expect(screen.queryByTestId('new-customer-dialog')).toBeNull();
+  await act(async () => { resolveCreate(customer); });
+  expect(observed.sale!.order.customer).toBeNull();
+  await act(async () => { observed.sale!.cancelTender(); });
+  expect(screen.queryByTestId('new-customer-dialog')).toBeNull();
+  expect(button('Customer: Guest')).toBeTruthy();
+});
