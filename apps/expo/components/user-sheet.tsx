@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Platform, Pressable, View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Avatar, avatarInitials, Button, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { formatClosureDate, presetRange, switchWarnings, watchFresh, type PosOrder, type SwitchWarningInput } from '@tallyui/pos';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
+import { medusaAdminUrl, openMedusaAdmin } from '../lib/medusa-admin';
 import { localDayStartIso, salesRoomFigures } from '../lib/reports';
 import type { Session } from '../lib/session';
 import { closureContext } from './register-close';
@@ -100,12 +101,7 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
       </View> : null}
       <View className="mt-auto border-t border-border">
       <Pressable testID="user-sheet-admin" accessibilityRole="link" className="min-h-11 flex-row items-center gap-2 text-muted-foreground"
-        onPress={() => {
-          const url = `${session.baseUrl}/app`;
-          if (Platform.OS === 'web') window.open(url, '_blank', 'noopener,noreferrer');
-          else void import('expo-linking').then((Linking) => Linking.openURL(url))
-            .catch((error) => console.warn('Failed to open admin URL:', error));
-        }}><ExternalLinkIcon size={14} /><Text className="text-sm text-muted-foreground">Medusa Admin</Text></Pressable>
+        onPress={() => openMedusaAdmin(medusaAdminUrl(session.baseUrl))}><ExternalLinkIcon size={14} /><Text className="text-sm text-muted-foreground">Medusa Admin</Text></Pressable>
       <View className="flex-row justify-between gap-2 border-t border-border pt-4">
         <Button testID="user-sheet-sign-out" variant="outline" className="min-h-11" accessibilityLabel="Sign out"
           disabled={signOutLocked} accessibilityHint={signOutLocked ? lockMessage : undefined}
