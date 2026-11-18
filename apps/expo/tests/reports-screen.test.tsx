@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
 import { createOrderBuilder, finalizeOrder, type Closure, type PosOrder, type RegisterSession } from '@tallyui/pos';
 import ReportsScreen from '../app/reports';
+import { AppFrame } from '../components/app-frame';
 import { closureContext } from '../components/register-close';
 import { dayBefore } from '../lib/closure-history';
 import { X_PRINT_FAILED } from '../lib/closure-print';
@@ -16,13 +17,15 @@ import { varianceLabel } from '../lib/reports';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { saveCachedSettings } from '../lib/store-settings';
+import { setWindowWidth } from './window-width';
 
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
-  router: { replace: vi.fn(), back: vi.fn(), push: vi.fn(), canGoBack: vi.fn(() => false) },
-  Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode } }) =>
-    <div data-testid="header-left">{options.headerLeft?.()}</div> },
+  router: { replace: vi.fn(), back: vi.fn(), push: vi.fn(), canGoBack: vi.fn(() => false) }, usePathname: () => '/reports',
+  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode } }) =>
+    <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
+      {options.headerLeft?.()}</div> },
 }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/register-context', () => ({ useRegister: vi.fn() }));
@@ -375,5 +378,29 @@ describe('ReportsScreen', () => {
     const label = within(button).getByText('Print X report');
     expect(icon.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(button.textContent).toBe('Print X report');
+  });
+});
+
+describe('the header', () => {
+  it('on a wide window there is no title bar; the main landmark is named Reports', async () => {
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    setWindowWidth(1024, 768);
+    render(<SessionProvider><AppFrame signedIn><ReportsScreen /></AppFrame></SessionProvider>);
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    const header = screen.getByTestId('header-left');
+    expect(header.dataset.headerShown).toBe('false');
+    expect(header.dataset.title).toBe('Reports');
+    expect(screen.queryByTestId('frame-menu')).toBeNull();
+    expect(screen.getByRole('main', { name: 'Reports' }).contains(screen.getByTestId('reports-sales-heading'))).toBe(true);
+  });
+
+  it('on a phone the header stays, with the frame\'s Menu', async () => {
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    setWindowWidth(390, 844);
+    render(<SessionProvider><AppFrame signedIn><ReportsScreen /></AppFrame></SessionProvider>);
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    const header = screen.getByTestId('header-left');
+    expect(header.dataset.headerShown).toBe('true');
+    expect(header.contains(screen.getByTestId('frame-menu'))).toBe(true);
   });
 });

@@ -17,8 +17,9 @@ import { setWindowWidth } from './window-width';
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/orders',
-  Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode } }) =>
-    <div data-testid="header-left">{options.headerLeft?.()}</div> },
+  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode } }) =>
+    <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
+      {options.headerLeft?.()}</div> },
 }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
@@ -66,6 +67,7 @@ describe('OrdersScreen', () => {
     setWindowWidth(390, 844);
     render(<SessionProvider><AppFrame signedIn><OrdersScreen /></AppFrame></SessionProvider>);
     const menu = screen.getByTestId('frame-menu');
+    expect(screen.getByTestId('header-left').dataset.headerShown).toBe('true');
     expect(screen.getByTestId('header-left').contains(menu)).toBe(true);
     expect(within(screen.getByTestId('header-left')).getAllByRole('button')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Products' })).toBeNull();
@@ -80,6 +82,10 @@ describe('OrdersScreen', () => {
     render(<SessionProvider><AppFrame signedIn><OrdersScreen /></AppFrame></SessionProvider>);
     expect(screen.getByTestId('header-left').childElementCount).toBe(0);
     expect(screen.getByTestId('nav-rail')).toBeTruthy();
+    // v2's Orders has no title bar on a wide window; the screen is the named main landmark instead.
+    expect(screen.getByTestId('header-left').dataset.headerShown).toBe('false');
+    expect(screen.getByTestId('header-left').dataset.title).toBe('Orders');
+    expect(screen.getByRole('main', { name: 'Orders' }).contains(screen.getByTestId('orders-search'))).toBe(true);
   });
 });
 

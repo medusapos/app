@@ -13,6 +13,8 @@ import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../l
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import ProductsAreaScreen from '../app/products';
+import { AppFrame } from '../components/app-frame';
+import { setWindowWidth } from './window-width';
 
 const { sessionState } = vi.hoisted(() => ({ sessionState: {
   session: null as Session | null, signOut: () => {}, reportUnauthorized: () => {}, reportNoPosAccess: () => {},
@@ -21,8 +23,9 @@ const { sessionState } = vi.hoisted(() => ({ sessionState: {
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/products',
-  Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode } }) =>
-    <div data-testid="header-left">{options.headerLeft?.()}</div> },
+  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode } }) =>
+    <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
+      {options.headerLeft?.()}</div> },
 }));
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 // The area's own catalogue read goes through the Sale's gate: its connector, store settings and replication, driven per test.
@@ -302,5 +305,29 @@ describe('ProductsAreaScreen', () => {
     mount();
     expect(inStock()).toBeTruthy();
     expect(screen.queryByTestId('category-nav-')).toBeNull();
+  });
+});
+
+describe('the header', () => {
+  it('on a wide window there is no title bar; the main landmark is named Products', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    setWindowWidth(1024, 768);
+    render(<AppFrame signedIn><ProductsAreaScreen /></AppFrame>);
+    const header = screen.getByTestId('header-left');
+    expect(header.dataset.headerShown).toBe('false');
+    expect(header.dataset.title).toBe('Products');
+    expect(screen.queryByTestId('frame-menu')).toBeNull();
+    expect(screen.getByRole('main', { name: 'Products' }).contains(screen.getByTestId('products-search'))).toBe(true);
+  });
+
+  it('on a phone the header stays, with the frame\'s Menu', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    setWindowWidth(390, 844);
+    render(<AppFrame signedIn><ProductsAreaScreen /></AppFrame>);
+    const header = screen.getByTestId('header-left');
+    expect(header.dataset.headerShown).toBe('true');
+    expect(header.contains(screen.getByTestId('frame-menu'))).toBe(true);
   });
 });

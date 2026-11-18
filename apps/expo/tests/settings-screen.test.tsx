@@ -22,8 +22,9 @@ vi.mock('../lib/pos-connector', async (importOriginal) => ({
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/settings',
-  Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
-    <div data-testid="header-left">{options.headerLeft?.()}</div>
+  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
+    <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
+      {options.headerLeft?.()}</div>
     {options.headerRight?.()}
   </> },
 }));
@@ -296,6 +297,7 @@ describe('SettingsScreen', () => {
   it('on a phone Settings shows one control in the header, the frame\'s Menu (walkthrough item 10)', async () => {
     await mountFramed(390, 844);
     const headerLeft = screen.getByTestId('header-left');
+    expect(headerLeft.dataset.headerShown).toBe('true');
     expect(headerLeft.contains(screen.getByTestId('frame-menu'))).toBe(true);
     expect(within(headerLeft).getAllByRole('button')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Products' })).toBeNull();
@@ -315,6 +317,10 @@ describe('SettingsScreen', () => {
   it('on a wide window the header has no back control and the rail\'s POS dismisses to the sale under Settings', async () => {
     await mountFramed(1440, 900);
     expect(screen.getByTestId('header-left').childElementCount).toBe(0);
+    // v2's Settings has no title bar on a wide window; the screen is the named main landmark instead.
+    expect(screen.getByTestId('header-left').dataset.headerShown).toBe('false');
+    expect(screen.getByTestId('header-left').dataset.title).toBe('Settings');
+    expect(screen.getByRole('main', { name: 'Settings' }).contains(screen.getByTestId('settings-nav'))).toBe(true);
     fireEvent.click(within(screen.getByTestId('nav-rail')).getByTestId('nav-item-sale'));
     expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
     expect(router.replace).not.toHaveBeenCalled();

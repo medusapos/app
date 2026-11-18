@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { Fragment, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
@@ -8,7 +8,8 @@ import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
-import { FrameMenuButton } from '../components/app-frame';
+import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { StripHeightContext } from '../components/store-refused';
 import { ExternalLinkIcon } from '../components/external-link-icon';
 import { version as appVersion } from '../package.json';
 import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
@@ -46,6 +47,10 @@ export default function SettingsScreen() {
   const { session } = useSession();
   const { width } = useWindowDimensions();
   const [chosenSection, setChosenSection] = useState('store');
+  // v2's Settings has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
+  const openMenu = useFrameMenu();
+  // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
+  const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
   const sections = [
     { id: 'store', label: 'General', element: <StoreSection session={session} /> },
@@ -59,9 +64,9 @@ export default function SettingsScreen() {
   ];
   const chosen = sections.find(({ id }) => id === chosenSection) ?? sections[0];
   if (width >= SETTINGS_SPLIT_MIN_WIDTH) return <>
-    <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
-    <SettingsLayout layout="split" navSlot={
-      <View testID="settings-nav" className="gap-1 p-2">
+    <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <SettingsLayout layout="split" role="main" aria-label="Settings" navSlot={
+      <View testID="settings-nav" className="gap-1 px-2 pb-2" style={{ paddingTop: 8 + topInset }}>
         {sections.map(({ id, label }) => <Pressable key={id} testID={`settings-nav-${id}`} accessibilityRole="button"
           aria-selected={chosenSection === id}
           accessibilityState={{ selected: chosenSection === id }} onPress={() => setChosenSection(id)}
@@ -70,7 +75,7 @@ export default function SettingsScreen() {
         </Pressable>)}
       </View>
     } contentSlot={
-      <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
+      <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 pb-6" contentContainerStyle={{ paddingTop: 24 + topInset }}>
         {/* v2 draws the chosen section in one full-width card, titled with its nav label. */}
         <Card testID="settings-section-card" className="w-full">
           <View className="border-b border-border px-4 py-3">
@@ -83,8 +88,9 @@ export default function SettingsScreen() {
       </ScrollView>
     } />
   </>;
-  return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
-    <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
+  return <ScrollView className="flex-1 bg-background" role="main" aria-label="Settings" contentContainerClassName="px-6 pb-6"
+    contentContainerStyle={{ paddingTop: 24 + topInset }}>
+    <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-md gap-6 self-center">
       {sections.map(({ id, element }) => <Fragment key={id}>{element}</Fragment>)}
     </View>
