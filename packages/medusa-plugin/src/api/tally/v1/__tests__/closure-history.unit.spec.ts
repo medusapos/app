@@ -15,6 +15,21 @@ describe('parseClosuresQuery', () => {
       .toStrictEqual({ ok: true, query: { limit: 50, from: '2026-01-01', to: '2026-01-01' } })
   })
 
+  it('reads cashier, and accepts a 200-character id', () => {
+    expect(parseClosuresQuery({ cashier: 'user_1', before: '5' }))
+      .toStrictEqual({ ok: true, query: { limit: 50, before: 5, cashier: 'user_1' } })
+    const long = 'u'.repeat(200)
+    expect(parseClosuresQuery({ cashier: long })).toStrictEqual({ ok: true, query: { limit: 50, cashier: long } })
+  })
+
+  it.each([
+    [{ cashier: '' }],
+    [{ cashier: ['a', 'b'] }],
+    [{ cashier: 'u'.repeat(201) }],
+  ])('refuses cashier %j', (query) => {
+    expect(parseClosuresQuery(query)).toStrictEqual({ ok: false, message: 'cashier must be a user id' })
+  })
+
   it.each([
     [{ limit: '0' }, 'limit must be an integer from 1 to 100'],
     [{ limit: '101' }, 'limit must be an integer from 1 to 100'],

@@ -951,9 +951,10 @@ medusaIntegrationTestRunner({
     })
 
     describe('closure history', () => {
-      async function closeDay(opening: ReturnType<typeof open>, number: number, businessDay?: string) {
+      async function closeDay(opening: ReturnType<typeof open>, number: number, businessDay?: string, closedBy?: string) {
         const submission = closure(opening.payload, number)
         if (businessDay !== undefined) submission.payload.businessDay = businessDay
+        if (closedBy !== undefined) submission.payload.closedBy = closedBy
         const response = await post([opening, close(opening.payload.sessionId), submission])
         expect(response.data.results.map(result => result.status)).toEqual(['applied', 'applied', 'applied'])
         return submission
@@ -1013,6 +1014,34 @@ medusaIntegrationTestRunner({
         const reversed = await api.get(`${url}?from=2026-01-03&to=2026-01-02`, { headers, validateStatus: () => true })
         expect(reversed.status).toBe(400)
         expect(reversed.data).toEqual({ message: 'from must not be after to' })
+      })
+
+      it('GET /tally/v1/registers/{id}/closures narrows to one cashier with cashier, pages within it, and an unknown cashier is an empty page', async () => {
+        const registerId = randomUUID()
+        await closeDay(open(registerId), 1, undefined, 'user_a')
+        await closeDay(open(registerId), 2, undefined, 'user_b')
+        await closeDay(open(registerId), 3, undefined, 'user_a')
+        await closeDay(open(registerId), 4, undefined, 'user_a')
+        await closeDay(open(), 1, undefined, 'user_a')
+        const url = `/tally/v1/registers/${registerId}/closures`
+        const all = await api.get(`${url}?cashier=user_a`, { headers })
+        expect(all.data.closures.map(c => c.number)).toEqual([4, 3, 1])
+        expect(all.data.more).toBe(false)
+        expect(all.data.closures.map(c => c.closedBy)).toEqual(['user_a', 'user_a', 'user_a'])
+        const firstPage = await api.get(`${url}?cashier=user_a&limit=2`, { headers })
+        expect(firstPage.data.closures.map(c => c.number)).toEqual([4, 3])
+        expect(firstPage.data.more).toBe(true)
+        const secondPage = await api.get(`${url}?cashier=user_a&limit=2&before=3`, { headers })
+        expect(secondPage.data.closures.map(c => c.number)).toEqual([1])
+        expect(secondPage.data.more).toBe(false)
+        const other = await api.get(`${url}?cashier=user_b`, { headers })
+        expect(other.data.closures.map(c => c.number)).toEqual([2])
+        const nobody = await api.get(`${url}?cashier=nobody`, { headers })
+        expect(nobody.status).toBe(200)
+        expect(nobody.data).toEqual({ closures: [], more: false })
+        const empty = await api.get(`${url}?cashier=`, { headers, validateStatus: () => true })
+        expect(empty.status).toBe(400)
+        expect(empty.data).toEqual({ message: 'cashier must be a user id' })
       })
     })
 

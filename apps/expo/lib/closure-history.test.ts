@@ -18,6 +18,16 @@ it('requests the bound register before a day, with the session token', async () 
     'https://shop.test/tally/v1/registers/reg%2F1/closures?limit=20&to=2026-11-09&before=7', { headers: authHeaders('t0k') });
 });
 
+it('sends cashier when given and leaves it out when not', async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => response({ closures: [], more: false }));
+  await fetchClosureHistory(session, 'reg/1', { to: '2026-11-09', before: 7, cashier: 'user 1' }, fetchImpl);
+  expect(fetchImpl).toHaveBeenLastCalledWith(
+    'https://shop.test/tally/v1/registers/reg%2F1/closures?limit=20&to=2026-11-09&before=7&cashier=user+1',
+    { headers: authHeaders('t0k') });
+  await fetchClosureHistory(session, 'reg/1', { to: '2026-11-09' }, fetchImpl);
+  expect(fetchImpl.mock.lastCall?.[0]).not.toContain('cashier');
+});
+
 it('returns the entries and more', async () => {
   const second = { closureId: 'c2', number: 2, openedAt: '2026-11-08T09:00:00Z',
     closedAt: '2026-11-08T18:00:00Z', periodSalesTotalMinor: 2000 };
