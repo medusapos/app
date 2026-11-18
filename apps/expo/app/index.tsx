@@ -24,6 +24,7 @@ import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerChip } from '../components/customer-chip';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
+import { OfflineToast, useOfflineToast } from '../components/offline-toast';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidChange } from '../components/paid-change';
@@ -104,6 +105,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's header "● Offline": the browser losing the network shows offline at once, not only after a pull fails.
   const networkOnline = useNetworkOnline();
   const pullState: SyncState = networkOnline ? state : 'offline';
+  const offline = useOfflineToast(networkOnline, state);
   const online = pullState !== 'offline';
   const previousToken = useRef(session.token);
   useEffect(() => {
@@ -320,6 +322,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       onViewStateError={onViewStateError} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
+    {/* v2's "Device went offline" toast, floating over the top of the products; the empty sides stay tappable. */}
+    {offline.kind && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center px-2">
+      <OfflineToast kind={offline.kind} onClose={offline.close} />
+    </View>}
   </View>;
   // The till's open sales: the strip's tabs, and the count's "carts still open" line (row 09e.2).
   const tillSales = openSales(sale.order, parked);
