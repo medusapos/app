@@ -88,6 +88,15 @@ describe('CustomerEditor billing', () => {
     await submit();
     expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), { ...stored, city: 'Leeds' }, undefined);
   });
+  it('ignores an address load that fails after the editor closes', async () => {
+    let reject!: (error: Error) => void;
+    const loadAddresses = () => new Promise<{ billing?: CustomerAddress }>((_, fail) => { reject = fail; });
+    const onUnauthorized = vi.fn();
+    const { unmount } = render(<CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={onUnauthorized} loadAddresses={loadAddresses} />);
+    unmount();
+    await act(async () => { reject(new ConnectorUnauthorizedError('expired', 401)); });
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
   it.each([new CustomerServiceError('network', 'offline'), new ConnectorUnauthorizedError('expired', 401)])(
     'locks billing after a failed load: %s', async (error) => {
       const save = vi.fn().mockResolvedValue(undefined);
