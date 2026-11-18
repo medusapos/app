@@ -9,6 +9,7 @@ import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
+import { ReceiptTemplatesGroup } from '../components/receipt-templates';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { StripHeightContext } from '../components/store-refused';
 import { ExternalLinkIcon } from '../components/external-link-icon';
@@ -275,7 +276,8 @@ function DefaultCustomerSection({ session }: { session: Session }) {
 const printMethodLabel = () => Platform.OS === 'web' ? 'Print dialog (browser)' : 'Not available on this device';
 function PrintingSection({ session }: { session: Session }) {
   const { settings, save } = usePrintingSettings(defaultStorage(), session.baseUrl);
-  return <SettingsGroup title="Printing" testID="settings-printing"
+  return <>
+  <SettingsGroup title="Printing" testID="settings-printing"
     description="Receipts print through this device's print dialog. Saved on this till only.">
     <SettingsRow label="Automatically print receipt after checkout" action={
       <Switch accessibilityLabel="Automatically print receipt after checkout" testID="settings-printing-auto-print"
@@ -287,7 +289,9 @@ function PrintingSection({ session }: { session: Session }) {
     <SettingsRow label="Print method" className="border-t border-border" action={
       <Text testID="settings-printing-method" className="max-w-40 text-right text-sm text-foreground">{printMethodLabel()}</Text>
     } />
-  </SettingsGroup>;
+  </SettingsGroup>
+  <ReceiptTemplatesGroup session={session} />
+  </>;
 }
 function CardReadersSection() {
   const mode = cardPaymentMode(TILL_PAYMENT_METHODS);
