@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { OrderSummaryLine, Text, orderReference } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, capturedMinor, type PosOrder, type SentOrder } from '@tallyui/pos';
+import { SummaryPayments } from './summary-payments';
 
 export function PaidSummary({ order, posOrder, storeName, taxLabel, formatDate }: {
   order: SentOrder;
@@ -31,16 +32,9 @@ export function PaidSummary({ order, posOrder, storeName, taxLabel, formatDate }
     {totals.taxLines.map((line, index) => <OrderSummaryLine key={index}
       label={`${totals.taxInclusive ? 'incl. ' : ''}${taxLabel(line.ratePpm)}`}
       amount={formatMoney({ amount: line.amountMinor, currency: order.currency })!} />)}
-    <Text className="font-semibold text-foreground">Payments</Text>
-    {posOrder.payments.map(payment => <View key={payment.id} className="gap-1">
-      <OrderSummaryLine label={payment.method === 'cash' ? 'Cash' : 'Card terminal'}
-        amount={formatMoney({ amount: payment.amountMinor, currency: order.currency })!} />
-      {payment.tenderedMinor !== undefined && <Text className="text-muted-foreground">
-        {`Tendered ${formatMoney({ amount: payment.tenderedMinor, currency: order.currency })} · change ${formatMoney({ amount: payment.changeMinor ?? 0, currency: order.currency })}`}
-      </Text>}
-    </View>)}
-    <OrderSummaryLine label="Total" bold amount={formatMoney({ amount: totals.totalMinor, currency: order.currency })!} />
-    <OrderSummaryLine label="Paid" amount={formatMoney({ amount: paidMinor, currency: order.currency })!} />
+    <SummaryPayments currency={order.currency} totalMinor={totals.totalMinor} paidMinor={paidMinor}
+      payments={posOrder.payments.map(payment => ({ id: payment.id, label: payment.method === 'cash' ? 'Cash' : 'Card terminal',
+        amountMinor: payment.amountMinor, tenderedMinor: payment.tenderedMinor, changeMinor: payment.changeMinor }))} />
     {paidMinor >= totals.totalMinor && <Text testID="paid-in-full" className="text-success">Paid in full</Text>}
   </View>;
 }
