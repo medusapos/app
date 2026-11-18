@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SignInError, StoreSettingsError, type StoreSettings as PricingSettings, type StoreSettingsChoices } from '@tallyui/core';
 import ProductsScreen from '../app/index';
@@ -244,7 +244,7 @@ describe('store settings flow', () => {
     expect(vi.mocked(useReplicatedProducts).mock.lastCall![1]).toBe(replicationContext);
     fireEvent.click(button('Back'));
     expect(button('Edit quantity of Shirt')).toBeTruthy();
-    expect(screen.getByTestId('cart-footer').textContent).toContain('Total€15.00');
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
   }, 20000);
 
   it('hides Retry while the cart has lines or a tender is open, and new settings wait for the sale to end (a money rule)', async () => {
@@ -275,7 +275,7 @@ describe('store settings flow', () => {
       pricingContext: { region_id: 'reg_de', currency_code: 'eur', publishable_key: 'pk_1' } }); });
     expect(region()).toBe('reg_eu');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    expect(screen.getByTestId('cart-footer').textContent).toContain('Total€30.00');
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €30.00');
     await payByCard();
     expect(tenderLegs()).toEqual(['Card terminal €30.00']);
     await act(async () => { fireEvent.click(button('Complete sale')); });
@@ -288,7 +288,7 @@ describe('store settings flow', () => {
     await act(async () => { fireEvent.click(button('New sale')); });
     expect(region()).toBe('reg_de');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
-    expect(screen.getByTestId('cart-footer').textContent).toContain('Total€20.00');
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €20.00');
   }, 20000);
 
   it('keeps the POS and its sale when a retry resolves to the choice screen mid-sale, and shows the choice after it (a money rule)', async () => {
