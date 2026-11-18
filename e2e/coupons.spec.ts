@@ -43,7 +43,7 @@ test('a €1.00 coupon typed in lower case prices the cart at €3.75, and Medus
     await expect(row).toContainText(/−\D*1\.00/);
     await expect(field(page).getByRole('alert')).toHaveCount(0);
     // 2 × €2.00 less the €1.00 coupon is €3.00 net, plus 25% VAT (€0.75) = €3.75.
-    await expect(cartTotalRow(page, 'Total')).toHaveText(/^Total\D*3\.75$/);
+    await expect(page.getByTestId('cart-checkout')).toHaveText(/^Checkout\D*3\.75$/);
     await expect(cartTotalRow(page, 'Subtotal')).toHaveText(/^Subtotal\D*4\.00$/);
     await expect(cartTotalRow(page, 'VAT 25%')).toHaveText(/^VAT 25%\D*0\.75$/);
     // The coupon reads on its own row, never again as a cart Discount.
@@ -81,15 +81,15 @@ test('removing an applied coupon takes its row away and puts the Total back to �
   const promotion = await createPromotion(await adminToken(), { code: uniqueCode('E2E-REMOVE'), amount: 1 });
   await signIn(page);
   await addE2E1(page);
-  await expect(cartTotalRow(page, 'Total')).toHaveText(/^Total\D*2\.50$/);
+  await expect(page.getByTestId('cart-checkout')).toHaveText(/^Checkout\D*2\.50$/);
   await applyCode(page, promotion.code);
   const row = page.getByTestId(`coupon-row-${promotion.code.toLowerCase()}`);
   await expect(row).toBeVisible();
   // €2.00 − €1.00 = €1.00 net, plus 25% VAT.
-  await expect(cartTotalRow(page, 'Total')).toHaveText(/^Total\D*1\.25$/);
+  await expect(page.getByTestId('cart-checkout')).toHaveText(/^Checkout\D*1\.25$/);
   await page.getByRole('button', { name: `Remove coupon ${promotion.code}`, exact: true }).click();
   await expect(couponRows(page)).toHaveCount(0);
-  await expect(cartTotalRow(page, 'Total')).toHaveText(/^Total\D*2\.50$/);
+  await expect(page.getByTestId('cart-checkout')).toHaveText(/^Checkout\D*2\.50$/);
 });
 
 test('an unknown code shows the store\'s refusal under the field, adds no row and keeps the text', async ({ page }) => {
@@ -101,7 +101,7 @@ test('an unknown code shows the store\'s refusal under the field, adds no row an
   await expect(field(page).getByRole('alert')).toHaveText("This coupon code isn't known to the store.");
   await expect(couponRows(page)).toHaveCount(0);
   await expect(page.getByLabel('Coupon code', { exact: true })).toHaveValue(code);
-  await expect(cartTotalRow(page, 'Total')).toHaveText(/^Total\D*2\.50$/);
+  await expect(page.getByTestId('cart-checkout')).toHaveText(/^Checkout\D*2\.50$/);
 });
 
 test('with the preview unreachable Apply says coupons need a connection; once it is back the coupon applies', async ({ page }) => {
@@ -117,5 +117,5 @@ test('with the preview unreachable Apply says coupons need a connection; once it
   await page.getByTestId('coupon-apply').click();
   await expect(page.getByTestId(`coupon-row-${promotion.code.toLowerCase()}`)).toBeVisible();
   await expect(field(page).getByRole('alert')).toHaveCount(0);
-  await expect(cartTotalRow(page, 'Total')).toHaveText(/^Total\D*1\.25$/);
+  await expect(page.getByTestId('cart-checkout')).toHaveText(/^Checkout\D*1\.25$/);
 });

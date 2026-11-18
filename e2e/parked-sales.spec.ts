@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { addE2E1, adminToken, captureCommands, cartLine, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
+import { addE2E1, adminToken, captureCommands, cartLine, discount, ordersByClientId, sellBySku, signIn, test } from './helpers';
 import { appliedResponse } from './helpers';
 
 type Sale = { clientOrderId: string; totalMinor: number;
@@ -22,7 +22,7 @@ test('park a sale, sell another, resume the first and complete it: both orders r
   const second = (await (await secondApplied).json()).results;
   await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
   await page.getByTestId(/^parked-resume-/).click();
-  await expect(cartTotalRow(page, 'Total')).toContainText('5.00');
+  await expect(page.getByTestId('cart-checkout')).toContainText('5.00');
   await expect(page.getByTestId('parked-sales-chip')).toHaveCount(0);
   const firstApplied = appliedResponse(page);
   expect(await sellBySku(page, [], 'exact')).toBe(5);
@@ -56,7 +56,7 @@ test('an edited unit price settles in Medusa at the till\'s total with no warnin
   await cartLine(page, 'E2E product 1').getByTestId('price-popover-trigger').click();
   for (const key of ['3', 'decimal', '2', '0']) await page.getByTestId(`price-popover-keypad-key-${key}`).click();
   await page.getByTestId('price-popover-apply').click();
-  await expect(cartTotalRow(page, 'Total')).toContainText('7.20');
+  await expect(page.getByTestId('cart-checkout')).toContainText('7.20');
   const applied = appliedResponse(page);
   expect(await sellBySku(page, [], 'exact')).toBe(7.2);
   const { results } = await (await applied).json();

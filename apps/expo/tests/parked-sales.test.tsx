@@ -121,7 +121,7 @@ it('parks the cart with New, starts an empty sale, and resumes the parked cart w
   fireEvent.click(button('Parked sales (1)'));
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
   expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
-  expect(row('Total')).toBe('Total€30.00');
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €30.00');
   expect(await drafts().find().exec()).toHaveLength(0);
   expect(record).not.toHaveBeenCalled();
 });
@@ -139,7 +139,8 @@ it('a parked sale resumed after a catalogue price change is re-priced to today\'
   view.rerender(<><ProductsScreen /><PortalHost /></>);
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€15.00', '€15.00']);
-  expect([row('Subtotal'), row('VAT 25%'), row('Total')]).toEqual(['Subtotal€15.00', 'VAT 25%€3.75', 'Total€18.75']);
+  expect([row('Subtotal'), row('VAT 25%')]).toEqual(['Subtotal€15.00', 'VAT 25%€3.75']);
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €18.75');
   expect(screen.getByText("Prices changed since this sale was parked: 1 line updated to today's price.")).toBeTruthy();
 });
 
@@ -153,7 +154,7 @@ it('a variant no longer in the catalogue keeps its parked price on resume', asyn
   expect(screen.queryByTestId('product-tile-Shirt')).toBeNull();
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
-  expect(row('Total')).toBe('Total€15.00');
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
   expect(screen.queryByText(/Prices changed/)).toBeNull();
 });
 
@@ -162,7 +163,7 @@ it('an unchanged catalogue resumes at the same prices with no Prices changed not
   fireEvent.click(button('Parked sales (1)'));
   await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
-  expect(row('Total')).toBe('Total€15.00');
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
   expect(screen.queryByText(/Prices changed/)).toBeNull();
 });
 
@@ -204,8 +205,9 @@ it('the Price action on a line changes its unit price, and the line and total fo
   // TallyUI 3.14.0's Price cell strikes the regular price through ahead of the new unit price.
   expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00€10.00', '€20.00']);
   expect(within(cartLine('Shirt')).getByLabelText('Regular price €12.00')).toBeTruthy();
-  expect([row('Subtotal'), row('Discount'), row('VAT 25%'), row('Total')])
-    .toEqual(['Subtotal€20.00', 'Discount−€2.00', 'VAT 25%€4.50', 'Total€22.50']);
+  expect([row('Subtotal'), row('Discount'), row('VAT 25%')])
+    .toEqual(['Subtotal€20.00', 'Discount−€2.00', 'VAT 25%€4.50']);
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €22.50');
 });
 
 it('a sale with an edited price is recorded with that unitPriceMinor', async () => {
