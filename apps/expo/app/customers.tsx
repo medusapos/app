@@ -5,7 +5,7 @@ import { Redirect, Stack } from 'expo-router';
 import { Path } from 'react-native-svg';
 import { createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, SearchInput } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type SyncContext } from '@tallyui/core';
-import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { CustomerColumnsButton } from '../components/customer-columns-settings';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
 import { CustomersTable } from '../components/customers-table';
@@ -34,7 +34,7 @@ export default function CustomersScreen() {
   const openMenu = useFrameMenu();
   if (!session) return <Redirect href="/login" />;
   return <>
-    <Stack.Screen options={{ title: 'Customers', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <Stack.Screen options={{ title: 'Customers', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <CustomersSearch session={session} onUnauthorized={reportUnauthorized} />
   </>;
 }
@@ -53,6 +53,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
   const columns = useCustomerColumns(defaultStorage(), session.baseUrl);
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
   const topInset = useContext(StripHeightContext);
+  const openMenu = useFrameMenu();
 
   useEffect(() => {
     const current = ++request.current;
@@ -88,6 +89,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
       {connector.createCustomer && <IconButton testID="customers-add" accessibilityLabel="Add customer"
         onPress={() => { createdCustomer.current = null; setEditing('new'); }}><UserPlusIcon /></IconButton>}
       <CustomerColumnsButton {...columns} />
+      {!openMenu && <AreaAccountButton />}
     </View>
     {message ? <View className="flex-1 items-center justify-center">
       <Text className="text-sm text-muted-foreground" accessibilityRole={failed ? 'alert' : undefined}>{message}</Text>

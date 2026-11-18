@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router, usePathname } from 'expo-router';
-import { AppFrame, FrameMenuButton, frameStep, useFrameBadge } from '../components/app-frame';
+import { AppFrame, AreaAccountButton, FrameMenuButton, frameStep, useFrameAccountPublisher, useFrameBadge } from '../components/app-frame';
 import { version as appVersion } from '../package.json';
 import { setWindowWidth } from './window-width';
 
@@ -172,5 +172,38 @@ describe('AppFrame on a phone', () => {
     mount('/orders');
     expect(screen.queryByTestId('nav-rail')).toBeNull();
     expect(screen.getByTestId('frame-menu')).toBeTruthy();
+  });
+});
+
+describe('the account channel (row 14a)', () => {
+  function Publisher({ open }: { open: () => void }) {
+    useFrameAccountPublisher({ displayName: 'Dana Cole', initials: 'DC', open });
+    return null;
+  }
+
+  it('a published account draws the area avatar, named for the user, which calls open once', () => {
+    vi.mocked(usePathname).mockReturnValue('/orders');
+    const open = vi.fn();
+    render(<AppFrame signedIn><Publisher open={open} /><AreaAccountButton /></AppFrame>);
+    const button = screen.getByRole('button', { name: 'Account: Dana Cole' });
+    expect(button.getAttribute('data-testid')).toBe('area-user-menu');
+    expect(within(button).getByTestId('area-user-menu-avatar').textContent).toBe('DC');
+    fireEvent.click(button);
+    expect(open).toHaveBeenCalledOnce();
+  });
+
+  it('draws nothing with no publisher, or once the publisher unmounts', () => {
+    vi.mocked(usePathname).mockReturnValue('/orders');
+    const { rerender } = render(<AppFrame signedIn><AreaAccountButton /></AppFrame>);
+    expect(screen.queryByTestId('area-user-menu')).toBeNull();
+    rerender(<AppFrame signedIn><Publisher open={vi.fn()} /><AreaAccountButton /></AppFrame>);
+    expect(screen.getByTestId('area-user-menu')).toBeTruthy();
+    rerender(<AppFrame signedIn><AreaAccountButton /></AppFrame>);
+    expect(screen.queryByTestId('area-user-menu')).toBeNull();
+  });
+
+  it('outside the frame the publisher does not throw and the area avatar draws nothing', () => {
+    expect(() => render(<><Publisher open={vi.fn()} /><AreaAccountButton /></>)).not.toThrow();
+    expect(screen.queryByTestId('area-user-menu')).toBeNull();
   });
 });

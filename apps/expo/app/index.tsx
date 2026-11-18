@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, router, Stack } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  Catalogue, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
+  Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
@@ -15,7 +15,8 @@ import {
   normalizeCatalogueViewState, type CatalogueViewState,
 } from '@tallyui/pos';
 
-import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
+import { AccountButton } from '../components/account-button';
+import { FrameMenuButton, useFrameAccountPublisher, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
 import { CartNoteDialog, CartNoteLink, CartNoteRow } from '../components/cart-note';
 import { CartSettingsButton } from '../components/cart-settings';
@@ -282,6 +283,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [userSheetOpen, setUserSheetOpen] = useState(false);
   const displayName = session.name || session.email;
   const initials = (session.name ? session.name.trim().split(/\s+/).slice(0, 2).map((word) => word[0]).join('') : session.email[0]).toUpperCase();
+  // Every area's avatar opens this sheet (row 14a): opened from an area it, and its register panel, show over the
+  // area whatever the sale's stage, and Switch register goes back to the sale before the picker.
+  const [sheetFromArea, setSheetFromArea] = useState(false);
+  useFrameAccountPublisher({ displayName, initials, open: () => { setSheetFromArea(true); setUserSheetOpen(true); } });
   // The receipt's and the last closure's store (ADR 0018).
   const receiptStore = { name: settings.storeName, address: settings.location.addressLine };
   // On a phone the count (and a close to finish) is in the cart view, so it opens there even with an empty cart.
@@ -400,23 +405,19 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
         {headerRegisterState && <HeaderRegisterState label={headerRegisterState}
           onPress={registerStatus === 'open' ? () => setPanelOpen(true) : openGate} />}
-        {!phoneTender && <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
-          onPress={() => setUserSheetOpen(true)} className="min-h-11 min-w-11 flex-row items-center justify-center">
-          {/* At every width, v2's avatar: light initials on a solid primary circle; the signed-in user's name is the
-              button's accessible name. */}
-          <Avatar testID="user-menu-avatar" fallback={initials} tone="primary" size="sm" />
-        </Pressable>}
+        {!phoneTender && <AccountButton testID="user-menu" displayName={displayName} initials={initials}
+          onPress={() => { setSheetFromArea(false); setUserSheetOpen(true); }} />}
         {phoneTender && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
           disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
           <View className="text-foreground"><XIcon size={24} /></View>
         </IconButton>}
         </View>
       ) }} />
-      <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={online} open={panelOpen && sale.stage.kind !== 'receipt'} onOpenChange={setPanelOpen} />
+      <RegisterPanelSheet currency={pricing.currency} store={receiptStore} online={online} open={panelOpen && (sheetFromArea || sale.stage.kind !== 'receipt')} onOpenChange={setPanelOpen} />
       <UserSheet session={session} displayName={displayName} initials={initials} storeName={receiptStore.name} currency={pricing.currency}
         outbox={summarizeOutboxHealth(outboxState, registerOutbox.state)} parkedSales={parked.length} paidMinor={capturedMinor(sale.order.payments)}
-        open={userSheetOpen && sale.stage.kind !== 'receipt'} onOpenChange={setUserSheetOpen} onRegister={() => setPanelOpen(true)}
-        onChooseRegister={openGate}
+        open={userSheetOpen && (sheetFromArea || sale.stage.kind !== 'receipt')} onOpenChange={setUserSheetOpen} onRegister={() => setPanelOpen(true)}
+        onChooseRegister={sheetFromArea ? () => { router.dismissTo('/'); openGate(); } : openGate}
         signOut={signOut} signOutLocked={signOutLocked} lockMessage={lockMessage} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
       <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}

@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+// @ts-expect-error no @types/react-dom in this Expo/React Native app
+import { createPortal } from 'react-dom';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -11,16 +13,23 @@ import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { useOutboxContext } from '../lib/outbox-context';
 import OrdersScreen from '../app/orders';
-import { AppFrame } from '../components/app-frame';
+import { AppFrame, useFrameAccountPublisher } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
 
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/orders',
-  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode } }) =>
-    <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
-      {options.headerLeft?.()}</div> },
+  Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) =>
+    <><div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
+      {options.headerLeft?.()}</div>
+      {/* The stack draws headerRight only when the header shows, outside the screen's main landmark. */}
+      {createPortal(<div data-testid="header-right">{options.headerShown && options.headerRight?.()}</div>, document.body)}</> },
 }));
+
+function AccountPublisher({ open }: { open: () => void }) {
+  useFrameAccountPublisher({ displayName: 'Dana Cole', initials: 'DC', open });
+  return null;
+}
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 
@@ -87,6 +96,25 @@ describe('OrdersScreen', () => {
     expect(screen.getByTestId('header-left').dataset.title).toBe('Orders');
     expect(screen.getByRole('main', { name: 'Orders' }).contains(screen.getByTestId('orders-search'))).toBe(true);
   });
+  it('the account avatar ends the search row on a wide window and is the header\'s right button on a phone (row 14a)', () => {
+    const open = vi.fn();
+    const mountFramed = () => render(<SessionProvider><AppFrame signedIn><AccountPublisher open={open} /><OrdersScreen /></AppFrame></SessionProvider>);
+    setWindowWidth(1440, 900);
+    const { unmount } = mountFramed();
+    const avatar = screen.getByTestId('area-user-menu');
+    expect(screen.getByRole('main', { name: 'Orders' }).contains(avatar)).toBe(true);
+    expect(avatar.parentElement!.contains(screen.getByTestId('orders-search'))).toBe(true);
+    expect(avatar.parentElement!.lastElementChild).toBe(avatar);
+    fireEvent.click(avatar);
+    expect(open).toHaveBeenCalledOnce();
+    unmount();
+    setWindowWidth(390, 844);
+    mountFramed();
+    const phoneAvatar = screen.getByTestId('area-user-menu');
+    expect(screen.getByRole('main', { name: 'Orders' }).contains(phoneAvatar)).toBe(false);
+    expect(screen.getByTestId('header-right').contains(phoneAvatar)).toBe(true);
+  });
+
 });
 
 describe('order detail (row 10)', () => {
