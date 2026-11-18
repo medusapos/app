@@ -15,8 +15,25 @@ export function paymentMethodLabel(method: string): string {
   return method === 'cash' ? 'Cash' : method === 'external' ? 'Card' : method.charAt(0).toUpperCase() + method.slice(1);
 }
 
+// The Sales room's status menu; the printed summary's scope line reads the same labels.
+export const STATUS_OPTIONS = [{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }];
+
+/** What a report covers: the period as the closures list names days, the register and the status filter. */
+export function reportScope(filters: SalesFilters, registers: { id: string; name: string }[], today: string, locale: string): {
+  period: string; registerLabel: string; statusLabel: string;
+} {
+  const { from, to } = filters.range;
+  return {
+    period: from === to ? closureDayLabel(from, today, locale)
+      : `${closureDayLabel(from, today, locale)} – ${closureDayLabel(to, today, locale)}`,
+    registerLabel: filters.registerId === null ? 'All registers'
+      : registers.find((r) => r.id === filters.registerId)?.name ?? '',
+    statusLabel: STATUS_OPTIONS.find((option) => option.value === filters.status)?.label ?? '',
+  };
+}
+
 export function salesRoomFigures(orders: readonly PosOrder[], filters: SalesFilters, currency: string): {
-  figures: SalesFigures; notSentCount: number; leftOutCount: number;
+  figures: SalesFigures; notSentCount: number; leftOutCount: number; periodOrders: PosOrder[];
 } {
   const counted = orders.filter((order) => order.currency.toUpperCase() === currency.toUpperCase()
     && (filters.registerId === null || order.registerId === filters.registerId)
@@ -30,6 +47,8 @@ export function salesRoomFigures(orders: readonly PosOrder[], filters: SalesFilt
     notSentCount: counted.filter((order) => order.syncStatus === 'pending' && inRange(order.createdAt, filters.range, 'device')).length,
     leftOutCount: orders.filter((order) => order.currency.toUpperCase() !== currency.toUpperCase()
       && inRange(order.createdAt, filters.range, 'device')).length,
+    periodOrders: counted.filter((order) => inRange(order.createdAt, filters.range, 'device'))
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0)),
   };
 }
 

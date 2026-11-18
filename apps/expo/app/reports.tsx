@@ -3,23 +3,22 @@ import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { Path } from 'react-native-svg';
-import { createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
+import { createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesCardId, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, presetRange, watchFresh, type PosOrder } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, useFrameAccount, useFrameMenu } from '../components/app-frame';
 import { ClosuresView } from '../components/closures-view';
+import { ReportSheet } from '../components/report-sheet';
 import { closureContext, printClosure } from '../components/register-close';
 import { RegisterStrip } from '../components/register-strip';
 import { StripHeightContext } from '../components/store-refused';
-import { PRINT_FAILED, printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
+import { PRINT_FAILED, printHtml, printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
-import { closureDayLabel, localDay, localDayStartIso, salesRoomFigures } from '../lib/reports';
+import { reportPanel, reportPanelCsv, reportPanelHtml } from '../lib/report-panels';
+import { downloadCsv, localDay, localDayStartIso, reportScope, salesRoomFigures, STATUS_OPTIONS } from '../lib/reports';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
-
-// The Sales room's status menu; the printed summary's scope line reads the same labels.
-const STATUS_OPTIONS = [{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }];
 
 // v2's outline printer on the Print summary, Print X report and Print closure buttons: paper tray, body, output sheet.
 const PrinterIcon = createSvgIcon('PrinterIcon', () => <>
@@ -46,6 +45,12 @@ export default function ReportsScreen() {
   const [zError, setZError] = useState<string | null>(null);
   const [summaryBusy, setSummaryBusy] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  // The Sales card whose report is open in the side sheet, as v2 opens a card's panel.
+  const [openCard, setOpenCard] = useState<SalesCardId | null>(null);
+  const [panelPrinting, setPanelPrinting] = useState(false);
+  const [panelPrintError, setPanelPrintError] = useState<string | null>(null);
+  const closeCard = () => { setOpenCard(null); setPanelPrintError(null); };
+  const showClosures = () => { closeCard(); setView('closures'); };
 
   useEffect(() => {
     if (!orders) return;
@@ -67,6 +72,10 @@ export default function ReportsScreen() {
   const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
   const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
+  const scope = ctx ? reportScope(filters, registers, today, ctx.locale) : null;
+  const covers = scope ? `${scope.period} · ${scope.registerLabel}` : '';
+  const panel = openCard && ctx && summary
+    ? reportPanel(openCard, { figures: summary.figures, orders: summary.periodOrders, ctx, today }) : null;
   // v2's closed strip offers Print closure where the open strip has Print X report (reports/index.mdx#closures).
   const lastClosure = register.lastClosure;
   const closurePrint = Platform.OS === 'web' && !!lastClosure
@@ -79,7 +88,7 @@ export default function ReportsScreen() {
     {view === 'sales' && !openMenu && account && <View className="flex-row justify-end"><AreaAccountButton /></View>}
     <View className="w-full max-w-5xl gap-4 self-center">
       {view === 'sales' && ctx && boundRegisterId ? <>
-        <RegisterStrip register={register} ctx={ctx} onOpenClosures={() => setView('closures')}
+        <RegisterStrip register={register} ctx={ctx} onOpenClosures={showClosures}
           panel={{ currency: currency!, store: { name: storeName, address: settings?.location.addressLine } }} action={Platform.OS === 'web' && register.session?.status === 'open' ?
           <Pressable testID="reports-x-print" accessibilityRole="button" disabled={xBusy}
             className="min-h-11 flex-row items-center justify-center gap-2 rounded-md px-4 border border-border"
@@ -117,7 +126,7 @@ export default function ReportsScreen() {
       {/* An unbound till has no strip, so Closures opens from a button in its place. */}
       {view === 'sales' && ctx && !boundRegisterId ? <Pressable testID="reports-open-closures" accessibilityRole="button"
         className="min-h-11 flex-row items-center justify-between rounded-md border border-border px-4"
-        onPress={() => setView('closures')}>
+        onPress={showClosures}>
         <Text className="text-foreground">Closures</Text>
         <Text className="text-muted-foreground">›</Text>
       </Pressable> : null}
@@ -135,12 +144,7 @@ export default function ReportsScreen() {
                 onPress={async () => {
                   setSummaryBusy(true);
                   setSummaryError(null);
-                  const { from, to } = filters.range;
-                  const period = from === to ? closureDayLabel(from, today, ctx.locale)
-                    : `${closureDayLabel(from, today, ctx.locale)} – ${closureDayLabel(to, today, ctx.locale)}`;
-                  const registerLabel = filters.registerId === null ? 'All registers'
-                    : registers.find((r) => r.id === filters.registerId)?.name ?? '';
-                  const statusLabel = STATUS_OPTIONS.find((option) => option.value === filters.status)?.label ?? '';
+                  const { period, registerLabel, statusLabel } = reportScope(filters, registers, today, ctx.locale);
                   try {
                     await printSalesSummary({ figures: summary.figures, context: ctx, notSentCount: summary.notSentCount,
                       period, scope: `${registerLabel} · ${statusLabel}` });
@@ -155,8 +159,21 @@ export default function ReportsScreen() {
             {Platform.OS === 'web' && summaryError ?
               <Text testID="reports-print-summary-error" accessibilityRole="alert">{summaryError}</Text> : null}
             <SalesHero figures={summary.figures} filters={filters} onFiltersChange={setFilters} currency={currency} />
-            <SalesCards figures={summary.figures} currency={currency} />
+            <SalesCards figures={summary.figures} currency={currency} onOpenCard={setOpenCard} />
           </View>
+          <ReportSheet panel={panel} covers={covers} onClose={closeCard} printing={panelPrinting} printError={panelPrintError}
+            printIcon={<View className="text-primary-foreground"><PrinterIcon size={18} /></View>}
+            onExport={Platform.OS === 'web' ? () => { if (panel) downloadCsv(panel.filename, reportPanelCsv(panel)); } : undefined}
+            onPrint={Platform.OS === 'web' ? async () => {
+              if (!panel) return;
+              setPanelPrinting(true);
+              setPanelPrintError(null);
+              try {
+                await printHtml(reportPanelHtml(panel, { ctx, covers }), { title: panel.title, failed: SUMMARY_PRINT_FAILED });
+              } catch (error) {
+                setPanelPrintError(error instanceof Error ? error.message : SUMMARY_PRINT_FAILED);
+              } finally { setPanelPrinting(false); }
+            } : undefined} />
           {summary.notSentCount > 0 ? <Text testID="reports-not-sent">
             {`${summary.notSentCount} ${summary.notSentCount === 1 ? 'sale' : 'sales'} not sent yet`}
           </Text> : null}
