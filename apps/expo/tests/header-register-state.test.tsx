@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { HeaderRegisterState, wideRegisterState } from '../components/header-register-state';
+import { headerStateText, HeaderRegisterState, wideRegisterState } from '../components/header-register-state';
 
 afterEach(() => { cleanup(); });
 
@@ -16,11 +16,33 @@ describe('HeaderRegisterState', () => {
     expect(screen.getByRole('button', { name })).toBe(control);
   });
 
+  it.each([
+    ['Offline', 1, 'Offline · 1 sale to send', 'Register: Offline · 1 sale to send'],
+    ['Offline', 3, 'Offline · 3 sales to send', 'Register: Offline · 3 sales to send'],
+    ['Offline', 0, 'Offline', 'Register: Offline'],
+    ['Closed', 2, 'Closed', 'Register: Closed'],
+  ] as const)('%s with %i sales to send reads %s', (label, salesToSend, text, name) => {
+    render(<HeaderRegisterState label={label} salesToSend={salesToSend} onPress={() => {}} />);
+    const control = screen.getByTestId('header-register-state');
+    expect(control.textContent).toBe(text);
+    expect(screen.getByRole('button', { name })).toBe(control);
+  });
+
   it('calls onPress when pressed', () => {
     const onPress = vi.fn();
     render(<HeaderRegisterState label="Closed" onPress={onPress} />);
     fireEvent.click(screen.getByTestId('header-register-state'));
     expect(onPress).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('headerStateText', () => {
+  it.each([
+    ['Offline', undefined, 'Offline'], ['Offline', 0, 'Offline'], ['Offline', 1, 'Offline · 1 sale to send'],
+    ['Offline', 2, 'Offline · 2 sales to send'], ['Closed', 2, 'Closed'], ['Choose register', 5, 'Choose register'],
+    ['Overdue', 1, 'Overdue'],
+  ] as const)('%s with %j sales to send reads %s', (label, salesToSend, expected) => {
+    expect(headerStateText(label, salesToSend)).toBe(expected);
   });
 });
 
