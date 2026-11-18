@@ -12,6 +12,7 @@ test('the Products area lists the catalogue read-only and finds a variant by SKU
   const rows = page.locator('[data-testid^="product-row-"]');
   await expect(rows).toHaveCount(1);
   await expect(rows).toContainText('E2E product 4 · B');
+  await expect(page.getByTestId('products-footer')).toHaveText(/^Showing 1 of \d+$/);
 });
 
 test('the Products area narrows by category chip and shows each row\'s stock status and category', async ({ page }) => {
@@ -76,6 +77,7 @@ test('on a phone the Products area lists two-line rows, not the table, and finds
   await openArea(page, 'Products');
   await expect(page.getByTestId('products-list')).toBeVisible();
   await expect(page.getByTestId('products-table')).toHaveCount(0);
+  await expect(page.getByTestId('products-footer')).toBeVisible();
   const rows = page.locator('[data-testid^="product-list-row-"]');
   const first = rows.filter({ hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first();
   await expect(first).toBeVisible();

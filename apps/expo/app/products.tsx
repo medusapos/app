@@ -2,7 +2,7 @@ import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Pressable, View, useWindowDimensions } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import {
-  Button, CategoryNav, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
+  Button, Card, CategoryNav, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
 } from '@tallyui/components';
 import { listCategories, sortProducts } from '@tallyui/pos';
 import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
@@ -13,7 +13,7 @@ import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsInStock, loadProductsAreaCategory, productAreaRows,
   productAreaStockLine,
   PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
-  PRODUCTS_NONE_IN_STOCK, saveProductsAreaCategory, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
+  PRODUCTS_NONE_IN_STOCK, PRODUCTS_SHOWING, saveProductsAreaCategory, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
 } from '../lib/products-area';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -132,8 +132,15 @@ export default function ProductsAreaScreen() {
       onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
     {ready && phone ? <ProductList testID="products-list" items={phoneItems} emptyState={emptyState}
       renderItem={(row: ProductAreaRow) => <PhoneRow row={row} />} /> : null}
-    {ready && !phone ? <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
-      defaultSort={{ field: 'name', dir: 'asc' }} emptyState={emptyState} /> : null}
+    {/* v2's table sits in a bordered box, inset as the search row; its phone rows run full width. */}
+    {ready && !phone ? <Card testID="products-table-card" className="mx-4 flex-1 overflow-hidden">
+      <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
+        defaultSort={{ field: 'name', dir: 'asc' }} emptyState={emptyState} />
+    </Card> : null}
+    {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue. */}
+    {ready ? <View className="items-end px-4 py-2" testID="products-footer">
+      <Text className="text-sm text-muted-foreground tabular-nums">{PRODUCTS_SHOWING(items.length, rows.length)}</Text>
+    </View> : null}
     {loaded?.status === 'loading' ? <View className="flex-1 items-center justify-center gap-3 px-4" testID="products-loading">
       <Loader />
       <Text className="text-center text-muted-foreground">{PRODUCTS_LOADING}</Text>
