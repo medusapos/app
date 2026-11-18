@@ -26,6 +26,7 @@ import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerChip } from '../components/customer-chip';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { OfflineToast, useOfflineToast } from '../components/offline-toast';
+import { ScanToast, scanAddedDescription, useScanToast } from '../components/scan-toast';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidAwaiting, useAwaitingStore } from '../components/paid-awaiting';
@@ -205,7 +206,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // setBusy bails out on an unchanged value, so this can't loop.
   useEffect(() => onBusy(!sale.idle));
   // The settings hold starts with the tap, in the same render pass as any settings landing with it (a money rule).
-  const add = (entry: Parameters<typeof sale.add>[0]) => { if (counting) return; onBusy(true); sale.add(entry, traits); };
+  // Returns sale.add's result (a scan's toast reads it), or undefined while counting.
+  const add = (entry: Parameters<typeof sale.add>[0]) => { if (counting) return undefined; onBusy(true); return sale.add(entry, traits); };
   useEffect(() => {
     markBusy('payment', sale.stage.kind === 'tender');
     return () => markBusy('payment', false);
@@ -248,13 +250,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       status: catalogueState, error: error ?? undefined });
   }, [session.baseUrl, sorted, traits, pricing.currency, catalogueState, error]);
   useEffect(() => () => withdrawCatalogue('sale'), []);
-  const [scanMiss, setScanMiss] = useState<string | null>(null);
-  // The miss line shows over the cart in the cart stage (on a phone, only in the cart view); it starts empty each time it shows.
-  const scanMissShown = sale.stage.kind === 'cart' && (!phone || cartOpen);
-  useEffect(() => { setScanMiss(null); }, [scanMissShown]);
+  const scanToast = useScanToast();
+  const clearScanToast = scanToast.clear;
+  // v2's scan toasts belong to the cart stage: leaving it (tender, receipt) hides the current one.
+  useEffect(() => { if (sale.stage.kind !== 'cart') clearScanToast(); }, [sale.stage.kind, clearScanToast]);
   const pathname = usePathname();
   // v2 scans anywhere in the POS; an editable target (search box, coupon field) keeps its own input, so no double add; off while an area is over the Sale and in tender.
-  const wedgeActive = scanMissShown && pathname === '/';
+  // On a phone only the cart view listens.
+  const wedgeActive = sale.stage.kind === 'cart' && (!phone || cartOpen) && pathname === '/';
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
@@ -272,7 +275,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
-    if (entry) { add(entry); setScanMiss(null); } else setScanMiss(code);
+    if (!entry) { scanToast.show({ kind: 'not-found', code }); return; }
+    const added = add(entry);
+    if (typeof added === 'object') scanToast.show({ kind: 'added',
+      description: scanAddedDescription(traits.getName(entry.product), entry.variant, traits.getVariants?.(entry.product).length ?? 1) });
+    else scanToast.clear();
   };
   useWedgeScan(wedgeActive, scannerSettings, onScan);
   // A directly connected scanner (Settings > Scanner) types nothing, so it adds in every layout without a double add.
@@ -339,10 +346,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       onViewStateError={onViewStateError} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
-    {/* v2's "Device went offline" toast, floating over the top of the products; the empty sides stay tappable. */}
-    {offline.kind && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center px-2">
-      <OfflineToast kind={offline.kind} onClose={offline.close} />
-    </View>}
   </View>;
   // The till's open sales: the strip's tabs, and the count's "carts still open" line (row 09e.2).
   const tillSales = openSales(sale.order, parked);
@@ -396,7 +399,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       </AlertDialogContent>
     </AlertDialog>}
   </RegisterGate>;
-  const scanMissLine = scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
   // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
@@ -420,6 +422,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
   </> : null;
   const phoneTender = phone && sale.stage.kind === 'tender';
+  const offlineShown = offline.kind !== null && sale.stage.kind === 'cart' && (!phone || !cartOpen);
+  const scanToastShown = scanToast.toast !== null && sale.stage.kind === 'cart';
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
@@ -494,17 +498,22 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
             {/* v2: tender takes the products' side, the order summary stays beside it; phone unchanged. */}
             {sale.stage.kind === 'tender' ? <View testID="tender-slot" className="flex-1 bg-card">{tenderPane}</View> : catalogue}
             <View className="flex-1 border-t border-border bg-card">
-              {sale.stage.kind === 'cart' ? <>{scanMissLine}{cart}</> : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
+              {sale.stage.kind === 'cart' ? cart : <TenderOrderSummary order={sale.order} taxLabel={taxLabel} />}
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : <>{cartOpen ? <View className="flex-1 bg-card">
-              {scanMissLine}
               {cart}
             </View> : catalogue}
               <PhoneTabBar active={cartOpen ? 'cart' : 'products'}
                 itemCount={sale.order.lineItems.reduce((count, line) => count + line.quantity, 0)}
                 onSelect={(tab) => setCartOpen(tab === 'cart')} />
             </>}
+          {/* The till's one toast host, floating over the top of the screen in every layout; the empty sides stay tappable.
+              v2's "Device went offline" toast shows over the products only, the scan toasts in the whole cart stage. */}
+          {(offlineShown || scanToastShown) && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center gap-2 px-2">
+            {offlineShown && <OfflineToast kind={offline.kind!} onClose={offline.close} />}
+            {scanToastShown && <ScanToast toast={scanToast.toast!} />}
+          </View>}
         </View>}
     </ConnectorProvider>
   );
