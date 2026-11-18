@@ -9,9 +9,12 @@ import { saveCachedSettings, saveCachedPricing, type StoreSettings } from '../li
 import SettingsScreen from '../app/settings';
 import { setWindowWidth } from './window-width';
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -47,7 +50,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); act(() => setWindowWidth(0)); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); act(() => setWindowWidth(0)); delete params.section; });
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
@@ -84,6 +87,7 @@ describe('Settings › Tax', () => {
   it('an older cache without tax rates shows —, and a region with no rates shows None', async () => {
     saveCachedSettings(localStorage, baseUrl, held);
     saveCachedPricing(localStorage, baseUrl, pricing);
+    params.section = 'tax';
     await mount();
     expect(screen.getByTestId('settings-tax-rates-none').textContent).toBe('—');
     expect(screen.queryByTestId('settings-tax-rate-0')).toBeNull();

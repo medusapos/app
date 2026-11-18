@@ -7,9 +7,12 @@ import { SessionProvider } from '../lib/session-context';
 import { subscribeThemeChoice } from '../lib/theme-choice';
 import SettingsScreen from '../app/settings';
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -30,9 +33,10 @@ beforeEach(() => {
     baseUrl, email: 'admin@store.test',
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
+  params.section = 'theme';
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); delete params.section; });
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
@@ -49,7 +53,11 @@ describe('SettingsScreen Theme section', () => {
     expect(screen.getByTestId('theme-tile-light').getAttribute('aria-selected')).toBe('true');
     expect(screen.getByTestId('theme-tile-system').getAttribute('aria-selected')).toBe('false');
     expect(screen.getByTestId('theme-tile-dark').getAttribute('aria-selected')).toBe('false');
-    expect(screen.getByTestId('settings-scanner').compareDocumentPosition(screen.getByTestId('settings-theme')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByTestId('settings-scanner')).toBeNull();
+    cleanup();
+    delete params.section;
+    await mount();
+    expect(screen.getByTestId('settings-list-scanner').compareDocumentPosition(screen.getByTestId('settings-list-theme')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('a stored choice shows pressed on open', async () => {

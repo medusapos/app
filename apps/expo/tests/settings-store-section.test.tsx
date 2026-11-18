@@ -9,9 +9,12 @@ import { SessionProvider } from '../lib/session-context';
 import { saveCachedSettings, saveCachedPricing, type StoreSettings } from '../lib/store-settings';
 import SettingsScreen from '../app/settings';
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -48,7 +51,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); delete params.section; });
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
@@ -56,65 +59,80 @@ async function mount(children: ReactNode = <SettingsScreen />) {
   return view;
 }
 
+// Opens one section's own phone page (General is `store`; Region and Prices include tax are on Tax).
+async function mountSection(section: string) {
+  cleanup();
+  params.section = section;
+  return mount();
+}
+
 describe('SettingsScreen Store section', () => {
   it('shows the Store, Register and Scanner sections, Store first', async () => {
     saveCachedSettings(localStorage, baseUrl, held);
     saveCachedPricing(localStorage, baseUrl, pricing);
     await mount();
-    expect(screen.getByText('Store')).toBeTruthy();
+    expect(screen.getByTestId('settings-list-store').textContent).toBe('General');
     expect(screen.getByText('Register')).toBeTruthy();
     expect(screen.getByText('Barcode Scanning')).toBeTruthy();
-    const store = screen.getByTestId('settings-store');
-    const tax = screen.getByTestId('settings-tax');
-    const register = screen.getByTestId('settings-register');
-    const scanner = screen.getByTestId('settings-scanner');
+    const store = screen.getByTestId('settings-list-store');
+    const tax = screen.getByTestId('settings-list-tax');
+    const register = screen.getByTestId('settings-list-register');
+    const scanner = screen.getByTestId('settings-list-scanner');
     expect(store.compareDocumentPosition(tax) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(tax.compareDocumentPosition(scanner) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scanner.compareDocumentPosition(register) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await mountSection('store');
+    expect(screen.getByText('Store')).toBeTruthy();
   });
 
   it('shows the cached store, currency, tax inclusivity and location', async () => {
     saveCachedSettings(localStorage, baseUrl, held);
     saveCachedPricing(localStorage, baseUrl, pricing);
-    await mount();
+    await mountSection('store');
     expect(screen.getByTestId('settings-store-name').textContent).toBe('Test shop');
     expect(screen.getByTestId('settings-store-currency').textContent).toBe('EUR');
-    expect(screen.getByTestId('settings-store-prices-include-tax').textContent).toBe('Yes');
     expect(screen.getByTestId('settings-store-location').textContent).toBe('Copenhagen shop');
     expect(screen.getByTestId('settings-store-location-address').textContent).toBe('Nørregade 1, Copenhagen');
     expect(screen.getByText('Read-only. Set in Medusa Admin.')).toBeTruthy();
+    await mountSection('tax');
+    expect(screen.getByTestId('settings-store-prices-include-tax').textContent).toBe('Yes');
   });
 
   it("never shows the publishable key or the store's default currency", async () => {
     saveCachedSettings(localStorage, baseUrl, held);
     saveCachedPricing(localStorage, baseUrl, pricing);
-    await mount();
-    expect(screen.queryByText(/pk_secret_test/)).toBeNull();
-    expect(screen.queryByText('USD')).toBeNull();
+    for (const section of ['store', 'tax', 'printing', 'card-readers', 'scanner', 'theme', 'register', 'danger']) {
+      await mountSection(section);
+      expect(screen.queryByText(/pk_secret_test/)).toBeNull();
+      expect(screen.queryByText('USD')).toBeNull();
+    }
   });
 
   it("shows the till's region and the sales channel by name", async () => {
     saveCachedSettings(localStorage, baseUrl, named);
     saveCachedPricing(localStorage, baseUrl, pricing);
-    await mount();
+    await mountSection('tax');
     const region = screen.getByTestId('settings-store-region');
-    const channel = screen.getByTestId('settings-store-sales-channel');
     expect(region.textContent).toBe('Europe');
-    expect(channel.textContent).toBe('Shop floor');
     expect(screen.queryByText(/reg_eu/)).toBeNull();
-    expect(screen.queryByText(/sc_pos/)).toBeNull();
     expect(screen.queryByText(/pk_secret_test/)).toBeNull();
     const tax = within(screen.getByTestId('settings-tax'));
     expect(tax.getByTestId('settings-store-region')).toBe(region);
     expect(region.compareDocumentPosition(tax.getByTestId('settings-store-prices-include-tax')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await mountSection('store');
+    const channel = screen.getByTestId('settings-store-sales-channel');
+    expect(channel.textContent).toBe('Shop floor');
+    expect(screen.queryByText(/sc_pos/)).toBeNull();
+    expect(screen.queryByText(/pk_secret_test/)).toBeNull();
     expect(screen.getByTestId('settings-store-location').compareDocumentPosition(channel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('an older cache without names shows — for Region and Sales channel', async () => {
     saveCachedSettings(localStorage, baseUrl, held);
     saveCachedPricing(localStorage, baseUrl, pricing);
-    await mount();
+    await mountSection('tax');
     expect(screen.getByTestId('settings-store-region').textContent).toBe('—');
+    await mountSection('store');
     expect(screen.getByTestId('settings-store-sales-channel').textContent).toBe('—');
     expect(screen.getByTestId('settings-store-name').textContent).toBe('Test shop');
   });
@@ -122,28 +140,32 @@ describe('SettingsScreen Store section', () => {
   it("a region the till's pricing does not name shows —", async () => {
     saveCachedSettings(localStorage, baseUrl, { ...named, regions: [{ id: 'reg_dk', name: 'Denmark' }] });
     saveCachedPricing(localStorage, baseUrl, pricing);
-    await mount();
+    await mountSection('tax');
     expect(screen.getByTestId('settings-store-region').textContent).toBe('—');
     cleanup();
     const { pricingContext: _, ...withoutContext } = pricing;
     saveCachedSettings(localStorage, baseUrl, named);
     saveCachedPricing(localStorage, baseUrl, withoutContext);
-    await mount();
+    await mountSection('tax');
     expect(screen.getByTestId('settings-store-region').textContent).toBe('—');
   });
 
   it('prices that exclude tax show No', async () => {
     saveCachedPricing(localStorage, baseUrl, { ...pricing, pricesIncludeTax: false });
-    await mount();
+    await mountSection('tax');
     expect(screen.getByTestId('settings-store-prices-include-tax').textContent).toBe('No');
   });
 
   it('with nothing cached, every Store row shows —', async () => {
-    await mount();
-    for (const id of ['settings-store-name', 'settings-store-currency', 'settings-store-region', 'settings-store-prices-include-tax', 'settings-store-location', 'settings-store-sales-channel']) {
+    await mountSection('store');
+    for (const id of ['settings-store-name', 'settings-store-currency', 'settings-store-location', 'settings-store-sales-channel']) {
       expect(screen.getByTestId(id).textContent).toBe('—');
     }
     expect(screen.queryByTestId('settings-store-location-address')).toBeNull();
+    await mountSection('tax');
+    for (const id of ['settings-store-region', 'settings-store-prices-include-tax']) {
+      expect(screen.getByTestId(id).textContent).toBe('—');
+    }
   });
 
   it('a location without an address shows no address line', async () => {
@@ -151,7 +173,7 @@ describe('SettingsScreen Store section', () => {
       ...held, location: { id: 'sloc_1', name: 'Copenhagen shop', countryCode: 'dk' },
     });
     saveCachedPricing(localStorage, baseUrl, pricing);
-    await mount();
+    await mountSection('store');
     expect(screen.getByTestId('settings-store-location').textContent).toBe('Copenhagen shop');
     expect(screen.queryByTestId('settings-store-location-address')).toBeNull();
   });
@@ -160,13 +182,15 @@ describe('SettingsScreen Store section', () => {
     saveCachedSettings(localStorage, baseUrl, held);
     saveCachedPricing(localStorage, baseUrl, pricing);
     await mount();
+    await mountSection('store');
+    await mountSection('tax');
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("shows the till's currency format under Store, read-only", async () => {
     saveCachedSettings(localStorage, baseUrl, held);
     saveCachedPricing(localStorage, baseUrl, pricing);
-    await mount();
+    await mountSection('store');
     const format = currencyFormat('EUR')!;
     expect(screen.getByTestId('settings-store').compareDocumentPosition(screen.getByTestId('settings-currency')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getByTestId('settings-currency-symbol').textContent).toBe(currencySymbol('EUR'));
@@ -179,13 +203,13 @@ describe('SettingsScreen Store section', () => {
 
   it('a zero-decimal currency shows 0 decimals and no decimal separator', async () => {
     saveCachedPricing(localStorage, baseUrl, { ...pricing, currency: 'JPY' });
-    await mount();
+    await mountSection('store');
     expect(screen.getByTestId('settings-currency-decimals').textContent).toBe('0');
     expect(screen.getByTestId('settings-currency-decimal').textContent).toBe('None');
   });
 
   it('with nothing cached, every currency-format row shows —', async () => {
-    await mount();
+    await mountSection('store');
     for (const id of ['settings-currency-symbol', 'settings-currency-position', 'settings-currency-thousands', 'settings-currency-decimal', 'settings-currency-decimals', 'settings-currency-example']) {
       expect(screen.getByTestId(id).textContent).toBe('—');
     }
