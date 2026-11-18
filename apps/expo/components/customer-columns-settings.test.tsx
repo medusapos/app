@@ -6,7 +6,7 @@ import CustomersScreen from '../app/customers';
 
 const { searchCustomers } = vi.hoisted(() => ({ searchCustomers: vi.fn() }));
 vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
-vi.mock('./app-frame', () => ({ FrameMenuButton: () => null }));
+vi.mock('./app-frame', () => ({ FrameMenuButton: () => null, useFrameMenu: () => undefined }));
 vi.mock('../lib/pos-connector', () => ({ authHeaders: () => ({ Authorization: 'Bearer t' }),
   createPosConnector: () => ({ id: 'medusa', searchCustomers, createCustomer: vi.fn(), updateCustomer: vi.fn() }) }));
 vi.mock('../lib/session-context', () => ({ useSession: () => ({
