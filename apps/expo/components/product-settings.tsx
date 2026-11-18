@@ -6,7 +6,7 @@ import { DEFAULT_CATALOGUE_VIEW_STATE, PRODUCT_SORT_FIELDS, type CatalogueViewSt
 import type { useProductSettings } from '../lib/product-settings';
 import { DEFAULT_CATALOGUE_SORT } from '../lib/catalogue-view';
 
-const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
+export const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
   <Line x1={3} y1={6} x2={21} y2={6} /><Circle cx={8} cy={6} r={2} />
   <Line x1={3} y1={12} x2={21} y2={12} /><Circle cx={16} cy={12} r={2} />
   <Line x1={3} y1={18} x2={21} y2={18} /><Circle cx={8} cy={18} r={2} />

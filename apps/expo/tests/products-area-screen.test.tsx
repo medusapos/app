@@ -328,6 +328,7 @@ describe('ProductsAreaScreen', () => {
       expect(card.contains(screen.getByTestId('products-table'))).toBe(true);
       expect(footer()).toBe('Showing 3 of 3');
       expect(card.contains(screen.getByTestId('products-footer'))).toBe(false);
+      expect(screen.getByTestId('products-settings-button')).toBeTruthy();
     });
 
     it('n follows the search, the category and the In stock chip; m stays the catalogue', () => {
@@ -431,6 +432,15 @@ describe('on a phone', () => {
     expect(listRowIds()).toEqual(['v1', 'v4a', 'v4b']);
     expect(texts('v1')).toEqual(['E2E product 1', 'E2E-1', '€10.00', '5 · In stock']);
     expect(texts('v4b')).toEqual(['E2E product 4 · B', 'E2E-4B', '€25.00', 'On backorder']);
+  });
+
+  // v2's column settings belong to the tablet table; a phone's two-line rows have no columns to choose.
+  it('has no column settings button', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    mount();
+    expect(screen.getByTestId('products-list')).toBeTruthy();
+    expect(screen.queryByTestId('products-settings-button')).toBeNull();
   });
 
   it('rows open nothing', () => {
