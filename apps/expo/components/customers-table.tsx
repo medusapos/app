@@ -9,12 +9,14 @@ import { DEFAULT_CUSTOMER_COLUMNS, type CustomerColumnSettings } from '../lib/cu
 import { AppText as Text } from './app-text';
 
 type SortField = 'firstName' | 'lastName' | 'email';
+// v2's opening order for the customers table.
+export const DEFAULT_CUSTOMER_SORT: ProductSort = { field: 'lastName', dir: 'asc' };
 
 // v2's customers table; Billing address and Date created wait until the connector's search returns them.
 export function CustomersTable({ customers, onOpen, columns = DEFAULT_CUSTOMER_COLUMNS }: {
   customers: Customer[]; onOpen?: (customer: Customer) => void; columns?: CustomerColumnSettings;
 }) {
-  const [sort, setSort] = useState<ProductSort | null>(null);
+  const [sort, setSort] = useState<ProductSort | null>(DEFAULT_CUSTOMER_SORT);
   if (customers.length === 0) return null;
   // Never sort by a column the cashier has hidden.
   const activeSort = sort && columns[sort.field as SortField] ? sort : null;
