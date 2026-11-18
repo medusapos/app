@@ -70,7 +70,7 @@ describe('OrdersScreen', () => {
     expect(within(screen.getByTestId('header-left')).getAllByRole('button')).toHaveLength(1);
     expect(screen.queryByRole('button', { name: 'Products' })).toBeNull();
     fireEvent.click(menu);
-    fireEvent.click(within(screen.getByTestId('nav-drawer')).getByRole('button', { name: 'Sale' }));
+    fireEvent.click(within(screen.getByTestId('nav-drawer')).getByTestId('nav-item-sale'));
     expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
     expect(router.replace).not.toHaveBeenCalled();
   });

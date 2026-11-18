@@ -34,7 +34,8 @@ const MenuIcon = createSvgIcon('MenuIcon', () => <><Line x1={4} y1={6} x2={20} y
   <Line x1={4} y1={18} x2={20} y2={18} /></>);
 
 export const FRAME_AREAS = [
-  { id: 'sale', label: 'Sale', href: '/', Icon: CartIcon },
+  // v2's menu labels its first entry "POS" (docs/v2-parity/demo-shots/17-menu-demo-phone.jpg).
+  { id: 'sale', label: 'POS', href: '/', Icon: CartIcon },
   { id: 'products', label: 'Products', href: '/products', Icon: GiftIcon },
   { id: 'orders', label: 'Orders', href: '/orders', Icon: ReceiptIcon },
   { id: 'customers', label: 'Customers', href: '/customers', Icon: UsersIcon },

@@ -130,7 +130,7 @@ test('the frame\'s Sale from Settings returns to the same sale, with one Product
   await expect(cart).toHaveAccessibleName(/^Cart, 1 item$/);
 
   await openSettings(page);
-  await openArea(page, 'Sale');
+  await openArea(page, 'POS');
   await expect(page.getByRole('heading', { name: / · Register 1$/ })).toBeVisible();
   await expect(cart).toBeVisible();
   await expect(cart).toHaveAccessibleName(/^Cart, 1 item$/);
@@ -143,7 +143,7 @@ test('opening /settings directly by URL still lands back on the sale', async ({ 
   await signIn(page);
   await page.goto('/settings');
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
-  await openArea(page, 'Sale');
+  await openArea(page, 'POS');
   await expect(page.getByRole('heading', { name: / · Register 1$/ })).toBeVisible();
 });
 
