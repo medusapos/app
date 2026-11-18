@@ -8,7 +8,8 @@ import { BillingNotSavedError } from './customer-billing';
  */
 export async function saveNewCustomer(
   connector: { create: (input: CustomerInput) => Promise<Customer>; update?: (id: string, patch: CustomerPatch) => Promise<Customer> },
-  values: CustomerFormValues, billing: CustomerAddress | undefined, created: { current: Customer | null },
+  values: CustomerFormValues, billing: CustomerAddress | undefined, shipping: CustomerAddress | undefined,
+  created: { current: Customer | null },
   onSaved?: (customer: Customer) => void,
 ): Promise<Customer> {
   const patch: CustomerPatch = {};
@@ -24,9 +25,10 @@ export async function saveNewCustomer(
   const customer = created.current ?? await connector.create(input);
   created.current = customer;
   onSaved?.(customer);
-  if ((Object.keys(patch).length || billing !== undefined) && connector.update) {
+  if ((Object.keys(patch).length || billing !== undefined || shipping !== undefined) && connector.update) {
     try {
-      const updated = await connector.update(customer.id, { ...patch, ...(billing !== undefined ? { billing } : {}) });
+      const updated = await connector.update(customer.id, { ...patch,
+        ...(billing !== undefined ? { billing } : {}), ...(shipping !== undefined ? { shipping } : {}) });
       created.current = updated;
       onSaved?.(updated);
       return updated;

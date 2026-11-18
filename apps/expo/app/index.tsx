@@ -439,6 +439,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
+  // The till's open sales: the strip's tabs, and the count's "carts still open" line (row 09e.2).
+  const tillSales = openSales(sale.order, parked);
   const openOrdersRow = <View className="flex-row items-stretch">
     {parked.length > 0 && <Pressable testID="parked-sales-chip" accessibilityRole="button"
       accessibilityLabel={`Parked sales (${parked.length})`} onPress={() => setParkedOpen(true)}
@@ -446,12 +448,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
     </Pressable>}
     <View className="min-w-0 flex-1">
-      <OpenSaleTabs sales={openSales(sale.order, parked)} currency={pricing.currency}
+      <OpenSaleTabs sales={tillSales} currency={pricing.currency}
         onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
     </View>
   </View>;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
-  const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
+  const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} openSaleCount={tillSales.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
       {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)} />}

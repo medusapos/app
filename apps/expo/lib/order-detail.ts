@@ -1,6 +1,8 @@
 import type { OrderDetailLineItem, OrderStatus } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import { buildReceiptDataFromPosOrder, type PosOrder, type PosOrderPayment } from '@tallyui/pos';
+import {
+  buildReceiptDataFromPosOrder, isRequeueable, type PosOrder, type PosOrderPayment, type UseOrderOutboxResult,
+} from '@tallyui/pos';
 import { medusaOrderStatus } from './order-filters';
 
 // The sheet's badge uses the Orders filter's Medusa words; TallyUI's key for "canceled" is 'cancelled'.
@@ -32,4 +34,16 @@ export const receiptTaxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
 // The words TallyUI's OrdersList uses for a payment.
 export function paymentLabel(method: PosOrderPayment['method']): string {
   return method === 'cash' ? 'Cash' : 'Card terminal';
+}
+
+// A pending sale is sent by flush(): requeue() moves only rejected sales back to pending.
+export function canSyncOrder(order: Pick<PosOrder, 'syncStatus' | 'error'>): boolean {
+  return order.syncStatus === 'pending' || (order.syncStatus === 'rejected' && isRequeueable(order.error?.code));
+}
+
+export async function syncOrder(
+  outbox: Pick<UseOrderOutboxResult, 'flush' | 'requeue'>, order: Pick<PosOrder, 'id' | 'syncStatus'>,
+): Promise<void> {
+  if (order.syncStatus === 'rejected') await outbox.requeue([order.id]);
+  else if (order.syncStatus === 'pending') await outbox.flush();
 }

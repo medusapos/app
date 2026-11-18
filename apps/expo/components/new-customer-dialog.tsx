@@ -19,8 +19,8 @@ export function NewCustomerDialog({ open, onOpenChange, create, update, onSaved,
     <DialogContent testID="new-customer-dialog" className="max-h-[90%]">
       <DialogTitle>Add new customer</DialogTitle>
       <ScrollView keyboardShouldPersistTaps="handled">
-        {open && <CustomerEditor customer={null} onUnauthorized={onUnauthorized} save={async (values, billing) => {
-          await saveNewCustomer({ create, update }, values, billing, created, onSaved);
+        {open && <CustomerEditor customer={null} onUnauthorized={onUnauthorized} save={async (values, billing, shipping) => {
+          await saveNewCustomer({ create, update }, values, billing, shipping, created, onSaved);
           created.current = null;
           onOpenChange(false);
         }} />}

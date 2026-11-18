@@ -255,6 +255,41 @@ describe('the register on the sale screen', () => {
     expect(screen.getByTestId('cart-empty')).toBeTruthy(); // the empty cart is back (it draws no Checkout)
     expect((await sessions().find().exec())[0].status).toBe('open');
   });
+
+  // v2's amber "carts still open" line on the count (row 09e.2): a warning only, never a gate on Close.
+  it('with an empty cart and nothing parked, the count shows no open-carts warning', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await startCount();
+    expect(screen.queryByTestId('count-open-carts')).toBeNull();
+  });
+
+  it('with a parked sale and a sale in progress, the count warns of 2 open carts above its amount, and Close still closes', async () => {
+    const session = await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await screen.findByRole('button', { name: 'Open register panel' });
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
+    await waitFor(() => expect(screen.getByTestId('parked-sales-chip').textContent).toBe('1 ▴'));
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    const count = await startCount();
+    const warning = await screen.findByTestId('count-open-carts');
+    expect(warning.textContent).toBe('2 carts still open · they stay open after the close');
+    expect(warning.getAttribute('role')).toBe('alert');
+    expect(warning.compareDocumentPosition(count.getByTestId('count-amount')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await closeWith(count, '100.00');
+    await screen.findByTestId('closure-sheet');
+    expect((await sessions().findOne(session.id).exec())!.status).toBe('closed');
+  });
+
+  it('with one sale in progress and nothing parked, the count warns of 1 open cart', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await screen.findByRole('button', { name: 'Open register panel' });
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await startCount();
+    expect((await screen.findByTestId('count-open-carts')).textContent).toBe('1 cart still open · it stays open after the close');
+  });
 });
 
 // Registers part B (ADR 0018): the count, the closure sheet, the last closure's figures and the approval gate.

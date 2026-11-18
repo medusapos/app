@@ -30,7 +30,7 @@ function Probe() {
   outbox = useOutboxContext();
   return <>
     <TillRegisterBar online onGate={onGate} onOpenPanel={onPanel} />
-    <RegisterGate currency="EUR" online refused={null} cartEmpty focus={focus}>
+    <RegisterGate currency="EUR" online refused={null} cartEmpty openSaleCount={0} focus={focus}>
       <span data-testid="cart-child">Cart</span>
     </RegisterGate>
   </>;

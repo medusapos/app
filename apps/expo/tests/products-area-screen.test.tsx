@@ -17,11 +17,13 @@ vi.mock('expo-router', () => ({
 }));
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 
-type Doc = { id: string; title: string; variants: VariantSummary[] };
+type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[] };
 const traits = {
   getName: (doc: Doc) => doc.title,
   getVariantCount: (doc: Doc) => doc.variants.length,
   getVariants: (doc: Doc) => doc.variants,
+  getCategories: (doc: Doc) => doc.categories ?? [],
+  getCategoryNames: (doc: Doc) => (doc.categories ?? []).map((category) => category.name),
 } as unknown as ProductTraits;
 const eur = (amount: number) => [{ amount, currency: 'EUR', kind: 'base' as const }];
 const products: Doc[] = [
@@ -53,9 +55,9 @@ describe('ProductsAreaScreen', () => {
     expect(screen.getByTestId('products-admin-note').textContent).toBe(PRODUCTS_ADMIN_NOTE);
     expect(screen.getByTestId('products-table')).toBeTruthy();
     const cells = (id: string) => within(screen.getByTestId(`product-row-${id}`)).getAllByText(/./).map((node) => node.textContent);
-    expect(cells('v1')).toEqual(['E2E product 1', 'E2E-1', '€10.00', '5']);
-    expect(cells('v4a')).toEqual(['E2E product 4 · A', 'E2E-4', '€20.00', '2']);
-    expect(cells('v4b')).toEqual(['E2E product 4 · B', 'E2E-4B', '€25.00', 'On backorder']);
+    expect(cells('v1')).toEqual(['E2E product 1', 'E2E-1', '5', 'In stock', '€10.00']);
+    expect(cells('v4a')).toEqual(['E2E product 4 · A', 'E2E-4', '2', 'In stock', '€20.00']);
+    expect(cells('v4b')).toEqual(['E2E product 4 · B', 'E2E-4B', 'On backorder', 'On backorder', '€25.00']);
   });
 
   it('filters to a SKU, and says when nothing matches', () => {

@@ -9,7 +9,7 @@ import { FrameMenuButton } from '../components/app-frame';
 import { CustomerColumnsButton } from '../components/customer-columns-settings';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
 import { CustomersTable } from '../components/customers-table';
-import { loadCustomerBilling } from '../lib/customer-billing';
+import { loadCustomerAddresses } from '../lib/customer-billing';
 import { useCustomerColumns } from '../lib/customer-columns';
 import { saveNewCustomer } from '../lib/save-new-customer';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
@@ -93,12 +93,12 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
         <DialogTitle>{editing === 'new' ? 'New customer' : 'Edit customer'}</DialogTitle>
         <ScrollView keyboardShouldPersistTaps="handled">
         {editing !== null && <CustomerEditor key={editing === 'new' ? 'new' : editing.id}
-          loadBilling={editing === 'new' ? undefined : () => loadCustomerBilling(context, editing.id)}
-          customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing) => {
+          loadAddresses={editing === 'new' ? undefined : () => loadCustomerAddresses(context, editing.id)}
+          customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing, shipping) => {
             if (editing === 'new') {
               await saveNewCustomer({ create: (input) => connector.createCustomer!(context, input),
                 update: connector.updateCustomer && ((id, patch) => connector.updateCustomer!(context, id, patch)) },
-                values, billing, createdCustomer, (saved) => {
+                values, billing, shipping, createdCustomer, (saved) => {
                 setCustomers((list) => list.some((customer) => customer.id === saved.id)
                   ? list.map((customer) => customer.id === saved.id ? saved : customer) : [saved, ...list]);
                 setMessage(null);
@@ -110,6 +110,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
                 if (values[field].trim() !== (editing[field] ?? '')) patch[field] = values[field].trim();
               }
               if (billing !== undefined) patch.billing = billing;
+              if (shipping !== undefined) patch.shipping = shipping;
               if (Object.keys(patch).length) {
                 const updated = await connector.updateCustomer!(context, editing.id, patch);
                 setCustomers((list) => list.map((customer) => customer.id === editing.id ? updated : customer));
