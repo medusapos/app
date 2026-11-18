@@ -7,7 +7,7 @@ import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type C
 import { FrameMenuButton } from '../components/app-frame';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
 import { CustomersTable } from '../components/customers-table';
-import { BillingNotSavedError, loadCustomerBilling } from '../lib/customer-billing';
+import { BillingNotSavedError, loadCustomerAddresses } from '../lib/customer-billing';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
 import type { Session } from '../lib/session';
@@ -84,8 +84,8 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
         <DialogTitle>{editing === 'new' ? 'New customer' : 'Edit customer'}</DialogTitle>
         <ScrollView keyboardShouldPersistTaps="handled">
         {editing !== null && <CustomerEditor key={editing === 'new' ? 'new' : editing.id}
-          loadBilling={editing === 'new' ? undefined : () => loadCustomerBilling(context, editing.id)}
-          customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing) => {
+          loadAddresses={editing === 'new' ? undefined : () => loadCustomerAddresses(context, editing.id)}
+          customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing, shipping) => {
             if (editing === 'new') {
               const patch: CustomerPatch = {};
               if (createdCustomer.current) {
@@ -103,9 +103,10 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
                 ? list.map((customer) => customer.id === created.id ? created : customer) : [created, ...list]);
               setMessage(null);
               setFailed(false);
-              if ((Object.keys(patch).length || billing !== undefined) && connector.updateCustomer) {
+              if ((Object.keys(patch).length || billing !== undefined || shipping !== undefined) && connector.updateCustomer) {
                 try {
-                  const updated = await connector.updateCustomer(context, created.id, { ...patch, ...(billing !== undefined ? { billing } : {}) });
+                  const updated = await connector.updateCustomer(context, created.id, { ...patch,
+                    ...(billing !== undefined ? { billing } : {}), ...(shipping !== undefined ? { shipping } : {}) });
                   createdCustomer.current = updated;
                   setCustomers((list) => list.map((customer) => customer.id === created.id ? updated : customer));
                 } catch (error) { throw new BillingNotSavedError(created, error); }
@@ -116,6 +117,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
                 if (values[field].trim() !== (editing[field] ?? '')) patch[field] = values[field].trim();
               }
               if (billing !== undefined) patch.billing = billing;
+              if (shipping !== undefined) patch.shipping = shipping;
               if (Object.keys(patch).length) {
                 const updated = await connector.updateCustomer!(context, editing.id, patch);
                 setCustomers((list) => list.map((customer) => customer.id === editing.id ? updated : customer));
