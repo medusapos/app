@@ -15,9 +15,12 @@ vi.mock('../lib/pos-connector', async (importOriginal) => ({
   createPosConnector: () => ({ id: 'medusa', searchCustomers }),
 }));
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/settings',
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -40,7 +43,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); act(() => setWindowWidth(0)); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); act(() => setWindowWidth(0)); delete params.section; });
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
@@ -75,12 +78,13 @@ describe('Settings › Printing', () => {
     expect(loadPrintingSettings(localStorage, baseUrl).autoPrintReceipt).toBe(false);
   });
 
-  it('on a phone shows Printing between Tax and Card readers', async () => {
+  it('on a phone lists Printing between Tax and Card readers', async () => {
     setWindowWidth(390, 844);
     await mount();
-    const printing = screen.getByTestId('settings-printing');
-    expect(follows(screen.getByTestId('settings-tax'), printing)).toBe(true);
-    expect(follows(printing, screen.getByTestId('settings-card-readers'))).toBe(true);
+    const printing = screen.getByTestId('settings-list-printing');
+    expect(printing.textContent).toBe('Printing');
+    expect(follows(screen.getByTestId('settings-list-tax'), printing)).toBe(true);
+    expect(follows(printing, screen.getByTestId('settings-list-card-readers'))).toBe(true);
   });
 
   it('names the print dialog as the print method under the auto-print switch', async () => {
@@ -101,6 +105,7 @@ describe('Settings › Printing', () => {
     Platform.OS = 'ios';
     try {
       setWindowWidth(390, 844);
+      params.section = 'printing';
       await mount();
       expect(screen.getByTestId('settings-printing-method').textContent).toBe('Not available on this device');
     } finally { Platform.OS = original; }

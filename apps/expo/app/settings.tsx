@@ -1,8 +1,9 @@
-import { Fragment, useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { AppText as Text } from '../components/app-text';
-import { Redirect, Stack } from 'expo-router';
-import { Card, CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
+import { Path } from 'react-native-svg';
+import { Card, createSvgIcon, CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
@@ -33,8 +34,10 @@ import { cardPaymentMode, TILL_PAYMENT_METHODS } from '../lib/card-payments';
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 // Shown for any value this till does not hold.
 const UNKNOWN = '—';
-// v2's nav-and-section layout starts at this width; a phone keeps one page.
+// v2's nav-and-section layout starts at this width; a phone lists the sections and opens each on its own page.
 const SETTINGS_SPLIT_MIN_WIDTH = 768;
+const ChevronRightIcon = createSvgIcon('ChevronRightIcon', () => <Path d="m9 18 6-6-6-6" />);
+const ChevronLeftIcon = createSvgIcon('ChevronLeftIcon', () => <Path d="m15 18-6-6 6-6" />);
 
 function Field({ label, help, ...input }: { label: string; help?: string } & ComponentProps<typeof TextInput>) {
   return <View className="gap-1">
@@ -47,6 +50,8 @@ export default function SettingsScreen() {
   const { session } = useSession();
   const { width } = useWindowDimensions();
   const [chosenSection, setChosenSection] = useState('store');
+  // A phone's section page is /settings?section=<id>, its own router entry, so browser and hardware back return to the list.
+  const { section } = useLocalSearchParams<{ section?: string }>();
   // v2's Settings has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
   const openMenu = useFrameMenu();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
@@ -88,13 +93,32 @@ export default function SettingsScreen() {
       </ScrollView>
     } />
   </>;
+  const opened = sections.find(({ id }) => id === section);
+  // v2's phone Settings: a plain list of the section names, each with a chevron, opening that section's page.
+  if (!opened) return <ScrollView className="flex-1 bg-background" role="main" aria-label="Settings" testID="settings-list"
+    contentContainerClassName="pb-6" contentContainerStyle={{ paddingTop: 8 + topInset }}>
+    <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    {sections.map(({ id, label }) => <Pressable key={id} testID={`settings-list-${id}`} accessibilityRole="button" accessibilityLabel={label}
+      onPress={() => router.push({ pathname: '/settings', params: { section: id } })} className="min-h-11 justify-center px-2">
+      <SettingsRow label={label} action={<View testID="settings-list-chevron" className="text-muted-foreground"><ChevronRightIcon size={20} /></View>} />
+    </Pressable>)}
+  </ScrollView>;
   return <ScrollView className="flex-1 bg-background" role="main" aria-label="Settings" contentContainerClassName="px-6 pb-6"
     contentContainerStyle={{ paddingTop: 24 + topInset }}>
-    <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <Stack.Screen options={{ title: opened.label, headerShown: true, headerLeft: () => <SettingsBackButton /> }} />
     <View className="w-full max-w-md gap-6 self-center">
-      {sections.map(({ id, element }) => <Fragment key={id}>{element}</Fragment>)}
+      {opened.element}
     </View>
   </ScrollView>;
+}
+// A section page opened directly by URL has nothing under it, so back replaces it with the list.
+function SettingsBackButton() {
+  return <Pressable testID="settings-back" accessibilityRole="button" accessibilityLabel="Back to Settings"
+    onPress={() => (router.canGoBack() ? router.back() : router.replace('/settings'))}
+    className="ml-1 min-h-11 flex-row items-center gap-1 rounded-md pr-2">
+    <View className="text-foreground"><ChevronLeftIcon size={24} /></View>
+    <Text className="text-foreground">Settings</Text>
+  </Pressable>;
 }
 function StoreSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));

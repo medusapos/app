@@ -5,9 +5,22 @@ import { addE2E1, captureCommands, cartTab, closeStoreRegister, openArea, openRe
 // field judges a scan the same way, against the currently saved settings.
 test.use({ viewport: { width: 360, height: 740 } });
 
-async function openSettings(page: Page) {
+const SECTION_LABELS = ['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Danger zone'];
+
+// A phone's Settings lists the sections; `section` (its label) opens that section's own page from the list.
+async function openSettings(page: Page, section?: string) {
   await openArea(page, 'Settings');
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  if (!section) return;
+  await page.getByTestId('settings-list').getByRole('button', { name: section, exact: true }).click();
+  await expect(page.getByRole('heading', { name: section, exact: true })).toBeVisible();
+}
+
+// A section page is its own history entry: the first back returns to the list, the second leaves Settings.
+async function leaveSettings(page: Page) {
+  await page.goBack();
+  await expect(page.getByTestId('settings-list')).toBeVisible();
+  await page.goBack();
 }
 
 async function setMinChars(page: Page, value: string) {
@@ -24,9 +37,9 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
   await signIn(page);
   await addE2E1(page);
 
-  await openSettings(page);
+  await openSettings(page, 'Barcode Scanning');
   await setMinChars(page, '6');
-  await page.goBack();
+  await leaveSettings(page);
 
   await openCart(page);
   await page.keyboard.type('E2E-2', { delay: 10 });
@@ -34,13 +47,13 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
   await expect(page.getByText('E2E product 2', { exact: true })).toHaveCount(0);
 
   await productsTab(page).click();
-  await openSettings(page);
+  await openSettings(page, 'Barcode Scanning');
   await setMinChars(page, '3');
   const testField = page.getByLabel('Test scan here', { exact: true });
   await testField.pressSequentially('E2E-2', { delay: 10 });
   await testField.press('Enter');
   await expect(page.getByText('Counts as a scan', { exact: true })).toBeVisible();
-  await page.goBack();
+  await leaveSettings(page);
 
   await openCart(page);
   await page.keyboard.type('E2E-2', { delay: 10 });
@@ -51,7 +64,7 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
 test('scanner affixes are stripped in the test field and cart, with sound enabled', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
-  await openSettings(page);
+  await openSettings(page, 'Barcode Scanning');
   await page.getByLabel('Scanner prefix', { exact: true }).fill('#');
   await page.getByLabel('Scanner suffix', { exact: true }).fill('!');
   await page.getByRole('button', { name: 'Save', exact: true }).click();
@@ -63,7 +76,7 @@ test('scanner affixes are stripped in the test field and cart, with sound enable
   const sound = page.getByRole('switch', { name: 'Play a sound on scan' });
   await sound.click();
   await expect(sound).toBeChecked();
-  await page.goBack();
+  await leaveSettings(page);
   await openCart(page);
   await page.keyboard.type('#E2E-2!', { delay: 10 });
   await page.keyboard.press('Enter');
@@ -75,17 +88,17 @@ test('a saved minChars gates Enter in the Products search: a shorter code stays 
   await signIn(page);
   const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
 
-  await openSettings(page);
+  await openSettings(page, 'Barcode Scanning');
   await setMinChars(page, '6');
-  await page.goBack();
+  await leaveSettings(page);
   await search.fill('E2E-2');
   await search.press('Enter');
   await expect(search).toHaveValue('E2E-2');
   await expect(page.getByRole('tab', { name: 'Cart, New', exact: true })).toBeVisible();
 
-  await openSettings(page);
+  await openSettings(page, 'Barcode Scanning');
   await setMinChars(page, '3');
-  await page.goBack();
+  await leaveSettings(page);
   await search.fill('E2E-2');
   await search.press('Enter');
   await expect(search).toHaveValue('');
@@ -98,22 +111,23 @@ test('a saved minChars gates Enter in the Products search: a shorter code stays 
 test('a till named in Settings opens Register 1 under that name at the store', async ({ page }) => {
   const opens = captureCommands<{ deviceName?: string }>(page, 'register.session.open');
   await signIn(page, 'Europe', false);
-  await openSettings(page);
+  await openSettings(page, 'Register');
   const tillName = page.getByLabel('Till name', { exact: true });
   await tillName.fill('Front counter');
   await page.getByRole('button', { name: 'Save till name', exact: true }).click();
-  await page.goBack();
+  await leaveSettings(page);
   try {
     await openRegister(page);
     expect(opens.map(({ payload }) => payload.deviceName)).toEqual(['Front counter']);
     expect(await refusedStoreOpen()).toMatchObject({ deviceName: 'Front counter' });
 
     // An empty name goes back to the platform label.
-    await openSettings(page);
+    await openSettings(page, 'Register');
     await expect(tillName).toHaveValue('Front counter');
     await tillName.fill('');
     await page.getByRole('button', { name: 'Save till name', exact: true }).click();
     await page.reload();
+    await expect(page.getByRole('heading', { name: 'Register', exact: true })).toBeVisible();
     await expect(tillName).toHaveValue('');
   } finally {
     await closeStoreRegister();
@@ -139,6 +153,28 @@ test('the frame\'s Sale from Settings returns to the same sale, with one Product
   await expect(cart).not.toHaveAccessibleName('Cart, New');
 });
 
+// v2's phone Settings: the section names in a list, each opening its own page, with browser back to the list.
+test('a phone lists the sections, opens each on its own page, and back returns to the list', async ({ page }) => {
+  await signIn(page);
+  await openSettings(page);
+  const list = page.getByTestId('settings-list');
+  await expect(list.getByRole('button')).toHaveText(SECTION_LABELS);
+  await list.getByRole('button', { name: 'Tax', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Tax', exact: true })).toBeVisible();
+  await expect(page.getByTestId('settings-tax')).toBeVisible();
+  await expect(page).toHaveURL(/section=tax/);
+  await page.getByTestId('settings-back').click();
+  await expect(list).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+
+  await list.getByRole('button', { name: 'Printing', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'Printing', exact: true })).toBeVisible();
+  await expect(page.getByTestId('settings-printing')).toBeVisible();
+  await page.goBack();
+  await expect(list).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+});
+
 test('opening /settings directly by URL still lands back on the sale', async ({ page }) => {
   await signIn(page);
   await page.goto('/settings');
@@ -152,7 +188,7 @@ test('Theme: Dark puts the dark class on <html> and its tokens, the first frame 
   await signIn(page, 'Europe', false);
   const html = page.locator('html');
   await expect(html).toHaveClass(/(^|\s)light(\s|$)/);
-  await openSettings(page);
+  await openSettings(page, 'Theme');
   await page.getByRole('button', { name: 'Dark', exact: true }).click();
   await expect(page.getByTestId('theme-tile-dark')).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('theme-tile-light')).toHaveAttribute('aria-selected', 'false');
@@ -172,7 +208,7 @@ test('Theme: Dark puts the dark class on <html> and its tokens, the first frame 
     requestAnimationFrame(record);
   });
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Theme', exact: true })).toBeVisible();
   await expect(html).toHaveClass(/(^|\s)dark(\s|$)/);
   // The next animation frame may not have run yet, so wait for the first recorded frame.
   await expect.poll(() => page.evaluate(() => (window as Window & { themeFrames: string[] }).themeFrames.length)).toBeGreaterThan(0);
@@ -190,7 +226,7 @@ test('Theme: Dark puts the dark class on <html> and its tokens, the first frame 
 
 test('Scale: Regular is the default, Auto persists after reload, and Regular restores the default size', async ({ page }) => {
   await signIn(page, 'Europe', false);
-  await openSettings(page);
+  await openSettings(page, 'Theme');
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim())).toBe('14px');
   await expect(page.getByTestId('scale-choice-regular')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('scale-choice-auto').click();
@@ -199,7 +235,7 @@ test('Scale: Regular is the default, Auto persists after reload, and Regular res
   expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('auto');
 
   await page.reload();
-  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Theme', exact: true })).toBeVisible();
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim())).toBe('13px');
   await expect(page.getByTestId('scale-choice-auto')).toHaveAttribute('aria-pressed', 'true');
   await page.getByTestId('scale-choice-regular').click();

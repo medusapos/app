@@ -19,9 +19,12 @@ vi.mock('../lib/pos-connector', async (importOriginal) => ({
   createPosConnector: () => ({ id: 'medusa', searchCustomers }),
 }));
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/settings',
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { title?: string; headerShown?: boolean; headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left" data-header-shown={String(options.headerShown)} data-title={options.title}>
       {options.headerLeft?.()}</div>
@@ -45,7 +48,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); delete params.section; });
 function mountFramed(width: number, height: number) {
   setWindowWidth(width, height);
   return mount(<AppFrame signedIn><SettingsScreen /></AppFrame>);
@@ -69,6 +72,7 @@ function Reader({ label }: { label: string }) {
 
 describe('SettingsScreen', () => {
   it('saves a picked default customer and clears it back to Guest', async () => {
+    params.section = 'store';
     const ada = { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.com' };
     searchCustomers.mockResolvedValueOnce([ada]);
     vi.useFakeTimers();
@@ -85,6 +89,7 @@ describe('SettingsScreen', () => {
   });
 
   it('turns on Default customer is cashier and says which Medusa customer new sales start on', async () => {
+    params.section = 'store';
     await mount();
     const toggle = screen.getByRole('switch', { name: 'Default customer is cashier' });
     expect(toggle.getAttribute('aria-checked')).toBe('false');
@@ -100,6 +105,7 @@ describe('SettingsScreen', () => {
   });
 
   it('says when no Medusa customer has the cashier\'s email', async () => {
+    params.section = 'store';
     searchCustomers.mockResolvedValueOnce([{ id: 'cus_x', name: 'X Admin', email: 'xadmin@store.test' }]);
     localStorage.setItem('medusapos.default-customer-is-cashier.' + baseUrl, 'true');
     await mount();
@@ -165,12 +171,14 @@ describe('SettingsScreen', () => {
     }
   });
 
-  it('on a phone the sections stack with no section card or title', async () => {
+  it('on a phone Settings lists the sections with no section card or title', async () => {
     await mount();
     expect(screen.queryByTestId('settings-section-card')).toBeNull();
     expect(screen.queryByTestId('settings-section-title')).toBeNull();
-    expect(screen.getByTestId('settings-store')).toBeTruthy();
-    expect(screen.getByTestId('settings-tax')).toBeTruthy();
+    expect(screen.getByTestId('settings-list-store').textContent).toBe('General');
+    expect(screen.getByTestId('settings-list-tax').textContent).toBe('Tax');
+    expect(screen.queryByTestId('settings-store')).toBeNull();
+    expect(screen.queryByTestId('settings-tax')).toBeNull();
   });
 
   it('redirects to login when signed out', async () => {
@@ -180,12 +188,14 @@ describe('SettingsScreen', () => {
   });
 
   it('shows the saved values on open', async () => {
+    params.section = 'scanner';
     await mount();
     expect((screen.getByLabelText('Average time per key (ms)') as HTMLInputElement).value).toBe(String(DEFAULT_SCANNER_SETTINGS.avgKeyMs));
     expect((screen.getByLabelText('Minimum characters') as HTMLInputElement).value).toBe(String(DEFAULT_SCANNER_SETTINGS.minChars));
   });
 
   it('saves valid values, keeping the last valid save when a later one is refused', async () => {
+    params.section = 'scanner';
     await mount();
     fireEvent.change(screen.getByLabelText('Average time per key (ms)'), { target: { value: '60' } });
     fireEvent.change(screen.getByLabelText('Minimum characters'), { target: { value: '6' } });
@@ -199,6 +209,7 @@ describe('SettingsScreen', () => {
   });
 
   it('saves scanner prefix and suffix', async () => {
+    params.section = 'scanner';
     await mount();
     fireEvent.change(screen.getByLabelText('Scanner prefix'), { target: { value: '#' } });
     fireEvent.change(screen.getByLabelText('Scanner suffix'), { target: { value: '!' } });
@@ -207,6 +218,7 @@ describe('SettingsScreen', () => {
   });
 
   it('saves sound immediately while leaving an unsaved threshold unsaved', async () => {
+    params.section = 'scanner';
     await mount();
     fireEvent.change(screen.getByLabelText('Minimum characters'), { target: { value: '6' } });
     fireEvent.click(screen.getByRole('switch', { name: 'Play a sound on scan' }));
@@ -216,6 +228,7 @@ describe('SettingsScreen', () => {
   });
 
   it('reports the stripped test scan with timing from the raw buffer', async () => {
+    params.section = 'scanner';
     await mount();
     fireEvent.change(screen.getByLabelText('Scanner prefix'), { target: { value: '#' } });
     fireEvent.change(screen.getByLabelText('Scanner suffix'), { target: { value: '!' } });
@@ -231,6 +244,7 @@ describe('SettingsScreen', () => {
   });
 
   it('resets to defaults', async () => {
+    params.section = 'scanner';
     await mount();
     fireEvent.change(screen.getByLabelText('Minimum characters'), { target: { value: '10' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
@@ -240,6 +254,7 @@ describe('SettingsScreen', () => {
   });
 
   it('a save updates every other mounted reader live, the way the wedge listener reads it', async () => {
+    params.section = 'scanner';
     await mount(<><SettingsScreen /><Reader label="reader" /></>);
     expect(screen.getByLabelText('reader').textContent).toBe(String(DEFAULT_SCANNER_SETTINGS.avgKeyMs));
     fireEvent.change(screen.getByLabelText('Average time per key (ms)'), { target: { value: '42' } });
@@ -248,6 +263,7 @@ describe('SettingsScreen', () => {
   });
 
   it('the Register section saves the till name through the hook, live for every reader', async () => {
+    params.section = 'register';
     await mount(<><SettingsScreen /><TillNameReader /></>);
     expect(screen.getByText('Register')).toBeTruthy();
     expect(screen.getByText('Shown to another till that finds this register open or takes it over. Leave empty to use \u201cWeb till\u201d.')).toBeTruthy();
@@ -258,6 +274,7 @@ describe('SettingsScreen', () => {
   });
 
   it('a 65-character till name shows the error and saves nothing', async () => {
+    params.section = 'register';
     await mount();
     fireEvent.change(screen.getByLabelText('Till name'), { target: { value: 'x'.repeat(65) } });
     fireEvent.click(screen.getByRole('button', { name: 'Save till name' }));
@@ -266,6 +283,7 @@ describe('SettingsScreen', () => {
   });
 
   it('the test field reports the average and verdict for a fast input', async () => {
+    params.section = 'scanner';
     await mount();
     const field = screen.getByLabelText('Test scan here');
     vi.useFakeTimers();
@@ -278,6 +296,7 @@ describe('SettingsScreen', () => {
   });
 
   it('the test field reports the verdict for a slow input', async () => {
+    params.section = 'scanner';
     await mount();
     const field = screen.getByLabelText('Test scan here');
     vi.useFakeTimers();
@@ -289,6 +308,7 @@ describe('SettingsScreen', () => {
   });
 
   it('shows help text for minimum characters and the test field', async () => {
+    params.section = 'scanner';
     await mount();
     expect(screen.getByText('Codes shorter than this are treated as typing, not a scan')).toBeTruthy();
     expect(screen.getByText('Scan a barcode into this field to check it counts as a scan')).toBeTruthy();

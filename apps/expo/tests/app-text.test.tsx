@@ -9,9 +9,12 @@ import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import SettingsScreen from '../app/settings';
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -36,7 +39,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); delete params.section; });
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
@@ -94,6 +97,7 @@ describe('useHeaderTitleStyle', () => {
 describe('SettingsScreen in Space Grotesk', () => {
   it("draws the app's own Settings text in the chosen face once it has loaded", async () => {
     localStorage.setItem('medusapos.font', 'grotesk');
+    params.section = 'store';
     await mount(<AppFontProvider><SettingsScreen /></AppFontProvider>);
     await waitFor(() => expect(family('settings-store-name')).toContain('Space Grotesk'));
   });

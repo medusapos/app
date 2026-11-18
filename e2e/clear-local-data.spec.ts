@@ -25,6 +25,9 @@ test('Clear all local data wipes the device and returns to sign-in', async ({ pa
 
   await openArea(page, 'Settings');
   await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  // A phone lists Settings' sections; Danger zone opens on its own page.
+  await page.getByTestId('settings-list-danger').click();
+  await expect(page.getByRole('heading', { name: 'Danger zone', exact: true })).toBeVisible();
   await page.getByTestId('clear-local-data').click();
   await expect(page.getByTestId('clear-local-data-warning')).toHaveText('Nothing is waiting to be sent, so your server already has your sales.');
   // signIn left the till open, so the dialog names it and asks for the typed word.
@@ -47,6 +50,7 @@ test('Clear all local data wipes the device and returns to sign-in', async ({ pa
 test('after a wipe the open server session is taken over, not lost', async ({ page }) => {
   await signIn(page);
   await openArea(page, 'Settings');
+  await page.getByTestId('settings-list-danger').click();
   await page.getByTestId('clear-local-data').click();
   await page.getByTestId('clear-local-data-word').fill('CLEAR');
   await page.getByTestId('clear-local-data-confirm').click();

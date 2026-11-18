@@ -9,9 +9,12 @@ import { SessionProvider } from '../lib/session-context';
 import { chooseFont, FONT_CHOICES, FONT_LABELS, subscribeFontChoice } from '../lib/font-choice';
 import SettingsScreen from '../app/settings';
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), back: vi.fn(), canGoBack: vi.fn(() => false) },
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -34,9 +37,10 @@ beforeEach(() => {
     baseUrl, email: 'admin@store.test',
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature`,
   });
+  params.section = 'theme';
 });
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); delete params.section; });
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;

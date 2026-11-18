@@ -10,9 +10,12 @@ import OrdersScreen from '../app/orders';
 import SettingsScreen from '../app/settings';
 import { version as appVersion } from '../package.json';
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
+  useLocalSearchParams: () => params,
   Stack: { Screen: () => null },
 }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
@@ -36,6 +39,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.clearAllMocks();
+  delete params.section;
 });
 
 describe('Send feedback link', () => {
@@ -64,6 +68,7 @@ describe('Send feedback link', () => {
 
   it('renders in Settings → General and opens the issue form with the signed-in backend host', async () => {
     saveSession(localStorage, { baseUrl: 'https://signed-in.test', email: 'cashier@test.com', token: 'token' });
+    params.section = 'store';
     await act(async () => { render(<SessionProvider><SettingsScreen /></SessionProvider>); });
     fireEvent.click(screen.getByRole('link', { name: 'Send feedback' }));
     expect(window.open).toHaveBeenCalledTimes(1);

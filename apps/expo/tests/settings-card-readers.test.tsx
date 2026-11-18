@@ -13,9 +13,12 @@ vi.mock('../lib/pos-connector', async (importOriginal) => ({
   createPosConnector: () => ({ id: 'medusa', searchCustomers }),
 }));
 
+// The phone opens one section per page, named by the route's `section` param.
+const { params } = vi.hoisted(() => ({ params: {} as { section?: string } }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), navigate: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/settings',
+  useLocalSearchParams: () => params,
   Stack: { Screen: ({ options }: { options: { headerLeft?: () => ReactNode; headerRight?: () => ReactNode } }) => <>
     <div data-testid="header-left">{options.headerLeft?.()}</div>
     {options.headerRight?.()}
@@ -38,7 +41,7 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); act(() => setWindowWidth(0)); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); act(() => setWindowWidth(0)); delete params.section; });
 
 async function mount(children: ReactNode = <SettingsScreen />) {
   let view!: ReturnType<typeof render>;
@@ -68,11 +71,12 @@ describe('Settings › Card readers', () => {
     expect(screen.getByTestId('settings-nav-card-readers').getAttribute('aria-selected')).toBe('true');
   });
 
-  it('on a phone shows Card readers between Printing and Scanner', async () => {
+  it('on a phone lists Card readers between Printing and Scanner', async () => {
     setWindowWidth(0);
     await mount();
-    const cardReaders = screen.getByTestId('settings-card-readers');
-    expect(follows(screen.getByTestId('settings-printing'), cardReaders)).toBe(true);
-    expect(follows(cardReaders, screen.getByTestId('settings-scanner'))).toBe(true);
+    const cardReaders = screen.getByTestId('settings-list-card-readers');
+    expect(cardReaders.textContent).toBe('Card readers');
+    expect(follows(screen.getByTestId('settings-list-printing'), cardReaders)).toBe(true);
+    expect(follows(cardReaders, screen.getByTestId('settings-list-scanner'))).toBe(true);
   });
 });
