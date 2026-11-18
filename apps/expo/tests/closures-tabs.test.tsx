@@ -8,6 +8,7 @@ import { PortalHost } from '@tallyui/primitives';
 import type { Closure } from '@tallyui/pos';
 import ReportsScreen from '../app/reports';
 import { closureContext } from '../components/register-close';
+import { dayBefore } from '../lib/closure-history';
 import { printXReport } from '../lib/closure-print';
 import { openOrderStore, closeOrderStores, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -123,6 +124,28 @@ describe('Closures tabs and the open session row', () => {
     expect(screen.queryByTestId('closures-export')).toBeNull();
     expect(screen.queryByTestId('earlier-closures-heading')).toBeNull();
     expect(screen.queryByTestId('earlier-closures-table')).toBeNull();
+    expect(screen.getByTestId('closures-count').textContent).toBe('1 session');
+  });
+
+  it('Open hides earlier closures even over a period that covers earlier days', async () => {
+    const [today, yesterday] = [localDay(new Date()), dayBefore(localDay(new Date()))];
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>(async () => new Response(JSON.stringify({ closures: [{ closureId: 'h7', number: 7,
+      businessDay: yesterday, openedAt: new Date(Date.now() - 26 * 3600e3).toISOString(),
+      closedAt: new Date(Date.now() - 24 * 3600e3).toISOString(), periodSalesTotalMinor: 900 }], more: false }))));
+    await mountClosures();
+    fireEvent.click(screen.getByTestId('closures-period'));
+    const day = (d: string) => screen.queryByTestId(`closures-period-calendar-day-${d}`);
+    if (!day(yesterday)) fireEvent.click(screen.getByTestId('closures-period-calendar-prev'));
+    fireEvent.click(day(yesterday)!);
+    if (!day(today)) fireEvent.click(screen.getByTestId('closures-period-calendar-next'));
+    fireEvent.click(day(today)!);
+    fireEvent.click(screen.getByTestId('closures-period-apply'));
+    expect(within(await screen.findByTestId('earlier-closures-table')).getByTestId('earlier-closure-h7')).toBeTruthy();
+    expect(screen.getByTestId('earlier-closures-heading')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('closures-tab-open'));
+    await waitFor(() => expect(screen.queryByTestId('earlier-closures-table')).toBeNull());
+    for (const id of ['heading', 'loading', 'more', 'empty', 'error']) expect(screen.queryByTestId(`earlier-closures-${id}`)).toBeNull();
+    expect(screen.getByTestId('closures-open-session')).toBeTruthy();
     expect(screen.getByTestId('closures-count').textContent).toBe('1 session');
   });
 
