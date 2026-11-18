@@ -341,17 +341,18 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   @InjectManager()
-  async closureHistory(registerId: string, page: { limit: number; before?: number; from?: string; to?: string },
+  async closureHistory(registerId: string, page: { limit: number; before?: number; from?: string; to?: string; cashier?: string },
     @MedusaContext() sharedContext: Context = {}): Promise<{ closures: StoredClosure[]; more: boolean } | null> {
     const em = sharedContext.manager as EntityManager
     const [register] = await em.execute('select id from tally_register where id = ?', [registerId])
     if (!register) return null
-    const { limit, before, from, to } = page
+    const { limit, before, from, to, cashier } = page
     const clauses = ['c.register_id = ?', 'c.deleted_at is null']
     const bindings: (string | number)[] = [registerId]
     if (before !== undefined) { clauses.push('c.number < ?'); bindings.push(before) }
     if (from !== undefined) { clauses.push('coalesce(c.business_day, substr(c.opened_at, 1, 10)) >= ?'); bindings.push(from) }
     if (to !== undefined) { clauses.push('coalesce(c.business_day, substr(c.opened_at, 1, 10)) <= ?'); bindings.push(to) }
+    if (cashier !== undefined) { clauses.push('c.closed_by = ?'); bindings.push(cashier) }
     const rows = await em.execute<{ closure: StoredClosure }[]>(`select json_build_object(
       'id', c.id, 'session_id', c.session_id, 'register_id', c.register_id, 'number', c.number,
       'business_day', c.business_day, 'opened_at', c.opened_at, 'closed_at', c.closed_at,

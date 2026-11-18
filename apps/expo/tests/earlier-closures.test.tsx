@@ -131,14 +131,55 @@ it('from and to reach the query', async () => {
   expect(fetchImpl.mock.calls[0][0]).toContain('to=2026-11-05');
 });
 
-it('a cashier shows only that cashier\'s rows and onCashiers gets the fetched cashiers', async () => {
-  fetchImpl.mockResolvedValueOnce(response({ closures: [first, second], more: false }));
+const byUrl = (unfiltered: unknown, narrowed: unknown) => fetchImpl.mockImplementation(async (url) =>
+  response(String(url).includes('cashier=') ? narrowed : unfiltered));
+const fetchedUrls = () => fetchImpl.mock.calls.map(([url]) => String(url));
+const otherCashier = { ...second, closedBy: 'user-2' };
+const mountCashier = (cashierId: string | null, onCashiers: (ids: string[]) => void) =>
+  <EarlierClosures session={session} registerId="reg/1" today="2026-11-10" ctx={ctx}
+    registerName="Register 1" cashierNames={{ 'user-1': 'Ana' }} cashierId={cashierId} onCashiers={onCashiers} />;
+
+it('a cashier asks the store for that cashier\'s rows and onCashiers gets the unfiltered page\'s cashiers', async () => {
+  byUrl({ closures: [first, otherCashier], more: false }, { closures: [first], more: false });
   const onCashiers = vi.fn();
-  render(<EarlierClosures session={session} registerId="reg/1" today="2026-11-10" ctx={ctx}
-    registerName="Register 1" cashierNames={{ 'user-1': 'Ana' }} cashierId="user-1" onCashiers={onCashiers} />);
+  render(mountCashier('user-1', onCashiers));
   await screen.findByTestId('earlier-closure-c12');
   expect(rowIds()).toEqual(['earlier-closure-c12']);
-  expect(onCashiers).toHaveBeenLastCalledWith(['user-1']);
+  await vi.waitFor(() => expect(onCashiers).toHaveBeenLastCalledWith(['user-1', 'user-2']));
+  expect(fetchedUrls().filter((url) => url.includes('cashier=user-1'))).toHaveLength(1);
+  expect(fetchedUrls().filter((url) => !url.includes('cashier='))).toHaveLength(1);
+  expect(onCashiers).not.toHaveBeenCalledWith(['user-1']);
+});
+
+it('choosing a cashier after an unfiltered load refetches for that cashier and keeps the full cashier list', async () => {
+  byUrl({ closures: [first, otherCashier], more: false }, { closures: [first], more: false });
+  const onCashiers = vi.fn();
+  const { rerender } = render(mountCashier(null, onCashiers));
+  await screen.findByTestId('earlier-closure-c11');
+  expect(onCashiers).toHaveBeenLastCalledWith(['user-1', 'user-2']);
+  rerender(mountCashier('user-1', onCashiers));
+  await vi.waitFor(() => expect(screen.queryByTestId('earlier-closure-c11')).toBeNull());
+  await screen.findByTestId('earlier-closure-c12');
+  expect(rowIds()).toEqual(['earlier-closure-c12']);
+  expect(fetchedUrls()).toHaveLength(2);
+  expect(fetchedUrls()[1]).toContain('cashier=user-1');
+  expect(onCashiers).toHaveBeenLastCalledWith(['user-1', 'user-2']);
+  expect(onCashiers).not.toHaveBeenCalledWith(['user-1']);
+});
+
+it('Load more with a cashier sends the cashier and the last number', async () => {
+  const older = { ...first, closureId: 'c9', number: 9 };
+  fetchImpl.mockImplementation(async (url) => response(!String(url).includes('cashier=')
+    ? { closures: [first, otherCashier], more: false }
+    : String(url).includes('before=') ? { closures: [older], more: false } : { closures: [first], more: true }));
+  render(mountCashier('user-1', vi.fn()));
+  fireEvent.click(await screen.findByTestId('earlier-closures-more'));
+  await screen.findByTestId('earlier-closure-c9');
+  expect(rowIds()).toEqual(['earlier-closure-c12', 'earlier-closure-c9']);
+  const more = fetchedUrls().filter((url) => url.includes('before='));
+  expect(more).toHaveLength(1);
+  expect(more[0]).toContain('cashier=user-1');
+  expect(more[0]).toContain('before=12');
 });
 
 it('without a heading the empty text names the period', async () => {

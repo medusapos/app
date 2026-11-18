@@ -17,11 +17,12 @@ export function dayBefore(day: string): string {
   return date.toISOString().slice(0, 10);
 }
 
-export async function fetchClosureHistory(session: Session, registerId: string, page: { from?: string; to: string; before?: number },
+export async function fetchClosureHistory(session: Session, registerId: string, page: { from?: string; to: string; before?: number; cashier?: string },
   fetchImpl = globalThis.fetch): Promise<{ closures: ClosureHistoryEntry[]; more: boolean }> {
   const query = new URLSearchParams({ limit: String(CLOSURE_HISTORY_PAGE), to: page.to });
   if (page.from !== undefined) query.set('from', page.from);
   if (page.before !== undefined) query.set('before', String(page.before));
+  if (page.cashier !== undefined) query.set('cashier', page.cashier);
   let response: Response;
   try {
     response = await fetchImpl(`${session.baseUrl}/tally/v1/registers/${encodeURIComponent(registerId)}/closures?${query}`,
