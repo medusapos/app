@@ -126,6 +126,31 @@ describe('SettingsScreen', () => {
     }
   });
 
+  it('on a wide window draws the chosen section in a card titled with its nav label', async () => {
+    setWindowWidth(1024);
+    try {
+      await mount();
+      const card = screen.getByTestId('settings-section-card');
+      expect(within(card).getByTestId('settings-store')).toBeTruthy();
+      expect(screen.getByTestId('settings-section-title').textContent).toBe('General');
+      fireEvent.click(screen.getByTestId('settings-nav-tax'));
+      expect(screen.getByTestId('settings-section-title').textContent).toBe('Tax');
+      expect(within(screen.getByTestId('settings-section-card')).getByTestId('settings-tax')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('settings-nav-danger'));
+      expect(screen.getByTestId('settings-section-title').textContent).toBe('Danger zone');
+    } finally {
+      act(() => setWindowWidth(0));
+    }
+  });
+
+  it('on a phone the sections stack with no section card or title', async () => {
+    await mount();
+    expect(screen.queryByTestId('settings-section-card')).toBeNull();
+    expect(screen.queryByTestId('settings-section-title')).toBeNull();
+    expect(screen.getByTestId('settings-store')).toBeTruthy();
+    expect(screen.getByTestId('settings-tax')).toBeTruthy();
+  });
+
   it('redirects to login when signed out', async () => {
     localStorage.removeItem('medusapos.session');
     await mount();

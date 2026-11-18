@@ -2,7 +2,7 @@ import { Fragment, useMemo, useRef, useState, type ComponentProps } from 'react'
 import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
-import { CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { Card, CustomerPicker, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
@@ -55,22 +55,29 @@ export default function SettingsScreen() {
     { id: 'customer', label: 'Customer', element: <DefaultCustomerSection session={session} /> },
     { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
   ];
+  const chosen = sections.find(({ id }) => id === chosenSection);
   if (width >= SETTINGS_SPLIT_MIN_WIDTH) return <>
     <Stack.Screen options={{ title: 'Settings', headerLeft: () => <FrameMenuButton /> }} />
     <SettingsLayout layout="split" navSlot={
-      <View testID="settings-nav">
+      <View testID="settings-nav" className="gap-1 p-2">
         {sections.map(({ id, label }) => <Pressable key={id} testID={`settings-nav-${id}`} accessibilityRole="button"
           aria-selected={chosenSection === id}
           accessibilityState={{ selected: chosenSection === id }} onPress={() => setChosenSection(id)}
-          className={`min-h-11 justify-center px-4 ${chosenSection === id ? 'bg-muted' : ''}`}>
+          className={`min-h-11 justify-center rounded-md border px-4 ${chosenSection === id ? 'border-border bg-card shadow-sm' : 'border-transparent'}`}>
           <Text className="text-foreground">{label}</Text>
         </Pressable>)}
       </View>
     } contentSlot={
       <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
-        <View className="w-full max-w-md gap-6 self-center">
-          {sections.find(({ id }) => id === chosenSection)?.element}
-        </View>
+        {/* v2 draws the chosen section in one full-width card, titled with its nav label. */}
+        <Card testID="settings-section-card" className="w-full">
+          <View className="border-b border-border px-4 py-3">
+            <Text testID="settings-section-title" accessibilityRole="header" className="text-lg font-semibold text-card-foreground">{chosen?.label}</Text>
+          </View>
+          <View className="gap-6 p-4">
+            {chosen?.element}
+          </View>
+        </Card>
       </ScrollView>
     } />
   </>;
