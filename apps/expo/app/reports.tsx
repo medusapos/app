@@ -1,16 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { Path } from 'react-native-svg';
 import { ClosureSheet, createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesFilters } from '@tallyui/components';
 import { comparisonRange, exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, type PosOrder } from '@tallyui/pos';
-import { FrameMenuButton } from '../components/app-frame';
+import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { ClosureFiltersBar } from '../components/closure-filters';
 import { ClosureTable } from '../components/closure-table';
 import { EarlierClosures } from '../components/earlier-closures';
 import { closureContext, printClosure } from '../components/register-close';
 import { RegisterStrip } from '../components/register-strip';
+import { StripHeightContext } from '../components/store-refused';
 import { loadApprovers } from '../lib/approval';
 import { printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -71,6 +72,10 @@ export default function ReportsScreen() {
   const currency = pricing?.currency ?? settings?.currency ?? null;
   const storeName = settings?.storeName ?? '';
   const ctx = currency ? closureContext(currency, { name: storeName, address: settings?.location.addressLine }) : null;
+  // v2's Reports has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
+  const openMenu = useFrameMenu();
+  // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
+  const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
   const scope = closureScopeFor({ today, boundRegisterId, storeKey: session.baseUrl });
   const rows = selectClosureRows(closures, scope, 'device');
@@ -87,8 +92,9 @@ export default function ReportsScreen() {
   const shownRows = byCashier(rows, cashierId, (row) => row.closed_by);
   const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
 
-  return <ScrollView className="flex-1 bg-background" contentContainerClassName="px-6 py-6">
-    <Stack.Screen options={{ title: 'Reports', headerLeft: () => <FrameMenuButton /> }} />
+  return <ScrollView className="flex-1 bg-background" role="main" aria-label="Reports" contentContainerClassName="px-6 pb-6"
+    contentContainerStyle={{ paddingTop: 24 + topInset }}>
+    <Stack.Screen options={{ title: 'Reports', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
     <View className="w-full max-w-5xl gap-4 self-center">
       {ctx && boundRegisterId ? <>
         <RegisterStrip register={register} ctx={ctx}

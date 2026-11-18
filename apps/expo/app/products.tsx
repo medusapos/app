@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Pressable, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { Button, CategoryNav, Loader, ProductTable, SearchInput, Text, type ProductTableColumn } from '@tallyui/components';
 import { listCategories } from '@tallyui/pos';
-import { FrameMenuButton } from '../components/app-frame';
+import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
@@ -65,12 +66,16 @@ export default function ProductsAreaScreen() {
   const items = useMemo(() => filterProductAreaRows(
     filterProductAreaRowsInStock(filterProductAreaRowsByCategory(rows, activeId), inStockOnly), search),
   [rows, activeId, inStockOnly, search]);
+  // v2's Products has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
+  const openMenu = useFrameMenu();
+  // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
+  const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
   // One cache per store and pricing context: the area reads only while the Sale holds no catalogue for this store.
   const saleHolds = loaded?.owner === 'sale';
-  return <View className="flex-1 bg-background">
-    <Stack.Screen options={{ title: 'Products', headerLeft: () => <FrameMenuButton /> }} />
-    <View className="flex-row items-center gap-2 px-4 pt-4 pb-2">
+  return <View className="flex-1 bg-background" role="main" aria-label="Products">
+    <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
     </View>
