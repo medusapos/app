@@ -161,11 +161,11 @@ describe('tap race when new store settings land (#58 review)', () => {
     // task, and renders the tap's update together with it (19.x renders sync and default lanes in one pass).
     await germanyLands(retry, async () => { for (let i = 0; i < 30; i++) await Promise.resolve(); tap('Shirt'); });
     expect(button('Edit quantity of Shirt')).toBeTruthy();
-    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€15.00'); // the Shirt at Europe's €12 + 25%
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €15.00'); // the Shirt at Europe's €12 + 25%
     // The sale started on Europe's settings, so the catalogue stays on them too (a money rule): Hat is €10 + 25%.
     fireEvent.click(screen.getByTestId('product-tile-Hat'));
     expect(region()).toBe('reg_eu');
-    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€27.50');
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €27.50');
   });
 
   it('control: keeps a line tapped in the same tick the new settings resolve (the tap first)', async () => {
@@ -173,7 +173,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     await germanyLands(retry, () => tap('Shirt'));
     expect(button('Edit quantity of Shirt')).toBeTruthy();
     expect(region()).toBe('reg_eu');
-    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€15.00');
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
   });
 
   it('control: keeps a line tapped once the new settings\' effects have run, on Germany\'s pricing', async () => {
@@ -182,7 +182,7 @@ describe('tap race when new store settings land (#58 review)', () => {
     onGermanyCommit = () => { committed = true; };
     await germanyLands(retry, async () => { await vi.waitFor(() => expect(committed).toBe(true)); await settleTasks(); tap('Shirt'); });
     expect(button('Edit quantity of Shirt')).toBeTruthy();
-    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€20.00'); // Germany's €20, tax included
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €20.00'); // Germany's €20, tax included
   });
 
   it('a refused add does not leave the settings hold on: the next store settings still apply', async () => {
@@ -202,6 +202,6 @@ describe('tap race when new store settings land (#58 review)', () => {
     expect(region()).toBe('reg_de');
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(button('Edit quantity of Shirt')).toBeTruthy();
-    expect(within(screen.getByTestId('cart-footer')).getByText('Total').parentElement!.textContent).toBe('Total€20.00'); // Germany's €20, tax included
+    expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €20.00'); // Germany's €20, tax included
   });
 });

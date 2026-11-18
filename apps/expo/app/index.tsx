@@ -375,7 +375,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     {!noteSet ? <CartNoteLink onPress={() => setNoteOpen(true)} /> : !hasLines && <View className="px-3">{noteRow}</View>}
-    <Cart sale={sortedCartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
+    {/* v2's cart has no Total row: the total is on the Checkout button. */}
+    <Cart sale={sortedCartSale} orderActions={false} showTotal={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       quickDiscounts={cartSettings.settings.quickDiscounts} columns={cartSettings.settings.columns}
       afterSubtotal={couponField || noteInTotals ? <>{couponField}{noteInTotals && noteRow}</> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}

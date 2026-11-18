@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, cartLineQuantity, cartTab, cartTotalRow, closeStoreRegister, discount, productsTab, sellBySku, signIn, tenderCash, test } from './helpers';
+import { addE2E1, cartLineQuantity, cartTab, closeStoreRegister, discount, productsTab, sellBySku, signIn, tenderCash, test } from './helpers';
 
 // The sale screen on a phone (ADR 0009): below 600 px the Cart tab opens the cart at full height, its lines and
 // order discount scroll, and the totals and pay buttons stay pinned. Sells only E2E-1 and E2E-2.
@@ -78,29 +78,28 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
   await expect(productsTab(page)).toHaveAttribute('aria-selected', 'true');
   await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
   await cart.click();
-  const total = cartTotalRow(page, 'Total');
-  await expect(total).toContainText('3.88');
-  // v2's foot: the ⋮ (44 px) and Checkout (56 px) share one row.
+  // v2's foot: the total is on Checkout (56 px), which shares one row with the ⋮ (44 px).
   const checkout = page.getByTestId('cart-checkout');
+  await expect(checkout).toContainText('3.88');
   const more = page.getByTestId('cart-foot-more');
-  for (const target of [page.getByText('E2E product 1', { exact: true }), total, checkout, more]) await expect(target).toBeInViewport();
+  for (const target of [page.getByText('E2E product 1', { exact: true }), checkout, more]) await expect(target).toBeInViewport();
   const [checkoutBox, moreBox] = [(await checkout.boundingBox())!, (await more.boundingBox())!];
   const centreGap = Math.abs(checkoutBox.y + checkoutBox.height / 2 - (moreBox.y + moreBox.height / 2));
   expect([centreGap <= 1, checkoutBox.height >= 56, Math.round(moreBox.width), Math.round(moreBox.height)]).toEqual([true, true, 44, 44]);
   await orderChip.scrollIntoViewIfNeeded();
-  for (const target of [orderChip, total, checkout]) await expect(target).toBeInViewport();
+  for (const target of [orderChip, checkout]) await expect(target).toBeInViewport();
   await productsTab(page).click();
   await page.getByTestId('product-tile-E2E product 2').click();
   await expect(cart).toHaveAccessibleName(/^Cart, 3 items$/);
   await expect(page.getByTestId('phone-tab-cart-count')).toHaveText('3');
   await cart.click();
-  // The order discount dialog's Cancel fits; closing it restores the pinned total and checkout.
+  // The order discount dialog's Cancel fits; closing it restores the pinned Checkout, which carries the total.
   await page.getByTestId('cart-add-menu').click();
   await page.getByRole('menuitem', { name: 'Add Discount', exact: true }).click();
   const cancel = page.getByRole('button', { name: 'Cancel', exact: true });
   await expect(cancel).toBeInViewport();
   await cancel.click();
-  for (const target of [total, checkout]) await expect(target).toBeInViewport();
+  await expect(checkout).toBeInViewport();
   expect(await sellBySku(page, [], 'exact')).toBeGreaterThan(3.88);
   await expect(cart).toHaveAccessibleName('Cart, New');
 });

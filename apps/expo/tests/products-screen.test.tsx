@@ -1129,6 +1129,8 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(screen.queryByTestId('cart-checkout')).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
     expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€24.00']);
+    expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €30.00');
+    expect(within(screen.getByTestId('cart-footer')).queryByText('Total')).toBeNull();
     expect(search()).toBeNull();
     fireEvent.click(screen.getByRole('tab', { name: 'Products' }));
     expect(search()).toBeTruthy();
@@ -1210,7 +1212,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     fireEvent.click(within(screen.getByTestId('cart-add-dialog')).getByRole('button', { name: 'Cancel' }));
     const footer = within(screen.getByTestId('cart-footer'));
     expect(footer.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
-    expect(footer.getByText('Total').parentElement!.textContent).toBe('Total€15.00');
+    expect(footer.queryByText('Total')).toBeNull(); // v2's cart: the total is on Checkout, no Total row
     // The ⋮ beside Checkout holds Void while the sale has lines and no payments.
     fireEvent.click(footer.getByRole('button', { name: 'More actions' }));
     expect(within(footer.getByTestId('cart-foot-menu')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Void']);

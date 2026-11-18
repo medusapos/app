@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartLineRow, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartLineRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
 import { appliedResponse, saleResults } from './helpers';
 
 // Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5, 6, 7] at GET /tally/v1/info,
@@ -34,7 +34,9 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   await expect(page.getByText(/^Order discount −.*0\.50$/)).toBeVisible();
   // The last "Discount" is the totals row; the first is the line's action.
   const row = async (label: string) => Number((await page.getByText(label, { exact: true }).last().locator('..').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
-  expect([await row('Subtotal'), await row('Discount'), await row('VAT 25%'), await row('Total')]).toEqual([4, 0.9, 0.78, 3.88]);
+  // v2's cart has no Total row: the total is on the Checkout button.
+  const total = Number((await page.getByTestId('cart-checkout').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
+  expect([await row('Subtotal'), await row('Discount'), await row('VAT 25%'), total]).toEqual([4, 0.9, 0.78, 3.88]);
   const applied = appliedResponse(page);
   // Exact cash, as sellBySku pays it, stopping on the receipt to read its rows.
   await page.getByTestId('cart-checkout').click();
@@ -93,8 +95,7 @@ test('100% off the line completes with cash at €0.00 as one Medusa order', asy
   await signIn(page);
   await addE2E1(page);
   await discount(page, 'line', 'Percent', '100');
-  const row = cartTotalRow(page, 'Total');
-  await expect(row).toContainText('0.00');
+  await expect(page.getByTestId('cart-checkout')).toContainText('0.00');
   const applied = appliedResponse(page);
   await page.getByTestId('cart-checkout').click();
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();

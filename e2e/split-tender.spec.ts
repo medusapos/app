@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { addE2E1, adminToken, appliedResponse, backend, captureCommands, cartTotalRow, ordersByClientId, signIn, test } from './helpers';
+import { addE2E1, adminToken, appliedResponse, backend, captureCommands, ordersByClientId, signIn, test } from './helpers';
 
 type Sale = { clientOrderId: string; totalMinor: number;
   payments: { method: string; amountMinor: number; tenderedMinor?: number; changeMinor?: number }[] };
@@ -10,8 +10,8 @@ test('a split card-and-cash sale reaches Medusa once at the till\'s total, with 
   await signIn(page);
   await addE2E1(page);
   await addE2E1(page);
-  const tillTotal = cartTotalRow(page, 'Total');
-  await expect(tillTotal).toHaveText(/Total\D*5\.00$/);
+  const tillTotal = page.getByTestId('cart-checkout');
+  await expect(tillTotal).toHaveText(/Checkout\D*5\.00$/);
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
   await page.getByTestId('cart-checkout').click();
   await expect(page.getByTestId('tender-pane')).toBeVisible();

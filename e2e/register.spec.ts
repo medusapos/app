@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartTab, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openArea, openRegisterPanel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartTab, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openArea, openRegisterPanel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
 
 // The store's closure history row for `sessionId`'s closure (closure-history.ts), read with the e2e admin token.
 async function storeClosure(sessionId: string): Promise<{ sessionId: string; number: number; approvalVerified: boolean } | undefined> {
@@ -496,7 +496,7 @@ test('with Register 1 open, Checkout opens the tender, and ⋮ Void asks first a
   await voidSale();
   await page.getByTestId('cart-void-keep').click();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
-  await expect(cartTotalRow(page, 'Total')).toHaveText(/Total\D*5\.00$/);
+  await expect(page.getByTestId('cart-checkout')).toHaveText(/Checkout\D*5\.00$/);
   await voidSale();
   await page.getByTestId('cart-void-confirm').click();
   await expect(page.getByTestId('cart-empty')).toBeVisible();

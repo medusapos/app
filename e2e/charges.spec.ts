@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartTotalRow, ordersByClientId, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, ordersByClientId, signIn, tenderCash, test } from './helpers';
 import { appliedResponse } from './helpers';
 
 // OrderCreatePayload v5: charges are fees/shipping; custom items are lines[].custom.
@@ -23,7 +23,7 @@ test('a sale with a fee, shipping and a custom item reaches Medusa once at the t
     await form.getByLabel('Amount', { exact: true }).fill(amount);
     await form.getByRole('button', { name: 'Apply', exact: true }).click();
   }
-  const tillTotal = cartTotalRow(page, 'Total');
+  const tillTotal = page.getByTestId('cart-checkout');
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
   await page.getByTestId('cart-checkout').click();
   await tenderCash(page, totalMinor / 100);
