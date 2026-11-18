@@ -307,6 +307,23 @@ it('shows the bound register with Switch disabled while its session is open', as
   expect(screen.getByTestId('user-sheet')).toBeTruthy();
 });
 
+it('puts the register label, name and Switch on one line', async () => {
+  await mount(); open();
+  const row = screen.getByTestId('user-sheet-register-row');
+  const label = within(row).getByText('Register');
+  const name = screen.getByTestId('user-sheet-register-name');
+  const button = screen.getByTestId('user-sheet-register-switch');
+  const line = label.parentElement!;
+  expect(name.parentElement).toBe(line);
+  expect(button.parentElement).toBe(line);
+  const children = Array.from(line.children);
+  expect(children.indexOf(label)).toBeLessThan(children.indexOf(name));
+  expect(children.indexOf(name)).toBeLessThan(children.indexOf(button));
+  const locked = screen.getByTestId('user-sheet-register-locked');
+  expect(locked.parentElement).not.toBe(line);
+  expect(row.contains(locked)).toBe(true);
+});
+
 it.each(['counting', 'closed'] as const)('disables Switch while the session is %s', async (status) => {
   const register = useRegister().register;
   vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, status } } });

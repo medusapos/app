@@ -355,4 +355,14 @@ describe('ReportsScreen', () => {
     expect((await screen.findByTestId('reports-x-print-error')).textContent).toBe(X_PRINT_FAILED);
     warn.mockRestore();
   });
+
+  it('Print summary shows v2\'s printer icon before its label', async () => {
+    mount();
+    const button = await screen.findByTestId('reports-print-summary');
+    const icon = within(button).getByTestId('reports-print-summary-icon');
+    expect(icon.querySelector('svg')).toBeTruthy();
+    const label = within(button).getByText('Print summary');
+    expect(icon.compareDocumentPosition(label) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(button.textContent).toBe('Print summary');
+  });
 });
