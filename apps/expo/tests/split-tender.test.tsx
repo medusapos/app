@@ -17,7 +17,7 @@ import { setWindowWidth } from './window-width';
 import { pickMethod, take, takeLeg, tenderBalance, tenderEntry } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
-vi.mock('expo-router', () => ({ Redirect: () => null, Stack: { Screen: () => null } }));
+vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, Stack: { Screen: () => null } }));
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));

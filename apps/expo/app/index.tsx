@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
-import { Redirect, router, Stack } from 'expo-router';
+import { Redirect, router, Stack, usePathname } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
@@ -238,12 +238,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       status: catalogueState, error: error ?? undefined });
   }, [session.baseUrl, sorted, traits, pricing.currency, catalogueState, error]);
   useEffect(() => () => withdrawCatalogue('sale'), []);
-  // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
-  const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
   // The miss line shows over the cart in the cart stage (on a phone, only in the cart view); it starts empty each time it shows.
   const scanMissShown = sale.stage.kind === 'cart' && (!phone || cartOpen);
   useEffect(() => { setScanMiss(null); }, [scanMissShown]);
+  const pathname = usePathname();
+  // v2 scans anywhere in the POS; an editable target (search box, coupon field) keeps its own input, so no double add; off while an area is over the Sale and in tender.
+  const wedgeActive = scanMissShown && pathname === '/';
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
