@@ -28,7 +28,7 @@ import { EmailReceipt } from '../components/email-receipt';
 import { PaidChange } from '../components/paid-change';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
-import { storeRegisterTitle } from '../components/frame-drawer-header';
+import { storeRegisterTitle } from '../lib/store-register-title';
 import { HeaderRegisterState, WideHeaderRegister, wideRegisterState } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
