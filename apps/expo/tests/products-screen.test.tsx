@@ -911,7 +911,7 @@ describe('Orders screen and sync status', () => {
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Recent']);
-    expect(screen.getByRole('link', { name: 'Send feedback' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Send feedback' })).toBeNull();
   });
   it('lists attention first, including errors, both warnings, totals and server display IDs', async () => {
     const order = savedSale();

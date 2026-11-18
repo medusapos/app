@@ -17,6 +17,7 @@ vi.mock('expo-router', () => ({
     {options.headerRight?.()}
   </> },
 }));
+vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 
 const baseUrl = 'https://store.test';
 const fetchSpy = vi.fn();
