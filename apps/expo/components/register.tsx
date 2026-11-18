@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, View } from 'react-native';
+import { Path } from 'react-native-svg';
 import { AppText as Text } from './app-text';
 import {
-  ClosureSheet, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
+  ClosureSheet, createSvgIcon, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';
 import { RegisterSessionRequiredError, type ApprovalNeeded, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { printXReport } from '../lib/closure-print';
@@ -22,6 +23,17 @@ export const GETTING_READY = 'Getting ready to save sales…';
 export const CHECK_FAILED = "Couldn't check the register. Try again.";
 
 type Sale = ReturnType<typeof useSale>;
+
+/** v2's amber line on the count (row 09e.2): the till's open sales, which the close leaves open. Null for none. */
+export function openCartsWarning(count: number): string | null {
+  if (count <= 0) return null;
+  return count === 1 ? '1 cart still open · it stays open after the close' : `${count} carts still open · they stay open after the close`;
+}
+
+const WarningIcon = createSvgIcon('WarningIcon', () => <>
+  <Path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+  <Path d="M12 9v4M12 17h.01" />
+</>);
 
 /**
  * The sale the Cart gets: its Cash and Card start the tender only once `requireSaleSession()` confirms an open
@@ -119,8 +131,10 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
  * the count (RegisterCount, ADR 0018) while counting, and for its Finish closing card when a session closed but its
  * closure didn't finish. A close here shows the closure sheet.
  */
-export function RegisterGate({ currency, online, refused, cartEmpty, focus, children }: {
+export function RegisterGate({ currency, online, refused, cartEmpty, openSaleCount, focus, children }: {
   currency: string; online: boolean; refused: string | null; cartEmpty: boolean; children: ReactNode;
+  /** The till's open sales (the current one with lines, plus parked ones), warned of on the count; never a gate. */
+  openSaleCount: number;
   /** A pill tap's request (`key`) and the last one handled, kept by the screen so a gate that mounts for it (a
    *  phone's cart view) still honours it. */
   focus: { key: number; handled: { current: number } };
@@ -152,6 +166,7 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
   // Finish closing card (TallyUI #174), which resumes with the count and approver stored on the session. During a
   // close (`register.closing`, TallyUI #175) the column keeps the count instead, so the card never flashes.
   const column = { ...register, actions: { ...register.actions, closeSession: (input: CloseInput) => close.run(input, false) } };
+  const openCarts = openCartsWarning(openSaleCount);
   return <View ref={gate} className="flex-1">
     {boundRegisterId === null ? <RegisterPicker registers={registers} onPick={pick} /> : null}
     {boundRegisterId && !session ? <OpenRegisterCard register={register} currency={currency} /> : null}
@@ -162,7 +177,15 @@ export function RegisterGate({ currency, online, refused, cartEmpty, focus, chil
       ? <Text testID="close-error" accessibilityRole="alert" className="px-4 pt-3 text-destructive">{close.error}</Text> : null}
     {boundRegisterId && session && session.status !== 'conflict' ? <RegisterColumn register={column} registerId={boundRegisterId} registers={registers}
       onPick={pick} currency={currency} cartEmpty={cartEmpty}
-      countSlot={<RegisterCount register={counting} currency={currency} approve={approveCount} />}>
+      countSlot={<View className="flex-1">
+        {/* mx-4 lines up with the count's own p-4 content. */}
+        {openCarts ? <View testID="count-open-carts" accessibilityRole="alert"
+          className="mx-4 mt-3 flex-row items-center gap-2 rounded-md border border-warning bg-warning/15 px-3 py-2">
+          <WarningIcon size={16} />
+          <Text className="flex-1 text-sm text-foreground">{openCarts}</Text>
+        </View> : null}
+        <RegisterCount register={counting} currency={currency} approve={approveCount} />
+      </View>}>
       {children}
     </RegisterColumn> : children}
     {dialog}
