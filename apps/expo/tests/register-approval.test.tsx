@@ -70,7 +70,7 @@ afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 async function mountCount(liveAtStore: boolean) {
   withRegister({ session: { ...OPEN_SESSION, status: 'counting' }, liveAtStore });
   await act(async () => {
-    render(<><RegisterGate currency="EUR" online refused={null} cartEmpty focus={{ key: 0, handled: { current: 0 } }}>{null}</RegisterGate><PortalHost /></>);
+    render(<><RegisterGate currency="EUR" online refused={null} cartEmpty openSaleCount={0} focus={{ key: 0, handled: { current: 0 } }}>{null}</RegisterGate><PortalHost /></>);
   });
   const count = within(screen.getByTestId('register-count'));
   fireEvent.change(count.getByTestId('count-amount'), { target: { value: '90.00' } });
