@@ -6,13 +6,12 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  CartNoteInput, Catalogue, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, StoreSettingsChoiceScreen, SyncStatus, Tender, Text as UiText, XIcon,
+  CartNoteInput, Catalogue, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
-import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice, SignInError, type ServerCapabilities, type StoreSettings as PricingSettings, type SyncContext, type TallyConnector } from '@tallyui/core';
+import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
 import {
-  capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, TaxProvider, taxProviderProps, useParkedSales, useSale, useStoreSettings,
-  withPricingContext, withStockOverlay,
+  capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, useParkedSales, useSale,
   normalizeCatalogueViewState, type CatalogueViewState,
 } from '@tallyui/pos';
 
@@ -35,14 +34,15 @@ import {
   GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
+import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { TenderOrderSummary } from '../components/tender-order-summary';
 import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
 import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
 import { sortCartLines, useCartSettings } from '../lib/cart-settings';
-import { publishCatalogue } from '../lib/catalogue-snapshot';
+import { catalogueStatus, publishCatalogue, sellableCatalogue, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
-import { demoTillChoice, isDemoAccount } from '../lib/demo';
+import { isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
 import { withDemoSaleEvent } from '../lib/demo-analytics';
 import { formatDate } from '../lib/format-date';
@@ -50,7 +50,6 @@ import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
 import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
-import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
 import { useProductSettings } from '../lib/product-settings';
 import { useRegister } from '../lib/register-context';
@@ -58,12 +57,8 @@ import { useScannerSettings } from '../lib/scanner-settings';
 import { playScanBeep } from '../lib/scan-beep';
 import { forgetDeletedDefaultCustomer, useDefaultCustomer } from '../lib/default-customer';
 import { forgetDeletedCashierCustomer, useCashierCustomer } from '../lib/cashier-customer';
-import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
+import { defaultStorage, REGISTER_ID_KEY } from '../lib/session';
 import { useSession } from '../lib/session-context';
-import {
-  clearSettingsRegion, fetchStoreSettings, loadCachedPricing, loadCachedSettings, loadSettingsChoice, saveCachedPricing,
-  saveCachedSettings, saveSettingsChoice, StoreSettingsError, type StoreSettings,
-} from '../lib/store-settings';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 import { useDeviceScans } from '../lib/use-device-scans';
 import { useWedgeScan } from '../lib/use-wedge-scan';
@@ -78,10 +73,6 @@ const STATE_LABEL: Record<SyncState, string> = {
 
 // Merchant-facing name of @medusapos/medusa-plugin (#129).
 const PLUGIN_NAME = 'the Medusa POS plugin';
-// TallyUI #339/#341, use-store-settings.ts:48: unknown tax rounding retries until settings resolve.
-const SETTINGS_RETRYING = "Can't reach the store's settings yet. Retrying…";
-// The till setup screen: its navigation header and its own title say the same words.
-const TILL_SETUP_TITLE = 'Set up this till';
 
 // ADR 0009: phone mode below 600 px.
 const PHONE_BREAKPOINT = 600;
@@ -97,138 +88,10 @@ export default function ProductsScreen() {
   if (!session) return <Redirect href={isDemoAccount(lastEmail.current ?? '') ? '/demo' : '/login'} />;
   lastEmail.current = session.email;
   return <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
-    onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} />;
+    onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={SignedInProducts} />;
 }
 
-type SignedInProps = { session: Session; signOut: () => void; onUnauthorized: () => void; onNoPosAccess: () => void;
-  onCapabilities: (fresh: ServerCapabilities | undefined) => void };
-
-function StoreSettingsGate(props: SignedInProps) {
-  const { session, onUnauthorized, onNoPosAccess, onCapabilities } = props;
-  const [connector] = useState(createPosConnector);
-  // Once per store (this screen is keyed by it): re-read the order.create capability a restored session was saved with (ADR-062).
-  useEffect(() => {
-    let active = true;
-    connector.capabilities?.({ connectorId: connector.id, baseUrl: session.baseUrl, headers: authHeaders(session.token) })
-      .then((fresh) => { if (active) onCapabilities(fresh); })
-      .catch((error: unknown) => { if (active && error instanceof SignInError && error.code === 'invalid_credentials') onUnauthorized(); });
-    return () => { active = false; };
-  }, [session.baseUrl, onCapabilities, onUnauthorized]);
-  const [settings, setSettings] = useState(() => loadCachedSettings(defaultStorage(), session.baseUrl));
-  const [error, setError] = useState<string | null>(null);
-  const [offline, setOffline] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  useEffect(() => {
-    let active = true;
-    setError(null);
-    void fetchStoreSettings(session).then((next) => {
-      if (!active) return;
-      saveCachedSettings(defaultStorage(), session.baseUrl, next);
-      setSettings(next);
-      setOffline(false);
-    }).catch((error: Error) => {
-      if (!active) return;
-      if (error instanceof StoreSettingsError && error.code === 'unauthorized') onUnauthorized();
-      else if (error instanceof StoreSettingsError && error.code === 'forbidden') onNoPosAccess();
-      else {
-        setError(error.message);
-        setOffline(error instanceof StoreSettingsError && error.code === 'unreachable');
-      }
-    });
-    return () => { active = false; };
-  }, [session, onUnauthorized, onNoPosAccess, attempt]);
-  if (!settings) return <SettingsMessage text={error ?? 'Loading store settings…'} actions={error ? { Retry: () => setAttempt(attempt + 1) } : {}} />;
-  return <PricingScreen {...props} connector={connector} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
-}
-
-function SettingsMessage({ text, actions }: { text: string; actions: Record<string, () => void> }) {
-  const buttons = Object.entries(actions);
-  return <>
-    <EarlierSaleNote />
-    <View dataSet={{ print: 'hide' }} className="flex-1 items-center justify-center gap-4">
-      <Text className={buttons.length ? 'text-destructive' : 'text-muted-foreground'}>{text}</Text>
-      {buttons.map(([label, onPress]) => <Pressable key={label} accessibilityRole="button" onPress={onPress} className="rounded-md border border-border bg-card px-4 py-3"><Text className="text-center text-foreground">{label}</Text></Pressable>)}
-    </View>
-  </>;
-}
-
-type PricingProps = SignedInProps & { connector: TallyConnector; settings: StoreSettings; settingsStatus: string | null };
-
-// TallyUI's store settings (TV4) price and tax every sale the way Medusa charges in the till's region.
-function PricingScreen(props: PricingProps) {
-  const { session, settings, connector } = props;
-  const token = useRef(session.token);
-  token.current = session.token;
-  const [attempt, setAttempt] = useState(0);
-  // D1: the plugin taxes each order by the stock location's address, so the till's country is always its country.
-  const country = settings.location.countryCode.toLowerCase();
-  // Read per request (as the outbox's transport), so a token refresh keeps this identity and never re-resolves; a new country does.
-  // The capability is a value dependency: only a new order.create version makes a new context, never a new session object.
-  const orderCreate = session.capabilities?.orderCreate;
-  const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
-    headers: { get Authorization() { return authHeaders(token.current).Authorization; } },
-    ...(orderCreate === undefined ? {} : { capabilities: { orderCreate } }) }), [session.baseUrl, attempt, country, orderCreate]);
-  const store = useStoreSettings({
-    connector, context, loadChoice: () => ({ ...loadSettingsChoice(defaultStorage(), session.baseUrl), country }),
-    saveChoice: (choice) => saveSettingsChoice(defaultStorage(), session.baseUrl, choice),
-    onSaveError: (error) => console.warn('Could not save the till\'s store settings choice:', error),
-  });
-  // A Retry never unmounts the POS or ends its sale (a money rule): the POS keeps the settings it shows (the same
-  // object, so the tax context and replication stay) while a retry loads or fails, and until it resolves to new ones.
-  const shown = useRef<{ pricing: PricingSettings; syncContext: SyncContext } | null>(null);
-  const pricing = useMemo(() => {
-    const previous = shown.current?.pricing ?? null;
-    if (store.state === 'ready') return previous && JSON.stringify(previous) === JSON.stringify(store.settings) ? previous : store.settings;
-    if (store.state === 'error') return previous ?? loadCachedPricing(defaultStorage(), session.baseUrl);
-    return store.state === 'loading' ? previous : null;
-  }, [store, session.baseUrl]);
-  useEffect(() => { if (store.state === 'ready') saveCachedPricing(defaultStorage(), session.baseUrl, store.settings); }, [store, session.baseUrl]);
-  const live = useMemo(() => pricing && { pricing, syncContext: withPricingContext(context, pricing) }, [context, pricing]);
-  // A sale in progress keeps the POS on what it shows (prices, tax, catalogue, currency; a money rule): new
-  // settings, and the choose, unsupported or error screens, wait until the sale is idle.
-  const [busy, setBusy] = useState(false);
-  const held = busy && shown.current !== null;
-  if (!held) shown.current = live;
-  const regionNames = useRef(new Map<string, string>());
-  const again = () => setAttempt(attempt + 1);
-  const demoChosen = useRef(false);
-  const autoChooseDemo = store.state === 'choose' && !held && !demoChosen.current && isDemoAccount(session.email)
-    && (!store.choices.countries || store.choices.countries.includes(country));
-  useEffect(() => {
-    if (!autoChooseDemo || demoChosen.current || store.state !== 'choose') return;
-    demoChosen.current = true;
-    store.choose({ ...demoTillChoice(store.choices, store.initial), country });
-  }, [autoChooseDemo, store, country]);
-
-  if (store.state === 'choose' && !held) {
-    for (const region of store.choices.regions ?? []) regionNames.current.set(region.id, region.name);
-    const { countries, ...choices } = store.choices;
-    if (countries && !countries.includes(country)) {
-      // No region in the choice: Medusa's default region, which wins again after any pick, so only Retry.
-      const region = store.initial?.region;
-      return <SettingsMessage text={`Stock location ${settings.location.name} is in ${country.toUpperCase()}, which ${region ? `region ${regionNames.current.get(region) ?? region}` : 'the store\'s default region'} does not cover.`}
-        actions={region ? { Retry: again, 'Choose another region': () => { clearSettingsRegion(defaultStorage(), session.baseUrl); again(); } } : { Retry: again }} />;
-    }
-    if (autoChooseDemo) return <SettingsMessage text="Setting up the demo till…" actions={{}} />;
-    return <><Stack.Screen options={{ title: TILL_SETUP_TITLE }} /><EarlierSaleNote />
-      <StoreSettingsChoiceScreen choices={choices} initial={store.initial} title={TILL_SETUP_TITLE}
-      onSubmit={(choice) => store.choose({ ...choice, country })} /></>;
-  }
-  if (store.state === 'unsupported' && !held) return <SettingsMessage text="This backend can't supply store settings" actions={{ Retry: again }} />;
-  const pos = shown.current;
-  if (store.state === 'error' && !pos) return <SettingsMessage text={store.nextRetryAt !== undefined ? SETTINGS_RETRYING
-    : store.error instanceof Error ? store.error.message : String(store.error)} actions={{ Retry: store.retry }} />;
-  if (!pos) return <SettingsMessage text="Loading store settings…" actions={{}} />;
-  return <TaxProvider {...taxProviderProps(pos.pricing)}>
-    <SignedInProducts {...props} pricing={pos.pricing} syncContext={pos.syncContext} onBusy={setBusy}
-      settingsStatus={props.settingsStatus ?? (store.state === 'error' ? 'Offline'
-        : store.state === 'choose' || store.state === 'unsupported' ? 'Store settings changed; this applies after the current sale' : null)} onRetry={store.state === 'error' ? store.retry : undefined} />
-  </TaxProvider>;
-}
-
-function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: PricingProps & {
-  pricing: PricingSettings; syncContext: SyncContext; onRetry?: () => void; onBusy: (busy: boolean) => void;
-}) {
+function SignedInProducts({ session, signOut, onUnauthorized, settings, settingsStatus, pricing, syncContext, onRetry, onBusy, connector }: TillCatalogueLeafProps) {
   const traits = connector.traits.product;
   const { setSaleHold } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
@@ -343,18 +206,16 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
 
   // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
-  const sorted = useMemo(
-    () => products.map((doc) => withStockOverlay(doc, connector.reconcile?.stock, stockOverlay))
-      .filter(traits.isSellable).sort((a, b) => traits.getName(a).localeCompare(traits.getName(b))),
-    [products, stockOverlay],
-  );
+  const sorted = useMemo(() => sellableCatalogue(products, connector, stockOverlay), [products, stockOverlay]);
   const entries = useMemo(() => catalogueEntries(sorted, traits), [sorted]);
   entriesRef.current = entries;
   // The Products area reads this catalogue; it stays live while the area is pushed over the Sale.
+  const catalogueState = catalogueStatus(products.length, state);
   useEffect(() => {
-    publishCatalogue({ baseUrl: session.baseUrl, products: sorted, traits, currency: pricing.currency });
-    return () => publishCatalogue(null);
-  }, [session.baseUrl, sorted, traits, pricing.currency]);
+    publishCatalogue({ owner: 'sale', baseUrl: session.baseUrl, products: sorted, traits, currency: pricing.currency,
+      status: catalogueState, error: error ?? undefined });
+  }, [session.baseUrl, sorted, traits, pricing.currency, catalogueState, error]);
+  useEffect(() => () => withdrawCatalogue('sale'), []);
   // Web only, while phone mode shows the cart view in the cart stage (ADR 0009); the products view's own SearchInput handles a scan there, so this never double-adds.
   const wedgeActive = phone && cartOpen && sale.stage.kind === 'cart';
   const [scanMiss, setScanMiss] = useState<string | null>(null);
