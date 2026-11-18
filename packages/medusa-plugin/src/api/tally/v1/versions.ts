@@ -9,6 +9,12 @@ export const LINE_TAX = { none: false, classes: false }
 export const SUPPORTED_REGISTER_VERSIONS: readonly number[] = [1, 2, 3]
 // ADR 0023: the default when the option is unset.
 export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
+// The version of the contract between this plugin and the MedusaPOS app, advertised on /info as `pluginContract`.
+// Bump it when the app comes to need a route, field or behaviour an older plugin lacks, and raise the app's
+// MIN_PLUGIN_CONTRACT (apps/expo/lib/plugin-contract.ts) in the same change. The order.create/register lists stay
+// TallyUI's per-command negotiation; this one is the app's.
+// Contract 1 includes GET /tally/v1/registers/{id}/closures' `cashier` filter (#446); an older plugin ignores the key.
+export const PLUGIN_CONTRACT = 1
 
 export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
   const value = options.approvalThresholdMinor

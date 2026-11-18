@@ -1,4 +1,4 @@
-import { approvalThresholdMinor, DEFAULT_APPROVAL_THRESHOLD_MINOR, LINE_TAX, registerVersionAccepted,
+import { approvalThresholdMinor, DEFAULT_APPROVAL_THRESHOLD_MINOR, LINE_TAX, PLUGIN_CONTRACT, registerVersionAccepted,
   SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS, TAX_ROUNDING } from '../versions'
 
 // The ServerCapabilities.taxRounding contract (TallyUI #309): /info tells the till to round tax the way the store does.
@@ -26,4 +26,9 @@ it('accepts supported register versions, subject to the optional minimum', () =>
   expect(registerVersionAccepted(3, { minRegisterContract: 3 })).toBe(true)
   expect(registerVersionAccepted(4, {})).toBe(false)
   expect(registerVersionAccepted(4, { minRegisterContract: 3 })).toBe(false)
+})
+
+// The app's MIN_PLUGIN_CONTRACT (apps/expo/lib/plugin-contract.ts) latches "Update required" below this.
+it('advertises plugin contract 1', () => {
+  expect(PLUGIN_CONTRACT).toBe(1)
 })

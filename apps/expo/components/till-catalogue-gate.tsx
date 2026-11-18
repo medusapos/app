@@ -8,6 +8,7 @@ import { SignInError, type ServerCapabilities, type StoreSettings as PricingSett
 import { TaxProvider, taxProviderProps, useStoreSettings, withPricingContext } from '@tallyui/pos';
 
 import { EarlierSaleNote } from './earlier-sale-note';
+import { UpdateRequired, usePluginContract } from './update-required';
 import { demoTillChoice, isDemoAccount } from '../lib/demo';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { defaultStorage, type Session } from '../lib/session';
@@ -48,6 +49,7 @@ export function StoreSettingsGate(props: GateProps) {
   const [error, setError] = useState<string | null>(null);
   const [offline, setOffline] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  const plugin = usePluginContract(session);
   useEffect(() => {
     let active = true;
     setError(null);
@@ -67,6 +69,9 @@ export function StoreSettingsGate(props: GateProps) {
     });
     return () => { active = false; };
   }, [session, onUnauthorized, onNoPosAccess, attempt]);
+  // Only a conclusive too-old plugin replaces the POS; a pending or inconclusive read renders as before.
+  if (plugin.latched) return <UpdateRequired baseUrl={session.baseUrl} checking={plugin.checking} failed={plugin.failed}
+    onCheckAgain={plugin.checkAgain} onSignOut={props.signOut} />;
   if (!settings) return <SettingsMessage text={error ?? 'Loading store settings…'} actions={error ? { Retry: () => setAttempt(attempt + 1) } : {}} />;
   return <PricingScreen {...props} connector={connector} settings={settings} settingsStatus={offline ? 'Offline' : error} />;
 }
