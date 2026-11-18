@@ -83,7 +83,7 @@ type Replicated = ReturnType<typeof useReplicatedProducts>;
 const reconcileStock = vi.fn(async () => {});
 const replicated = (over: Partial<Replicated>): Replicated => ({ products: [], state: 'synced', error: null,
   lastSyncedAt: null, stockOverlay: undefined, lastStockCheckAt: null, reconcileStock, unlisted: undefined,
-  pullNotice: undefined, resumePull: vi.fn(), ...over });
+  pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn(), ...over });
 
 const settings: StoreSettings = {
   storeName: 'Test shop', currency: 'EUR', location: { id: 'loc', name: 'Main', countryCode: 'dk' },
@@ -327,8 +327,8 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
-      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'cart-settings-button', 'cart-add-menu', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'In Stock', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings', 'Add order note']);
+      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'catalogue-sync', 'cart-settings-button', 'cart-add-menu', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
+      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'In Stock', 'Sync products', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings', 'Add order note']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -488,6 +488,37 @@ describe('ProductsScreen catalogue', () => {
     }));
     expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
     expect(screen.getByText(`Cashier: ${name ?? 'admin@store.test'}`)).toBeTruthy();
+  });
+
+  it('puts the sync arrow on the status row before the product settings; a tap syncs', async () => {
+    const syncNow = vi.fn();
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ syncNow }));
+    await mount();
+    const sync = screen.getByTestId('catalogue-sync');
+    const settingsButton = screen.getByTestId('product-settings-button');
+    expect(sync.parentElement).toBe(settingsButton.parentElement);
+    expect(sync.compareDocumentPosition(settingsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(sync);
+    expect(syncNow).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('catalogue-clear-refresh')).toBeNull();
+  });
+
+  it('Clear and Refresh clears the cache, turns In Stock back off and empties the search', async () => {
+    const clearAndRefresh = vi.fn();
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ clearAndRefresh, products: [
+      { id: 'apple', title: 'Apple', status: 'published', variants: [{ id: 'apple-one', title: 'One size',
+        manage_inventory: true, inventory_quantity: 5, prices: [{ amount: 12.5, currency_code: 'eur' }] }] },
+    ] }));
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'In Stock', pressed: false }));
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'zebra' } });
+    expect(screen.queryByTestId('product-tile-Apple')).toBeNull();
+    fireEvent.contextMenu(screen.getByTestId('catalogue-sync'));
+    fireEvent.click(screen.getByTestId('catalogue-clear-refresh'));
+    expect(clearAndRefresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
+    expect((screen.getByRole('searchbox') as HTMLInputElement).value).toBe('');
+    expect(screen.getByTestId('product-tile-Apple')).toBeTruthy();
   });
 });
 describe('Product settings sheet', () => {

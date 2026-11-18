@@ -60,7 +60,7 @@ beforeEach(() => {
     pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' },
   }, refresh: () => {} });
   vi.mocked(useReplicatedProducts).mockReturnValue({ products: [], state: 'synced', error: null, lastSyncedAt: null,
-    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(), unlisted: undefined, pullNotice: undefined, resumePull: vi.fn() });
+    stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(), unlisted: undefined, pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn() });
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   vi.mocked(useParkedSales).mockReturnValue({ parked: [], discard: vi.fn() });
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [],
