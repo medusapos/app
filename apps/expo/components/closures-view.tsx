@@ -7,12 +7,15 @@ import { exportCsv, presetRange, selectClosureRows, watchFresh, type Closure, ty
 import { AreaAccountButton, useFrameMenu } from './app-frame';
 import { ClosureFiltersBar, ClosureRegisterSelect } from './closure-filters';
 import { ClosureTable } from './closure-table';
+import { ClosuresStats } from './closures-stats';
 import { OpenSessionRow } from './closures-open-session';
 import { ClosuresTabs, type ClosuresTab } from './closures-tabs';
 import { EarlierClosures } from './earlier-closures';
 import { printClosure } from './register-close';
 import { loadApprovers } from '../lib/approval';
+import type { ClosureHistoryEntry } from '../lib/closure-history';
 import { printXReport } from '../lib/closure-print';
+import { closureStats } from '../lib/closure-stats';
 import { openSessionOf } from '../lib/open-session';
 import { useOutboxContext } from '../lib/outbox-context';
 import { registerCollections } from '../lib/order-store';
@@ -37,7 +40,7 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
   }));
   const [historyCashiers, setHistoryCashiers] = useState<string[]>([]);
   const [tab, setTab] = useState<ClosuresTab>('all');
-  const [earlierCount, setEarlierCount] = useState(0);
+  const [earlierRows, setEarlierRows] = useState<ClosureHistoryEntry[]>([]);
   // A phone keeps the avatar in the stack header; a wide window has no header, so this row carries it.
   const openMenu = useFrameMenu();
 
@@ -69,8 +72,9 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
     print={Platform.OS === 'web' && openSession.status === 'open' ? () => printXReport({ session: register.session!,
       expected: register.expected, salesCount: register.salesCount, registerName: openRegisterName, context: ctx }) : undefined} /> : null;
   const showsEarlier = tab !== 'open' && !!chosenRegister && !!historyWindow;
-  const count = (tab !== 'closed' && openRow ? 1 : 0)
-    + (tab === 'open' ? 0 : (showsToday ? shownRows.length : 0) + (showsEarlier ? earlierCount : 0));
+  // The stat cards and the tabs' count cover exactly the sessions the list shows.
+  const stats = closureStats({ open: tab !== 'closed' ? openSession : null,
+    closures: tab === 'open' || !showsToday ? [] : shownRows, earlier: showsEarlier ? earlierRows : [], local: closures });
   const exports = tab !== 'open' && showsToday && Platform.OS === 'web' && rows.length > 0;
 
   return <View testID="closures-view" className="gap-4">
@@ -98,7 +102,8 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
         </Pressable> : undefined} />
     {exports && exportError ?
       <Text testID="closures-export-error" accessibilityRole="alert">Export failed. Try again.</Text> : null}
-    <ClosuresTabs value={tab} onChange={setTab} count={count} />
+    {!openMenu ? <ClosuresStats stats={stats} ctx={ctx} /> : null}
+    <ClosuresTabs value={tab} onChange={setTab} count={stats.sessions} />
     {tab === 'open' ? openRow ? <ClosureTable testID="closures-table" rowTestID={(id) => `closure-row-${id}`} ctx={ctx}
       today={today} rows={[]} todayLead={openRow} /> : <Text testID="closures-open-empty">No open session</Text>
       : !showsToday ? null : shownRows.length === 0 && !(tab === 'all' && openRow) ? <Text testID="closures-empty">No closures yet today</Text>
@@ -110,7 +115,7 @@ export function ClosuresView({ session, registers, boundRegisterId, register, ct
     {showsEarlier && chosenRegister && historyWindow ? <EarlierClosures session={session} registerId={chosenRegister} today={today} ctx={ctx}
       registerName={registerNames[chosenRegister] ?? ''} cashierNames={cashierNames}
       localClosures={closures} onOpen={setOpened} from={historyWindow.from} to={historyWindow.to}
-      cashierId={cashierId} onCashiers={setHistoryCashiers} onCount={setEarlierCount}
+      cashierId={cashierId} onCashiers={setHistoryCashiers} onRows={setEarlierRows}
       heading={showsToday ? 'Earlier closures' : null} /> : null}
     {opened ? <ClosureSheet currency={currency} onDone={() => setOpened(null)}
       register={{ ...register, lastClosure: opened.closure, closureApprovalStatus: register.closureApprovalStatus ?? {} }}
