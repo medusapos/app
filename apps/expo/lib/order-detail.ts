@@ -26,6 +26,9 @@ export function orderDetailFigures(order: PosOrder): {
   };
 }
 
+// The receipts' tax row; the rate arrives in parts per million (10 000 ppm = 1%).
+export const receiptTaxLabel = (ppm: number) => `VAT ${ppm / 10000}%`;
+
 // The words TallyUI's OrdersList uses for a payment.
 export function paymentLabel(method: PosOrderPayment['method']): string {
   return method === 'cash' ? 'Cash' : 'Card terminal';
