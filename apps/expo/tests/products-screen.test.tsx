@@ -1245,6 +1245,23 @@ describe('ProductsScreen network offline header', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('phone: the offline toast shows over Products only, not over the Cart view', async () => {
+    setWindowWidth(390, 844);
+    await mount();
+    vi.useFakeTimers();
+    try {
+      goNetwork(false);
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Device went offline');
+      fireEvent.click(screen.getByTestId('phone-tab-cart'));
+      expect(screen.getByTestId('phone-tab-cart').getAttribute('aria-selected')).toBe('true');
+      expect(toast()).toBeNull();
+      fireEvent.click(screen.getByTestId('phone-tab-products'));
+      expect(toast()?.textContent).toContain('Device went offline');
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('wide: with the network up but the pull offline, the toast reads Website is unreachable after 5 s', async () => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ state: 'offline' }));
     // The outage starts with the screen, so the clock is faked before mount.
@@ -2052,6 +2069,33 @@ describe('ProductsScreen wedge scan anywhere (wide)', () => {
     expect(screen.getAllByTestId('scan-toast')).toHaveLength(1);
     expect(screen.getByTestId('scan-toast').textContent).toContain('Added to cart');
     expect(screen.getByTestId('scan-toast').textContent).not.toContain('Barcode not found');
+  });
+
+  // TallyUI's sale.add refuses a product with no price in the sale's currency (addEntryToCart's CartError `No EUR price`).
+  it('a refused add clears the Added to cart toast and shows none of its own', async () => {
+    const shown = vi.mocked(useReplicatedProducts).getMockImplementation()!;
+    vi.mocked(useReplicatedProducts).mockImplementation((...args) => {
+      const result = shown(...args);
+      return { ...result, products: [...result.products, { id: 'cap', title: 'Cap', status: 'published',
+        variants: [{ id: 'cap-1', title: 'One', sku: 'CAP12', prices: [{ amount: 9, currency_code: 'usd' }] }] }] };
+    });
+    await mount();
+    blurSearch();
+    wedgeScan('AB123');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Added to cart');
+    wedgeScan('CAP12');
+    expect(screen.getByRole('alert').textContent).toBe('No EUR price for Cap');
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
+  });
+
+  it('leaving the cart for the tender hides the Added to cart toast before SCAN_TOAST_MS', async () => {
+    await mount();
+    blurSearch();
+    wedgeScan('AB123');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Added to cart');
+    await checkout();
+    expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
   });
 
   it('ignores a scan typed into the search box (no double add)', async () => {
