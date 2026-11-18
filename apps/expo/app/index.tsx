@@ -66,6 +66,7 @@ import { defaultStorage, REGISTER_ID_KEY } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 import { useDeviceScans } from '../lib/use-device-scans';
+import { useNetworkOnline } from '../lib/use-network-online';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -101,7 +102,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { setSaleHold } = useSession();
   const { products, state, error, lastSyncedAt, stockOverlay, lastStockCheckAt, reconcileStock, unlisted, pullNotice, resumePull } =
     useReplicatedProducts(connector, syncContext, onUnauthorized);
-  const online = state !== 'offline';
+  // v2's header "● Offline": the browser losing the network shows offline at once, not only after a pull fails.
+  const networkOnline = useNetworkOnline();
+  const pullState: SyncState = networkOnline ? state : 'offline';
+  const online = pullState !== 'offline';
   const previousToken = useRef(session.token);
   useEffect(() => {
     if (previousToken.current !== session.token) resumePull();
@@ -265,8 +269,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
   const productCount = `${sellableCount.toLocaleString()} ${sellableCount === 1 ? 'product' : 'products'}`;
   const storeName = settings.storeName.trim() ? settings.storeName : connector.name;
-  const statusText = phone ? `${STATE_LABEL[state]}${error ? ` · ${error}` : ''} · ${productCount}`
-    : `${storeName} · ${STATE_LABEL[state]} · ${productCount}`
+  const statusText = phone ? `${STATE_LABEL[pullState]}${error ? ` · ${error}` : ''} · ${productCount}`
+    : `${storeName} · ${STATE_LABEL[pullState]} · ${productCount}`
       + (unlisted?.count ? ` · ${unlisted.count.toLocaleString()} not sold in this channel${unlisted.stale ? ' (last check failed)' : ''}` : '')
       + (error ? ` · ${error}` : '');
   // Web has no 12/24-hour API and reports none; keep the locale default in that case.
@@ -407,8 +411,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         headerLeft: () => phoneTender ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className={phone ? 'flex-row items-center gap-4 pr-4' : 'flex-1 flex-row items-center gap-4 pr-4'}>
-        {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
-        {headerRegisterState && <HeaderRegisterState label={headerRegisterState}
+        {!phone && <WideHeaderRegister online={online} salesToSend={outboxState.pending} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
+        {headerRegisterState && <HeaderRegisterState label={headerRegisterState} salesToSend={outboxState.pending}
           onPress={registerStatus === 'open' ? () => setPanelOpen(true) : openGate} />}
         {!phoneTender && <AccountButton testID="user-menu" displayName={displayName} initials={initials}
           onPress={() => { setSheetFromArea(false); setUserSheetOpen(true); }} />}
