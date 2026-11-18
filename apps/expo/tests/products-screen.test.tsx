@@ -1900,3 +1900,61 @@ describe('ProductsScreen device scans', () => {
     expect(screen.getByText('No product matches "NOPE1"')).toBeTruthy();
   });
 });
+
+// Row 14a (#443): an area's avatar opens the Sale's user sheet through the frame's account. The probe stands in for an
+// area's avatar (AreaAccountButton), pressing the account's open() under the real AppFrame.
+describe('ProductsScreen user sheet opened from an area', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+  const tab = (name: RegExp) => screen.getByRole('tab', { name });
+  const switchRegister = () => act(async () => { fireEvent.click(screen.getByTestId('user-sheet-register-switch')); });
+
+  async function mountWithAreaAvatar() {
+    const { useFrameAccount } = await import('../components/app-frame');
+    function AreaAvatarProbe() {
+      const account = useFrameAccount();
+      return <button type="button" data-testid="area-avatar-probe" onClick={() => account?.open()} />;
+    }
+    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
+      token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
+    await act(async () => {
+      render(<SessionProvider><AppFrame signedIn><ProductsScreen /><AreaAvatarProbe /></AppFrame><PortalHost /></SessionProvider>);
+    });
+    return () => act(() => { fireEvent.click(screen.getByTestId('area-avatar-probe')); });
+  }
+
+  it('shows the sheet over the sale\'s receipt when an area opens it', async () => {
+    const openFromArea = await mountWithAreaAvatar();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await payByCard();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
+    expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    expect(screen.queryByTestId('user-sheet')).toBeNull();
+    openFromArea();
+    expect(screen.getByTestId('user-sheet')).toBeTruthy();
+  });
+
+  // Switch register is disabled while a session exists, so the till is bound with no session (a finished close).
+  // At 360 wide the gate opening is visible: openGate selects the Cart tab.
+  it('from an area, Switch register goes back to the sale before the gate; from the sale\'s avatar it does not', async () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register, session: null } });
+    setWindowWidth(360);
+    const openFromArea = await mountWithAreaAvatar();
+    fireEvent.click(tab(/^Products/));
+    expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('false');
+    openFromArea();
+    await switchRegister();
+    expect(fixture.unbind).toHaveBeenCalledTimes(1);
+    expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
+    expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('true');
+
+    vi.mocked(router.dismissTo).mockClear();
+    fireEvent.click(tab(/^Products/));
+    fireEvent.click(screen.getByTestId('user-menu'));
+    await switchRegister();
+    expect(fixture.unbind).toHaveBeenCalledTimes(2);
+    expect(router.dismissTo).not.toHaveBeenCalled();
+    expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('true');
+  });
+});
