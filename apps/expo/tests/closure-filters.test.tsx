@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { Text } from 'react-native';
 import { afterEach, expect, it, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
 import { presetRange } from '@tallyui/pos';
-import { ClosureFiltersBar } from '../components/closure-filters';
+import { ClosureFiltersBar, ClosureRegisterSelect } from '../components/closure-filters';
 import type { ClosureFilters } from '../lib/reports';
 
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
@@ -12,7 +13,7 @@ const filters: ClosureFilters = { preset: 'today', range: presetRange('today', n
 const registerOptions = [{ value: 'register-1', label: 'Test shop · Register 1' }, { value: 'register-2', label: 'Test shop · Register 2' }];
 const cashierOptions = [{ value: 'user-1', label: 'Ana' }, { value: 'user-2', label: 'Ben' }];
 const mount = (onChange = vi.fn(), value = filters) => {
-  render(<><ClosureFiltersBar filters={value} onChange={onChange} registerOptions={registerOptions} cashierOptions={cashierOptions} /><PortalHost /></>);
+  render(<><ClosureFiltersBar filters={value} onChange={onChange} cashierOptions={cashierOptions} /><PortalHost /></>);
   return onChange;
 };
 
@@ -22,7 +23,6 @@ it('shows the period and the chosen register\'s label', () => {
   mount();
   expect(screen.getByTestId('closures-filters')).toBeTruthy();
   expect(screen.getByTestId('closures-period').textContent).toMatch(/^Today · /);
-  expect(screen.getByTestId('closures-register').textContent).toBe('Test shop · Register 1');
   expect(screen.getByTestId('closures-cashier').textContent).toBe('All cashiers');
 });
 
@@ -48,8 +48,18 @@ it('choosing a cashier sets cashierId and All cashiers clears it', () => {
 });
 
 it('choosing a register sets registerId', () => {
-  const onChange = mount();
+  const onChange = vi.fn();
+  render(<ClosureRegisterSelect value="register-1" options={registerOptions} onChange={onChange} />);
+  expect(screen.getByTestId('closures-register').textContent).toBe('Test shop · Register 1');
   fireEvent.click(screen.getByTestId('closures-register'));
   fireEvent.click(screen.getByTestId('closures-register-option-register-2'));
-  expect(onChange).toHaveBeenCalledWith({ ...filters, registerId: 'register-2' });
+  expect(onChange).toHaveBeenCalledWith('register-2');
+  expect(screen.queryByTestId('closures-register-option-register-2')).toBeNull();
+});
+
+it('a trailing element ends the filter row', () => {
+  render(<ClosureFiltersBar filters={filters} onChange={vi.fn()} cashierOptions={cashierOptions} trailing={<Text testID="trailing">x</Text>} />);
+  const row = screen.getByTestId('closures-filters');
+  const trailing = within(row).getByTestId('trailing');
+  expect(within(row).getByTestId('closures-cashier').compareDocumentPosition(trailing) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
