@@ -1,5 +1,6 @@
 import type { ProductTraits, StockLevel } from '@tallyui/core';
 import { catalogueEntries, productCategories, variantPriceLabel } from '@tallyui/pos';
+import type { SessionStorage } from './session';
 
 export type ProductAreaRow = {
   id: string; name: string; sku: string; price: string; stock: string;
@@ -12,6 +13,8 @@ export const PRODUCTS_LOADING = 'Loading the catalogue…';
 export const PRODUCTS_LOAD_FAILED = 'The catalogue could not load.';
 export const PRODUCTS_EMPTY = 'No products in the catalogue yet.';
 export const PRODUCTS_NO_MATCH =(query: string) => `No products match “${query}”.`;
+export const PRODUCTS_IN_STOCK_LABEL = 'In stock';
+export const PRODUCTS_NONE_IN_STOCK = 'No products are in stock.';
 
 export const STOCK_STATUS_LABELS: Record<StockLevel['status'], string> = {
   in_stock: 'In stock', out_of_stock: 'Out of stock', backorder: 'On backorder', unknown: '—',
@@ -55,4 +58,29 @@ export function filterProductAreaRows(rows: ProductAreaRow[], query: string): Pr
     const sku = row.sku.toLowerCase();
     return terms.every((term) => name.includes(term) || sku.includes(term));
   });
+}
+
+/** Only rows in stock when `inStockOnly`; off returns the same array. */
+export function filterProductAreaRowsInStock(rows: ProductAreaRow[], inStockOnly: boolean): ProductAreaRow[] {
+  if (!inStockOnly) return rows;
+  return rows.filter((row) => row.stockStatus === 'in_stock');
+}
+
+// The Products area's category choice per store on this device, kept apart from the Sale's catalogue view.
+const CATEGORY_PREFIX = 'medusapos.products-area.';
+
+/** The stored category id, or null for All or a missing, corrupt or unreadable value. */
+export function loadProductsAreaCategory(storage: SessionStorage | null, baseUrl: string): string | null {
+  try {
+    const value: unknown = JSON.parse(storage?.getItem(CATEGORY_PREFIX + baseUrl) ?? 'null');
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    const category = (value as { category?: unknown }).category;
+    return typeof category === 'string' && category !== '' ? category : null;
+  } catch { return null; }
+}
+
+export function saveProductsAreaCategory(storage: SessionStorage | null, baseUrl: string, categoryId: string | null): void {
+  try {
+    storage?.setItem(CATEGORY_PREFIX + baseUrl, JSON.stringify({ category: categoryId }));
+  } catch (error) { console.warn('Could not save the Products category:', error); }
 }

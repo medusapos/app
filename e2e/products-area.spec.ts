@@ -45,3 +45,27 @@ test('the Products area loads the catalogue itself when opened without the Sale'
   await expect(page.getByTestId('products-error')).toHaveCount(0);
   await expect(page.getByText(/Up to date · /)).toHaveCount(0);
 });
+
+test('the Products area keeps its category across a page load and narrows with an In stock chip that it does not keep', async ({ page }) => {
+  await signIn(page);
+  await openArea(page, 'Products');
+  const categories = page.getByRole('radiogroup', { name: 'Categories' });
+  const chip = (name: string) => categories.getByRole('radio', { name, exact: true });
+  const rows = page.locator('[data-testid^="product-row-"]');
+  await chip('Food').click();
+  await expect(chip('Food')).toBeChecked();
+  // A fresh page load: the category is read back from this device's storage.
+  await page.goto('/orders');
+  await openArea(page, 'Products');
+  await expect(chip('Food')).toBeChecked();
+  await expect(rows.filter({ hasText: 'E2E product 3' }).first()).toBeVisible();
+  await expect(rows.filter({ hasText: 'E2E product 1' })).toHaveCount(0);
+  const inStock = page.getByRole('button', { name: 'In stock', exact: true });
+  await expect(inStock).toBeVisible();
+  await expect(inStock).toHaveAttribute('aria-pressed', 'false');
+  await inStock.click();
+  await expect(inStock).toHaveAttribute('aria-pressed', 'true');
+  await expect(rows.filter({ hasText: 'E2E product 3' }).first()).toBeVisible();
+  await chip('All products').click();
+  await expect(chip('All products')).toBeChecked();
+});

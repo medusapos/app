@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { Button, CategoryNav, Loader, ProductTable, SearchInput, Text, type ProductTableColumn } from '@tallyui/components';
 import { listCategories } from '@tallyui/pos';
@@ -7,9 +7,11 @@ import { FrameMenuButton } from '../components/app-frame';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
-  filterProductAreaRows, filterProductAreaRowsByCategory, productAreaRows, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING,
-  PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
+  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsInStock, loadProductsAreaCategory, productAreaRows,
+  PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
+  PRODUCTS_NONE_IN_STOCK, saveProductsAreaCategory, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
 } from '../lib/products-area';
+import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
@@ -47,7 +49,9 @@ export default function ProductsAreaScreen() {
   const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
   const snapshot = useCatalogueSnapshot();
   const [search, setSearch] = useState('');
-  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [categoryId, setCategoryId] = useState<string | null>(() =>
+    session ? loadProductsAreaCategory(defaultStorage(), session.baseUrl) : null);
+  const [inStockOnly, setInStockOnly] = useState(false);
   // Retry remounts the read (a fresh useReplicatedProducts); the gate and its store settings stay.
   const [read, setRead] = useState(0);
   const retry = useCallback(() => setRead((count) => count + 1), []);
@@ -58,7 +62,9 @@ export default function ProductsAreaScreen() {
   const categories = useMemo(() => ready ? listCategories(ready.products, ready.traits) : [], [ready]);
   // A chosen category no longer in the catalogue counts as All, as the Sale's chips do.
   const activeId = categoryId !== null && categories.some((category) => category.id === categoryId) ? categoryId : null;
-  const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsByCategory(rows, activeId), search), [rows, activeId, search]);
+  const items = useMemo(() => filterProductAreaRows(
+    filterProductAreaRowsInStock(filterProductAreaRowsByCategory(rows, activeId), inStockOnly), search),
+  [rows, activeId, inStockOnly, search]);
   if (!session) return <Redirect href="/login" />;
   // One cache per store and pricing context: the area reads only while the Sale holds no catalogue for this store.
   const saleHolds = loaded?.owner === 'sale';
@@ -68,9 +74,23 @@ export default function ProductsAreaScreen() {
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
     </View>
-    {ready && categories.length ? <View><CategoryNav className="px-1" testID="products-categories"
-      categories={[{ id: '', name: 'All products' }, ...categories]} selectedId={activeId ?? ''}
-      onSelect={(id) => setCategoryId(id === '' ? null : id)} /></View> : null}
+    {/* In stock first, as in v2's chip row; the category is kept per store, In stock is not. */}
+    {ready ? <View className="flex-row items-center pl-4">
+      <View className="py-2">
+        <Pressable testID="products-in-stock" role="button" aria-pressed={inStockOnly} accessibilityLabel={PRODUCTS_IN_STOCK_LABEL}
+          onPress={() => setInStockOnly((on) => !on)} className={`rounded-md px-3 py-1.5 ${inStockOnly ? 'bg-primary' : 'bg-muted'}`}>
+          <Text className={`text-sm font-medium ${inStockOnly ? 'text-primary-foreground' : 'text-foreground'}`}>
+            {PRODUCTS_IN_STOCK_LABEL}
+          </Text>
+        </Pressable>
+      </View>
+      {categories.length ? <CategoryNav className="flex-1" testID="products-categories"
+        categories={[{ id: '', name: 'All products' }, ...categories]} selectedId={activeId ?? ''}
+        onSelect={(id) => {
+          setCategoryId(id === '' ? null : id);
+          saveProductsAreaCategory(defaultStorage(), session.baseUrl, id === '' ? null : id);
+        }} /> : null}
+    </View> : null}
     <View className="px-4 pb-2">
       <Text className="text-sm text-muted-foreground" testID="products-admin-note">{PRODUCTS_ADMIN_NOTE}</Text>
     </View>
@@ -78,7 +98,8 @@ export default function ProductsAreaScreen() {
       onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
     {ready ? <ProductTable testID="products-table" items={items} columns={COLUMNS as ProductTableColumn[]}
       defaultSort={{ field: 'name', dir: 'asc' }} emptyState={
-        <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search) : PRODUCTS_EMPTY}</Text>
+        <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
+          : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>
       } /> : null}
     {loaded?.status === 'loading' ? <View className="flex-1 items-center justify-center gap-3 px-4" testID="products-loading">
       <Loader />
