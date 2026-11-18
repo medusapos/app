@@ -5,7 +5,7 @@ import { addE2E1, cartLineQuantity, signIn, test } from './helpers';
 // focus on a cart Pressable or on nothing, not only in the search box. Never sells, so E2E-1's shared stock is untouched.
 test.use({ viewport: { width: 1024, height: 768 } });
 
-test('a keyboard-wedge scan adds from anywhere on the wide sale screen, and an unknown code alerts without adding', async ({ page }) => {
+test('a keyboard-wedge scan adds from anywhere on the wide sale screen, and an unknown code shows Barcode not found without adding', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
 
@@ -19,13 +19,16 @@ test('a keyboard-wedge scan adds from anywhere on the wide sale screen, and an u
   await page.keyboard.type('E2E-2', { delay: 10 });
   await page.keyboard.press('Enter');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
+  await expect(page.getByTestId('scan-toast')).toContainText('Added to cart');
+  await expect(page.getByTestId('scan-toast')).toContainText('E2E product 2');
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(page.getByTestId('quantity-popover')).toHaveCount(0);
 
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.type('ZZZ-NOPE', { delay: 10 });
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('alert')).toHaveText('No product matches "ZZZ-NOPE"');
+  await expect(page.getByTestId('scan-toast')).toContainText('Barcode not found');
+  await expect(page.getByTestId('scan-toast')).toContainText('ZZZ-NOPE — not in this store');
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
 });

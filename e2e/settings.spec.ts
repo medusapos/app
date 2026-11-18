@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, captureCommands, cartTab, closeStoreRegister, openArea, openRegister, productsTab, refusedStoreOpen, signIn, test } from './helpers';
+import { addE2E1, captureCommands, cartLineQuantity, cartTab, closeStoreRegister, openArea, openRegister, productsTab, refusedStoreOpen, signIn, test } from './helpers';
 
 // Settings → Scanner (ADR 0016): minChars gates the phone-cart wedge listener, and the test-scan
 // field judges a scan the same way, against the currently saved settings.
@@ -58,7 +58,7 @@ test('a saved minChars gates the wedge scan, and the test-scan field reports its
   await openCart(page);
   await page.keyboard.type('E2E-2', { delay: 10 });
   await page.keyboard.press('Enter');
-  await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
+  await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
 });
 
 test('scanner affixes are stripped in the test field and cart, with sound enabled', async ({ page }) => {
@@ -80,7 +80,7 @@ test('scanner affixes are stripped in the test field and cart, with sound enable
   await openCart(page);
   await page.keyboard.type('#E2E-2!', { delay: 10 });
   await page.keyboard.press('Enter');
-  await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
+  await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
 });
 
 // The same minChars is the Products search's minCodeLength (TallyUI #148): below it, Enter does no code lookup.
