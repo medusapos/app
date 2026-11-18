@@ -26,6 +26,7 @@ import { CustomerChip } from '../components/customer-chip';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
+import { PaidAwaiting, useAwaitingStore } from '../components/paid-awaiting';
 import { PaidChange } from '../components/paid-change';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
@@ -372,11 +373,15 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const scanMissLine = scanMiss ? <Text accessibilityRole="alert" className="px-3 py-2 text-destructive">{`No product matches "${scanMiss}"`}</Text> : null;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
+  // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
+  const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
   const wide = width >= ROW_BREAKPOINT;
+  const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || sale.stage.order.changeDueMinor > 0);
   const paidReceipt = sale.stage.kind === 'receipt' ? <>
-    {/* v2 leads the paid screen with the change; screen only, not printed. */}
-    {sale.stage.order.changeDueMinor > 0 && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-      <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />
+    {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
+    {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
+      {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
+        : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
     </View>}
     <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
     store={receiptStore}
@@ -385,7 +390,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       online={online} defaultEmail={paid?.customer?.email
         ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
       send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-    topInset={sale.stage.order.changeDueMinor > 0 ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
+    topInset={paidHeadline ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
     cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
   </> : null;
   const phoneTender = phone && sale.stage.kind === 'tender';
