@@ -414,6 +414,15 @@ describe('ReportsScreen', () => {
     expect(screen.queryByTestId('reports-closure-print')).toBeNull();
   });
 
+  it.each(['counting', 'conflict'] as const)('Print closure stays hidden while the register is %s', (status) => {
+    openRegister(status);
+    const base = vi.mocked(useRegister)();
+    vi.mocked(useRegister).mockReturnValue({ ...base, register: { ...base.register, lastClosure: closure({ number: 3 }) } });
+    mount();
+    expect(screen.getByTestId('register-strip')).toBeTruthy();
+    expect(screen.queryByTestId('reports-closure-print')).toBeNull();
+  });
+
   it('Print closure prints the last closure in the frame', async () => {
     document.getElementById('closure-print-frame')?.remove();
     vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register,
