@@ -18,8 +18,9 @@ function setup(getCustomer: (id: string) => Promise<Customer | null> = async () 
     update: vi.fn(async (_id: string, patch: CustomerPatch): Promise<Customer> => ({ ...ada, ...patch })),
     onSaved: vi.fn(), onClose: vi.fn(), onUnauthorized: vi.fn(),
   };
-  render(<><CustomerAddressDialog customerId="ada" {...fakes} /><PortalHost /></>);
-  return fakes;
+  const view = render(<><CustomerAddressDialog customerId="ada" {...fakes} /><PortalHost /></>);
+  const rerender = (customerId: string | null) => view.rerender(<><CustomerAddressDialog customerId={customerId} {...fakes} /><PortalHost /></>);
+  return { ...fakes, rerender };
 }
 const settle = () => act(async () => {});
 const input = (label: string) => screen.getByLabelText(label, { exact: true }) as HTMLInputElement;
@@ -82,6 +83,20 @@ describe('CustomerAddressDialog', () => {
     await saveCustomer();
     expect(update).toHaveBeenCalledTimes(1);
     expect(within(screen.getByTestId('customer-address-dialog')).getByRole('alert').textContent).toBe(NETWORK_ERROR_TEXT);
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('a save that settles after the dialog closed reports nothing', async () => {
+    const { update, onSaved, onClose, rerender } = setup();
+    await settle();
+    fireEvent.change(input('City'), { target: { value: 'Leeds' } });
+    let resolveUpdate!: (customer: Customer) => void;
+    update.mockReturnValue(new Promise((resolve) => { resolveUpdate = resolve; }));
+    await saveCustomer();
+    expect(update).toHaveBeenCalledTimes(1);
+    rerender(null);
+    await act(async () => { resolveUpdate({ ...ada, billing: { ...stored, city: 'Leeds' } }); });
     expect(onSaved).not.toHaveBeenCalled();
     expect(onClose).not.toHaveBeenCalled();
   });

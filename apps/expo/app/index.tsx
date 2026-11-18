@@ -206,6 +206,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   };
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
+  // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so does the
+  // address dialog, so leaving the cart closes it and a cancelled tender does not reopen it.
+  useEffect(() => { if (sale.stage.kind !== 'cart') setAddressCustomerId(null); }, [sale.stage.kind]);
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
 
   // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
@@ -422,7 +425,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
         onUnauthorized={onUnauthorized} />}
-      {connector.getCustomer && connector.updateCustomer && <CustomerAddressDialog customerId={addressCustomerId}
+      {connector.getCustomer && connector.updateCustomer && <CustomerAddressDialog customerId={sale.stage.kind === 'cart' ? addressCustomerId : null}
         onClose={() => setAddressCustomerId(null)} getCustomer={(id) => connector.getCustomer!(syncContext, id)}
         loadAddresses={(id) => loadCustomerAddresses(syncContext, id)}
         update={(id, patch) => connector.updateCustomer!(syncContext, id, patch)}
