@@ -14,6 +14,7 @@ import {
 import {
   carryOverOrders, closeOrderStores, draftsCollection, openOrderStore, ORDER_STORE_CLOSE_WAIT_MS, orderDatabaseName, registerCollections,
 } from './order-store';
+import { BUILT_IN_PRINTER, printerProfilesOf } from './printers';
 
 // ensureRegister, observed: the real one runs.
 vi.mock('@tallyui/pos', async (importOriginal) => {
@@ -702,6 +703,18 @@ describe('register collections in the order store', () => {
     try {
       expect(ensureRegister).toHaveBeenCalledTimes(2);
       expect(await readRegister(registerCollections(reopened.orders).sessions)).toEqual(minted);
+    } finally { await reopened.close(); }
+  });
+
+  it('opens printer_profiles holding exactly the built-in printer, and still one after a close and reopen', async () => {
+    const url = 'https://printers.test';
+    const first = await openOrderStore(url);
+    const printers = (await printerProfilesOf(first.orders)!.find().exec()).map((doc) => doc.toJSON());
+    expect(printers).toEqual([BUILT_IN_PRINTER]);
+    await first.close();
+    const reopened = await openOrderStore(url);
+    try {
+      expect((await printerProfilesOf(reopened.orders)!.find().exec()).map((doc) => doc.toJSON())).toEqual([BUILT_IN_PRINTER]);
     } finally { await reopened.close(); }
   });
 });

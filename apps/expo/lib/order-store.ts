@@ -6,13 +6,14 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
 import {
-  addPosOrderCollection, addRegisterSessionCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, posOrderCollection, posOrderSchema, registerCommandCollection,
+  addPosOrderCollection, addPrinterProfileCollection, addRegisterSessionCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, posOrderCollection, posOrderSchema, registerCommandCollection,
   type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
 } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { terminateWebStorage, webStorageAvailable } from './web-storage';
 import { STORAGE_WATCHDOG_OPTIONS, watchStorageHealth } from './storage-health';
 import { exposeE2eHook } from './e2e-debug';
+import { ensureBuiltInPrinter } from './printers';
 
 addRxPlugin(RxDBLocalDocumentsPlugin);
 
@@ -206,6 +207,11 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
           register_commands: registerCommandCollection(), drafts: { schema: orderDraftSchema },
         });
         const register_sessions = await addRegisterSessionCollection(db as unknown as RxDatabase);
+        // Device-local printers (TallyUI `printer_profiles`), never replicated. A failure here never fails the open:
+        // Settings then shows the built-in printer alone.
+        try {
+          await ensureBuiltInPrinter(await addPrinterProfileCollection(db as unknown as RxDatabase));
+        } catch (error) { console.warn('The printers collection did not open; Settings shows the built-in printer:', error); }
         // E2E debug only (folded away in production): FailNextClosureInsert fails one closure write, leaving a
         // session closed with its closure unwritten, as a restart mid-close does (ADR 0018).
         if (process.env.EXPO_PUBLIC_E2E_DEBUG === '1') {
