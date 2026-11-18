@@ -3,9 +3,10 @@ import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type C
 export type BillingFields = { address1: string; address2: string; city: string; state: string; postcode: string; country: string };
 export const EMPTY_BILLING: BillingFields = { address1: '', address2: '', city: '', state: '', postcode: '', country: '' };
 const keys = Object.keys(EMPTY_BILLING) as (keyof BillingFields)[];
-export const BILLING_NOT_SAVED = 'The customer was saved, but not the billing address. Save again to try the address again.';
-export const BILLING_LOAD_FAILED = "Couldn't load the stored billing address, so it can't be changed now. The other details can still be saved.";
+export const BILLING_NOT_SAVED = 'The customer was saved, but not the address. Save again to try the address again.';
+export const BILLING_LOAD_FAILED = "Couldn't load the stored addresses, so they can't be changed now. The other details can still be saved.";
 export const BILLING_COUNTRY_HINT = "The stored country isn't a two-letter code. Choose a country from the list.";
+export const SHIPPING_COUNTRY_HINT = "The stored shipping country isn't a two-letter code. Choose a country from the list.";
 
 export function billingFields(address: CustomerAddress | undefined): BillingFields {
   return Object.fromEntries(keys.map((key) => [key, address?.[key] ?? ''])) as BillingFields;
@@ -31,7 +32,8 @@ export function hasBilling(fields: BillingFields): boolean {
   return keys.some((key) => fields[key].trim() !== '');
 }
 
-export async function loadCustomerBilling(context: SyncContext, id: string): Promise<CustomerAddress | undefined> {
+/** Reads the customer's default billing and default shipping addresses; a key is absent when there is no such address. */
+export async function loadCustomerAddresses(context: SyncContext, id: string): Promise<{ billing?: CustomerAddress; shipping?: CustomerAddress }> {
   let response: Response;
   try {
     response = await (context.fetch ?? fetch)(`${context.baseUrl}/admin/customers/${encodeURIComponent(id)}?fields=id,*addresses`,
@@ -41,8 +43,13 @@ export async function loadCustomerBilling(context: SyncContext, id: string): Pro
   if (!response.ok) throw new CustomerServiceError('server', `HTTP ${response.status}`, { status: response.status });
   const body = await response.json();
   if (!body?.customer) throw new CustomerServiceError('server', 'unexpected response', { status: response.status });
-  const stored = body.customer.addresses?.find((address: { is_default_billing?: boolean }) => address.is_default_billing === true);
-  if (!stored) return undefined;
+  const find = (flag: 'is_default_billing' | 'is_default_shipping') =>
+    body.customer.addresses?.find((address: Record<string, unknown>) => address[flag] === true);
+  const billing = find('is_default_billing');
+  const shipping = find('is_default_shipping');
+  return { ...(billing ? { billing: mapAddress(billing) } : {}), ...(shipping ? { shipping: mapAddress(shipping) } : {}) };
+}
+function mapAddress(stored: Record<string, unknown>): CustomerAddress {
   const address: CustomerAddress = {};
   const mapping = { first_name: 'firstName', last_name: 'lastName', company: 'company', address_1: 'address1',
     address_2: 'address2', city: 'city', province: 'state', postal_code: 'postcode', country_code: 'country', phone: 'phone' } as const;
