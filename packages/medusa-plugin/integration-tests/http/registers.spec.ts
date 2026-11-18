@@ -251,7 +251,7 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results).toEqual([{ ...retry.data.results[0], status: 'duplicate' }])
     })
 
-    it('/info lists order.create 1 to 7 and register 1, 2, 3 with the approval threshold', async () => {
+    it('/info lists order.create 1 to 7, register 1, 2, 3, the approval threshold and plugin contract 1', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
@@ -260,6 +260,7 @@ medusaIntegrationTestRunner({
         registerApproval: { thresholdMinor: 500 },
         lineTax: { none: false, classes: false },
         coupons: true,
+        pluginContract: 1,
       })
     })
 
