@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { Path } from 'react-native-svg';
-import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
+import { Avatar, avatarInitials, Button, createSvgIcon, Dialog, DialogContent, DialogTitle, SwitchConfirm, Text, type SalesFilters } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { formatClosureDate, presetRange, switchWarnings, watchFresh, type PosOrder, type SwitchWarningInput } from '@tallyui/pos';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -68,9 +68,12 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
       </View>}
       {drawerOpen && <View testID="user-sheet-drawer" className="gap-2 rounded-md border border-border p-3">
         <Text>In the drawer</Text>
-        {since && <Text testID="user-sheet-drawer-opened" className="text-sm text-muted-foreground">
-          {[registerName, `opened ${since}${opener ? ` by ${opener}` : ''}`].filter(Boolean).join(' · ')}
-        </Text>}
+        {since && <View className="flex-row items-center gap-2">
+          <Text testID="user-sheet-drawer-opened" className="text-sm text-muted-foreground">
+            {[registerName, `opened ${since}${opener ? ` by ${opener}` : ''}`].filter(Boolean).join(' · ')}
+          </Text>
+          {opener && <Avatar testID="user-sheet-drawer-opener-avatar" aria-hidden size="sm" tone="primary" fallback={avatarInitials(opener)} />}
+        </View>}
         {!register.blind && <Text className="text-xl font-semibold tabular-nums">{formatMoney({ amount: register.expected.cash ?? 0, currency })}</Text>}
         <Pressable testID="user-sheet-register" accessibilityRole="button" className="min-h-11 flex-row items-center justify-between gap-2"
           onPress={() => { onOpenChange(false); onRegister(); }}>
