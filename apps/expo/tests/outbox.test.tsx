@@ -581,6 +581,9 @@ describe('the Products screen on the real outbox (TallyUI ce184e6)', () => {
     vi.mocked(fetchStoreSettings).mockResolvedValue(storeSettings);
     vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: screenPricing, refresh: () => {} });
     capabilities.mockResolvedValue(undefined);
+    // The gate's plugin-contract read gets a current plugin's info; fetchStub sees only the command posts.
+    vi.stubGlobal('fetch', (url: string | URL | Request, init?: RequestInit) => String(url) === `${session.baseUrl}/tally/v1/info`
+      ? Promise.resolve(new Response(JSON.stringify({ contracts: {}, pluginContract: 1 }))) : fetchStub(url, init));
     warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     error = vi.spyOn(console, 'error').mockImplementation(() => {});
   });

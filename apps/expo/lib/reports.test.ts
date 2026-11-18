@@ -41,7 +41,7 @@ describe('closureTableRow', () => {
     const row = closure({ breakdowns: { register_name: 'Front till', closed_by_name: 'Ana' },
       counted: { cash: 800, external: 500 }, variance: { cash: -200, external: 50 } });
     expect(closureTableRow(row, { 'register-1': 'Register 1' })).toEqual({
-      id: row.id, number: row.number, day: today, closedAt: row.closed_at, registerName: 'Front till', cashierName: 'Ana',
+      id: row.id, number: row.number, day: today, openedAt: row.opened_at, closedAt: row.closed_at, registerName: 'Front till', cashierName: 'Ana',
       salesMinor: 1000, countedMinor: 1300, varianceMinor: -150,
     });
   });
@@ -63,7 +63,7 @@ describe('historyTableRow', () => {
     periodSalesTotalMinor: 1000, registerId: 'register-1', closedBy: 'user-1' };
   it('calculates counted and variance and resolves the cashier name', () => {
     expect(historyTableRow({ ...entry, counted: { cash: 800 }, tillExpected: { cash: 1000 } }, 'Register 1', { 'user-1': 'Ana' }))
-      .toEqual({ id: 'c1', number: 1, day: localDay(new Date(entry.closedAt)), closedAt: entry.closedAt, registerName: 'Register 1', cashierName: 'Ana',
+      .toEqual({ id: 'c1', number: 1, day: localDay(new Date(entry.closedAt)), openedAt: entry.openedAt, closedAt: entry.closedAt, registerName: 'Register 1', cashierName: 'Ana',
         salesMinor: 1000, countedMinor: 800, varianceMinor: -200 });
   });
   it('keeps unknown figures null and falls back to cashier id or a dash', () => {
@@ -84,7 +84,7 @@ describe('historyTableRow', () => {
 
 describe('closureDays', () => {
   const row = (id: string, day: string, countedMinor: number | null, varianceMinor: number | null) => ({
-    id, number: 1, day, closedAt: '', registerName: '', cashierName: '', salesMinor: 0, countedMinor, varianceMinor });
+    id, number: 1, day, openedAt: '', closedAt: '', registerName: '', cashierName: '', salesMinor: 0, countedMinor, varianceMinor });
   it('groups by day in order of first appearance and sums counted and variance', () => {
     const [a, b, c] = [row('a', '2026-11-10', 800, -200), row('b', '2026-11-09', 500, 0), row('c', '2026-11-10', 1000, 50)];
     expect(closureDays([a, b, c])).toEqual([
