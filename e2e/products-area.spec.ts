@@ -32,3 +32,16 @@ test('the Products area narrows by category chip and shows each row\'s stock sta
   await chip('All products').click();
   await expect(first).toBeVisible();
 });
+
+test('the Products area loads the catalogue itself when opened without the Sale', async ({ page }) => {
+  await signIn(page, 'Europe', false);
+  // A fresh page load with the saved session: no Sale is mounted beneath the areas.
+  await page.goto('/orders');
+  await openArea(page, 'Products');
+  await expect(page).toHaveURL(/\/products$/);
+  await expect(page.locator('[data-testid^="product-row-"]', { hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first())
+    .toBeVisible();
+  await expect(page.getByTestId('products-loading')).toHaveCount(0);
+  await expect(page.getByTestId('products-error')).toHaveCount(0);
+  await expect(page.getByText(/Up to date · /)).toHaveCount(0);
+});

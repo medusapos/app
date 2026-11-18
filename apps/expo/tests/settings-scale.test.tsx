@@ -18,6 +18,7 @@ vi.mock('expo-router', () => ({
     {options.headerRight?.()}
   </> },
 }));
+vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 
 beforeEach(() => {
   const data = new Map<string, string>();

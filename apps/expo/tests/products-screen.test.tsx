@@ -349,7 +349,7 @@ describe('ProductsScreen catalogue', () => {
     const Probe = () => { seen = useCatalogueSnapshot(); return null; };
     await mount();
     render(<Probe />);
-    expect(seen).toMatchObject({ baseUrl: 'https://store.test', currency: 'EUR' });
+    expect(seen).toMatchObject({ owner: 'sale', baseUrl: 'https://store.test', currency: 'EUR', status: 'ready' });
     expect((seen!.products as { id: string }[]).map(({ id }) => id)).toEqual(['a', 'zebra']);
     cleanup();
     render(<Probe />);
@@ -911,7 +911,7 @@ describe('Orders screen and sync status', () => {
     ] });
     await mount(true, true);
     expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Recent']);
-    expect(screen.getByRole('link', { name: 'Send feedback' })).toBeTruthy();
+    expect(screen.queryByRole('link', { name: 'Send feedback' })).toBeNull();
   });
   it('lists attention first, including errors, both warnings, totals and server display IDs', async () => {
     const order = savedSale();
