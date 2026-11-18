@@ -4,7 +4,7 @@ import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { Path } from 'react-native-svg';
 import { createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, SearchInput } from '@tallyui/components';
-import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerPatch, type SyncContext } from '@tallyui/core';
+import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type SyncContext } from '@tallyui/core';
 import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { CustomerColumnsButton } from '../components/customer-columns-settings';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
@@ -12,6 +12,7 @@ import { CustomersTable } from '../components/customers-table';
 import { StripHeightContext } from '../components/store-refused';
 import { loadCustomerAddresses } from '../lib/customer-billing';
 import { useCustomerColumns } from '../lib/customer-columns';
+import { saveCustomerEdits } from '../lib/save-customer-edits';
 import { saveNewCustomer } from '../lib/save-new-customer';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
@@ -110,16 +111,9 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
                 setFailed(false);
               });
             } else {
-              const patch: CustomerPatch = {};
-              for (const field of ['firstName', 'lastName', 'email', 'phone'] as const) {
-                if (values[field].trim() !== (editing[field] ?? '')) patch[field] = values[field].trim();
-              }
-              if (billing !== undefined) patch.billing = billing;
-              if (shipping !== undefined) patch.shipping = shipping;
-              if (Object.keys(patch).length) {
-                const updated = await connector.updateCustomer!(context, editing.id, patch);
-                setCustomers((list) => list.map((customer) => customer.id === editing.id ? updated : customer));
-              }
+              const updated = await saveCustomerEdits((id, patch) => connector.updateCustomer!(context, id, patch),
+                editing, values, billing, shipping);
+              if (updated) setCustomers((list) => list.map((customer) => customer.id === editing.id ? updated : customer));
             }
             createdCustomer.current = null;
             setEditing(null);

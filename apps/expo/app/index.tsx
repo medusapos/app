@@ -19,6 +19,7 @@ import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
+import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerChip } from '../components/customer-chip';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
@@ -42,6 +43,7 @@ import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
 import { sortCartLines, useCartSettings } from '../lib/cart-settings';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
+import { loadCustomerAddresses } from '../lib/customer-billing';
 import { isDemoAccount } from '../lib/demo';
 import { clampNote } from '../lib/note-text';
 import { withDemoSaleEvent } from '../lib/demo-analytics';
@@ -131,6 +133,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
   const [customerOpen, setCustomerOpen] = useState(false);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
+  const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
   const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
@@ -317,7 +320,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} openSaleCount={tillSales.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
     <View className="flex-row items-center justify-end gap-4 px-3">
-      {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)} />}
+      {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)}
+        onAddress={sale.order.customer && online && connector.getCustomer && connector.updateCustomer
+          ? () => setAddressCustomerId(sale.order.customer?.id ?? null) : undefined} />}
       <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined} />
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
@@ -415,6 +420,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen} onOpenChange={setNewCustomerOpen}
         create={(input) => connector.createCustomer!(syncContext, input)}
         update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}
+        onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
+        onUnauthorized={onUnauthorized} />}
+      {connector.getCustomer && connector.updateCustomer && <CustomerAddressDialog customerId={addressCustomerId}
+        onClose={() => setAddressCustomerId(null)} getCustomer={(id) => connector.getCustomer!(syncContext, id)}
+        loadAddresses={(id) => loadCustomerAddresses(syncContext, id)}
+        update={(id, patch) => connector.updateCustomer!(syncContext, id, patch)}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
         onUnauthorized={onUnauthorized} />}
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
