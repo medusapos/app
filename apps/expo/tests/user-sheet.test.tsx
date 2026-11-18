@@ -126,14 +126,15 @@ it('subscribes only while open and unsubscribes when closed', async () => {
   expect(sales.unsubscribe).toHaveBeenCalledTimes(1);
 });
 
-it.each([['Alex Smith', 'AS', 1280], [undefined, 'A', 1280], ['Alex Smith', 'AS', 360]] as const)(
+it.each([['Alex Smith', 'AS', 1280], [undefined, 'A', 1280], ['Alex Smith', 'AS', 360], ['Alex Smith', 'AS', 1024]] as const)(
   'shows the account identity for %s (%s) at %i px', async (name, initials, width) => {
     setWindowWidth(width, 800);
     await mount(name);
     const displayName = name ?? 'admin@store.test';
     const button = screen.getByRole('button', { name: `Account: ${displayName}` });
     expect(button).toBe(screen.getByTestId('user-menu'));
-    expect(button.textContent).toBe(initials + (width === 360 ? '' : displayName));
+    expect(button.textContent).toBe(initials);
+    expect(within(button).getByTestId('user-menu-avatar').textContent).toBe(initials);
     expect(screen.queryByTestId('user-sheet')).toBeNull();
     open();
     expect(screen.getByTestId('user-sheet-name').textContent).toBe(displayName);
