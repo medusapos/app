@@ -1215,6 +1215,58 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     fireEvent.click(footer.getByRole('button', { name: 'More actions' }));
     expect(within(footer.getByTestId('cart-foot-menu')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Void']);
   });
+
+  // v2 (pos/checkout/payment-methods.mdx#close): in a browser Esc goes back one step, as the ✕ does, unless you are
+  // typing in a field or a dialog is open.
+  const escape = (target: Element = document.body) => act(() => { fireEvent.keyDown(target, { key: 'Escape' }); });
+
+  it('at 390 wide Escape leaves the tender for the cart, as the close does', async () => {
+    setWindowWidth(390, 844);
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
+    await checkout();
+    expect(button('Complete sale')).toBeTruthy();
+    escape();
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    expect(screen.queryByTestId('tender-close')).toBeNull();
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00']);
+  });
+
+  it('at 1280 wide Escape leaves the tender for the cart', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    expect(button('Complete sale')).toBeTruthy();
+    escape();
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  });
+
+  it('at 1280 wide an Escape typed in the Terminal reference field keeps the tender', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    pickMethod('external');
+    const field = screen.getByLabelText('Terminal reference');
+    act(() => { field.focus(); });
+    expect(document.activeElement).toBe(field);
+    escape(field);
+    expect(button('Complete sale')).toBeTruthy();
+  });
+
+  it('at 1280 wide an Escape with the user sheet open closes only the sheet; a second leaves the tender', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    act(() => { fireEvent.click(screen.getByTestId('user-menu')); });
+    expect(screen.getByTestId('user-sheet')).toBeTruthy();
+    escape();
+    expect(screen.queryByTestId('user-sheet')).toBeNull();
+    expect(button('Complete sale')).toBeTruthy();
+    escape();
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+  });
 });
 
 // v2's header "● Offline": the browser's offline event shows it at once, before any pull fails.
