@@ -284,6 +284,7 @@ describe('CustomerEditor shipping', () => {
     fireEvent.click(screen.getByTestId('customers-add'));
     changeForm('email@example.com', created.email);
     changeForm('First name', 'Nia');
+    fireEvent.click(screen.getByTestId('customer-add-shipping'));
     fireEvent.click(screen.getByTestId('customer-shipping-different'));
     change('Shipping city', 'York');
     await submit();
@@ -302,6 +303,7 @@ it('retries only billing after a partial creation, keeps one latest row, and res
   fireEvent.click(screen.getByTestId('customers-add'));
   changeForm('email@example.com', created.email);
   changeForm('First name', 'Nia');
+  fireEvent.click(screen.getByTestId('customer-add-billing'));
   change('City', 'Leeds');
   await submit();
   expect(screen.getByText(BILLING_NOT_SAVED)).toBeTruthy();
@@ -331,6 +333,7 @@ it('saves corrected customer fields with billing when retrying a partial creatio
   fireEvent.click(screen.getByTestId('customers-add'));
   changeForm('email@example.com', created.email);
   changeForm('First name', 'Nia');
+  fireEvent.click(screen.getByTestId('customer-add-billing'));
   change('City', 'Leeds');
   await submit();
   expect(screen.getByText(BILLING_NOT_SAVED)).toBeTruthy();
@@ -342,5 +345,66 @@ it('saves corrected customer fields with billing when retrying a partial creatio
   expect(updateCustomer).toHaveBeenCalledTimes(2);
   expect(updateCustomer).toHaveBeenNthCalledWith(2, context, 'nia', {
     firstName: 'Nina', phone: '555', billing: { firstName: 'Nina', city: 'Leeds' },
+  });
+});
+
+describe('CustomerEditor optional details', () => {
+  const OPTIONAL = 'Addresses and other optional details';
+  const disabled = (testID: string) => screen.getByTestId(testID).getAttribute('aria-disabled') === 'true';
+  it('starts a new customer with name, email and phone, and opens each address block from its add button', () => {
+    render(<CustomerEditor customer={null} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails />);
+    for (const placeholder of ['First name', 'Last name', 'email@example.com', 'Phone number']) {
+      expect(screen.getByPlaceholderText(placeholder)).toBeTruthy();
+    }
+    expect(screen.getByText(OPTIONAL)).toBeTruthy();
+    expect(screen.queryByLabelText('Address line 1')).toBeNull();
+    expect(screen.queryByText('Same as billing')).toBeNull();
+    expect(screen.getByTestId('customer-add-shipping')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('customer-add-billing'));
+    expect(input('Address line 1')).toBeTruthy();
+    expect(screen.queryByTestId('customer-add-billing')).toBeNull();
+    expect(screen.getByTestId('customer-add-shipping')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('customer-add-shipping'));
+    expect(screen.getByText('Same as billing')).toBeTruthy();
+    expect(screen.getByTestId('customer-shipping-different')).toBeTruthy();
+    expect(screen.queryByTestId('customer-add-billing')).toBeNull();
+    expect(screen.queryByTestId('customer-add-shipping')).toBeNull();
+  });
+  it('opens both blocks for an edit with a stored billing address', async () => {
+    render(<CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails
+      loadAddresses={async () => ({ billing: stored })} />);
+    await waitFor(() => expect(input('Address line 1').value).toBe('1 Old St'));
+    expect(screen.getByText('Same as billing')).toBeTruthy();
+    expect(screen.queryByTestId('customer-add-billing')).toBeNull();
+    expect(screen.queryByTestId('customer-add-shipping')).toBeNull();
+  });
+  it('keeps both blocks closed for an edit with no stored address', async () => {
+    render(<CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails loadAddresses={async () => ({})} />);
+    await waitFor(() => expect(disabled('customer-add-billing')).toBe(false));
+    expect(disabled('customer-add-shipping')).toBe(false);
+    expect(screen.queryByLabelText('Address line 1')).toBeNull();
+    expect(screen.queryByText('Same as billing')).toBeNull();
+    expect(screen.queryByLabelText('Shipping address line 1')).toBeNull();
+  });
+  it('opens only the shipping block for an edit with only a stored shipping address', async () => {
+    render(<CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails
+      loadAddresses={async () => ({ shipping: { address1: '2 Dock Rd', city: 'Hull' } })} />);
+    await waitFor(() => expect(input('Shipping address line 1').value).toBe('2 Dock Rd'));
+    expect(screen.queryByLabelText('Address line 1')).toBeNull();
+    expect(screen.getByTestId('customer-add-billing')).toBeTruthy();
+    expect(screen.queryByTestId('customer-add-shipping')).toBeNull();
+  });
+  it('shows the load failure and disables the add buttons when the addresses do not load', async () => {
+    render(<CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails
+      loadAddresses={async () => { throw new CustomerServiceError('network', 'offline'); }} />);
+    expect(await screen.findByText(BILLING_LOAD_FAILED)).toBeTruthy();
+    expect(disabled('customer-add-billing')).toBe(true);
+    expect(disabled('customer-add-shipping')).toBe(true);
+  });
+  it('opens both blocks at once without optionalDetails (the cart dialogs)', () => {
+    render(<CustomerEditor customer={null} save={vi.fn()} onUnauthorized={vi.fn()} />);
+    expect(input('Address line 1')).toBeTruthy();
+    expect(screen.getByText('Same as billing')).toBeTruthy();
+    expect(screen.queryByText(OPTIONAL)).toBeNull();
   });
 });
