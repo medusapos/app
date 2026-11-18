@@ -169,6 +169,17 @@ it('names a card terminal part and a cash part in payment order', async () => {
 }, 15000);
 
 // The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('names a method once when two payments use it, then counts the payments', async () => {
+  syncState('offline');
+  await startTender();
+  takeLeg('external', '10.00');
+  takeLeg('external', '14.00');
+  const order = await complete();
+  await outboxNow(order, 'pending');
+  expect(status()).toBe('Awaiting store · Card terminal · 2 payments');
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
 it('keeps the change as the headline and counts the payments when two cash payments over-tender', async () => {
   syncState('offline');
   await startTender();
