@@ -40,7 +40,8 @@ describe('order detail Receipt (row 10.3)', () => {
   const formatDate = (iso: string) => iso.slice(0, 10);
   // The app's root layout holds the PortalHost the sheet renders into.
   function sheet(order: PosOrder | null) {
-    return <SessionProvider><OrderDetailSheet order={order} onClose={vi.fn()} formatDate={formatDate} /><PortalHost /></SessionProvider>;
+    return <SessionProvider><OrderDetailSheet order={order} onClose={vi.fn()} formatDate={formatDate} onRetry={vi.fn()}
+      onFlush={vi.fn()} /><PortalHost /></SessionProvider>;
   }
 
   it('Receipt swaps the detail for TallyUI\'s receipt of the sale, with the cached store name', async () => {

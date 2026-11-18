@@ -15,7 +15,7 @@ import { filterOrders, orderFilterOptions, ORDERS_SCREEN_FILTER_FIELDS } from '.
 
 export default function OrdersScreen() {
   const { session } = useSession();
-  const { recent, requeue } = useOutboxContext();
+  const { recent, requeue, flush } = useOutboxContext();
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<OrderFilterValue>({});
   const [openId, setOpenId] = useState<string | null>(null);
@@ -44,6 +44,6 @@ export default function OrdersScreen() {
     } />
     {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. */}
     <OrderDetailSheet order={recent.find((order) => order.id === openId) ?? null} onClose={() => setOpenId(null)}
-      formatDate={formatDate} />
+      formatDate={formatDate} onRetry={requeue} onFlush={flush} />
   </View>;
 }
