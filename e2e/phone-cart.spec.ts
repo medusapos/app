@@ -158,7 +158,6 @@ test('a keyboard-wedge scan in the cart view adds a product, and an unknown code
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await page.keyboard.type('E2E-2', { delay: 10 });
   await page.keyboard.press('Enter');
-  await expect(page.getByText('E2E product 2', { exact: true })).toBeVisible();
   await expect(page.getByTestId('quantity-popover')).toHaveCount(0);
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
@@ -167,7 +166,8 @@ test('a keyboard-wedge scan in the cart view adds a product, and an unknown code
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.keyboard.type('ZZZ-NOPE', { delay: 10 });
   await page.keyboard.press('Enter');
-  await expect(page.getByRole('alert')).toHaveText('No product matches "ZZZ-NOPE"');
+  await expect(page.getByTestId('scan-toast')).toContainText('Barcode not found');
+  await expect(page.getByTestId('scan-toast')).toContainText('ZZZ-NOPE — not in this store');
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
 

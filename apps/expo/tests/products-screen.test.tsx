@@ -10,6 +10,7 @@ import { createOrderBuilder, DEFAULT_CATALOGUE_VIEW_STATE, finalizeOrder, useOrd
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { router, usePathname } from 'expo-router';
 import { EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
+import { SCAN_TOAST_MS } from '../components/scan-toast';
 import { storeConfig } from '../lib/config';
 import { formatReceiptDate } from '../lib/format-date';
 import { DEFAULT_CART_SETTINGS, loadCartSettings, saveCartSettings } from '../lib/cart-settings';
@@ -1966,10 +1967,25 @@ describe('ProductsScreen device scans', () => {
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   });
 
-  it('says no product matches an unknown code, on the wide window', async () => {
+  it('shows the Barcode not found toast for an unknown code, on the wide window', async () => {
     const scan = await mountWithHub();
     scan('NOPE1');
-    expect(screen.getByText('No product matches "NOPE1"')).toBeTruthy();
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Barcode not found');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('NOPE1 — not in this store');
+    expect(screen.queryByText('No product matches "NOPE1"')).toBeNull();
+  });
+
+  it('a device scan shows the Added to cart toast naming the product, gone after SCAN_TOAST_MS', async () => {
+    const scan = await mountWithHub();
+    vi.useFakeTimers();
+    try {
+      scan('AB123');
+      expect(screen.getByTestId('scan-toast').textContent).toContain('Added to cart');
+      expect(screen.getByTestId('scan-toast').textContent).toContain('Shirt');
+      act(() => { vi.advanceTimersByTime(SCAN_TOAST_MS); });
+      expect(screen.queryByTestId('scan-toast')).toBeNull();
+      cleanup();
+    } finally { vi.useRealTimers(); }
   });
 });
 
@@ -2009,12 +2025,33 @@ describe('ProductsScreen wedge scan anywhere (wide)', () => {
     expect(screen.queryByTestId('quantity-popover')).toBeNull();
   });
 
-  it('says no product matches an unknown code, and the cart stays empty', async () => {
+  it('shows the Barcode not found toast for an unknown code, and the cart stays empty', async () => {
     await mount();
     blurSearch();
     wedgeScan('NOPE1');
-    expect(screen.getByText('No product matches "NOPE1"')).toBeTruthy();
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Barcode not found');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('NOPE1 — not in this store');
+    expect(screen.queryByText('No product matches "NOPE1"')).toBeNull();
     noShirtLine();
+  });
+
+  it('a scan with nothing focused shows the Added to cart toast naming the product', async () => {
+    await mount();
+    blurSearch();
+    wedgeScan('AB123');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Added to cart');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Shirt');
+  });
+
+  it('a hit after a miss replaces the Barcode not found toast with Added to cart', async () => {
+    await mount();
+    blurSearch();
+    wedgeScan('NOPE1');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Barcode not found');
+    wedgeScan('AB123');
+    expect(screen.getAllByTestId('scan-toast')).toHaveLength(1);
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Added to cart');
+    expect(screen.getByTestId('scan-toast').textContent).not.toContain('Barcode not found');
   });
 
   it('ignores a scan typed into the search box (no double add)', async () => {
@@ -2033,7 +2070,7 @@ describe('ProductsScreen wedge scan anywhere (wide)', () => {
     blurSearch();
     wedgeScan('AB123');
     noShirtLine();
-    expect(screen.queryByText('No product matches "AB123"')).toBeNull();
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
   });
 
   // A scan here would change the amount due under the cashier, so the line, its total and the balance all stay put.
@@ -2048,7 +2085,7 @@ describe('ProductsScreen wedge scan anywhere (wide)', () => {
     wedgeScan('AB123');
     expect([tenderLine(), tenderBalance(), tenderEntry()]).toEqual(['1Shirt€12.00€12.00', '€15.00', '€15.00']);
     expect(screen.getAllByText('Shirt')).toHaveLength(1);
-    expect(screen.queryByText('No product matches "AB123"')).toBeNull();
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
     expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
   });
 });
