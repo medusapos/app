@@ -84,7 +84,7 @@ export function FrameMenuButton() {
   </IconButton>;
 }
 
-export function AppFrame({ signedIn, children, drawerHeader }: { signedIn: boolean; children: ReactNode; drawerHeader?: ReactNode }) {
+export function AppFrame({ signedIn, children }: { signedIn: boolean; children: ReactNode }) {
   const pathname = usePathname();
   const { width, height } = useWindowDimensions();
   const wide = width >= WIDE_MIN_WIDTH && height >= WIDE_MIN_HEIGHT;
@@ -117,8 +117,9 @@ export function AppFrame({ signedIn, children, drawerHeader }: { signedIn: boole
         </View>
       ) : null}
       <View className="min-w-0 flex-1">{children}</View>
+      {/* v2's phone drawer starts on its POS row; the phone header names the store and register (DEMO-PARITY row 17b). */}
       {active && !wide ? <NavDrawer open={menuOpen} onOpenChange={setMenuOpen} items={items} activeId={active}
-        onNavigate={navigate} header={drawerHeader} /> : null}
+        onNavigate={navigate} /> : null}
     </View>
   </FrameContext.Provider>;
 }
