@@ -70,6 +70,7 @@ import { useSession } from '../lib/session-context';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 import { useDeviceScans } from '../lib/use-device-scans';
 import { useNetworkOnline } from '../lib/use-network-online';
+import { useEscapeBack } from '../lib/use-escape-back';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -284,6 +285,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useWedgeScan(wedgeActive, scannerSettings, onScan);
   // A directly connected scanner (Settings > Scanner) types nothing, so it adds in every layout without a double add.
   useDeviceScans(sale.stage.kind === 'cart', onScan);
+  // v2: on web, Escape in the tender does what its ✕ / Back does (not while saving, as the ✕ is disabled).
+  useEscapeBack(sale.stage.kind === 'tender', () => { if (sale.saving) return; sale.cancelTender(); if (phone) setCartOpen(true); });
   const sellableCount = sorted.length;
   // On a phone the status line shares one line with the product settings button, so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
