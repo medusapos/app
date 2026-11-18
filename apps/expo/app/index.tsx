@@ -6,7 +6,7 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  CartNoteInput, Catalogue, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
+  Catalogue, CustomerPicker, Avatar, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
@@ -17,6 +17,7 @@ import {
 
 import { FrameMenuButton, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
+import { CartNoteDialog, CartNoteLink, CartNoteRow } from '../components/cart-note';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
@@ -134,6 +135,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [customerOpen, setCustomerOpen] = useState(false);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
+  const [noteOpen, setNoteOpen] = useState(false);
   const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
@@ -207,10 +209,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so do the
-  // customer picker, the new-customer dialog and the address dialog, so leaving the cart closes them and a cancelled
+  // customer picker, the new-customer dialog, the address dialog and the note dialog, so leaving the cart closes them and a cancelled
   // tender does not reopen them.
   useEffect(() => {
-    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setCustomerOpen(false); setNewCustomerOpen(false); }
+    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setCustomerOpen(false); setNewCustomerOpen(false); setNoteOpen(false); }
   }, [sale.stage.kind]);
   // Read at pick time: the picker's New customer create can settle after its dialog closed, and that late pick is dropped.
   const pickerLive = useRef(false);
@@ -323,6 +325,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
     </View>
   </View>;
+  // v2's note row sits in the totals, nearest Checkout; an empty cart draws no totals, so it takes the link's place.
+  const noteSet = (sale.order.note ?? '').trim() !== '';
+  const hasLines = sale.order.lineItems.length > 0;
+  const noteInTotals = noteSet && hasLines;
+  const noteRow = <CartNoteRow note={sale.order.note ?? ''} onPress={() => setNoteOpen(true)} />;
+  const couponField = couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : null;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} openSaleCount={tillSales.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
@@ -334,11 +342,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
-    <CartNoteInput key={sale.order.id} label="Order note" value={sale.order.note ?? ''}
-      onChangeText={(text) => sale.setNote(clampNote(text))} />
+    {!noteSet ? <CartNoteLink onPress={() => setNoteOpen(true)} /> : !hasLines && <View className="px-3">{noteRow}</View>}
     <Cart sale={sortedCartSale} orderActions={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       quickDiscounts={cartSettings.settings.quickDiscounts} columns={cartSettings.settings.columns}
-      afterSubtotal={couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : undefined}
+      afterSubtotal={couponField || noteInTotals ? <>{couponField}{noteInTotals && noteRow}</> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
     {cartSettings.settings.openOrders === 'bottom' && openOrdersRow}
@@ -435,6 +442,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         update={(id, patch) => connector.updateCustomer!(syncContext, id, patch)}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
         onUnauthorized={onUnauthorized} />}
+      <CartNoteDialog open={noteOpen && sale.stage.kind === 'cart'} onOpenChange={setNoteOpen} value={sale.order.note ?? ''}
+        onChangeText={(text) => sale.setNote(clampNote(text))} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row items-start">
         <View className="flex-1">{paidReceipt}</View>
