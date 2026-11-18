@@ -126,7 +126,7 @@ export async function chooseRegion(page: Page, region: string) {
 }
 
 // The app frame: the rail on a window at least 768 x 480 (TallyUI's boundary), else the drawer behind the header's Menu.
-export async function openArea(page: Page, area: 'Sale' | 'Products' | 'Orders' | 'Reports' | 'Settings' | 'Customers') {
+export async function openArea(page: Page, area: 'POS' | 'Products' | 'Orders' | 'Reports' | 'Settings' | 'Customers') {
   const { width, height } = page.viewportSize() ?? { width: 1280, height: 720 };
   if (width < 768 || height < 480) await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: area, exact: true }).click();

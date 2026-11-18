@@ -49,14 +49,30 @@ describe('AppFrame on a wide window', () => {
     }
   });
 
-  it('draws the rail with Sale, Products, Orders, Customers, Reports and Settings in that order, and no menu button', () => {
+  it('draws the rail with POS, Products, Orders, Customers, Reports and Settings in that order, and no menu button', () => {
     mount('/');
     expect(screen.getByTestId('app-frame')).toBeTruthy();
     expect(screen.getByTestId('nav-rail')).toBeTruthy();
     expect(navIds()).toEqual(['nav-item-sale', 'nav-item-products', 'nav-item-orders', 'nav-item-customers', 'nav-item-reports', 'nav-item-settings']);
-    expect(['Sale', 'Products', 'Orders', 'Customers', 'Reports', 'Settings'].map((name) => screen.getByRole('button', { name }).getAttribute('data-testid')))
+    expect(['POS', 'Products', 'Orders', 'Customers', 'Reports', 'Settings'].map((name) => screen.getByRole('button', { name }).getAttribute('data-testid')))
       .toEqual(navIds());
     expect(screen.queryByTestId('frame-menu')).toBeNull();
+  });
+
+  it('the first entry reads POS, as v2\'s menu does, on the rail and in the drawer', () => {
+    mount('/');
+    const rail = screen.getByTestId('nav-rail');
+    expect(navIds(rail)[0]).toBe('nav-item-sale');
+    expect(within(rail).getByRole('button', { name: 'POS' }).getAttribute('data-testid')).toBe('nav-item-sale');
+    expect(within(rail).queryByRole('button', { name: 'Sale' })).toBeNull();
+    cleanup();
+    setWindowWidth(390, 844);
+    mount('/');
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
+    const panel = screen.getByTestId('nav-drawer-panel');
+    expect(navIds(panel)[0]).toBe('nav-item-sale');
+    expect(within(panel).getByRole('button', { name: 'POS' }).getAttribute('data-testid')).toBe('nav-item-sale');
+    expect(within(panel).queryByRole('button', { name: 'Sale' })).toBeNull();
   });
 
   it('shows the attention count on Orders and hides it at 0', () => {
@@ -141,13 +157,13 @@ describe('AppFrame on a phone', () => {
     expect(screen.queryByTestId('nav-drawer')).toBeNull();
   });
 
-  it('lists Sale, Products, Orders, Customers, Reports and Settings in the drawer in v2\'s order', () => {
+  it('lists POS, Products, Orders, Customers, Reports and Settings in the drawer in v2\'s order', () => {
     setWindowWidth(390, 844);
     mount('/');
     fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
     const panel = screen.getByTestId('nav-drawer-panel');
     expect(navIds(panel)).toEqual(['nav-item-sale', 'nav-item-products', 'nav-item-orders', 'nav-item-customers', 'nav-item-reports', 'nav-item-settings']);
-    expect(['Sale', 'Products', 'Orders', 'Customers', 'Reports', 'Settings'].map((name) => within(panel).getByRole('button', { name }).getAttribute('data-testid')))
+    expect(['POS', 'Products', 'Orders', 'Customers', 'Reports', 'Settings'].map((name) => within(panel).getByRole('button', { name }).getAttribute('data-testid')))
       .toEqual(navIds(panel));
   });
 
