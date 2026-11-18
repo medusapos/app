@@ -388,12 +388,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
         {headerRegisterState && <HeaderRegisterState label={headerRegisterState} onPress={openGate} />}
         <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
-          onPress={() => setUserSheetOpen(true)} className="min-h-11 flex-row items-center gap-2">
-          {/* On a phone, v2's avatar: light initials on a solid primary circle. */}
-          {phone ? <Avatar fallback={initials} tone="primary" size="sm" /> : <>
-            <View className="h-10 w-10 items-center justify-center rounded-full bg-muted"><Text className="text-foreground">{initials}</Text></View>
-            <Text className="text-foreground">{displayName}</Text>
-          </>}
+          onPress={() => setUserSheetOpen(true)} className="min-h-11 min-w-11 flex-row items-center justify-center">
+          {/* At every width, v2's avatar: light initials on a solid primary circle; the signed-in user's name is the
+              button's accessible name. */}
+          <Avatar testID="user-menu-avatar" fallback={initials} tone="primary" size="sm" />
         </Pressable>
         {phone && sale.stage.kind === 'tender' && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
           disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
