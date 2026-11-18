@@ -61,26 +61,46 @@ describe('CustomersTable', () => {
     }
   });
 
-  it('keeps the given order and shows no sort glyph before any header tap', () => {
+  it('opens sorted by Last name ascending, as v2 does', () => {
     render(<CustomersTable customers={unsorted} />);
-    expect(rowOrder()).toEqual(['mia', 'ben', 'zoe', 'cal']);
-    for (const field of ['firstName', 'lastName', 'email']) {
+    expect(rowOrder()).toEqual(['ben', 'zoe', 'mia', 'cal']);
+    expect(sortHeader('lastName').textContent).toBe('Last name ▲');
+    expect(ariaSort('lastName')).toBe('ascending');
+    for (const field of ['firstName', 'email']) {
       expect(sortHeader(field).textContent).not.toMatch(/[▲▼]/);
       expect(ariaSort(field)).toBe('none');
     }
   });
 
-  it('sorts by last name on a Last name tap and reverses on a second tap, missing last names last', () => {
+  it('opens in the given order when the Last name column is hidden', () => {
+    render(<CustomersTable customers={unsorted} columns={{ avatar: true, firstName: true, lastName: false, email: true }} />);
+    expect(rowOrder()).toEqual(['mia', 'ben', 'zoe', 'cal']);
+    expect(ariaSort('firstName')).toBe('none');
+    expect(ariaSort('email')).toBe('none');
+  });
+
+  it('a Last name tap reverses the opening order and a second tap restores it, missing last names last', () => {
     render(<CustomersTable customers={unsorted} />);
     expect(screen.getByLabelText('Sort by Last name')).toBe(sortHeader('lastName'));
-    fireEvent.click(sortHeader('lastName'));
     expect(rowOrder()).toEqual(['ben', 'zoe', 'mia', 'cal']);
     expect(sortHeader('lastName').textContent).toBe('Last name ▲');
-    expect(ariaSort('lastName')).toBe('ascending');
     fireEvent.click(sortHeader('lastName'));
     expect(rowOrder()).toEqual(['mia', 'zoe', 'ben', 'cal']);
     expect(sortHeader('lastName').textContent).toBe('Last name ▼');
     expect(ariaSort('lastName')).toBe('descending');
+    fireEvent.click(sortHeader('lastName'));
+    expect(rowOrder()).toEqual(['ben', 'zoe', 'mia', 'cal']);
+    expect(sortHeader('lastName').textContent).toBe('Last name ▲');
+    expect(ariaSort('lastName')).toBe('ascending');
+  });
+
+  it('a First name tap sorts ascending by first name from the opening order', () => {
+    render(<CustomersTable customers={unsorted} />);
+    fireEvent.click(sortHeader('firstName'));
+    expect(rowOrder()).toEqual(['ben', 'cal', 'mia', 'zoe']);
+    expect(sortHeader('firstName').textContent).toBe('First name ▲');
+    expect(sortHeader('lastName').textContent).toBe('Last name');
+    expect(ariaSort('lastName')).toBe('none');
   });
 
   it('sorts ascending by first name when First name is tapped after Last name', () => {
@@ -106,7 +126,6 @@ describe('CustomersTable', () => {
 
   it('shows the given order again when the sorted column is hidden', () => {
     const { rerender } = render(<CustomersTable customers={unsorted} />);
-    fireEvent.click(sortHeader('lastName'));
     expect(rowOrder()).toEqual(['ben', 'zoe', 'mia', 'cal']);
     rerender(<CustomersTable customers={unsorted} columns={{ avatar: true, firstName: true, lastName: false, email: true }} />);
     expect(rowOrder()).toEqual(['mia', 'ben', 'zoe', 'cal']);
