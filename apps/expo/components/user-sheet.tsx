@@ -125,7 +125,8 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
           onPress={() => {
             if (signOutLocked) return;
             if (switchWarnings({ kind: 'signOut', ...warningInput }).warnings.length === 0) signOut();
-            else { onOpenChange(false); setConfirm('signOut'); }
+            // As v2: the confirm opens over the sheet, so Cancel returns to it.
+            else setConfirm('signOut');
           }}>
           <Text className="text-destructive">Sign out</Text>
         </Button>
@@ -139,6 +140,6 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
       targetName="the next cashier" registerName={registerName || undefined}
       amount={confirm === 'signOut' && !register.blind ? formatMoney({ amount: register.expected.cash ?? 0, currency }) : undefined}
       onConfirm={signOut} onCancel={() => setConfirm(null)}
-      onCloseRegister={confirm === 'signOut' ? () => { setConfirm(null); onRegister(); } : undefined} />}
+      onCloseRegister={confirm === 'signOut' ? () => { setConfirm(null); onOpenChange(false); onRegister(); } : undefined} />}
   </>;
 }

@@ -305,8 +305,7 @@ it('opens Medusa Admin and closes the sheet', async () => {
 it.each(['confirm', 'cancel', 'close-register'])('confirms sign-out with an open session: %s', async (action) => {
   await mount(); open();
   fireEvent.click(screen.getByRole('button', { name: 'Sign out' }));
-  expect(screen.queryByTestId('user-sheet')).toBeNull();
-  expect(screen.getByTestId('switch-confirm')).toBeTruthy();
+  expectConfirmOverSheet();
   expect(screen.getByTestId('switch-confirm-title').textContent).toBe('Register 1 is still open at €100.00. Close it first?');
   expect(localStorage.getItem('medusapos.session')).not.toBeNull();
   fireEvent.click(screen.getByTestId(`switch-confirm-${action}`));
@@ -317,8 +316,41 @@ it.each(['confirm', 'cancel', 'close-register'])('confirms sign-out with an open
     expect(screen.getByText('redirect:/login')).toBeTruthy();
   } else {
     expect(localStorage.getItem('medusapos.session')).not.toBeNull();
-    if (action === 'close-register') expect(screen.getByTestId('register-panel')).toBeTruthy();
+    if (action === 'cancel') expect(screen.getByTestId('user-sheet')).toBeTruthy();
+    if (action === 'close-register') {
+      expect(screen.queryByTestId('user-sheet')).toBeNull();
+      expect(screen.getByTestId('register-panel')).toBeTruthy();
+    }
   }
+});
+
+// As v2: the sheet stays open and the confirm portals after it, on top (jsdom has no z-order).
+function expectConfirmOverSheet() {
+  const sheet = screen.getByTestId('user-sheet');
+  const confirm = screen.getByTestId('switch-confirm');
+  expect(sheet.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+}
+
+it('opens the sign-out confirm over the sheet at phone width, and Cancel returns to the sheet', async () => {
+  setWindowWidth(599, 800);
+  await mount(); open();
+  fireEvent.click(screen.getByTestId('user-sheet-sign-out'));
+  expectConfirmOverSheet();
+  fireEvent.click(screen.getByTestId('switch-confirm-cancel'));
+  expect(screen.queryByTestId('switch-confirm')).toBeNull();
+  expect(screen.getByTestId('user-sheet')).toBeTruthy();
+});
+
+it('closes only the sign-out confirm on Escape, then the sheet on a second Escape', async () => {
+  await mount(); open();
+  fireEvent.click(screen.getByTestId('user-sheet-sign-out'));
+  expectConfirmOverSheet();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByTestId('switch-confirm')).toBeNull();
+  expect(screen.getByTestId('user-sheet')).toBeTruthy();
+  expect(localStorage.getItem('medusapos.session')).not.toBeNull();
+  fireEvent.keyDown(document, { key: 'Escape' });
+  expect(screen.queryByTestId('user-sheet')).toBeNull();
 });
 
 it.each([0, 1])('signs out without a session with %i parked sales', async (count) => {
