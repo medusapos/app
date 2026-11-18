@@ -34,7 +34,9 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses }
   const shippingCountryValid = sameAsBilling || billingCountryValid(shippingFields);
   useEffect(() => {
     if (!customer || !loadAddresses) return;
+    let live = true; // a load that settles after the editor closes changes nothing
     void loadAddresses().then((addresses) => {
+      if (!live) return;
       setStored(addresses.billing);
       setFields(billingFields(addresses.billing));
       setStoredShipping(addresses.shipping);
@@ -42,9 +44,11 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses }
       setSameAsBilling(shippingIsBilling(addresses));
       setBillingStatus('ready');
     }, (error) => {
+      if (!live) return;
       setBillingStatus('failed');
       if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized();
     });
+    return () => { live = false; };
   }, []);
   async function submit() {
     if (saving || values.email.trim() === '' || !countryValid || !shippingCountryValid) return;
