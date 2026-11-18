@@ -2,22 +2,29 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
-import { Button, Dialog, DialogContent, DialogTitle, SearchInput, Text as ButtonText } from '@tallyui/components';
+import { Path } from 'react-native-svg';
+import { createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, SearchInput } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerPatch, type SyncContext } from '@tallyui/core';
 import { FrameMenuButton } from '../components/app-frame';
+import { CustomerColumnsButton } from '../components/customer-columns-settings';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
 import { CustomersTable } from '../components/customers-table';
 import { loadCustomerBilling } from '../lib/customer-billing';
+import { useCustomerColumns } from '../lib/customer-columns';
 import { saveNewCustomer } from '../lib/save-new-customer';
 import { authHeaders, createPosConnector } from '../lib/pos-connector';
 import { useSession } from '../lib/session-context';
-import type { Session } from '../lib/session';
+import { defaultStorage, type Session } from '../lib/session';
 
 export const SEARCH_HINT = 'Search by name, email or phone.';
 export const SEARCHING_TEXT = 'Searching…';
 export const NO_MATCH_TEXT = (query: string) => `No customers match “${query}”.`;
 export { NETWORK_ERROR_TEXT };
 export const SEARCH_ERROR_TEXT = "Couldn't search customers. Try again.";
+
+// v2's add-customer glyph, tabler's `user-plus`.
+const UserPlusIcon = createSvgIcon('UserPlusIcon', () => <><Path d="M8 7a4 4 0 1 0 8 0a4 4 0 0 0 -8 0" />
+  <Path d="M16 19h6" /><Path d="M19 16v6" /><Path d="M6 21v-2a4 4 0 0 1 4 -4h4" /></>);
 
 export default function CustomersScreen() {
   const { session, reportUnauthorized } = useSession();
@@ -39,6 +46,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
   const [editing, setEditing] = useState<Customer | 'new' | null>(null);
   const request = useRef(0);
   const createdCustomer = useRef<Customer | null>(null);
+  const columns = useCustomerColumns(defaultStorage(), session.baseUrl);
 
   useEffect(() => {
     const current = ++request.current;
@@ -71,14 +79,14 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
     <View className="flex-row items-center gap-2 px-4 pt-4 pb-2">
       <SearchInput className="flex-1" value={query} onChangeText={setQuery} placeholder="Search customers"
         accessibilityLabel="Search customers" testID="customers-search" autoFocus />
-      {connector.createCustomer && <Button variant="outline" testID="customers-add" onPress={() => { createdCustomer.current = null; setEditing('new'); }}>
-        <ButtonText>Add customer</ButtonText>
-      </Button>}
+      {connector.createCustomer && <IconButton testID="customers-add" accessibilityLabel="Add customer"
+        onPress={() => { createdCustomer.current = null; setEditing('new'); }}><UserPlusIcon /></IconButton>}
+      <CustomerColumnsButton {...columns} />
     </View>
     {message ? <View className="flex-1 items-center justify-center">
       <Text className="text-sm text-muted-foreground" accessibilityRole={failed ? 'alert' : undefined}>{message}</Text>
     </View> : <ScrollView>
-      <CustomersTable customers={customers} onOpen={connector.updateCustomer ? (customer) => { createdCustomer.current = null; setEditing(customer); } : undefined} />
+      <CustomersTable customers={customers} columns={columns.settings} onOpen={connector.updateCustomer ? (customer) => { createdCustomer.current = null; setEditing(customer); } : undefined} />
     </ScrollView>}
     <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) { createdCustomer.current = null; setEditing(null); } }}>
       <DialogContent testID="customer-editor" className="max-h-[90%]">
