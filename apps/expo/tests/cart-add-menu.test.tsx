@@ -79,8 +79,8 @@ function openMenu(name?: string) {
   fireEvent.click(screen.getByTestId('cart-add-menu'));
   if (name) fireEvent.click(screen.getByRole('menuitem', { name }));
 }
-const FIVE_ROWS = ['Add new customer', 'Add Miscellaneous Product', 'Add Fee', 'Add Discount', 'Add Shipping'];
-it('lists the five actions in order and hides the inline controls', async () => {
+const SIX_ROWS = ['Add new customer', 'Add Miscellaneous Product', 'Add Fee', 'Add Discount', 'Add Coupon', 'Add Shipping'];
+it('lists the six actions in order and hides the inline controls', async () => {
   await start();
   fireEvent.click(screen.getByTestId('product-tile-Shirt'));
   expect(screen.queryByRole('button', { name: /^(Add charge|Order discount)$/ })).toBeNull();
@@ -88,12 +88,12 @@ it('lists the five actions in order and hides the inline controls', async () => 
   expect(trigger.textContent).toBe('');
   expect(trigger.querySelector('svg')).toBeTruthy();
   openMenu();
-  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(FIVE_ROWS);
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(SIX_ROWS);
 });
-it('lists all five rows on an empty cart, Add Discount enabled', async () => {
+it('lists all six rows on an empty cart, Add Discount enabled', async () => {
   await start();
   openMenu();
-  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(FIVE_ROWS);
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(SIX_ROWS);
   expect(screen.getByRole('menuitem', { name: 'Add Discount' }).getAttribute('aria-disabled')).not.toBe('true');
 });
 it('marks the trigger open only while its menu is open', async () => {
@@ -157,5 +157,10 @@ it('below order.create 5 offers only Add new customer and a discount, on an empt
   capabilities.mockResolvedValue(session.capabilities);
   await start();
   openMenu();
-  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Add new customer', 'Add Discount']);
+  expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Add new customer', 'Add Discount', 'Add Coupon']);
+});
+it('greys Add Coupon when the till does not offer coupons', async () => {
+  await start();
+  openMenu();
+  expect(screen.getByRole('menuitem', { name: 'Add Coupon' }).getAttribute('aria-disabled')).toBe('true');
 });
