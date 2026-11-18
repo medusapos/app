@@ -307,6 +307,58 @@ describe('ProductsAreaScreen', () => {
     expect(inStock()).toBeTruthy();
     expect(screen.queryByTestId('category-nav-')).toBeNull();
   });
+
+  describe('the footer and card', () => {
+    const footer = () => screen.getByTestId('products-footer').textContent;
+
+    it('on a tablet the table sits in a card, with Showing n of m under it', () => {
+      sessionState.session = session;
+      publishCatalogue(sale());
+      mount();
+      const card = screen.getByTestId('products-table-card');
+      expect(card.contains(screen.getByTestId('products-table'))).toBe(true);
+      expect(footer()).toBe('Showing 3 of 3');
+      expect(card.contains(screen.getByTestId('products-footer'))).toBe(false);
+    });
+
+    it('n follows the search, the category and the In stock chip; m stays the catalogue', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: categorized }));
+      mount();
+      expect(rowIds()).toHaveLength(3);
+      expect(footer()).toBe('Showing 3 of 3');
+      press('products-in-stock');
+      expect(rowIds()).toHaveLength(2);
+      expect(footer()).toBe('Showing 2 of 3');
+      press('category-nav-cat_food');
+      expect(rowIds()).toHaveLength(1);
+      expect(footer()).toBe('Showing 1 of 3');
+      fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
+      expect(rowIds()).toHaveLength(0);
+      expect(footer()).toBe('Showing 0 of 3');
+    });
+
+    it('on a phone the list has the same footer and no card', () => {
+      setWindowWidth(390, 844);
+      sessionState.session = session;
+      publishCatalogue(sale());
+      mount();
+      expect(screen.getByTestId('products-list')).toBeTruthy();
+      expect(screen.queryByTestId('products-table-card')).toBeNull();
+      expect(footer()).toBe('Showing 3 of 3');
+      fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
+      expect(footer()).toBe('Showing 1 of 3');
+    });
+
+    it('no footer while the catalogue loads', () => {
+      sessionState.session = session;
+      publishCatalogue(sale({ status: 'loading' }));
+      mount();
+      expect(screen.getByTestId('products-loading')).toBeTruthy();
+      expect(screen.queryByTestId('products-footer')).toBeNull();
+    });
+  });
 });
 
 describe('the header', () => {

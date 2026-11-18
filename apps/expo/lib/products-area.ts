@@ -15,6 +15,8 @@ export const PRODUCTS_EMPTY = 'No products in the catalogue yet.';
 export const PRODUCTS_NO_MATCH =(query: string) => `No products match “${query}”.`;
 export const PRODUCTS_IN_STOCK_LABEL = 'In stock';
 export const PRODUCTS_NONE_IN_STOCK = 'No products are in stock.';
+// The footer under the list: rows shown after the search and chips, of the sellable catalogue's rows.
+export const PRODUCTS_SHOWING = (shown: number, total: number) => `Showing ${shown} of ${total}`;
 
 export const STOCK_STATUS_LABELS: Record<StockLevel['status'], string> = {
   in_stock: 'In stock', out_of_stock: 'Out of stock', backorder: 'On backorder', unknown: '—',
