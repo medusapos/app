@@ -30,12 +30,10 @@ it('lists earlier closures newest first and leaves out today', async () => {
   mount();
   const row = within(await screen.findByTestId('earlier-closure-c12'));
   expect(rowIds()).toEqual(['earlier-closure-c12', 'earlier-closure-c11']);
-  expect(row.getByTestId('earlier-closure-c12-number').textContent).toBe('#12');
-  expect(row.getByTestId('earlier-closure-c12-closed').textContent)
-    .toBe(formatClosureDate(first.closedAt, { timezone: ctx.timezone, locale: ctx.locale }).datetime);
-  expect(row.getByTestId('earlier-closure-c12-register').textContent).toBe('Register 1');
+  const time = (value: string) => formatClosureDate(value, { timezone: ctx.timezone, locale: ctx.locale }).time;
+  expect(row.getByTestId('earlier-closure-c12-title').textContent).toBe('Closure 12 · Register 1');
+  expect(row.getByTestId('earlier-closure-c12-detail').textContent).toBe(`${time(first.openedAt)} → ${time(first.closedAt)} · Ana`);
   expect(row.getByTestId('earlier-closure-c12-cashier').textContent).toBe('Ana');
-  expect(row.getByTestId('earlier-closure-c12-sales').textContent).toBe(ctx.formatMoney('45.00'));
   expect(row.getByTestId('earlier-closure-c12-counted').textContent).toBe(ctx.formatMoney('44.00'));
   expect(row.getByTestId('earlier-closure-c12-variance').textContent).toBe(`${ctx.formatMoney('1.00')} short`);
   expect(screen.getByTestId('earlier-closure-c11-counted').textContent).toBe('—');

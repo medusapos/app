@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Pressable, View } from 'react-native';
 import { AppText as Text } from './app-text';
-import { DateRangeMenu } from '@tallyui/components';
+import { ChevronDownIcon, DateRangeMenu } from '@tallyui/components';
 import type { ClosureFilters } from '../lib/reports';
 
 type Option = { value: string; label: string };
@@ -26,17 +26,37 @@ function ChoiceSelect({ id, value, options, onChange }: { id: string; value: str
   </View>;
 }
 
-/** v2's Closures filter row: period, store · register, cashier. */
-export function ClosureFiltersBar({ filters, onChange, registerOptions, cashierOptions }: {
-  filters: ClosureFilters; onChange: (next: ClosureFilters) => void; registerOptions: Option[]; cashierOptions: Option[];
+/** v2's Closures header: the store · register as the view's title, a ⌄ after it, the same inline list as ChoiceSelect. */
+export function ClosureRegisterSelect({ value, options, onChange }: { value: string; options: Option[]; onChange: (registerId: string) => void }) {
+  const [open, setOpen] = useState(false);
+  const chosen = options.find((option) => option.value === value);
+  return <View className="shrink gap-1">
+    <Pressable testID="closures-register" accessibilityRole="button" onPress={() => setOpen(!open)}
+      className="min-h-11 flex-row items-center gap-1">
+      <Text numberOfLines={1} className="text-lg font-semibold text-foreground">{chosen?.label ?? value}</Text>
+      <View className="text-muted-foreground"><ChevronDownIcon size={18} /></View>
+    </Pressable>
+    {open ? <View className="rounded-md border border-border bg-card py-1">
+      {options.map((option) => <Pressable key={option.value} testID={`closures-register-option-${option.value}`} accessibilityRole="radio"
+        accessibilityState={{ checked: option.value === value }}
+        className={option.value === value ? 'px-3 py-2 bg-muted' : 'px-3 py-2'}
+        onPress={() => { setOpen(false); onChange(option.value); }}>
+        <Text className="text-sm text-foreground">{option.label}</Text>
+      </Pressable>)}
+    </View> : null}
+  </View>;
+}
+
+/** v2's Closures filter row: period, cashier, and Export CSV (the trailing element) at its right end. */
+export function ClosureFiltersBar({ filters, onChange, cashierOptions, trailing }: {
+  filters: ClosureFilters; onChange: (next: ClosureFilters) => void; cashierOptions: Option[]; trailing?: ReactNode;
 }) {
   return <View testID="closures-filters" className="flex-row flex-wrap items-start gap-2">
     <DateRangeMenu testID="closures-period" timezone="device" value={{ preset: filters.preset, range: filters.range }}
       onChange={(next) => onChange({ ...filters, preset: next.preset, range: next.range })} />
-    <ChoiceSelect id="closures-register" value={filters.registerId ?? ''} options={registerOptions}
-      onChange={(registerId) => onChange({ ...filters, registerId })} />
     <ChoiceSelect id="closures-cashier" value={filters.cashierId ?? 'all'}
       options={[{ value: 'all', label: 'All cashiers' }, ...cashierOptions]}
       onChange={(value) => onChange({ ...filters, cashierId: value === 'all' ? null : value })} />
+    {trailing ? <View className="ml-auto">{trailing}</View> : null}
   </View>;
 }
