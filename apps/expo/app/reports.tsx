@@ -24,7 +24,7 @@ import { loadCachedPricing, loadCachedSettings } from '../lib/store-settings';
 // The Sales room's status menu; the printed summary's scope line reads the same labels.
 const STATUS_OPTIONS = [{ value: 'all', label: 'All orders' }, { value: 'applied', label: 'Synced' }, { value: 'pending', label: 'Not sent' }];
 
-// v2's outline printer on the Print summary button: paper tray, body, output sheet.
+// v2's outline printer on the Print summary and Print X report buttons: paper tray, body, output sheet.
 const PrinterIcon = createSvgIcon('PrinterIcon', () => <>
   <Path d="M6 9V2h12v7" />
   <Path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
@@ -94,7 +94,7 @@ export default function ReportsScreen() {
         <RegisterStrip register={register} ctx={ctx}
           panel={{ currency: currency!, store: { name: storeName, address: settings?.location.addressLine } }} action={Platform.OS === 'web' && register.session?.status === 'open' ?
           <Pressable testID="reports-x-print" accessibilityRole="button" disabled={xBusy}
-            className="min-h-11 items-center justify-center rounded-md px-4 border border-border"
+            className="min-h-11 flex-row items-center justify-center gap-2 rounded-md px-4 border border-border"
             onPress={async () => {
               setXBusy(true);
               setXError(null);
@@ -105,6 +105,7 @@ export default function ReportsScreen() {
                 setXError(error instanceof Error ? error.message : X_PRINT_FAILED);
               } finally { setXBusy(false); }
             }}>
+            <View testID="reports-x-print-icon" className="text-foreground"><PrinterIcon size={18} /></View>
             <Text className="text-foreground">{xBusy ? 'Printing…' : 'Print X report'}</Text>
           </Pressable> : null} />
         {Platform.OS === 'web' && register.session?.status === 'open' && xError ?
