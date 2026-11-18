@@ -1053,6 +1053,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
     await checkout();
     expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Checkout Order');
+    expect(screen.queryByTestId('user-menu')).toBeNull();
     const close = screen.getByTestId('tender-close');
     expect(button('Close')).toBe(close);
     act(() => { fireEvent.click(close); });
@@ -1060,6 +1061,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00']);
     expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Test shop · Register 1');
     expect(screen.queryByTestId('tender-close')).toBeNull();
+    expect(screen.getByTestId('user-menu')).toBeTruthy();
   });
 
   it('at 1280 wide the title names the store and register, through the tender, with no close', async () => {
@@ -1070,6 +1072,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(button('Complete sale')).toBeTruthy();
     expect(screen.getByTestId('screen-title').getAttribute('data-title')).toBe('Test shop · Register 1');
     expect(screen.queryByTestId('tender-close')).toBeNull();
+    expect(screen.getByTestId('user-menu')).toBeTruthy();
   });
 
   it('at 1280 wide the title falls back to the connector name when the store name is blank', async () => {

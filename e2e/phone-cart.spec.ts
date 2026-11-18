@@ -18,6 +18,7 @@ test('the phone tender is titled Checkout Order and its close returns to the car
   await page.getByTestId('cart-checkout').click();
   await expect(page.getByRole('heading', { name: 'Checkout Order', exact: true })).toBeVisible();
   await expect(page.getByTestId('frame-menu')).toHaveCount(0);
+  await expect(page.getByTestId('user-menu')).toHaveCount(0);
   const close = page.getByTestId('tender-close');
   await expect(close).toBeInViewport();
   const box = (await close.boundingBox())!;
@@ -28,6 +29,7 @@ test('the phone tender is titled Checkout Order and its close returns to the car
   await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
   await expect(page.getByTestId('cart-checkout')).toBeVisible();
   await expect(page.getByTestId('frame-menu')).toBeVisible();
+  await expect(page.getByTestId('user-menu')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Complete sale' })).toHaveCount(0);
 });
 
@@ -104,7 +106,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
 });
 
 // ADR 0015 (#82 review): an automatic sign-out during a save that can't finish waits, with a note that fits at 360 px.
-test('a sign-out requested during a stuck save waits, and its note fits at 360 px and Sign out stays locked', async ({ page }) => {
+test('a sign-out requested during a stuck save waits, and its note fits at 360 px and Sign out is out of reach', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
   await cartTab(page).click();
@@ -119,16 +121,15 @@ test('a sign-out requested during a stuck save waits, and its note fits at 360 p
   await page.evaluate(() => (window as unknown as { __medusaposReportUnauthorized: () => void }).__medusaposReportUnauthorized());
   const note = page.getByText('Signed out after this sale is saved', { exact: true });
   await expect(note).toBeVisible();
-  await expectAccountInViewport(page);
   const box = (await note.boundingBox())!;
   expect([box.x >= 0, box.x + box.width <= 360]).toEqual([true, true]);
   // Still signed in, on the sale's tender.
   await expect(page.getByRole('button', { name: 'Complete sale', exact: true })).toBeVisible();
   await expect(page).not.toHaveURL(/\/login/);
 
-  await page.getByTestId('user-menu').click();
-  await expect(page.getByRole('button', { name: 'Sign out', exact: true })).toBeDisabled();
-  await page.getByTestId('user-sheet-close').click();
+  // The phone tender header carries only the title and the close, as v2's, so Sign out is out of reach until the
+  // sale is saved.
+  await expect(page.getByTestId('user-menu')).toHaveCount(0);
 
   // The save lands: the receipt shows, and the deferred sign-out waits for it to clear, then runs.
   await page.evaluate(() => (window as unknown as { __medusaposReleaseOrderInserts: () => void }).__medusaposReleaseOrderInserts());
