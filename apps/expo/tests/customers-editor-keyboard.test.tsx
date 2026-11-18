@@ -46,7 +46,7 @@ describe('Customers editor keyboard taps', () => {
   it("the new-customer editor's scroll view keeps taps for the country matches", () => {
     render(<><CustomersScreen /><PortalHost /></>);
     fireEvent.click(screen.getByTestId('customers-add'));
-    expect(within(screen.getByTestId('customer-editor')).getByText('New customer')).toBeTruthy();
+    expect(within(screen.getByTestId('customer-editor')).getByRole('heading', { name: 'Add Customer' })).toBeTruthy();
     expect(editorScrollTaps()).toBe('handled');
   });
 

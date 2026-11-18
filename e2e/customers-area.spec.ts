@@ -27,6 +27,7 @@ test('the Customers area adds a customer', async ({ page }) => {
   await page.getByPlaceholder('email@example.com').fill(email);
   await page.getByPlaceholder('First name').fill('Nia');
   await page.getByTestId('customer-save').click();
+  await expect(page.getByTestId('customer-saved-toast')).toHaveText('Nia saved');
   await expect(page.getByLabel(`Nia, ${email}`, { exact: true })).toBeVisible();
   const response = await fetch(`${backend}/admin/customers?q=${encodeURIComponent(email)}`, { headers: { Authorization: `Bearer ${token}` } });
   expect(response.ok, await response.clone().text()).toBeTruthy();

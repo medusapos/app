@@ -13,7 +13,7 @@ type Addresses = { billing?: CustomerAddress; shipping?: CustomerAddress };
 /** Shipping starts as "Same as billing" when there is none stored or its six fields match billing's. */
 const shippingIsBilling = ({ billing, shipping }: Addresses) => !shipping || !billingChanged(billingFields(shipping), billing);
 
-export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, layout }: {
+export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, layout, saveLabel = 'Save customer' }: {
   customer: Customer | null;
   save: (values: CustomerFormValues, billing: CustomerAddress | undefined, shipping: CustomerAddress | undefined) => Promise<void>;
   onUnauthorized: () => void;
@@ -21,6 +21,8 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
   loadAddresses?: () => Promise<Addresses>;
   /** Places the editor's parts; without it they render in order: form, message, save. */
   layout?: (parts: { form: ReactNode; message: ReactNode; save: ReactNode }) => ReactNode;
+  /** The save button's words; the Customers screen's new-customer form reads v2's "Add Customer". */
+  saveLabel?: string;
 }) {
   const [values, setValues] = useState<CustomerFormValues>({ firstName: customer?.firstName ?? '',
     lastName: customer?.lastName ?? '', email: customer?.email ?? '', phone: customer?.phone ?? '', address: '' });
@@ -112,7 +114,7 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
   const shown = message ? <Text accessibilityRole="alert" className="text-sm text-destructive">{message}</Text> : null;
   const saveButton = <Button testID="customer-save" disabled={saving || values.email.trim() === '' || !countryValid || !shippingCountryValid}
     onPress={submit}>
-    <Text>Save customer</Text>
+    <Text>{saveLabel}</Text>
   </Button>;
   return layout ? <>{layout({ form, message: shown, save: saveButton })}</> : <>{form}{shown}{saveButton}</>;
 }

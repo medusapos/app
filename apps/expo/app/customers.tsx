@@ -8,6 +8,7 @@ import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type S
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { CustomerColumnsButton } from '../components/customer-columns-settings';
 import { CustomerEditor, NETWORK_ERROR_TEXT } from '../components/customer-editor';
+import { CustomerSavedToast, useCustomerSavedToast } from '../components/customer-saved-toast';
 import { CustomersTable } from '../components/customers-table';
 import { StripHeightContext } from '../components/store-refused';
 import { loadCustomerAddresses } from '../lib/customer-billing';
@@ -54,6 +55,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
   const topInset = useContext(StripHeightContext);
   const openMenu = useFrameMenu();
+  const toast = useCustomerSavedToast();
 
   useEffect(() => {
     const current = ++request.current;
@@ -98,13 +100,13 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
     </ScrollView>}
     <Dialog open={editing !== null} onOpenChange={(open) => { if (!open) { createdCustomer.current = null; setEditing(null); } }}>
       <DialogContent testID="customer-editor" className="max-h-[90%]">
-        <DialogTitle>{editing === 'new' ? 'New customer' : 'Edit customer'}</DialogTitle>
+        <DialogTitle>{editing === 'new' ? 'Add Customer' : 'Edit customer'}</DialogTitle>
         <ScrollView keyboardShouldPersistTaps="handled">
         {editing !== null && <CustomerEditor key={editing === 'new' ? 'new' : editing.id}
           loadAddresses={editing === 'new' ? undefined : () => loadCustomerAddresses(context, editing.id)}
           customer={editing === 'new' ? null : editing} onUnauthorized={onUnauthorized} save={async (values, billing, shipping) => {
             if (editing === 'new') {
-              await saveNewCustomer({ create: (input) => connector.createCustomer!(context, input),
+              const added = await saveNewCustomer({ create: (input) => connector.createCustomer!(context, input),
                 update: connector.updateCustomer && ((id, patch) => connector.updateCustomer!(context, id, patch)) },
                 values, billing, shipping, createdCustomer, (saved) => {
                 setCustomers((list) => list.some((customer) => customer.id === saved.id)
@@ -112,6 +114,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
                 setMessage(null);
                 setFailed(false);
               });
+              toast.show(added.name);
             } else {
               const updated = await saveCustomerEdits((id, patch) => connector.updateCustomer!(context, id, patch),
                 editing, values, billing, shipping);
@@ -119,9 +122,12 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
             }
             createdCustomer.current = null;
             setEditing(null);
-          }} />}
+          }} saveLabel={editing === 'new' ? 'Add Customer' : undefined} />}
         </ScrollView>
       </DialogContent>
     </Dialog>
+    {toast.name && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center px-2">
+      <CustomerSavedToast name={toast.name} />
+    </View>}
   </View>;
 }

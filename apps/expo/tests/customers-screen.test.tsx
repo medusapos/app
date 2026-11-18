@@ -9,6 +9,7 @@ import { ConnectorUnauthorizedError, CustomerServiceError, type Customer } from 
 import type { Session } from '../lib/session';
 import CustomersScreen, { NETWORK_ERROR_TEXT, NO_MATCH_TEXT, SEARCH_HINT, SEARCHING_TEXT } from '../app/customers';
 import { AppFrame, useFrameAccountPublisher } from '../components/app-frame';
+import { CUSTOMER_SAVED_TOAST_MS } from '../components/customer-saved-toast';
 import { setWindowWidth } from './window-width';
 
 const { searchCustomers, updateCustomer, createCustomer, sessionState } = vi.hoisted(() => ({
@@ -108,7 +109,8 @@ describe('CustomersScreen', () => {
   it('adds a customer with only the supplied fields and shows the new row', async () => {
     render(<><CustomersScreen /><PortalHost /></>);
     fireEvent.click(screen.getByTestId('customers-add'));
-    expect(within(screen.getByTestId('customer-editor')).getByText('New customer')).toBeTruthy();
+    expect(within(screen.getByTestId('customer-editor')).getByRole('heading', { name: 'Add Customer' })).toBeTruthy();
+    expect(within(screen.getByTestId('customer-save')).getByText('Add Customer')).toBeTruthy();
     expect(screen.getByTestId('customer-save').getAttribute('aria-disabled')).toBe('true');
     changeField('email@example.com', 'new@example.com');
     changeField('First name', 'Nia');
@@ -116,6 +118,45 @@ describe('CustomersScreen', () => {
     expect(createCustomer).toHaveBeenCalledExactlyOnceWith(context, { email: 'new@example.com', firstName: 'Nia' });
     expect(screen.queryByTestId('customer-editor')).toBeNull();
     expect(screen.getByLabelText('Nia, new@example.com')).toBeTruthy();
+    expect(screen.getByTestId('customer-saved-toast').textContent).toContain('Nia saved');
+  });
+
+  it('the added-customer message names the customer and goes after CUSTOMER_SAVED_TOAST_MS', async () => {
+    render(<><CustomersScreen /><PortalHost /></>);
+    fireEvent.click(screen.getByTestId('customers-add'));
+    changeField('email@example.com', 'new@example.com');
+    changeField('First name', 'Nia');
+    await saveCustomer();
+    expect(screen.getByTestId('customer-saved-toast').textContent).toContain('Nia saved');
+    await act(async () => { await vi.advanceTimersByTimeAsync(CUSTOMER_SAVED_TOAST_MS - 1); });
+    expect(screen.getByTestId('customer-saved-toast')).toBeTruthy();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(screen.queryByTestId('customer-saved-toast')).toBeNull();
+  });
+
+  it('an edit keeps "Edit customer" and "Save customer" and shows no message', async () => {
+    await editAda();
+    expect(within(screen.getByTestId('customer-editor')).getByText('Edit customer')).toBeTruthy();
+    expect(within(screen.getByTestId('customer-save')).getByText('Save customer')).toBeTruthy();
+    changeField('Phone number', '+44 2');
+    await saveCustomer();
+    expect(updateCustomer).toHaveBeenCalledOnce();
+    expect(screen.queryByTestId('customer-editor')).toBeNull();
+    expect(screen.queryByTestId('customer-saved-toast')).toBeNull();
+  });
+
+  it('no message when the new customer\'s address is not saved', async () => {
+    updateCustomer.mockRejectedValue(new Error('x'));
+    render(<><CustomersScreen /><PortalHost /></>);
+    fireEvent.click(screen.getByTestId('customers-add'));
+    changeField('email@example.com', 'new@example.com');
+    changeField('First name', 'Nia');
+    fireEvent.change(screen.getByLabelText('Address line 1'), { target: { value: '1 Market St' } });
+    await saveCustomer();
+    expect(createCustomer).toHaveBeenCalledOnce();
+    expect(updateCustomer).toHaveBeenCalledOnce();
+    expect(screen.getByTestId('customer-editor')).toBeTruthy();
+    expect(screen.queryByTestId('customer-saved-toast')).toBeNull();
   });
 
   it('redirects to /login without a session', () => {
