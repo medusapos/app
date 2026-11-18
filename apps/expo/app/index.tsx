@@ -27,12 +27,12 @@ import { EmailReceipt } from '../components/email-receipt';
 import { PaidChange } from '../components/paid-change';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
-import { phoneRegisterState, storeRegisterTitle } from '../components/frame-drawer-header';
-import { HeaderRegisterState, WideHeaderRegister } from '../components/header-register-state';
+import { storeRegisterTitle } from '../components/frame-drawer-header';
+import { HeaderRegisterState, WideHeaderRegister, wideRegisterState } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
-  GETTING_READY, IN_ROW, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, TillRegisterBar, useGatedSale,
+  GETTING_READY, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, useGatedSale,
 } from '../components/register';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
@@ -257,7 +257,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // A directly connected scanner (Settings > Scanner) types nothing, so it adds in every layout without a double add.
   useDeviceScans(sale.stage.kind === 'cart', onScan);
   const sellableCount = sorted.length;
-  // On a phone the status line shares one line with the register pill (ADR 0017), so it drops the store name and
+  // On a phone the status line shares one line with the product settings button, so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
   const productCount = `${sellableCount.toLocaleString()} ${sellableCount === 1 ? 'product' : 'products'}`;
   const storeName = settings.storeName.trim() ? settings.storeName : connector.name;
@@ -274,7 +274,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const tenderPane = orders === null
     ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
     : <Tender sale={sale} methods={TILL_PAYMENT_METHODS} />;
-  // The register control (ADR 0017): its pill brings up the gate (on a phone, the cart view, even with an empty cart).
+  // The register control (ADR 0017): the header state brings up the gate (on a phone, the cart view, even with an empty
+  // cart), or the panel while the session is open.
   const [panelOpen, setPanelOpen] = useState(false);
   const [userSheetOpen, setUserSheetOpen] = useState(false);
   const displayName = session.name || session.email;
@@ -287,24 +288,21 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [gateFocus, setGateFocus] = useState(0);
   const gateFocusHandled = useRef(0);
   const openGate = () => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); };
-  const registerBar = (className?: string) => <TillRegisterBar online={online} onOpenPanel={() => setPanelOpen(true)}
-    onGate={openGate} className={className} />;
-  const headerRegisterState = phone && sale.stage.kind !== 'tender' ? phoneRegisterState(boundRegisterId, registerStatus) : null;
+  // v2's phone has no register row (row 17a): every state the wide header names shows in the phone header instead.
+  const headerRegisterState = phone && sale.stage.kind !== 'tender' ? wideRegisterState(boundRegisterId, online, register) : null;
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
     showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
   const catalogue = <View className="flex-1">
     <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
-    {/* statusAccessory: on a phone the register bar ends the status line (ADR 0017). */}
     {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
     {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
     <View testID="catalogue-area" className="flex-1" pointerEvents={dimmed ? 'none' : 'auto'}
       aria-disabled={dimmed} style={{ opacity: dimmed ? 0.5 : 1 }}>
     <Catalogue products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={phone
-        ? <View className="flex-row items-center gap-2">{registerBar(IN_ROW)}{productSettingsButton}</View> : productSettingsButton}
+      onSelect={add} statusText={statusText} statusAccessory={productSettingsButton}
       showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
@@ -393,7 +391,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className={phone ? 'flex-row items-center gap-4 pr-4' : 'flex-1 flex-row items-center gap-4 pr-4'}>
         {!phone && <WideHeaderRegister online={online} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
-        {headerRegisterState && <HeaderRegisterState label={headerRegisterState} onPress={openGate} />}
+        {headerRegisterState && <HeaderRegisterState label={headerRegisterState}
+          onPress={registerStatus === 'open' ? () => setPanelOpen(true) : openGate} />}
         {!phoneTender && <Pressable testID="user-menu" accessibilityRole="button" accessibilityLabel={`Account: ${displayName}`}
           onPress={() => setUserSheetOpen(true)} className="min-h-11 flex-row items-center gap-2">
           {/* On a phone, v2's avatar: light initials on a solid primary circle. */}
@@ -460,9 +459,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
             </View>
           </View> : sale.stage.kind === 'tender' ? <View className="flex-1 bg-card">{tenderPane}</View>
             : <>{cartOpen ? <View className="flex-1 bg-card">
-              <View testID="phone-cart-head" className="min-h-11 flex-row items-center justify-end border-b border-border pr-3">
-                {registerBar(IN_ROW)}
-              </View>
               {scanMissLine}
               {cart}
             </View> : catalogue}

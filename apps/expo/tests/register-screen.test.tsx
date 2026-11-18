@@ -57,8 +57,7 @@ const button = (name: string | RegExp) => screen.getByRole('button', { name });
 // takes the whole balance, as the cart's old Card terminal button did.
 const checkoutButton = () => screen.getByTestId('cart-checkout');
 async function payByCard() { await act(async () => { fireEvent.click(checkoutButton()); }); pickMethod('external'); take(); }
-const pill = () => screen.queryByTestId('register-bar-pill')?.textContent ?? null;
-// Wide, v2's header state beside the store and register name (row 09a.3); a phone keeps the pill.
+// v2's header state: wide beside the store and register name (row 09a.3), on a phone before the avatar (row 17a).
 const headerState = () => screen.queryByTestId('header-register-state')?.textContent ?? null;
 
 let sequence = 0;
@@ -108,13 +107,17 @@ async function mount() {
   });
 }
 const sessions = () => registerCollections(store.orders).sessions;
-async function openPanel() {
-  fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+/** Wide, the header's "Register ›"; a phone has none, so the user sheet's "Pay in · Pay out · Close register" row. */
+async function openPanel(phone = false) {
+  if (phone) {
+    fireEvent.click(await screen.findByTestId('user-menu'));
+    fireEvent.click(await screen.findByTestId('user-sheet-register'));
+  } else fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
   return within(await screen.findByTestId('register-panel'));
 }
 /** The panel's Close register: RegisterCount replaces the cart. */
-async function startCount() {
-  const panel = await openPanel();
+async function startCount(phone = false) {
+  const panel = await openPanel(phone);
   await act(async () => { fireEvent.click(panel.getByTestId('register-panel-close')); });
   return within(await screen.findByTestId('register-count'));
 }
@@ -601,9 +604,9 @@ describe('closing the register', () => {
     setWindowWidth(360);
     await openTestRegister(store.orders, baseUrl);
     await mount();
-    await startCount();
+    await startCount(true);
     expect(screen.getByRole('tab', { name: /^Cart/ }).getAttribute('aria-selected')).toBe('true');
-    await waitFor(() => expect(pill()).toBe('Counting'));
+    await waitFor(() => expect(headerState()).toBe('Counting'));
   });
 
   // #89 review, MAJOR 1.
@@ -684,7 +687,7 @@ describe('closing the register', () => {
     setWindowWidth(360);
     await openTestRegister(store.orders, baseUrl);
     await mount();
-    const count = await startCount();
+    const count = await startCount(true);
     const hold = holdClosureWrites();
     await closeWith(count, '100.00');
     await waitFor(() => expect(hold.waiting()).toBe(1));
@@ -800,7 +803,7 @@ describe('closing the register', () => {
   });
 });
 
-// The Front desk's review (2026-09-28): the pill is never a dead label, and on a phone the control ends existing rows.
+// The Front desk's review (2026-09-28): the state is never a dead label; a phone has no register row of its own (row 17a).
 describe('the register control', () => {
   it('at 1280, tapping "Choose register" in the header brings up the gate: the picker, focused', async () => {
     await mount();
@@ -811,52 +814,55 @@ describe('the register control', () => {
     expect(picker.contains(document.activeElement)).toBe(true);
   });
 
-  it('at 360, with the bar on the status line and an empty cart, tapping "Register closed" opens the cart view with the open card above the empty cart', async () => {
+  it('at 360, with the header state and an empty cart, tapping "Closed" opens the cart view with the open card above the empty cart', async () => {
     setWindowWidth(360);
     await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
     await mount();
-    await waitFor(() => expect(pill()).toBe('Register closed'));
-    // No strip: the bar ends Catalogue's status line.
-    expect(screen.getByTestId('catalogue-status-row').contains(screen.getByTestId('register-bar'))).toBe(true);
+    await waitFor(() => expect(headerState()).toBe('Closed'));
+    // No register bar: not on Catalogue's status line, nor anywhere else.
+    expect(screen.queryByTestId('register-bar')).toBeNull();
+    expect(screen.queryByTestId('register-bar-pill')).toBeNull();
+    expect(within(screen.getByTestId('catalogue-status-row')).queryByRole('button', { name: 'Open register panel' })).toBeNull();
     expect(screen.queryByTestId('open-register-card')).toBeNull();
-    // Only the pill or the Cart tab opens the cart view.
+    // Only the header state or the Cart tab opens the cart view.
     expect(screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected')).toBe('true');
     expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
-    fireEvent.click(button('Register closed'));
+    fireEvent.click(button('Register: Closed'));
     const card = await screen.findByTestId('open-register-card');
     // One tap also focuses the gate, which mounted for it (the float field).
     expect(card.contains(document.activeElement)).toBe(true);
     const empty = screen.getByText('Tap a product to start a sale');
     expect(card.compareDocumentPosition(empty) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // The control now ends the cart head row.
-    expect(screen.getByTestId('phone-cart-head').contains(screen.getByTestId('register-bar-pill'))).toBe(true);
+    // The cart view has no register row either.
+    expect(screen.queryByTestId('phone-cart-head')).toBeNull();
+    expect(screen.queryByTestId('register-bar')).toBeNull();
   });
 
-  it.each([1280, 360])('at %i, with a session open, tapping the pill ("Offline") opens the panel', async (width) => {
+  it.each([1280, 360])('at %i, with a session open, tapping the header state ("Offline") opens the panel', async (width) => {
     setWindowWidth(width);
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'offline', error: null, lastSyncedAt: null,
       stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: undefined });
     await openTestRegister(store.orders, baseUrl);
     await mount();
-    await waitFor(() => expect(width === 1280 ? headerState() : pill()).toBe('Offline'));
-    fireEvent.click(button(width === 1280 ? 'Register: Offline' : 'Offline'));
+    await waitFor(() => expect(headerState()).toBe('Offline'));
+    fireEvent.click(button('Register: Offline'));
     expect(await screen.findByTestId('register-panel')).toBeTruthy();
   });
 
-  // #89 final round: TallyUI #175's "Close not finished" pill.
+  // #89 final round: TallyUI #175's "Close not finished" state.
   it.each([1280, 360])('at %i, "Close not finished" brings up the Finish closing card with its button focused', async (width) => {
     setWindowWidth(width);
     const session = await openTestRegister(store.orders, baseUrl);
     await startCounting(sessions(), session.id);
     await closeSession(sessions(), session.id, { counted: { cash: 10000 }, closedBy: 'admin@store.test' });
     await mount();
-    await waitFor(() => expect(width === 1280 ? headerState() : pill()).toBe('Close not finished'));
+    await waitFor(() => expect(headerState()).toBe('Close not finished'));
     if (width === 360) {
-      // The cart view opened for it by itself; leave it, so the pill has to bring it back.
+      // The cart view opened for it by itself; leave it, so the header state has to bring it back.
       await act(async () => { fireEvent.click(await screen.findByRole('tab', { name: 'Products' })); });
       expect(screen.queryByTestId('register-column-finish-close')).toBeNull();
     }
-    await act(async () => { fireEvent.click(button(width === 1280 ? 'Register: Close not finished' : 'Close not finished')); });
+    await act(async () => { fireEvent.click(button('Register: Close not finished')); });
     const finish = await screen.findByTestId('register-column-finish-close-button');
     expect(finish.id).toBe('register-column-finish-close-button');
     expect(document.activeElement).toBe(finish);
@@ -873,6 +879,27 @@ describe('the register control', () => {
     fireEvent.click(open);
     expect(await screen.findByTestId('register-panel')).toBeTruthy();
   });
+
+  it('at 360, with a register open, there is no register row on Products or in the Cart view, and the user sheet opens the panel', async () => {
+    setWindowWidth(360);
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await screen.findByTestId('user-menu');
+    await waitFor(() => expect(screen.queryByTestId('price-check-banner')).toBeNull());
+    const noRegisterRow = () => {
+      expect(screen.queryByTestId('register-bar')).toBeNull();
+      expect(screen.queryByTestId('phone-cart-head')).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Open register panel' })).toBeNull();
+      expect(headerState()).toBeNull();
+    };
+    noRegisterRow();
+    await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Cart/ })); });
+    expect(screen.getByRole('tab', { name: /^Cart/ }).getAttribute('aria-selected')).toBe('true');
+    noRegisterRow();
+    fireEvent.click(screen.getByTestId('user-menu'));
+    fireEvent.click(await screen.findByTestId('user-sheet-register'));
+    expect(await screen.findByTestId('register-panel')).toBeTruthy();
+  });
 });
 
 // DEMO-PARITY row 17a.3: the phone Products view carries the wide screen's price-check strip (#330) above the catalogue.
@@ -880,13 +907,13 @@ describe('the phone Products view (row 17a.3)', () => {
   const productsSelected = () => screen.getByRole('tab', { name: 'Products' }).getAttribute('aria-selected');
 
   it.each([
-    ['unbound', false, 'Choose a register'],
-    ['bound, not open', true, 'Register closed'],
-  ])('%s: the Products tab shows "Price check only" above the catalogue', async (_label, bound, pillText) => {
+    ['unbound', false, 'Choose register'],
+    ['bound, not open', true, 'Closed'],
+  ])('%s: the Products tab shows "Price check only" above the catalogue', async (_label, bound, stateText) => {
     setWindowWidth(360);
     if (bound) await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
     await mount();
-    await waitFor(() => expect(pill()).toBe(pillText));
+    await waitFor(() => expect(headerState()).toBe(stateText));
     expect(productsSelected()).toBe('true');
     const banner = screen.getByTestId('price-check-banner');
     expect(banner.textContent).toBe(PRICE_CHECK_ONLY);
@@ -898,8 +925,8 @@ describe('the phone Products view (row 17a.3)', () => {
     setWindowWidth(360);
     await openTestRegister(store.orders, baseUrl);
     await mount();
-    expect(await screen.findByRole('button', { name: 'Open register panel' })).toBeTruthy();
-    expect(pill()).toBeNull();
+    expect(await screen.findByTestId('user-menu')).toBeTruthy();
+    await waitFor(() => expect(headerState()).toBeNull());
     expect(productsSelected()).toBe('true');
     expect(screen.getByTestId('product-tile-Shirt')).toBeTruthy();
     expect(screen.queryByTestId('price-check-banner')).toBeNull();
@@ -909,7 +936,7 @@ describe('the phone Products view (row 17a.3)', () => {
     setWindowWidth(360);
     await bindRegister(sessions(), baseUrl, { id: 'register-1', name: 'Register 1' });
     await mount();
-    await waitFor(() => expect(pill()).toBe('Register closed'));
+    await waitFor(() => expect(headerState()).toBe('Closed'));
     expect(screen.getByTestId('price-check-banner').textContent).toBe(PRICE_CHECK_ONLY);
     await act(async () => { fireEvent.click(screen.getByRole('tab', { name: /^Cart/ })); });
     expect(screen.queryByTestId('price-check-banner')).toBeNull();
@@ -919,7 +946,7 @@ describe('the phone Products view (row 17a.3)', () => {
   });
 });
 
-// The Front desk (2026-09-28): on a phone the status line shares its row with the register pill, so it is short.
+// The Front desk (2026-09-28): on a phone the status line shares its row with the product settings button, so it is short.
 describe('the catalogue status line', () => {
   it.each([
     [1280, 'Test shop · Up to date · 1 product · 2 not sold in this channel · Failed to fetch'],
@@ -929,7 +956,7 @@ describe('the catalogue status line', () => {
     vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'synced', error: 'Failed to fetch', lastSyncedAt: null,
       stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), unlisted: { count: 2, stale: false } });
     await mount();
-    await waitFor(() => expect(width === 1280 ? headerState() : pill()).toBe(width === 1280 ? 'Choose register' : 'Choose a register'));
+    await waitFor(() => expect(headerState()).toBe('Choose register'));
     expect(within(screen.getByTestId('catalogue-status-row')).getByText(text)).toBeTruthy();
   });
 });

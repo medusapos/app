@@ -1,7 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartTab, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartTab, cartTotalRow, closeStoreRegister, credentials, inventoryLevel, nextStoreClosure, openArea, openRegisterPanel, openStoreRegister, ordersByClientId, sellBySku, setInventoryLevel, signIn, storeRegister, submitStoreClosure, test, type PostedCommand } from './helpers';
 
 // The store's closure history row for `sessionId`'s closure (closure-history.ts), read with the e2e admin token.
 async function storeClosure(sessionId: string): Promise<{ sessionId: string; number: number; approvalVerified: boolean } | undefined> {
@@ -36,10 +36,18 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     const phone = viewport.width < 600;
     // On a phone the register's picker and open card show in the cart view, which the Cart tab opens.
     const openCart = async (page: Page) => { if (phone) await cartTab(page).click(); };
-    // The register's state: TallyUI's pill on a phone; wide, v2's header state beside the store and register (row 09a.3).
-    const registerState = (page: Page) => page.getByTestId(phone ? 'register-bar-pill' : 'header-register-state');
-    // The pill's text, or wide, v2's wording for it.
-    const stateText = (pill: string) => phone ? pill : pill === 'Choose a register' ? 'Choose register' : pill === 'Register closed' ? 'Closed' : pill;
+    // The register's state: v2's header state, wide beside the store and register (row 09a.3), on a phone before the avatar.
+    const registerState = (page: Page) => page.getByTestId('header-register-state');
+    // TallyUI's pill wording, in v2's words.
+    const stateText = (pill: string) => pill === 'Choose a register' ? 'Choose register' : pill === 'Register closed' ? 'Closed' : pill;
+    // The last closure, or a refused approval's re-ask (no session): wide, the header's "Register ›"; a phone has no
+    // register row (row 17a), so Reports' register strip chevron.
+    const openLastClosure = async (page: Page) => {
+      if (phone) {
+        await openArea(page, 'Reports');
+        await page.getByTestId('register-strip-open-panel').click();
+      } else await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+    };
 
     test('bind, open with a float, a cash sale, a paid in and its Undo, and Close register', async ({ page }) => {
       const opens = captureCommands<{ sessionId: string }>(page, 'register.session.open');
@@ -47,17 +55,19 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await closeStoreRegister();
       await signIn(page, 'Europe', false);
       await expect(registerState(page)).toHaveText(stateText('Choose a register'));
-      // On a phone the bar ends Catalogue's status line.
+      // On a phone no register bar ends Catalogue's status line (row 17a).
       if (phone) {
-        await expect(page.getByTestId('catalogue-status-row').getByTestId('register-bar-pill')).toBeVisible();
+        await expect(page.getByTestId('catalogue-status-row').getByTestId('register-bar-pill')).toHaveCount(0);
+        await expect(page.getByTestId('catalogue-status-row').getByRole('button', { name: 'Open register panel' })).toHaveCount(0);
         await shot(page, 'products');
-        // A long status stays on one line beside the pill, cut with an ellipsis (TallyUI #169).
+        // A long status stays on one line (TallyUI #169); without the register bar beside it, it fits at 360
+        // and needs no ellipsis.
         const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
         await search.fill('E2E product');
         const status = page.getByTestId('catalogue-status-row').getByText(/^Up to date · 5 products · \d+ matching$/);
         await expect(status).toBeVisible();
-        const [height, clipped] = await status.evaluate((el) => [el.getBoundingClientRect().height, el.scrollWidth > el.clientWidth]);
-        expect([height < 24, clipped]).toEqual([true, true]);
+        const height = await status.evaluate((el) => el.getBoundingClientRect().height);
+        expect(height).toBeLessThan(24);
         await shot(page, 'products-long');
         await search.fill('');
       }
@@ -78,7 +88,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
 
       await page.getByTestId('open-register-amount').fill('100.00');
       await page.getByTestId('open-register-button').click();
-      await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+      if (!phone) await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
       await expect(page.getByTestId('open-register-card')).toHaveCount(0);
       await expect(page.getByRole('alert')).toHaveCount(0);
       await expect(registerState(page)).toHaveCount(0);
@@ -92,12 +102,12 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       expect(opens[0].payload.sessionId).toBe(sales[0].payload.sessionId);
       const closure = await nextStoreClosure();
       if (phone) {
-        // Products with the register open: the short status line and "Register ›" share one row.
+        // Products with the register open: the short status line, and no "Register ›" beside it.
         await expect(page.getByTestId('catalogue-status-row').getByText(/^Up to date · 5 products$/)).toBeVisible();
-        await expect(page.getByTestId('catalogue-status-row').getByRole('button', { name: 'Open register panel' })).toBeVisible();
+        await expect(page.getByTestId('catalogue-status-row').getByRole('button', { name: 'Open register panel' })).toHaveCount(0);
         await shot(page, 'products-open');
       }
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openRegisterPanel(page);
       const panel = page.getByTestId('register-panel');
       await expect(panel.getByTestId('register-panel-session-sales')).toHaveText(/1 sale$/);
       const expectedCash = panel.getByTestId('register-panel-expected').getByText(/\d/);
@@ -154,7 +164,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(registerState(page)).toHaveText(stateText('Register closed'));
       await shot(page, 'open-after-close');
       // The last closure's figures, from the frozen closure.
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openLastClosure(page);
       const figures = page.getByTestId('last-closure');
       await expect(figures.getByRole('heading')).toHaveText(`Last closure · ${closure}`);
       await expect(figures.getByTestId('last-closure-sales')).toHaveText(money(total));
@@ -173,7 +183,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     test('a close whose closure write failed shows TallyUI\'s Finish closing card, which completes it with the stored count', async ({ page }) => {
       await signIn(page);
       const closure = await nextStoreClosure();
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openRegisterPanel(page);
       await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
       const count = page.getByTestId('register-count');
       await count.getByTestId('count-amount').fill('100.00');
@@ -201,7 +211,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     test('over the threshold: the approval dialog, its offline refusal, then a manager login approves the close', async ({ page }) => {
       await signIn(page);
       const closure = await nextStoreClosure();
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openRegisterPanel(page);
       await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
       const count = page.getByTestId('register-count');
       // €10.00 short of the €100.00 float: over the €5.00 threshold.
@@ -240,7 +250,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await shot(page, 'closure');
       await sheet.getByTestId('closure-done').click();
       await expect(page.getByTestId('open-register-amount')).toHaveValue('90.00');
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openLastClosure(page);
       const figures = page.getByTestId('last-closure');
       await expect(figures.getByTestId('last-closure-variance-cash')).toHaveText(/^Short €?\s?10[.,]00\s?€?$/);
       await expect(figures.getByTestId('last-closure-approved-by')).toHaveText(approvedBy!);
@@ -252,7 +262,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
 
     // Counts €10.00 short and approves in the dialog as the e2e admin (`dialog`), from the panel's Close register.
     async function closeOverThreshold(page: Page) {
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openRegisterPanel(page);
       await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
       const count = page.getByTestId('register-count');
       await count.getByTestId('count-amount').fill('90.00');
@@ -292,7 +302,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect.poll(() => submits.map(({ code }) => code), { timeout: 30_000 }).toContain('register_approval_invalid');
       await page.unroute('**/tally/v1/register-approvals');
 
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openLastClosure(page);
       const card = page.getByTestId('register-panel').getByTestId('register-panel-reapproval');
       await expect(card).toBeVisible();
       await shot(page, 'reapproval-card');
@@ -323,7 +333,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
         await released;
         await route.continue().catch(() => {});
       });
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openRegisterPanel(page);
       await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
       const count = page.getByTestId('register-count');
       await count.getByTestId('count-amount').fill('100.00');
@@ -349,7 +359,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await sheet.getByTestId('closure-print').click();
       await expect(page.frameLocator('#closure-print-frame').locator('h2')).toHaveText(`Z report · Closure #${last + 2}`);
       await sheet.getByTestId('closure-done').click();
-      await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+      await openLastClosure(page);
       await expect(page.getByTestId('last-closure').getByRole('heading')).toHaveText(`Last closure · Closure #${last + 2}`);
       await expect(page.getByText(/refused|needs attention/)).toHaveCount(0);
       await expect(page.getByTestId('register-panel-reapproval')).toHaveCount(0);

@@ -3,7 +3,7 @@ import { Platform, View } from 'react-native';
 import { Path } from 'react-native-svg';
 import { AppText as Text } from './app-text';
 import {
-  ClosureSheet, createSvgIcon, OpenRegisterCard, RegisterBar, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
+  ClosureSheet, createSvgIcon, OpenRegisterCard, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';
 import { RegisterSessionRequiredError, type ApprovalNeeded, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { printXReport } from '../lib/closure-print';
@@ -73,26 +73,6 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
     });
   };
   return { sale: { ...sale, startTender }, refused };
-}
-
-// RegisterBar inside an existing row (a phone's "‹ Products" row, Catalogue's status line): no strip of its own.
-export const IN_ROW = 'h-auto border-b-0 bg-transparent px-0';
-
-/**
- * TallyUI's RegisterBar for this till, in a phone's rows (`IN_ROW`); the wide header uses `WideHeaderRegister`. Its pill is
- * never a dead label: with an open session it opens the panel; otherwise it brings up the gate (`onGate`), which
- * also holds the count and, for "Close not finished" (TallyUI #175), focuses the Finish closing button.
- */
-export function TillRegisterBar({ online, onOpenPanel, onGate, className }: {
-  online: boolean; onOpenPanel: () => void; onGate: () => void; className?: string;
-}) {
-  const { register, boundRegisterId, registerName } = useRegister();
-  if (boundRegisterId === undefined) return null;
-  return <View dataSet={{ print: 'hide' }}>
-    <RegisterBar register={register} registerId={boundRegisterId} online={online} registerName={registerName ?? undefined}
-      multiRegister={false} onOpenPanel={register.session?.status === 'conflict' ? onGate : onOpenPanel}
-      onPressPill={register.session?.status === 'open' ? onOpenPanel : onGate} className={className} />
-  </View>;
 }
 
 /**

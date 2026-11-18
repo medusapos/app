@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { FrameDrawerHeader, phoneRegisterState, registerStateLabel, storeRegisterTitle } from '../components/frame-drawer-header';
+import { FrameDrawerHeader, registerStateLabel, storeRegisterTitle } from '../components/frame-drawer-header';
 
 const state = vi.hoisted(() => ({
   session: { baseUrl: 'http://localhost:9000' } as { baseUrl: string } | null,
@@ -44,24 +44,6 @@ describe('storeRegisterTitle', () => {
   });
   it('names only the store while the binding is unknown', () => {
     expect(storeRegisterTitle('E2E Store', undefined, null)).toBe('E2E Store');
-  });
-});
-
-describe('phoneRegisterState', () => {
-  it('is absent while the binding is unknown', () => {
-    expect(phoneRegisterState(undefined, 'closed')).toBeNull();
-  });
-  it('asks to choose a register when none is chosen', () => {
-    expect(phoneRegisterState(null, undefined)).toBe('Choose register');
-  });
-  it('is absent for an open register', () => {
-    expect(phoneRegisterState('register-1', 'open')).toBeNull();
-  });
-  it('shows Counting for a counting session', () => {
-    expect(phoneRegisterState('register-1', 'counting')).toBe('Counting');
-  });
-  it.each(['closed', 'conflict', null, undefined])('shows Closed for a %s status', (status) => {
-    expect(phoneRegisterState('register-1', status)).toBe('Closed');
   });
 });
 

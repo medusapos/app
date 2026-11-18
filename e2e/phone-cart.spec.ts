@@ -38,7 +38,7 @@ test('at 360 px the header title truncates before a closed register state and th
   await signIn(page, 'Europe', false);
   const state = page.getByTestId('header-register-state');
   await expect(state).toHaveText('Choose register');
-  await page.getByTestId('register-bar-pill').click();
+  await state.click();
   await page.getByTestId('register-picker-row-register-1').click();
   await expect(state).toHaveText('Closed');
   const heading = page.getByRole('heading', { name: / · Register 1$/ });

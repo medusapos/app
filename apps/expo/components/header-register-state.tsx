@@ -5,7 +5,9 @@ import { useRegister } from '../lib/register-context';
 
 export type WideRegisterState = 'Choose register' | 'Closed' | 'Counting' | 'Close not finished' | 'Offline' | 'Approval needed' | 'Overdue';
 
-// v2's phone header: an amber dot and the register's state before the avatar (row 17a.2). Plain dot and text, no pill.
+// v2's header state: an amber dot and the register's state, wide beside the store and register (row 09a.3), on a phone
+// before the avatar (row 17a.2). Plain dot and text, no pill. A phone has no other register row, so this is its way to
+// the gate and, while open, the panel.
 export function HeaderRegisterState({ label, onPress }: { label: WideRegisterState; onPress: () => void }) {
   return <Pressable testID="header-register-state" accessibilityRole="button"
     accessibilityLabel={label === 'Choose register' ? label : `Register: ${label}`} onPress={onPress}
@@ -15,7 +17,7 @@ export function HeaderRegisterState({ label, onPress }: { label: WideRegisterSta
   </Pressable>;
 }
 
-/** TallyUI RegisterBar's pill for this till, in v2's header wording ("Choose register", "Closed"). */
+/** TallyUI RegisterBar's pill for this till, in v2's header wording ("Choose register", "Closed"); the phone header's too. */
 export function wideRegisterState(boundRegisterId: string | null | undefined, online: boolean,
   register: Pick<ReturnType<typeof useRegisterSession>, 'session' | 'overdue' | 'enabled' | 'closing'>): WideRegisterState | null {
   if (boundRegisterId === undefined) return null;

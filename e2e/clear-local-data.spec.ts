@@ -54,14 +54,14 @@ test('after a wipe the open server session is taken over, not lost', async ({ pa
 
   // Not openRegister: it would close the server session first. The new device id's open is refused.
   await signIn(page, 'Europe', false);
-  await page.getByTestId('register-bar-pill').click();
+  await page.getByTestId('header-register-state').click();
   await page.getByTestId('register-picker-row-register-1').click();
   await page.getByTestId('open-register-amount').fill('100.00');
   await page.getByTestId('open-register-button').click();
   const card = page.getByTestId('register-conflict-card');
   await expect(card).toBeVisible();
   await card.getByTestId('register-conflict-take-over').click();
-  await expect(page.getByRole('button', { name: 'Open register panel', exact: true })).toBeVisible();
+  await expect(page.getByTestId('header-register-state')).toHaveCount(0);
   await expect(card).toHaveCount(0);
 });
 

@@ -2,7 +2,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { RegisterCommandEnvelope } from '@tallyui/core';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { RegisterGate, TillRegisterBar } from '../components/register';
+import { WideHeaderRegister } from '../components/header-register-state';
+import { RegisterGate } from '../components/register';
 import { closeOrderStores, registerCollections } from '../lib/order-store';
 import { OutboxProvider, useOutboxContext } from '../lib/outbox-context';
 import { getDeviceName, useRegister } from '../lib/register-context';
@@ -29,7 +30,7 @@ function Probe() {
   context = useRegister();
   outbox = useOutboxContext();
   return <>
-    <TillRegisterBar online onGate={onGate} onOpenPanel={onPanel} />
+    <WideHeaderRegister online onOpenPanel={onPanel} onGate={onGate} />
     <RegisterGate currency="EUR" online refused={null} cartEmpty openSaleCount={0} focus={focus}>
       <span data-testid="cart-child">Cart</span>
     </RegisterGate>
