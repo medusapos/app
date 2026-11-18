@@ -303,19 +303,19 @@ describe('SettingsScreen', () => {
   });
 
   // dismissTo replaces when nothing is under Settings, as when it was opened directly by URL.
-  it('on a phone the drawer\'s Sale goes home by dismissTo, for when Settings was opened directly by URL', async () => {
+  it('on a phone the drawer\'s POS goes home by dismissTo, for when Settings was opened directly by URL', async () => {
     await mountFramed(390, 844);
     fireEvent.click(screen.getByTestId('frame-menu'));
-    fireEvent.click(within(screen.getByTestId('nav-drawer')).getByRole('button', { name: 'Sale' }));
+    fireEvent.click(within(screen.getByTestId('nav-drawer')).getByTestId('nav-item-sale'));
     expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
     expect(router.replace).not.toHaveBeenCalled();
   });
 
   // A replace would mount a second, empty Products screen over the one holding the sale.
-  it('on a wide window the header has no back control and the rail\'s Sale dismisses to the sale under Settings', async () => {
+  it('on a wide window the header has no back control and the rail\'s POS dismisses to the sale under Settings', async () => {
     await mountFramed(1440, 900);
     expect(screen.getByTestId('header-left').childElementCount).toBe(0);
-    fireEvent.click(within(screen.getByTestId('nav-rail')).getByRole('button', { name: 'Sale' }));
+    fireEvent.click(within(screen.getByTestId('nav-rail')).getByTestId('nav-item-sale'));
     expect(router.dismissTo).toHaveBeenCalledExactlyOnceWith('/');
     expect(router.replace).not.toHaveBeenCalled();
     expect(router.push).not.toHaveBeenCalled();

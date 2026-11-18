@@ -69,7 +69,7 @@ test('a sale with the Settings default customer reaches Medusa with the customer
     await page.getByTestId('customer-picker-search').fill(email);
     await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
     await expect(page.getByTestId('settings-default-customer-current')).toHaveText('Ada Lovelace');
-    await openArea(page, 'Sale');
+    await openArea(page, 'POS');
     await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
     await addE2E1(page);
     await payCash(page);
@@ -114,7 +114,7 @@ test('the Default customer is cashier switch starts the sale on the signed-in ca
   await page.getByRole('switch', { name: 'Default customer is cashier', exact: true }).click();
   await expect(page.getByTestId('settings-default-customer-cashier-status'))
     .toHaveText(`New sales start on ${name}, the customer in Medusa with your email.`);
-  await openArea(page, 'Sale');
+  await openArea(page, 'POS');
   await expect(page.getByRole('button', { name: `Customer: ${name}`, exact: true })).toBeVisible();
 });
 
