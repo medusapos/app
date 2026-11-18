@@ -9,7 +9,7 @@ import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
-import { FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { StripHeightContext } from '../components/store-refused';
 import { ExternalLinkIcon } from '../components/external-link-icon';
 import { version as appVersion } from '../package.json';
@@ -98,7 +98,7 @@ export default function SettingsScreen() {
   // v2's phone Settings: a plain list of the section names, each with a chevron, opening that section's page.
   if (!opened) return <ScrollView className="flex-1 bg-background" role="main" aria-label="Settings" testID="settings-list"
     contentContainerClassName="pb-6" contentContainerStyle={{ paddingTop: 8 + topInset }}>
-    <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
+    <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     {sections.map(({ id, label }) => <Pressable key={id} testID={`settings-list-${id}`} accessibilityRole="button" accessibilityLabel={label}
       onPress={() => router.push({ pathname: '/settings', params: { section: id } })} className="min-h-11 justify-center px-2">
       <SettingsRow label={label} action={<View testID="settings-list-chevron" className="text-muted-foreground"><ChevronRightIcon size={20} /></View>} />
@@ -106,7 +106,7 @@ export default function SettingsScreen() {
   </ScrollView>;
   return <ScrollView className="flex-1 bg-background" role="main" aria-label="Settings" contentContainerClassName="px-6 pb-6"
     contentContainerStyle={{ paddingTop: 24 + topInset }}>
-    <Stack.Screen options={{ title: opened.label, headerShown: true, headerLeft: () => <SettingsBackButton /> }} />
+    <Stack.Screen options={{ title: opened.label, headerShown: true, headerLeft: () => <SettingsBackButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="w-full max-w-md gap-6 self-center">
       {opened.element}
     </View>
