@@ -32,7 +32,7 @@ import { OutboxStrip, StoreRefused } from '../components/store-refused';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
-import { cartLine, cartLineCells, pickMethod, take } from './tender-pane';
+import { cartLine, cartLineCells, pickMethod, take, tenderBalance, tenderEntry } from './tender-pane';
 
 // v2's cart foot (TallyUI 3.18.0): Checkout opens the tender on Cash through the register gate; the Card terminal
 // tile then takes the whole balance, as the cart's old Card terminal button did.
@@ -2036,14 +2036,20 @@ describe('ProductsScreen wedge scan anywhere (wide)', () => {
     expect(screen.queryByText('No product matches "AB123"')).toBeNull();
   });
 
+  // A scan here would change the amount due under the cashier, so the line, its total and the balance all stay put.
   it('adds nothing in the tender stage', async () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await checkout();
     act(() => { (document.activeElement as HTMLElement | null)?.blur(); });
-    const before = screen.getAllByText('Shirt').length;
+    // The tender's summary line has no quantity button: quantity, name, unit price, total.
+    const tenderLine = () => screen.getByText('Shirt').parentElement!.parentElement!.textContent;
+    expect([tenderLine(), tenderBalance(), tenderEntry()]).toEqual(['1Shirt€12.00€12.00', '€15.00', '€15.00']);
     wedgeScan('AB123');
-    expect(screen.getAllByText('Shirt').length).toBe(before);
+    expect([tenderLine(), tenderBalance(), tenderEntry()]).toEqual(['1Shirt€12.00€12.00', '€15.00', '€15.00']);
+    expect(screen.getAllByText('Shirt')).toHaveLength(1);
+    expect(screen.queryByText('No product matches "AB123"')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
   });
 });
 
