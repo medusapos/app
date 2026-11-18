@@ -63,6 +63,19 @@ it('syncNow after the first sync pulls again and ends synced', async () => {
   expect(ids(result.current.products)).toEqual(['cap', 'hat']);
 });
 
+it('syncNow also rechecks stock, as v2\'s Sync refreshes the catalogue and its stock together', async () => {
+  // A store with no stock rows: each pass is one fetchPages call that yields nothing.
+  const fetchPages = vi.fn(async function* (): AsyncGenerator<Map<string, unknown>> {});
+  connector = { ...connector, reconcile: { stock: { fetchPages, overlay: () => undefined } } };
+  const { result } = renderHook(() => useReplicatedProducts(connector, context, onUnauthorized));
+  // The start pass after the first sync has finished.
+  await waitFor(() => expect(result.current.lastStockCheckAt).not.toBeNull());
+  expect(fetchPages).toHaveBeenCalledTimes(1);
+  act(() => result.current.syncNow());
+  await waitFor(() => expect(fetchPages).toHaveBeenCalledTimes(2));
+  await waitFor(() => expect(result.current.state).toBe('synced'));
+});
+
 it('syncNow with a till-fixable notice resumes the held pull, as resumePull does', async () => {
   handler.mockRejectedValueOnce(new ConnectorUnauthorizedError('Medusa API error: 401', 401));
   const { result } = renderHook(() => useReplicatedProducts(connector, context, onUnauthorized));
