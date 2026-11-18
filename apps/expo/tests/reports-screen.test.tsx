@@ -80,6 +80,10 @@ function openRegister(status: RegisterSession['status'] = 'open') {
       expected: { cash: 2500 }, salesCount: 2, movements: [] },
   } as unknown as ReturnType<typeof useRegister>);
 }
+async function openClosures() {
+  fireEvent.click(await screen.findByTestId('register-strip-open-closures'));
+  await screen.findByTestId('closures-view');
+}
 function order(totalMinor: number, method: 'cash' | 'external', overrides: Partial<PosOrder> = {}): PosOrder {
   const builder = createOrderBuilder({ currency: overrides.currency ?? 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
   builder.addLine({ productId: 'shirt', name: 'Shirt', unitPrice: { amount: totalMinor, currency: overrides.currency ?? 'EUR' } });
@@ -161,7 +165,7 @@ describe('register strip', () => {
     expect(screen.queryByTestId('reports-x-print')).toBeNull();
   });
 
-  it('ends with v2\'s chevron, which opens the register panel', async () => {
+  it('ends with v2\'s chevron, which opens Closures in place of the strip and sales, and back returns', async () => {
     vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
       session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z', opened_by: 'Ana' },
       terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
@@ -174,24 +178,48 @@ describe('register strip', () => {
     render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
     const strip = screen.getByTestId('register-strip');
     const buttons = within(strip).getAllByRole('button').map((button) => button.getAttribute('data-testid'));
-    expect(buttons.slice(-2)).toEqual(['reports-x-print', 'register-strip-open-panel']);
-    expect(within(strip).getByTestId('register-strip-open-panel').getAttribute('aria-label')).toBe('Open register panel');
-    fireEvent.click(within(strip).getByTestId('register-strip-open-panel'));
-    expect((await screen.findByTestId('register-panel-title')).textContent).toBe('Register 1');
-    expect(screen.getByTestId('register-panel-close')).toBeTruthy();
+    expect(buttons.slice(-2)).toEqual(['reports-x-print', 'register-strip-open-closures']);
+    expect(within(strip).getByTestId('register-strip-open-closures').getAttribute('aria-label')).toBe('Open closures');
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    fireEvent.click(within(strip).getByTestId('register-strip-open-closures'));
+    expect(await screen.findByTestId('closures-view')).toBeTruthy();
+    expect(screen.queryByTestId('register-strip')).toBeNull();
+    expect(screen.queryByTestId('sales-room')).toBeNull();
+    expect(screen.getByTestId('closures-back').getAttribute('aria-label')).toBe('Back to Reports');
+    fireEvent.click(screen.getByTestId('closures-back'));
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    expect(screen.getByTestId('register-strip')).toBeTruthy();
+    expect(screen.queryByTestId('closures-view')).toBeNull();
   });
 
-  it('has no chevron without a session or a last closure', () => {
+  it('the strip\'s Register block opens the register panel', async () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: {
+      session: { status: 'open', opened_at_gmt: '2026-09-11T08:00:00Z', opened_by: 'Ana' },
+      terms: { floatMinor: 1000, cashSales: { amountMinor: 3000, count: 2 },
+        cashRefunds: { amountMinor: 0, count: 0 }, paidIn: { amountMinor: 0, count: 0 },
+        paidOut: { amountMinor: 0, count: 0 }, noSales: 0, otherTenders: {}, sessionSalesMinor: 3000,
+        expected: { cash: 4000 } },
+      lastClosure: null, blind: false, expected: {}, movements: [],
+    } } as unknown as ReturnType<typeof useRegister>);
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    fireEvent.click(screen.getByTestId('register-strip-open-panel'));
+    expect((await screen.findByTestId('register-panel-title')).textContent).toBe('Register 1');
+  });
+
+  it('without a session or a last closure the strip opens no register panel, and its › still opens Closures', () => {
     mount();
     expect(screen.getByTestId('register-strip')).toBeTruthy();
     expect(screen.queryByTestId('register-strip-open-panel')).toBeNull();
+    expect(screen.getByTestId('register-strip-open-closures')).toBeTruthy();
   });
 
-  it('has no chevron for a conflict session', () => {
+  it('for a conflict session the strip opens no register panel, and its › still opens Closures', () => {
     openRegister('conflict');
     mount();
     expect(screen.getByTestId('register-strip-status')).toBeTruthy();
     expect(screen.queryByTestId('register-strip-open-panel')).toBeNull();
+    expect(screen.getByTestId('register-strip-open-closures')).toBeTruthy();
   });
 
   it('the strip is v2\'s three rows: Register and Last closure on the left, the action and › at the top right, the chips below', () => {
@@ -208,7 +236,7 @@ describe('register strip', () => {
     const header = screen.getByTestId('register-strip-header');
     const equation = screen.getByTestId('register-strip-equation');
     const [status, last, print, chevron] = ['register-strip-status', 'register-strip-last-closure', 'reports-x-print',
-      'register-strip-open-panel'].map((id) => within(header).getByTestId(id));
+      'register-strip-open-closures'].map((id) => within(header).getByTestId(id));
     expect(status).toBeTruthy();
     expect(header.contains(equation)).toBe(false);
     expect(header.compareDocumentPosition(equation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -234,8 +262,15 @@ describe('ReportsScreen', () => {
     mount();
     expect(await screen.findByTestId('sales-room')).toBeTruthy();
     expect(screen.getByTestId('card-orders-empty')).toBeTruthy();
+    await openClosures();
     expect((await screen.findByTestId('closures-empty')).textContent).toBe('No closures yet today');
     expect(screen.queryByTestId('closures-export')).toBeNull();
+  });
+  it('the Reports view has no Sales or Closures headings and no closures filters', async () => {
+    mount();
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    for (const id of ['reports-sales-heading', 'closures-heading', 'closures-filters', 'closures-empty'])
+      expect(screen.queryByTestId(id)).toBeNull();
   });
   it('limits the sales room to pending orders when Not sent is chosen', async () => {
     await store.orders.insert(order(1200, 'cash'));
@@ -255,6 +290,7 @@ describe('ReportsScreen', () => {
     await closures.insert(closure({ id: 'c2', number: 2, breakdowns: { closed_by_name: 'Ana' } }));
     await closures.insert(closure({ id: 'c3', register_id: 'register-2' }));
     mount();
+    await openClosures();
     await screen.findByTestId('closure-row-c2');
     expect(screen.getAllByTestId(/^closure-row-[^-]+$/).map((row) => row.getAttribute('data-testid'))).toEqual(['closure-row-c2', 'closure-row-c1']);
     const { formatMoney } = closureContext('EUR', { name: 'Test shop' });
@@ -272,6 +308,7 @@ describe('ReportsScreen', () => {
     await closures.insert(closure({ variance: { cash: -200 }, counted: { cash: 800 }, closed_at: new Date(Date.now() - 60 * 60 * 1000).toISOString() }));
     await closures.insert(closure({ id: 'c2', number: 2 }));
     mount();
+    await openClosures();
     const day = `closures-table-day-${localDay(new Date())}`;
     expect((await screen.findByTestId(`${day}-label`)).textContent).toBe('Today');
     const { formatMoney } = closureContext('EUR', { name: 'Test shop' });
@@ -284,6 +321,7 @@ describe('ReportsScreen', () => {
     await closures.insert(closure({ id: 'c2', number: 2 }));
     saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
     render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    await openClosures();
     fireEvent.click(await screen.findByTestId('closure-row-c2-open'));
     expect(await screen.findByTestId('closure-sheet')).toBeTruthy();
     expect(screen.getByTestId('closure-number').textContent).toBe('Closure #2');
@@ -294,6 +332,7 @@ describe('ReportsScreen', () => {
     await registerCollections(store.orders).closures.insert(closure());
     const today = localDay(new Date());
     mount();
+    await openClosures();
     fireEvent.click(await screen.findByTestId('closures-export'));
     expect(downloadCsv).toHaveBeenCalledTimes(1);
     const [filename, csv] = vi.mocked(downloadCsv).mock.calls[0];
@@ -309,6 +348,7 @@ describe('ReportsScreen', () => {
     await closures.insert(closure({ closed_by: 'user-1', breakdowns: { closed_by_name: 'Ana' } }));
     await closures.insert(closure({ id: 'c2', number: 2, closed_by: 'user-2', breakdowns: { closed_by_name: 'Ben' } }));
     mount();
+    await openClosures();
     await screen.findByTestId('closure-row-c2');
     fireEvent.click(screen.getByTestId('closures-cashier'));
     expect(screen.getByTestId('closures-cashier-option-user-1').textContent).toBe('Ana');
@@ -326,6 +366,7 @@ describe('ReportsScreen', () => {
     await registerCollections(store.orders).closures.insert(closure());
     saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
     render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    await openClosures();
     await screen.findByTestId('closure-row-c1');
     const storeCalls = () => fetchMock.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('/tally/v1/registers/'));
     expect(storeCalls()).toEqual([]);
@@ -338,6 +379,26 @@ describe('ReportsScreen', () => {
     expect(storeCalls()).toHaveLength(1);
     expect(storeCalls()[0]).toContain(`from=${yesterday}`);
     expect(storeCalls()[0]).toContain(`to=${yesterday}`);
+  });
+  it('the Closures header is the back arrow, then the store · register select; Export CSV ends the filter row', async () => {
+    await registerCollections(store.orders).closures.insert(closure());
+    mount();
+    await openClosures();
+    const header = screen.getByTestId('closures-header');
+    const [back, select] = ['closures-back', 'closures-register'].map((id) => within(header).getByTestId(id));
+    expect(back.compareDocumentPosition(select) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(select.textContent).toBe('Test shop · Register 1');
+    const filters = screen.getByTestId('closures-filters');
+    const exportButton = await within(filters).findByTestId('closures-export');
+    expect(within(filters).getByTestId('closures-cashier').compareDocumentPosition(exportButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+  it('an unbound till opens Closures from the Closures button', async () => {
+    vi.mocked(useRegister).mockReturnValue({ ...useRegister(), boundRegisterId: null });
+    mount();
+    expect(screen.queryByTestId('register-strip')).toBeNull();
+    fireEvent.click(await screen.findByTestId('reports-open-closures'));
+    expect(await screen.findByTestId('closures-view')).toBeTruthy();
+    expect(screen.getByTestId('closures-register').textContent).toBe('Test shop · Register 1');
   });
   it('redirects to login without a session', () => {
     mount(false);
@@ -479,7 +540,7 @@ describe('the header', () => {
     expect(header.dataset.headerShown).toBe('false');
     expect(header.dataset.title).toBe('Reports');
     expect(screen.queryByTestId('frame-menu')).toBeNull();
-    expect(screen.getByRole('main', { name: 'Reports' }).contains(screen.getByTestId('reports-sales-heading'))).toBe(true);
+    expect(screen.getByRole('main', { name: 'Reports' }).contains(screen.getByTestId('sales-room'))).toBe(true);
   });
 
   it('on a phone the header stays, with the frame\'s Menu', async () => {
@@ -500,7 +561,7 @@ describe('the header', () => {
     expect(await screen.findByTestId('sales-room')).toBeTruthy();
     const avatar = screen.getByTestId('area-user-menu');
     expect(screen.getByRole('main', { name: 'Reports' }).contains(avatar)).toBe(true);
-    expect(avatar.compareDocumentPosition(screen.getByTestId('reports-sales-heading')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(avatar.compareDocumentPosition(screen.getByTestId('sales-room')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(avatar);
     expect(open).toHaveBeenCalledOnce();
     unmount();
@@ -510,6 +571,20 @@ describe('the header', () => {
     const phoneAvatar = screen.getByTestId('area-user-menu');
     expect(screen.getByRole('main', { name: 'Reports' }).contains(phoneAvatar)).toBe(false);
     expect(screen.getByTestId('header-right').contains(phoneAvatar)).toBe(true);
+  });
+  it('on a wide window the Closures header carries the avatar; on a phone it stays in the stack header', async () => {
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token' });
+    const mountFramed = () => render(<SessionProvider><AppFrame signedIn><AccountPublisher open={vi.fn()} /><ReportsScreen /></AppFrame></SessionProvider>);
+    setWindowWidth(1024, 768);
+    const { unmount } = mountFramed();
+    await openClosures();
+    expect(screen.getAllByTestId('area-user-menu')).toHaveLength(1);
+    expect(screen.getByTestId('closures-header').contains(screen.getByTestId('area-user-menu'))).toBe(true);
+    unmount();
+    setWindowWidth(390, 844);
+    mountFramed();
+    await openClosures();
+    expect(screen.getByTestId('closures-header').contains(screen.queryByTestId('area-user-menu'))).toBe(false);
   });
 
 });
