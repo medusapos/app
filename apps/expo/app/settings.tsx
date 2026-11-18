@@ -14,6 +14,7 @@ import { StripHeightContext } from '../components/store-refused';
 import { ExternalLinkIcon } from '../components/external-link-icon';
 import { version as appVersion } from '../package.json';
 import { feedbackUrl, openFeedbackUrl } from '../lib/feedback-url';
+import { medusaAdminUrl, openMedusaAdmin, type MedusaAdminPage } from '../lib/medusa-admin';
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { getDeviceName } from '../lib/register-context';
@@ -120,26 +121,39 @@ function SettingsBackButton() {
     <Text className="text-foreground">Settings</Text>
   </Pressable>;
 }
+// v2's "Set in WooCommerce · Open ↗" beside each read-only store value: opens the Medusa Admin page that sets it.
+function AdminLink({ session, label, page, testID }: { session: Session; label: string; page: MedusaAdminPage; testID: string }) {
+  return <Pressable testID={testID} accessibilityRole="link" accessibilityLabel={`Open ${label} in Medusa Admin`}
+    className="-my-3 min-h-11 flex-row items-center gap-1" onPress={() => openMedusaAdmin(medusaAdminUrl(session.baseUrl, page))}>
+    <Text className="text-sm text-primary">Open</Text>
+    <ExternalLinkIcon size={14} className="text-primary" />
+  </Pressable>;
+}
 function StoreSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
   const [format] = useState(() => currencyFormat(held.pricing?.currency));
   return <>
   <SettingsGroup title="Store" description="Read-only. Set in Medusa Admin." testID="settings-store">
-    <SettingsRow label="Store name" action={
+    <SettingsRow label="Store name" action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-name" className="max-w-40 text-right text-sm text-foreground">{held.settings?.storeName || UNKNOWN}</Text>
-    } />
-    <SettingsRow label="Currency" className="border-t border-border" action={
+      <AdminLink session={session} label="Store name" page="store" testID="settings-store-name-admin" />
+    </View>} />
+    {/* The till's currency follows its region. */}
+    <SettingsRow label="Currency" className="border-t border-border" action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-currency" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.currency || UNKNOWN}</Text>
-    } />
-    <SettingsRow label="Stock location" className="border-t border-border" action={
+      <AdminLink session={session} label="Currency" page="regions" testID="settings-store-currency-admin" />
+    </View>} />
+    <SettingsRow label="Stock location" className="border-t border-border" action={<View className="flex-row items-center gap-3">
       <View className="max-w-40 items-end">
         <Text testID="settings-store-location" className="max-w-40 text-right text-sm text-foreground">{held.settings?.location.name || UNKNOWN}</Text>
         {held.settings?.location.addressLine ? <Text testID="settings-store-location-address" className="text-right text-xs text-muted-foreground">{held.settings.location.addressLine}</Text> : null}
       </View>
-    } />
-    <SettingsRow label="Sales channel" className="border-t border-border" action={
+      <AdminLink session={session} label="Stock location" page="locations" testID="settings-store-location-admin" />
+    </View>} />
+    <SettingsRow label="Sales channel" className="border-t border-border" action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-sales-channel" className="max-w-40 text-right text-sm text-foreground">{held.settings?.salesChannel?.name || UNKNOWN}</Text>
-    } />
+      <AdminLink session={session} label="Sales channel" page="salesChannels" testID="settings-store-sales-channel-admin" />
+    </View>} />
   </SettingsGroup>
   {/* v2's General holds the default customer between Store and Currency & numbers. */}
   <DefaultCustomerSection session={session} />
@@ -182,17 +196,21 @@ function TaxSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
   const taxRates = held.settings?.taxRates;
   return <SettingsGroup title="Tax" description="Read-only. Set per region in Medusa Admin." testID="settings-tax">
-    <SettingsRow label="Region" action={
+    <SettingsRow label="Region" action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-region" className="max-w-40 text-right text-sm text-foreground">{held.settings?.regions?.find((region) => region.id === held.pricing?.pricingContext?.region_id)?.name || UNKNOWN}</Text>
-    } />
-    <SettingsRow label="Prices include tax" className="border-t border-border" action={
+      <AdminLink session={session} label="Region" page="regions" testID="settings-store-region-admin" />
+    </View>} />
+    <SettingsRow label="Prices include tax" className="border-t border-border" action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-prices-include-tax" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.pricesIncludeTax === true ? 'Yes' : held.pricing?.pricesIncludeTax === false ? 'No' : UNKNOWN}</Text>
-    } />
-    {taxRates?.length ? taxRates.map((taxRate, index) => <SettingsRow key={index} label={taxRate.name} className="border-t border-border" action={
+      <AdminLink session={session} label="Prices include tax" page="regions" testID="settings-store-prices-include-tax-admin" />
+    </View>} />
+    {taxRates?.length ? taxRates.map((taxRate, index) => <SettingsRow key={index} label={taxRate.name} className="border-t border-border" action={<View className="flex-row items-center gap-3">
       <Text testID={`settings-tax-rate-${index}`} className="max-w-40 text-right text-sm text-foreground">{`${taxRate.rate !== undefined ? `${taxRate.rate}%` : UNKNOWN}${taxRate.isDefault ? ' · Default' : ''}`}</Text>
-    } />) : <SettingsRow label="Tax rates" className="border-t border-border" action={
+      <AdminLink session={session} label={taxRate.name} page="taxRegions" testID={`settings-tax-rate-${index}-admin`} />
+    </View>} />) : <SettingsRow label="Tax rates" className="border-t border-border" action={<View className="flex-row items-center gap-3">
       <Text testID="settings-tax-rates-none" className="max-w-40 text-right text-sm text-foreground">{taxRates ? 'None' : UNKNOWN}</Text>
-    } />}
+      <AdminLink session={session} label="Tax rates" page="taxRegions" testID="settings-tax-rates-admin" />
+    </View>} />}
   </SettingsGroup>;
 }
 function RegisterSection({ session }: { session: Session }) {
