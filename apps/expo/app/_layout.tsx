@@ -6,7 +6,6 @@ import { PortalHost } from '@tallyui/primitives';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Uniwind, useCSSVariable } from 'uniwind';
 import { AppFrame } from '../components/app-frame';
-import { FrameDrawerHeader } from '../components/frame-drawer-header';
 import { AppScale } from '../components/app-scale';
 import { useHeaderTitleStyle } from '../components/app-text';
 import { ClearLocalDataGate } from '../components/clear-local-data';
@@ -37,7 +36,7 @@ function GatedApp() {
   const headerTitleStyle = useHeaderTitleStyle();
   return (
     <LiveTabGate scope={session?.baseUrl}>
-      <DeviceScannerProvider><StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null} drawerHeader={<FrameDrawerHeader />}><Stack
+      <DeviceScannerProvider><StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null}><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
