@@ -409,6 +409,22 @@ medusaIntegrationTestRunner({
         expect(read.data).toEqual({ session, counters })
       })
 
+      it("closure, then an open from another device, then the first till's closed transition, through the command endpoint", async () => {
+        const opening = openV2('till-a', { deviceName: 'Till A' })
+        expect((await post([opening])).data.results[0].status).toBe('applied')
+        const next = openV2('till-b', { registerId: opening.payload.registerId, deviceName: 'Till B',
+          supersedes: opening.payload.sessionId, openedAt: closedAt, countedFloatMinor: 200 })
+        const steps = [closure(opening.payload), next, { ...close(opening.payload.sessionId), version: 2 }]
+        const results: Record<string, any>[] = []
+        for (const step of steps) results.push((await post([step])).data.results[0])
+        expect(results.map(result => result.status)).toEqual(['applied', 'applied', 'applied'])
+        expect(results[1].register).not.toHaveProperty('superseded')
+        expect(results[2].register.session).toMatchObject({ id: opening.payload.sessionId, status: 'closed' })
+        expect(JSON.stringify(results)).not.toContain('register_session_superseded')
+        const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
+        expect(read.data.session).toMatchObject({ id: next.payload.sessionId, status: 'open' })
+      })
+
       it('after a take-over, a v2 movement on the superseded session is rejected register_session_superseded with the take-over data, is final, and the new session is unchanged', async () => {
         const opening = openV2('till-a', { deviceName: 'Till A' })
         expect((await post([opening])).data.results[0].status).toBe('applied')

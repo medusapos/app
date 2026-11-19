@@ -90,9 +90,18 @@ export default class TallyRegisterModuleService extends MedusaService({
           if (alias.status === 'superseded') return { kind: 'conflict', code: 'register_session_superseded',
             data: (await this.supersededData(alias.id, { manager: em }))! }
         }
-        const [live] = alias ? [alias] : await em.execute(`select * from tally_register_session
+        let [live]: any[] = alias ? [alias] : await em.execute(`select * from tally_register_session
           where register_id = ? and status in ('open','counting') and deleted_at is null`, [p.registerId])
         if (!alias && live?.id === p.sessionId) continue
+        // A live session with a stored closure is finished: close it from its closure and open fresh, never a take-over.
+        if (!alias && live && (await this.lockSession(live.id, em)) && (await em.execute(
+          'select id from tally_register_closure where session_id = ?', [live.id])).length) {
+          const closed = await em.execute(`update tally_register_session s set status = 'closed', status_at = c.closed_at,
+            closed_at = c.closed_at, counted = c.counted, closed_by = c.closed_by, approved_by = c.approved_by, updated_at = now()
+            from tally_register_closure c where c.session_id = s.id and s.id = ? and s.status in ('open','counting') returning s.id`, [live.id])
+          if (!closed.length) continue
+          live = undefined
+        }
         if (alias || (v2 && live?.device_id != null && live.device_id === p.deviceId)) {
           if (!alias) await em.execute('insert into tally_register_session_alias (id, session_id) values (?, ?) on conflict do nothing', [p.sessionId, live.id])
           const state = await this.sessionState(live.id, em)

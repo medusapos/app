@@ -275,6 +275,7 @@ TallyUI registers c2 syncs a till's drawer to the store: sessions, cash movement
 - **Business refusals** are per-command rejections, stored in the ledger so a replay returns them:
   - `register_session_already_open`, with `error.data.sessionId`;
   - `register_session_closed`, with no data;
+  - `register_session_superseded`, with `error.data` `{ sessionId, supersededAt, newSessionId, supersededBy?, deviceId?, deviceName? }`, at every contract ([ADR 0022](../../docs/adr/0022-register-v2.md));
   - `register_closure_exists`, with `error.data.closureId`;
   - `register_closure_number_invalid`, with `error.data.counters`.
 - **Commands apply in the order received.** `at` and `createdAt` are never compared. Any transition is accepted except one out of `closed`, and a same-status transition is a no-op. Every operation is replay-safe by its till-minted id.

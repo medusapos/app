@@ -188,16 +188,13 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           .toEqual([{ open_contract: contract }])
       })
 
-      it('a movement, void and closure stored before the take-over still replay ok after it', async () => {
+      it('a movement and void stored before the take-over still replay ok after it', async () => {
         await service.openSession(owner)
         const alias = { ...owner, sessionId: randomUUID() }
         await service.openSession(alias)
         expect(await service.recordMovement(movement)).toMatchObject({ kind: 'ok' })
         expect(await service.voidMovement(voidPayload)).toMatchObject({ kind: 'ok' })
-        const closing = closure()
-        const result = await service.submitClosure(closing)
-        expect(result).toMatchObject({ kind: 'ok' })
-        expect(await service.openSession(taker)).toMatchObject({ kind: 'ok' })
+        expect(await service.openSession(taker)).toMatchObject({ kind: 'ok', register: { superseded: { sessionId: first.sessionId } } })
         const before = await snapshot()
         for (const contract of [undefined, 1, 2]) for (const sessionId of [first.sessionId, alias.sessionId]) {
           expect(await service.recordMovement({ ...movement, sessionId, contract })).toMatchObject({
@@ -206,9 +203,82 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           expect(await service.voidMovement({ ...voidPayload, sessionId, contract })).toMatchObject({
             kind: 'ok', register: { session: { id: first.sessionId, status: 'superseded' } },
           })
-          expect(await service.submitClosure({ ...closing, sessionId, contract })).toEqual(result)
         }
         expect(await snapshot()).toEqual(before)
+      })
+
+      it('a closure stored before the next open still replays ok after it, with the session closed', async () => {
+        await service.openSession(owner)
+        const alias = { ...owner, sessionId: randomUUID() }
+        await service.openSession(alias)
+        const closing = closure()
+        const result = await service.submitClosure(closing)
+        expect(result).toMatchObject({ kind: 'ok' })
+        expect(await service.openSession(taker)).toMatchObject({ kind: 'ok' })
+        const before = await snapshot()
+        for (const contract of [undefined, 1, 2]) for (const sessionId of [first.sessionId, alias.sessionId]) {
+          expect(await service.submitClosure({ ...closing, sessionId, contract })).toEqual(result)
+        }
+        expect(await sql('select status from tally_register_session where id = ?', [first.sessionId])).toEqual([{ status: 'closed' }])
+        expect(await snapshot()).toEqual(before)
+      })
+
+      it("an open after a stored closure but before the closed transition starts a fresh session, and the old till's closed transition answers ok", async () => {
+        await service.openSession(owner)
+        const closing = closure({ closedBy: 'closer', approvedBy: 'approver' })
+        expect(await service.submitClosure({ ...closing, contract: 2 })).toMatchObject({ kind: 'ok' })
+        const opened = await service.openSession(taker)
+        expect(opened).toMatchObject({ kind: 'ok', register: { session: { id: second.sessionId, status: 'open' } } })
+        expect(opened).not.toHaveProperty('register.superseded')
+        const closedRow = [{ status: 'closed', status_at: closing.closedAt, closed_at: closing.closedAt, counted: closing.counted,
+          closed_by: 'closer', approved_by: 'approver', superseded_at: null }]
+        const row = () => sql(`select status, status_at, closed_at, counted, closed_by, approved_by, superseded_at
+          from tally_register_session where id = ?`, [first.sessionId])
+        expect(await row()).toEqual(closedRow)
+        expect(await service.transition({ sessionId: first.sessionId, status: 'closed', at: second.openedAt,
+          counted: { cash: 1 }, closedBy: 'other', contract: 2 }))
+          .toMatchObject({ kind: 'ok', register: { session: { id: first.sessionId, status: 'closed' } } })
+        expect(await row()).toEqual(closedRow)
+        expect(await service.submitClosure({ ...closure(), number: 2, contract: 2 })).toEqual({
+          kind: 'conflict', code: 'register_closure_exists', data: { closureId: closing.closureId } })
+      })
+
+      it.each([
+        ['v2 with no supersedes', { ...taker, supersedes: undefined }],
+        ['contract 1', { ...second, deviceId: 'device-2' }],
+        ['v2 from the same device', { ...owner, sessionId: second.sessionId, openedAt: second.openedAt }],
+      ] as const)('the fresh open applies without supersedes, at contract 1, and from the same device (%s)', async (_, opening) => {
+        await service.openSession(owner)
+        expect(await service.submitClosure(closure())).toMatchObject({ kind: 'ok' })
+        expect(await service.openSession(opening)).toEqual({ kind: 'ok', register: {
+          session: { id: second.sessionId, status: 'open' }, counters: expect.any(Object) } })
+        expect(await sql('select id, status from tally_register_session order by opened_at'))
+          .toEqual([{ id: first.sessionId, status: 'closed' }, { id: second.sessionId, status: 'open' }])
+        expect(await sql('select id from tally_register_session_alias')).toEqual([])
+      })
+
+      it('an open over a session whose close was refused for approval stays a take-over', async () => {
+        await service.openSession(owner)
+        expect(await service.submitClosure({ ...closure({ counted: { cash: 11000, card: 3000 } }), contract: 3, thresholdMinor: 100 }))
+          .toMatchObject({ kind: 'conflict', code: 'register_approval_required' })
+        expect(await sql('select id from tally_register_closure')).toEqual([])
+        expect(await service.openSession(taker)).toMatchObject({ kind: 'ok', register: { superseded: { sessionId: first.sessionId } } })
+        expect(await sql('select status, superseded_by_session from tally_register_session where id = ?', [first.sessionId]))
+          .toEqual([{ status: 'superseded', superseded_by_session: second.sessionId }])
+      })
+
+      it('two opens racing over the same finished session leave one fresh session', async () => {
+        await service.openSession(owner)
+        expect(await service.submitClosure(closure())).toMatchObject({ kind: 'ok' })
+        const challenger = { ...taker, sessionId: randomUUID(), deviceId: 'device-3', deviceName: 'Third till' }
+        const outcomes = await Promise.all([service.openSession(taker), service.openSession(challenger)])
+        const live = await sql("select id from tally_register_session where status in ('open','counting')")
+        expect(live).toHaveLength(1)
+        expect(outcomes).toContainEqual({ kind: 'ok', register: { session: { id: live[0].id, status: 'open' }, counters: expect.any(Object) } })
+        expect(outcomes).toContainEqual(expect.objectContaining({ kind: 'conflict', code: 'register_session_already_open',
+          data: expect.objectContaining({ sessionId: live[0].id }) }))
+        expect(await sql('select status, superseded_at from tally_register_session where id = ?', [first.sessionId]))
+          .toEqual([{ status: 'closed', superseded_at: null }])
       })
 
       it('a command naming an alias of a superseded session is refused register_session_superseded with the real session id in its data', async () => {
