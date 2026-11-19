@@ -165,3 +165,44 @@ test('the Products area\'s settings sheet lists v2\'s Image switch first, on, an
   await page.getByTestId('products-settings-close').click();
   await expect(first.getByTestId(`product-image-placeholder-${id}`)).toBeVisible();
 });
+
+test('the Products area\'s settings switches show whole inside the sheet at 1280 wide', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+  await openArea(page, 'Products');
+  await page.getByTestId('products-settings-button').click();
+  const sheet = page.getByTestId('products-settings-sheet');
+  const root = (id: string) => page.getByTestId(`products-settings-column-${id}`);
+  const box = async (id: string) => {
+    const r = await root(id).boundingBox();
+    const t = await root(id).locator('> *').first().boundingBox();
+    if (!r || !t) throw new Error(`no box for ${id}`);
+    return { r, t, inside: t.x >= r.x - 0.5 && t.x + t.width <= r.x + r.width + 0.5, offset: t.x + t.width / 2 - (r.x + r.width / 2) };
+  };
+  for (const id of ['id', 'barcode']) {
+    await root(id).click();
+    await expect(root(id)).toHaveAttribute('aria-checked', 'true');
+  }
+  const ids = ['id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price'];
+  await expect(async () => {
+    const s = await sheet.boundingBox();
+    if (!s) throw new Error('no sheet box');
+    for (const id of ids) {
+      const { r, t, inside, offset } = await box(id);
+      console.log(`switch ${id}: root ${r.x}-${r.x + r.width}, thumb ${t.x}-${t.x + t.width}, sheet ${s.x}-${s.x + s.width}`);
+      expect(inside, `${id} thumb inside its root`).toBe(true);
+      expect(offset, `${id} thumb centre right of the root centre`).toBeGreaterThan(0);
+      expect(r.x + r.width, `${id} root inside the sheet's padding`).toBeLessThanOrEqual(s.x + s.width - 24 + 0.5);
+    }
+  }).toPass();
+  await root('id').click();
+  await expect(root('id')).toHaveAttribute('aria-checked', 'false');
+  await expect(async () => {
+    const { r, t, inside, offset } = await box('id');
+    console.log(`switch id off: root ${r.x}-${r.x + r.width}, thumb ${t.x}-${t.x + t.width}`);
+    expect(inside, 'id thumb inside its root').toBe(true);
+    expect(offset, 'id thumb centre left of the root centre').toBeLessThan(0);
+  }).toPass();
+  await page.getByTestId('products-settings-restore').click();
+  await page.getByTestId('products-settings-close').click();
+});
