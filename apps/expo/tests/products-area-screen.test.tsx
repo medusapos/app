@@ -14,6 +14,8 @@ import {
   PRODUCTS_TAGS_NONE, PRODUCTS_TAGS_SEARCH, saveProductsAreaCategory, saveProductsAreaTag,
 } from '../lib/products-area';
 import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../lib/store-settings';
+import { playScanBeep } from '../lib/scan-beep';
+import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import ProductsAreaScreen from '../app/products';
@@ -43,6 +45,7 @@ vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: () => ({ savesInFlight: 0 }) }));
+vi.mock('../lib/scan-beep', () => ({ playScanBeep: vi.fn() }));
 vi.mock('@tallyui/pos', async (importOriginal) => ({
   ...await importOriginal<typeof import('@tallyui/pos')>(), useStoreSettings: vi.fn(),
 }));
@@ -704,5 +707,73 @@ describe('on a phone', () => {
     mount();
     expect(screen.getByTestId('products-table')).toBeTruthy();
     expect(screen.queryByTestId('products-list')).toBeNull();
+  });
+});
+
+// v2: "On the Products and Orders screens, a scan goes into that screen's search box instead".
+describe('a barcode scan', () => {
+  const scanner = { ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!', playSound: true };
+  const rowIds = () => Array.from(document.querySelectorAll('[data-testid^="product-row-"]'))
+    .map((row) => row.getAttribute('data-testid')!.replace('product-row-', ''));
+  const box = () => screen.getByTestId('products-search') as HTMLInputElement;
+  const mountWith = (settings: typeof scanner) => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
+    saveScannerSettings(localStorage, session.baseUrl, settings);
+    sessionState.session = session;
+    publishCatalogue(sale());
+    mount();
+  };
+  // Types `raw` into the focused box `gapMs` apart, the field's value following each key as a real one does, then Enter.
+  const typeInBox = (raw: string, gapMs: number) => {
+    let t = 1_000;
+    for (const key of Array.from(raw)) {
+      vi.setSystemTime(t); t += gapMs;
+      fireEvent.keyDown(box(), { key });
+      fireEvent.change(box(), { target: { value: box().value + key } });
+    }
+    vi.setSystemTime(t);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+  };
+  // A wedge scan with nothing editable focused: keys land on the body.
+  const scanOnBody = (raw: string) => {
+    let t = 1_000;
+    for (const key of [...Array.from(raw), 'Enter']) { vi.setSystemTime(t); t += 10; fireEvent.keyDown(document.body, { key }); }
+  };
+
+  beforeEach(() => { vi.useFakeTimers(); vi.mocked(playScanBeep).mockClear(); });
+  afterEach(() => vi.useRealTimers());
+
+  it('typed into the search box puts the bare code in the box, filters the table and beeps', () => {
+    mountWith(scanner);
+    typeInBox('#E2E-4B!', 10);
+    expect(box().value).toBe('E2E-4B');
+    expect(rowIds()).toEqual(['v4b']);
+    expect(playScanBeep).toHaveBeenCalledOnce();
+  });
+
+  it('with nothing focused fills the box the same way', () => {
+    mountWith(scanner);
+    scanOnBody('#E2E-4B!');
+    expect(box().value).toBe('E2E-4B');
+    expect(rowIds()).toEqual(['v4b']);
+    expect(playScanBeep).toHaveBeenCalledOnce();
+  });
+
+  it('filters without a beep while Play a sound on scan is off', () => {
+    mountWith({ ...scanner, playSound: false });
+    typeInBox('#E2E-4B!', 10);
+    expect(box().value).toBe('E2E-4B');
+    expect(rowIds()).toEqual(['v4b']);
+    expect(playScanBeep).not.toHaveBeenCalled();
+  });
+
+  it('leaves slow typing as typed, with no beep', () => {
+    mountWith(scanner);
+    typeInBox('E2E-4B', 200);
+    expect(box().value).toBe('E2E-4B');
+    expect(rowIds()).toEqual(['v4b']);
+    expect(playScanBeep).not.toHaveBeenCalled();
   });
 });
