@@ -71,6 +71,32 @@ test('the Products area keeps its category across a page load and narrows with a
   await expect(chip('All products')).toBeChecked();
 });
 
+test('the Products area narrows by the Tags chip, keeps the tag across a page load, and its cross takes it off', async ({ page }) => {
+  await signIn(page);
+  await openArea(page, 'Products');
+  const rows = page.locator('[data-testid^="product-row-"]');
+  const tags = page.getByTestId('products-tags');
+  await expect(tags).toHaveText('Tags');
+  await tags.click();
+  const menu = page.getByTestId('products-tags-menu');
+  for (const name of ['Organic', 'Seasonal']) await expect(menu.getByRole('radio', { name, exact: true })).toBeVisible();
+  await menu.getByRole('radio', { name: 'Organic', exact: true }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(tags).toHaveText('Organic');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'E2E product 1' })).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'E2E product 3' })).toHaveCount(1);
+  await expect(page.getByTestId('products-footer')).toHaveText(/^Showing 2 of \d+$/);
+  // A fresh page load: the tag is read back from this device's storage.
+  await page.goto('/orders');
+  await openArea(page, 'Products');
+  await expect(tags).toHaveText('Organic');
+  await expect(rows).toHaveCount(2);
+  await page.getByTestId('products-tags-remove').click();
+  await expect(tags).toHaveText('Tags');
+  await expect(rows.filter({ hasText: 'E2E product 2' }).first()).toBeVisible();
+});
+
 test('on a phone the Products area lists two-line rows, not the table, and finds a variant by SKU', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
   await signIn(page);

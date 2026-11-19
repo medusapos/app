@@ -2,10 +2,11 @@ import type { ExecArgs } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules, ProductStatus } from "@medusajs/framework/utils"
 import {
   createAndLinkProductOptionsToProductWorkflow, createApiKeysWorkflow, createProductCategoriesWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
-  createProductVariantsWorkflow, createRegionsWorkflow,
+  createProductTagsWorkflow, createProductVariantsWorkflow, createRegionsWorkflow,
   createSalesChannelsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow,
   createStockLocationsWorkflow, createStoresWorkflow, createTaxRegionsWorkflow,
-  linkSalesChannelsToApiKeyWorkflow, linkSalesChannelsToStockLocationWorkflow, updateRegionsWorkflow, updateStoresWorkflow,
+  linkSalesChannelsToApiKeyWorkflow, linkSalesChannelsToStockLocationWorkflow, updateProductsWorkflow, updateRegionsWorkflow,
+  updateStoresWorkflow,
 } from "@medusajs/medusa/core-flows"
 
 export default async function seedE2e({ container }: ExecArgs) {
@@ -114,6 +115,7 @@ export default async function seedE2e({ container }: ExecArgs) {
   if (preference.is_tax_inclusive) await pricing.updatePricePreferences(preference.id, { is_tax_inclusive: false })
   const productService = container.resolve(Modules.PRODUCT)
   // Two categories for the catalogue's category nav: E2E products 1 and 2 are Drinks, 3 is Food, the rest have none.
+  // Two product tags for the Products area's Tags chip: E2E products 1 and 3 are Organic, 2 is Seasonal, 4 and 5 have none.
   let categories = await productService.listProductCategories({ name: ["Drinks", "Food"] })
   const missingCategories = ["Drinks", "Food"].filter(name => !categories.some(category => category.name === name))
   if (missingCategories.length) {
@@ -123,9 +125,17 @@ export default async function seedE2e({ container }: ExecArgs) {
     categories = await productService.listProductCategories({ name: ["Drinks", "Food"] })
   }
   const categoryIds = (name: string) => [categories.find(category => category.name === name)!.id]
+  let tags = await productService.listProductTags({ value: ["Organic", "Seasonal"] })
+  const missingTags = ["Organic", "Seasonal"].filter(value => !tags.some(tag => tag.value === value))
+  if (missingTags.length) {
+    await createProductTagsWorkflow(container).run({ input: { product_tags: missingTags.map(value => ({ value })) } })
+    tags = await productService.listProductTags({ value: ["Organic", "Seasonal"] })
+  }
+  const tagIds = (i: number) => i === 0 || i === 2 ? [tags.find(tag => tag.value === "Organic")!.id]
+    : i === 1 ? [tags.find(tag => tag.value === "Seasonal")!.id] : []
   const products = await productService.listProducts(
     { handle: ["e2e-1", "e2e-2", "e2e-3", "e2e-4", "e2e-5"] },
-    { relations: ["options", "options.values", "variants"] },
+    { relations: ["options", "options.values", "variants", "tags"] },
   )
   // E2E product 4 gets a second variant (SKU E2E-4B) so the variant chooser — the app's only
   // stock display, which opens only for a product with more than one variant — has a product
@@ -133,7 +143,7 @@ export default async function seedE2e({ container }: ExecArgs) {
   const missingProducts = [2, 3.5, 4.25, 10, 12.99].map((amount, i) => ({
     title: `E2E product ${i + 1}`, handle: `e2e-${i + 1}`, status: ProductStatus.PUBLISHED,
     shipping_profile_id: profile.id, sales_channels: [{ id: channel.id }],
-    ...(i < 3 ? { category_ids: categoryIds(i < 2 ? "Drinks" : "Food") } : {}),
+    ...(i < 3 ? { category_ids: categoryIds(i < 2 ? "Drinks" : "Food"), tag_ids: tagIds(i) } : {}),
     options: [{ title: "Variant", values: i === 3 ? ["Default", "B"] : ["Default"] }],
     variants: [
       {
@@ -149,6 +159,13 @@ export default async function seedE2e({ container }: ExecArgs) {
     ],
   })).filter(product => !products.some(existing => existing.handle === product.handle))
   if (missingProducts.length) await createProductsWorkflow(container).run({ input: { products: missingProducts } })
+  // Products from a seed run before the tags existed get theirs; a product that already has tags is left as it is.
+  for (const [i, handle] of ["e2e-1", "e2e-2", "e2e-3"].entries()) {
+    const existing = products.find(product => product.handle === handle)
+    if (existing && !existing.tags?.length) await updateProductsWorkflow(container).run({ input: {
+      selector: { id: existing.id }, update: { tag_ids: tagIds(i) },
+    } })
+  }
   // Priced and stocked, but only in another sales channel: the store API doesn't list it for the
   // E2E key, so the till replicates it unlisted and hides it (the catalogue still shows 5 products).
   // Medusa 2.21.0 skips the store API's channel filter only when the store has at most one sales

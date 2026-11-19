@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProductTraits, VariantSummary } from '@tallyui/core';
 import {
-  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsInStock, loadProductsAreaCategory, productAreaRows,
-  productAreaStockLine, saveProductsAreaCategory, STOCK_STATUS_DOTS, type ProductAreaRow,
+  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock, listProductTags,
+  loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine, productTags, saveProductsAreaCategory,
+  saveProductsAreaTag, STOCK_STATUS_DOTS, type ProductAreaRow,
 } from './products-area';
 import type { SessionStorage } from './session';
 
-type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[]; thumbnail?: string };
+type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[]; thumbnail?: string;
+  tags?: unknown };
 const traits = {
   getName: (doc: Doc) => doc.title,
   getImageUrl: (doc: Doc) => doc.thumbnail,
@@ -29,11 +31,11 @@ describe('productAreaRows', () => {
     ] };
     expect(productAreaRows([shirt, mug], traits, 'EUR')).toEqual([
       { id: 'shirt-one', name: 'Shirt', sku: 'SHIRT', barcode: '5012345678900', price: '€12.50', stock: '7', stockStatus: 'in_stock',
-        categories: '', categoryIds: [] },
+        categories: '', categoryIds: [], tagIds: [] },
       { id: 'mug-a', name: 'Mug · A', sku: 'MUG-A', barcode: '', price: '€5.00', stock: '3', stockStatus: 'in_stock', categories: '',
-        categoryIds: [] },
+        categoryIds: [], tagIds: [] },
       { id: 'mug-b', name: 'Mug · B', sku: 'MUG-B', barcode: '', price: '€6.00', stock: '0', stockStatus: 'out_of_stock', categories: '',
-        categoryIds: [] },
+        categoryIds: [], tagIds: [] },
     ]);
   });
 
@@ -48,7 +50,7 @@ describe('productAreaRows', () => {
   it('shows a missing SKU as empty and a missing price as a dash', () => {
     const doc: Doc = { id: 'p', title: 'Plain', variants: [{ id: 'v', prices: [], stock: { status: 'unknown' } }] };
     expect(productAreaRows([doc], traits, 'EUR')).toEqual([{ id: 'v', name: 'Plain', sku: '', barcode: '', price: '—',
-      stock: '—', stockStatus: 'unknown', categories: '', categoryIds: [] }]);
+      stock: '—', stockStatus: 'unknown', categories: '', categoryIds: [], tagIds: [] }]);
   });
 
   it("gives each row its stock status and its product's categories", () => {
@@ -80,7 +82,7 @@ describe('productAreaRows', () => {
 
 describe('productAreaStockLine', () => {
   const row = (stock: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id: 'v', name: 'P', sku: 'P', barcode: '',
-    price: '€1.00', stock, stockStatus, categories: '', categoryIds: [] });
+    price: '€1.00', stock, stockStatus, categories: '', categoryIds: [], tagIds: [] });
 
   it('puts the quantity before the status when the variant has one', () => {
     expect(productAreaStockLine(row('5', 'in_stock'))).toBe('5 · In stock');
@@ -95,7 +97,7 @@ describe('productAreaStockLine', () => {
 
 describe('filterProductAreaRows', () => {
   const row = (id: string, name: string, sku: string): ProductAreaRow => ({ id, name, sku, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds: [] });
+    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds: [] });
   const rows = [row('1', 'E2E product 1', 'E2E-1'), row('4a', 'E2E product 4 · A', 'E2E-4'), row('4b', 'E2E product 4 · B', 'E2E-4B')];
 
   it('returns the same array for a blank query', () => {
@@ -123,7 +125,7 @@ describe('filterProductAreaRows', () => {
 
 describe('filterProductAreaRowsByCategory', () => {
   const row = (id: string, categoryIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds });
+    stockStatus: 'in_stock', categories: '', categoryIds, tagIds: [] });
   const rows = [row('1', ['drinks']), row('2', ['drinks', 'food']), row('3', ['food']), row('4', [])];
 
   it('keeps only rows in the category', () => {
@@ -147,7 +149,7 @@ describe('STOCK_STATUS_DOTS', () => {
 
 describe('filterProductAreaRowsInStock', () => {
   const row = (id: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id, name: id, sku: id, barcode: '',
-    price: '€1.00', stock: '1', stockStatus, categories: '', categoryIds: [] });
+    price: '€1.00', stock: '1', stockStatus, categories: '', categoryIds: [], tagIds: [] });
   const rows = [row('in', 'in_stock'), row('back', 'backorder'), row('out', 'out_of_stock'), row('unknown', 'unknown')];
 
   it('returns the same array when off', () => {
@@ -207,6 +209,116 @@ describe('loadProductsAreaCategory / saveProductsAreaCategory', () => {
     expect(loadProductsAreaCategory(broken, store)).toBeNull();
     expect(() => saveProductsAreaCategory(broken, store, 'cat_food')).not.toThrow();
     expect(warn).toHaveBeenCalledWith('Could not save the Products category:', expect.any(Error));
+    warn.mockRestore();
+  });
+});
+
+describe('productTags', () => {
+  it("keeps the document's valid { id, value } tags", () => {
+    expect(productTags({ tags: [{ id: 't1', value: 'Organic', created_at: 'x' }, { id: 't2', value: 'Seasonal' }] }))
+      .toEqual([{ id: 't1', value: 'Organic' }, { id: 't2', value: 'Seasonal' }]);
+  });
+
+  it('gives [] for no tags, a non-array or a null document', () => {
+    expect(productTags({})).toEqual([]);
+    for (const tags of ['Organic', null]) expect(productTags({ tags })).toEqual([]);
+    expect(productTags(null)).toEqual([]);
+  });
+
+  it('drops entries with a missing or empty id or value', () => {
+    expect(productTags({ tags: [null, 'Organic', { value: 'A' }, { id: '', value: 'B' }, { id: 'c' }, { id: 'd', value: '' },
+      { id: 7, value: 'E' }, { id: 'f', value: 'Fine' }] })).toEqual([{ id: 'f', value: 'Fine' }]);
+  });
+});
+
+describe('productAreaRows tags', () => {
+  it("gives every variant row of a tagged product its tag ids, and [] to an untagged product's", () => {
+    const mug: Doc = { id: 'mug', title: 'Mug', tags: [{ id: 't1', value: 'Organic' }, { id: 't2', value: 'Seasonal' }], variants: [
+      { id: 'mug-a', title: 'A', prices: eur(500), stock: { status: 'in_stock' } },
+      { id: 'mug-b', title: 'B', prices: eur(600), stock: { status: 'in_stock' } },
+    ] };
+    const plain: Doc = { id: 'p', title: 'Plain', variants: [{ id: 'p-1', prices: eur(100), stock: { status: 'in_stock' } }] };
+    expect(productAreaRows([mug, plain], traits, 'EUR').map(({ id, tagIds }) => ({ id, tagIds }))).toEqual([
+      { id: 'mug-a', tagIds: ['t1', 't2'] }, { id: 'mug-b', tagIds: ['t1', 't2'] }, { id: 'p-1', tagIds: [] },
+    ]);
+  });
+});
+
+describe('listProductTags', () => {
+  it('lists each tag once by id, the first value seen, sorted by value naturally then by id', () => {
+    expect(listProductTags([
+      { tags: [{ id: 't10', value: 'Size 10' }, { id: 'tb', value: 'organic' }] },
+      { tags: [{ id: 't2', value: 'Size 2' }, { id: 'tb', value: 'Renamed' }, { id: 'ta', value: 'Organic' }] },
+      { title: 'untagged' }, { tags: [] },
+    ])).toEqual([
+      { id: 'ta', value: 'Organic' }, { id: 'tb', value: 'organic' }, { id: 't2', value: 'Size 2' }, { id: 't10', value: 'Size 10' },
+    ]);
+  });
+});
+
+describe('filterProductAreaRowsByTag', () => {
+  const row = (id: string, tagIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, barcode: '', price: '€1.00', stock: '1',
+    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds });
+  const rows = [row('1', ['organic']), row('2', ['organic', 'seasonal']), row('3', ['seasonal']), row('4', [])];
+
+  it('returns the same array for no tag', () => {
+    expect(filterProductAreaRowsByTag(rows, null)).toBe(rows);
+    expect(filterProductAreaRowsByTag(rows, '')).toBe(rows);
+  });
+
+  it('keeps only rows carrying the tag', () => {
+    expect(filterProductAreaRowsByTag(rows, 'organic').map((r) => r.id)).toEqual(['1', '2']);
+    expect(filterProductAreaRowsByTag(rows, 'seasonal').map((r) => r.id)).toEqual(['2', '3']);
+    expect(filterProductAreaRowsByTag(rows, 'gone')).toEqual([]);
+  });
+});
+
+describe('loadProductsAreaTag / saveProductsAreaTag', () => {
+  const memory = (): SessionStorage & { data: Map<string, string> } => {
+    const data = new Map<string, string>();
+    return { data, getItem: (key) => data.get(key) ?? null, setItem: (key, value) => { data.set(key, value); },
+      removeItem: (key) => { data.delete(key); } };
+  };
+  const store = 'https://store.test';
+
+  it('round-trips a saved tag per store, and a saved null as null', () => {
+    const storage = memory();
+    saveProductsAreaTag(storage, store, 'ptag_organic');
+    expect(loadProductsAreaTag(storage, store)).toBe('ptag_organic');
+    expect(loadProductsAreaTag(storage, 'https://other.test')).toBeNull();
+    expect(storage.data.get('medusapos.products-area-tag.' + store)).toBe(JSON.stringify({ tag: 'ptag_organic' }));
+    saveProductsAreaTag(storage, store, null);
+    expect(loadProductsAreaTag(storage, store)).toBeNull();
+  });
+
+  it('loads missing, corrupt and wrong-shaped values as null', () => {
+    const storage = memory();
+    expect(loadProductsAreaTag(storage, store)).toBeNull();
+    for (const value of ['{', '[]', 'null', '"ptag"', JSON.stringify({ tag: 7 }), JSON.stringify({ tag: '' })]) {
+      storage.data.set('medusapos.products-area-tag.' + store, value);
+      expect(loadProductsAreaTag(storage, store)).toBeNull();
+    }
+  });
+
+  it('keeps the tag and the category apart', () => {
+    const storage = memory();
+    saveProductsAreaCategory(storage, store, 'cat_food');
+    saveProductsAreaTag(storage, store, 'ptag_organic');
+    expect(loadProductsAreaCategory(storage, store)).toBe('cat_food');
+    expect(storage.data.get('medusapos.products-area.' + store)).toBe(JSON.stringify({ category: 'cat_food' }));
+    saveProductsAreaCategory(storage, store, null);
+    expect(loadProductsAreaTag(storage, store)).toBe('ptag_organic');
+  });
+
+  it('loads null from a null or throwing storage, and swallows a throwing setItem', () => {
+    const fail = () => { throw new Error('denied'); };
+    const broken: SessionStorage = { getItem: fail, setItem: fail, removeItem: fail };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(loadProductsAreaTag(null, store)).toBeNull();
+    expect(() => saveProductsAreaTag(null, store, 'ptag_organic')).not.toThrow();
+    expect(loadProductsAreaTag(broken, store)).toBeNull();
+    expect(() => saveProductsAreaTag(broken, store, 'ptag_organic')).not.toThrow();
+    expect(warn).toHaveBeenCalledWith('Could not save the Products tag:', expect.any(Error));
     warn.mockRestore();
   });
 });
