@@ -620,3 +620,53 @@ describe('the header', () => {
   });
 
 });
+
+describe('the Sales cashier menu', () => {
+  const menuOptions = () => screen.getAllByTestId(/^sales-filter-cashier-option-/);
+  const seedTwoCashiers = async () => {
+    await store.orders.insert(order(1200, 'cash', { cashierRef: 'ana@store.test' }));
+    await store.orders.insert(order(800, 'external', { cashierRef: 'ben@store.test' }));
+  };
+
+  it('lists Everyone, the cashiers in the till\'s sales and the signed-in user, with no email in any item', async () => {
+    await seedTwoCashiers();
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('20.00')));
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    expect(menuOptions().map((option) => option.getAttribute('data-testid'))).toEqual(['sales-filter-cashier-option-all',
+      'sales-filter-cashier-option-admin@store.test', 'sales-filter-cashier-option-ana@store.test',
+      'sales-filter-cashier-option-ben@store.test']);
+    expect(menuOptions().slice(1).map((option) => option.textContent)).toEqual(['admin', 'ana', 'ben']);
+    for (const option of menuOptions()) expect(option.textContent).not.toContain('@');
+  });
+
+  it('narrows the figures to the chosen cashier\'s sales, keeps them listed, and Everyone shows them all again', async () => {
+    await seedTwoCashiers();
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('20.00')));
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    fireEvent.click(screen.getByTestId('sales-filter-cashier-option-ben@store.test'));
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('8.00')));
+    expect(screen.getByTestId('card-orders-figure').textContent).toBe('1');
+    expect(screen.getByTestId('sales-filter-cashier').textContent).toBe('ben');
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    expect(menuOptions().map((option) => option.textContent)).toEqual(['Everyone', 'admin', 'ana', 'ben']);
+    fireEvent.click(screen.getByTestId('sales-filter-cashier-option-all'));
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('20.00')));
+    expect(screen.getByTestId('card-orders-figure').textContent).toBe('2');
+  });
+
+  it('lists Everyone and the signed-in user when the till has no sales, and asks the store for no cashier list', async () => {
+    const fetchSpy = vi.fn<typeof fetch>(async () => new Response('{}', { status: 404 }));
+    vi.stubGlobal('fetch', fetchSpy);
+    mount();
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    expect(menuOptions().map((option) => option.getAttribute('data-testid')))
+      .toEqual(['sales-filter-cashier-option-all', 'sales-filter-cashier-option-admin@store.test']);
+    expect(screen.getByTestId('sales-filter-cashier-option-admin@store.test').textContent).toBe('admin');
+    expect(fetchSpy.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('cashier'))).toEqual([]);
+  });
+});

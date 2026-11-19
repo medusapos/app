@@ -11,6 +11,7 @@ import { ReportSheet } from '../components/report-sheet';
 import { closureContext, printClosure } from '../components/register-close';
 import { RegisterStrip } from '../components/register-strip';
 import { StripHeightContext } from '../components/store-refused';
+import { reportCashierOptions } from '../lib/cashiers';
 import { PRINT_FAILED, printHtml, printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
@@ -137,7 +138,7 @@ export default function ReportsScreen() {
             <View className="flex-row flex-wrap items-start gap-2">
               <View className="flex-1">
                 <SalesFiltersBar filters={filters} onFiltersChange={setFilters} timezone="device" statusOptions={STATUS_OPTIONS}
-                  cashierOptions={[]} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
+                  cashierOptions={reportCashierOptions(sales, session, filters.cashierId)} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
               </View>
               {Platform.OS === 'web' ? <Pressable testID="reports-print-summary" accessibilityRole="button" disabled={summaryBusy}
                 className="min-h-11 flex-row items-center justify-center gap-2 rounded-md px-4 border border-border"
