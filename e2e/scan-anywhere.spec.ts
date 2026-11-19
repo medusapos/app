@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { addE2E1, cartLineQuantity, signIn, test } from './helpers';
+import { addE2E1, cartLineQuantity, cartTab, productsTab, signIn, test } from './helpers';
 
 // v2 scans anywhere in the POS (barcode-scanning, shot bs-1): on a non-phone window a keyboard-wedge scan adds with
 // focus on a cart Pressable or on nothing, not only in the search box. Never sells, so E2E-1's shared stock is untouched.
@@ -31,4 +31,37 @@ test('a keyboard-wedge scan adds from anywhere on the wide sale screen, and an u
   await expect(page.getByTestId('scan-toast')).toContainText('ZZZ-NOPE — not in this store');
   await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('2');
   await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
+});
+
+// Row 02f.4: on a phone (below 600 px) the Products view takes a wedge scan as the Cart view does, and stays on
+// Products. Never sells.
+test.describe('phone Products view', () => {
+  test.use({ viewport: { width: 390, height: 844 } });
+
+  test('a keyboard-wedge scan adds from the phone Products view after a tile tap, and an unknown code shows Barcode not found', async ({ page }) => {
+    await signIn(page);
+    await expect(productsTab(page)).toHaveAttribute('aria-selected', 'true');
+    // The tapped tile keeps focus in Chromium and activates on Enter; the scan's Enter must not also press it.
+    await page.getByTestId('product-tile-E2E product 1').click();
+    await expect(cartTab(page)).toHaveAccessibleName(/^Cart, 1 item$/);
+    await expect(productsTab(page)).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.type('E2E-2', { delay: 10 });
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('scan-toast')).toContainText('Added to cart');
+    await expect(page.getByTestId('scan-toast')).toContainText('E2E product 2');
+    await expect(cartTab(page)).toHaveAccessibleName(/^Cart, 2 items$/);
+    await expect(productsTab(page)).toHaveAttribute('aria-selected', 'true');
+
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    await page.keyboard.type('ZZZ-NOPE', { delay: 10 });
+    await page.keyboard.press('Enter');
+    await expect(page.getByTestId('scan-toast')).toContainText('Barcode not found');
+    await expect(page.getByTestId('scan-toast')).toContainText('ZZZ-NOPE — not in this store');
+    await expect(cartTab(page)).toHaveAccessibleName(/^Cart, 2 items$/);
+
+    await cartTab(page).click();
+    await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
+    await expect(cartLineQuantity(page, 'E2E product 1')).toHaveText('1');
+    await expect(cartLineQuantity(page, 'E2E product 2')).toHaveText('1');
+  });
 });

@@ -262,8 +262,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useEffect(() => { if (sale.stage.kind !== 'cart') clearCustomerSaved(); }, [sale.stage.kind, clearCustomerSaved]);
   const pathname = usePathname();
   // v2 scans anywhere in the POS; an editable target (search box, coupon field) keeps its own input, so no double add; off while an area is over the Sale and in tender.
-  // On a phone only the cart view listens.
-  const wedgeActive = sale.stage.kind === 'cart' && (!phone || cartOpen) && pathname === '/';
+  // Every layout listens in the cart stage, the phone's Products and Cart views alike.
+  const wedgeActive = sale.stage.kind === 'cart' && pathname === '/';
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
