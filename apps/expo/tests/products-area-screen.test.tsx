@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // @ts-expect-error no @types/react-dom in this Expo/React Native app
 import { createPortal } from 'react-dom';
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StoreSettingsError, type ProductTraits, type StoreSettings as PricingSettings, type VariantSummary } from '@tallyui/core';
@@ -16,6 +16,7 @@ import {
 import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../lib/store-settings';
 import { playScanBeep } from '../lib/scan-beep';
 import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
+import { useProductSettings } from '../lib/product-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import ProductsAreaScreen from '../app/products';
@@ -95,7 +96,17 @@ const pricing: PricingSettings = {
   pricingContext: { region_id: 'reg_eu', currency_code: 'eur', publishable_key: 'pk_1' },
 };
 
+// The tests that press p4's toggle expecting sub-rows run on Expanded rows: storage holding the Sale's Variations
+// choice 'popover' for the store (a new device is on Open in place, as the Variations choice tests show).
+const EXPANDED_ROWS = ['medusapos.product-settings.https://store.test', JSON.stringify({ variations: 'popover' })] as const;
+const stubExpandedRows = () => {
+  const data = new Map<string, string>([EXPANDED_ROWS]);
+  vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
+};
+
 beforeEach(() => {
+  stubExpandedRows();
   capabilities.mockResolvedValue(undefined);
   vi.mocked(fetchStoreSettings).mockResolvedValue(settings);
   vi.mocked(useStoreSettings).mockReturnValue({ state: 'ready', settings: pricing, refresh: () => {} });
@@ -244,12 +255,9 @@ describe('ProductsAreaScreen', () => {
     .map((row) => row.getAttribute('data-testid')!.replace('product-row-', '')).sort();
   const press = (testID: string) => fireEvent.click(screen.getByTestId(testID));
   const inStock = () => screen.getByTestId('products-in-stock');
-  // This Node's test environment has no working localStorage (as the till-setup case above), so these cases stub one.
-  const stubStorage = () => {
-    const data = new Map<string, string>();
-    vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
-      setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
-  };
+  // This Node's test environment has no working localStorage (as the till-setup case above), so these cases stub one,
+  // on Expanded rows.
+  const stubStorage = stubExpandedRows;
 
   it('restores the category chosen in an earlier visit', () => {
     stubStorage();
@@ -1000,11 +1008,159 @@ describe('variation sub-rows', () => {
   });
 });
 
+// v2's Product Settings › Variations, shared with the Sale's product panel: Open in place (a new device) fills the list with
+// the product's variants under a Products back link; Expanded rows is the sub-rows above.
+describe('the Variations choice', () => {
+  const rowIds = () => Array.from(document.querySelectorAll('[data-testid^="product-row-"]'))
+    .map((row) => row.getAttribute('data-testid')!.replace('product-row-', ''));
+  const cells = (id: string) => within(screen.getByTestId(`product-row-${id}`)).getAllByText(/./).map((node) => node.textContent);
+  const toggle = () => screen.getByTestId('product-variations-p4');
+  const press = (testID: string) => fireEvent.click(screen.getByTestId(testID));
+  const footer = () => screen.getByTestId('products-footer').textContent;
+  // A new device: storage with nothing in it, or `entries` only.
+  const storage = (...entries: [string, string][]) => {
+    const data = new Map<string, string>(entries);
+    vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
+    return data;
+  };
+  // The sheet renders in a portal.
+  const show = () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    render(<><ProductsAreaScreen /><PortalHost /></>);
+  };
+
+  it('a new device opens p4 in place: its variants A and B under a Products back link, which returns to the list', () => {
+    storage();
+    show();
+    expect(rowIds()).toEqual(['v1', 'p4']);
+    expect(toggle().hasAttribute('aria-expanded')).toBe(false);
+    expect(toggle().textContent).toBe('2 variations');
+    expect(toggle().getAttribute('aria-label')).toBe('2 variations, E2E product 4');
+    expect(screen.queryByTestId('products-place')).toBeNull();
+    fireEvent.click(toggle());
+    expect(screen.getByTestId('products-place-name').textContent).toBe('E2E product 4');
+    expect(screen.getByTestId('products-place').contains(screen.getByTestId('products-place-back'))).toBe(true);
+    expect(screen.getByTestId('products-place-back').textContent).toBe('Products');
+    expect(rowIds()).toEqual(['v4a', 'v4b']);
+    expect(cells('v4a')[0]).toBe('A');
+    expect(cells('v4b')[0]).toBe('B');
+    expect(footer()).toBe('Showing 2 of 2');
+    press('products-place-back');
+    expect(screen.queryByTestId('products-place')).toBeNull();
+    expect(rowIds()).toEqual(['v1', 'p4']);
+    expect(toggle().hasAttribute('aria-expanded')).toBe(false);
+    expect(footer()).toBe('Showing 3 of 3');
+  });
+
+  it('in place the In stock chip narrows the variants, and n counts them of the product', () => {
+    storage();
+    show();
+    press('products-in-stock');
+    fireEvent.click(toggle());
+    expect(rowIds()).toEqual(['v4a']);
+    expect(footer()).toBe('Showing 1 of 2');
+  });
+
+  it('a search shows the matching variant under p4 in the list and in place; back keeps the search and the chips', () => {
+    storage();
+    show();
+    fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
+    expect(rowIds()).toEqual(['p4', 'v4b']);
+    expect(toggle().hasAttribute('aria-expanded')).toBe(false);
+    fireEvent.click(toggle());
+    expect(rowIds()).toEqual(['v4b']);
+    expect(footer()).toBe('Showing 1 of 2');
+    // No variant left: the empty-state text, with the back row still shown.
+    press('products-in-stock');
+    expect(rowIds()).toEqual([]);
+    expect(screen.getByText(PRODUCTS_NO_MATCH('E2E-4B'))).toBeTruthy();
+    expect(screen.getByTestId('products-place-back')).toBeTruthy();
+    press('products-place-back');
+    expect(screen.queryByTestId('products-place')).toBeNull();
+    expect((screen.getByTestId('products-search') as HTMLInputElement).value).toBe('E2E-4B');
+    expect(screen.getByTestId('products-in-stock').getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('sorting the Product column descending in place lists B then A', () => {
+    storage();
+    show();
+    fireEvent.click(toggle());
+    press('product-table-sort-name');
+    expect(rowIds()).toEqual(['v4b', 'v4a']);
+  });
+
+  it('is kept per store: Expanded rows stored for this store gives sub-rows, stored for another store leaves Open in place', () => {
+    storage(['medusapos.product-settings.https://store.test', JSON.stringify({ variations: 'popover' })]);
+    show();
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(rowIds()).toEqual(['v1', 'p4', 'v4a', 'v4b']);
+    expect(screen.queryByTestId('products-place')).toBeNull();
+    cleanup();
+    act(() => withdrawCatalogue('sale'));
+    storage(['medusapos.product-settings.https://other.test', JSON.stringify({ variations: 'popover' })]);
+    show();
+    expect(toggle().hasAttribute('aria-expanded')).toBe(false);
+    fireEvent.click(toggle());
+    expect(screen.getByTestId('products-place-name').textContent).toBe('E2E product 4');
+  });
+
+  it('choosing Expanded rows in the sheet while p4 is open in place returns to the list with the sub-row toggle', () => {
+    const data = storage();
+    show();
+    fireEvent.click(toggle());
+    expect(rowIds()).toEqual(['v4a', 'v4b']);
+    press('products-settings-button');
+    expect(screen.getByTestId('products-settings-variations-list').getAttribute('aria-selected')).toBe('true');
+    press('products-settings-variations-popover');
+    expect(screen.getByTestId('products-settings-variations-popover').getAttribute('aria-selected')).toBe('true');
+    expect(JSON.parse(data.get('medusapos.product-settings.https://store.test')!)).toEqual({ variations: 'popover' });
+    press('products-settings-close');
+    expect(screen.queryByTestId('products-place')).toBeNull();
+    expect(rowIds()).toEqual(['v1', 'p4']);
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(toggle());
+    expect(rowIds()).toEqual(['v1', 'p4', 'v4a', 'v4b']);
+  });
+
+  it("is the Sale's own setting: a save through the Sale's hook is what the area shows, and the area's choice is what the Sale reads", () => {
+    storage();
+    show();
+    const { result } = renderHook(() => useProductSettings(localStorage, session.baseUrl));
+    expect(result.current.settings).toEqual({ variations: 'list' });
+    act(() => result.current.save({ variations: 'popover' }));
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    press('products-settings-button');
+    press('products-settings-variations-list');
+    expect(result.current.settings).toEqual({ variations: 'list' });
+    expect(toggle().hasAttribute('aria-expanded')).toBe(false);
+  });
+
+  it('on a phone opens p4 in place: its variant rows under the back row, and back returns to the list', () => {
+    setWindowWidth(390, 844);
+    storage();
+    show();
+    const listRowIds = () => Array.from(document.querySelectorAll('[data-testid^="product-list-row-"]'))
+      .map((row) => row.getAttribute('data-testid')!.replace('product-list-row-', ''));
+    expect(listRowIds()).toEqual(['v1', 'p4']);
+    fireEvent.click(toggle());
+    expect(listRowIds()).toEqual(['v4a', 'v4b']);
+    expect(screen.getByTestId('products-place').compareDocumentPosition(screen.getByTestId('products-list'))
+      & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(footer()).toBe('Showing 2 of 2');
+    press('products-place-back');
+    expect(listRowIds()).toEqual(['v1', 'p4']);
+  });
+});
+
 // v2's Type column: the till reads the product types from Medusa only while the column shows.
 describe('the Type column', () => {
   const typed = [products[0], { ...products[1], type_id: 'ptyp_apparel' }];
   const stub = () => {
-    const data = new Map<string, string>();
+    const data = new Map<string, string>([EXPANDED_ROWS]);
     vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
       setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
     const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/admin/product-types')

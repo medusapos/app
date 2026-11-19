@@ -231,6 +231,15 @@ export function productAreaItems(shown: ProductAreaRow[], products: ProductAreaP
   });
 }
 
+/** v2's Open in place: the product's variant rows left in `shown`, as plain rows labelled by the variant title, by `sort`. */
+export function productAreaPlaceItems(shown: ProductAreaRow[], product: ProductAreaProduct, sort: ProductSort | null,
+  valueOf: (item: ProductAreaItem, field: string) => ProductSortValue): ProductAreaItem[] {
+  const titles = new Map(product.variants.map(({ id, title }) => [id, title]));
+  const items = shown.filter((row) => titles.has(row.id))
+    .map((row): ProductAreaItem => ({ ...row, kind: 'variant', sub: false, label: titles.get(row.id)! }));
+  return sortProducts(items, sort, valueOf);
+}
+
 /** The product row's toggle: "2 variations", or "1 of 2 variations" while the filters leave fewer. */
 export const PRODUCTS_VARIATIONS = (shown: number, total: number) =>
   `${shown === total ? '' : `${shown} of `}${total} ${total === 1 ? 'variation' : 'variations'}`;

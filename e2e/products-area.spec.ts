@@ -30,6 +30,23 @@ test('the Products area shows E2E product 4 as one row whose variations toggle o
   await expect(product).toContainText('2 variations');
   await expect(rows.filter({ hasText: 'E2E-4B' })).toHaveCount(0);
   const toggle = page.getByRole('button', { name: '2 variations, E2E product 4', exact: true });
+  // A new device is on v2's Open in place: the toggle fills the table with the product's variants under a Products back link.
+  await toggle.click();
+  await expect(page.getByTestId('products-place-name')).toHaveText('E2E product 4');
+  await expect(page.getByTestId(`product-row-${defaultId}`)).toContainText('Default');
+  await expect(page.getByTestId(`product-row-${bId}`)).toContainText('B');
+  await expect(rows).toHaveCount(2);
+  await expect(page.getByTestId('products-footer')).toHaveText(/^Showing 2 of 2$/);
+  await page.getByTestId('products-place-back').click();
+  await expect(page.getByTestId('products-place')).toHaveCount(0);
+  await expect(product).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'E2E-4B' })).toHaveCount(0);
+  // v2's Expanded rows, chosen in the settings sheet.
+  await page.getByTestId('products-settings-button').click();
+  await page.getByTestId('products-settings-variations-popover').click();
+  await expect(page.getByTestId('products-settings-variations-popover')).toHaveAttribute('aria-selected', 'true');
+  await page.getByTestId('products-settings-close').click();
+  await expect(page.getByTestId('products-settings-sheet')).not.toBeVisible();
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -436,6 +453,8 @@ test('the Products area\'s Type column and Product SKU and Attributes lines show
     await page.getByTestId('products-settings-product-attributes').click();
     await expect(page.getByTestId('products-settings-product-attributes')).toHaveAttribute('aria-checked', 'true');
     await expect(page.getByTestId('products-settings-product-barcode')).toHaveAttribute('aria-checked', 'false');
+    // The sub-rows below are v2's Expanded rows (a new device is on Open in place).
+    await page.getByTestId('products-settings-variations-popover').click();
     await page.getByTestId('products-settings-close').click();
     await expect(head('Type')).toBeVisible();
     await expect(page.getByTestId(`product-type-${product.id}`)).toHaveText('E2E Apparel');
