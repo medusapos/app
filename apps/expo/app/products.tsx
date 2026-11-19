@@ -9,7 +9,7 @@ import { Image } from '@tallyui/primitives';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { ProductsAreaColumnsButton } from '../components/products-area-columns-settings';
-import { ProductsTagsChip } from '../components/products-tags-chip';
+import { PRODUCTS_COLLECTIONS_COPY, ProductsTagsChip } from '../components/products-tags-chip';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
@@ -19,10 +19,12 @@ import {
   productAreaRows, productAreaStockLine, productTypeIds, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
   PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE, PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL,
   PRODUCTS_SHOWING, PRODUCTS_VARIATIONS, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS,
+  filterProductAreaRowsByCollection, listProductCollections, productCollectionIds, PRODUCTS_NONE_IN_COLLECTION,
   type ProductAreaItem, type ProductAreaRow,
 } from '../lib/products-area';
 import { DEFAULT_PRODUCTS_AREA_COLUMNS, useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
 import { useProductSettings } from '../lib/product-settings';
+import { useProductCollections } from '../lib/product-collections';
 import { useProductTypes } from '../lib/product-types';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -187,6 +189,8 @@ export default function ProductsAreaScreen() {
   const [categoryId, setCategoryId] = useState<string | null>(() =>
     session ? loadProductsAreaCategory(defaultStorage(), session.baseUrl) : null);
   const [tagId, setTagId] = useState<string | null>(() => session ? loadProductsAreaTag(defaultStorage(), session.baseUrl) : null);
+  // The collection choice is for this visit only, as In stock and On sale are.
+  const [collectionId, setCollectionId] = useState<string | null>(null);
   const [inStockOnly, setInStockOnly] = useState(false);
   const [onSaleOnly, setOnSaleOnly] = useState(false);
   const columns = useProductsAreaColumns(defaultStorage(), session?.baseUrl ?? '');
@@ -211,9 +215,17 @@ export default function ProductsAreaScreen() {
   // A chosen tag no longer in the catalogue counts as none, as the category does.
   const activeTag = tags.find((tag) => tag.id === tagId) ?? null;
   const activeTagId = activeTag?.id ?? null;
+  // Collection titles come from Medusa's store API (the document carries only `collection_id`); a collection without a
+  // title read yet is not listed, and a chosen collection not in the list counts as none.
+  const collectionIds = useMemo(() => ready ? productCollectionIds(ready.products) : [], [ready]);
+  const collectionTitles = useProductCollections(session?.baseUrl, collectionIds);
+  const collections = useMemo(() => ready ? listProductCollections(ready.products, collectionTitles) : [], [ready, collectionTitles]);
+  const activeCollection = collections.find((collection) => collection.id === collectionId) ?? null;
+  const activeCollectionId = activeCollection?.id ?? null;
   const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsOnSale(filterProductAreaRowsInStock(
-    filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId), inStockOnly), onSaleOnly), search),
-  [rows, activeId, activeTagId, inStockOnly, onSaleOnly, search]);
+    filterProductAreaRowsByCollection(filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId),
+      activeCollectionId), inStockOnly), onSaleOnly), search),
+  [rows, activeId, activeTagId, activeCollectionId, inStockOnly, onSaleOnly, search]);
   // v2's Variations choice is the Sale's own setting: 'list' opens a product in place, 'popover' is Expanded rows here.
   const { settings: productSettings, save: saveProductSettings } = useProductSettings(defaultStorage(), session?.baseUrl ?? '');
   const inPlace = productSettings.variations === 'list';
@@ -249,7 +261,8 @@ export default function ProductsAreaScreen() {
     setOnSaleOnly(false);
   };
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
-    : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
+    : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : activeCollection ? PRODUCTS_NONE_IN_COLLECTION(activeCollection.value)
+      : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
       : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
   return <ToggleVariations.Provider value={toggleVariations}><OpensInPlace.Provider value={inPlace}><ProductLines.Provider value={columns.settings}>
   <View className="flex-1 bg-background" role="main" aria-label="Products">
@@ -263,7 +276,7 @@ export default function ProductsAreaScreen() {
       }} />}
       {!openMenu && <AreaAccountButton />}
     </View>
-    {/* In stock and On sale lead, as in v2's chip row, Tags last; the category and tag are kept per store, neither chip is. */}
+    {/* In stock and On sale lead, as in v2's chip row, Tags and Collections last; the category and tag are kept per store, no chip is. */}
     {ready ? <View className="flex-row items-center pl-4">
       <View className="flex-row gap-2 py-2">
         <Pressable testID="products-in-stock" role="button" aria-pressed={inStockOnly} accessibilityLabel={PRODUCTS_IN_STOCK_LABEL}
@@ -286,11 +299,13 @@ export default function ProductsAreaScreen() {
           setCategoryId(id === '' ? null : id);
           saveProductsAreaCategory(defaultStorage(), session.baseUrl, id === '' ? null : id);
         }} /> : null}
-      {tags.length ? <View className="shrink-0 py-2 pr-4 pl-2">
-        <ProductsTagsChip tags={tags} selectedId={activeTagId} onSelect={(id) => {
+      {tags.length || collections.length ? <View className="shrink-0 flex-row gap-2 py-2 pr-4 pl-2">
+        {tags.length ? <ProductsTagsChip tags={tags} selectedId={activeTagId} onSelect={(id) => {
           setTagId(id);
           saveProductsAreaTag(defaultStorage(), session.baseUrl, id);
-        }} />
+        }} /> : null}
+        {collections.length ? <ProductsTagsChip tags={collections} selectedId={activeCollectionId} onSelect={setCollectionId}
+          copy={PRODUCTS_COLLECTIONS_COPY} /> : null}
       </View> : null}
     </View> : null}
     <View className="px-4 pb-2">

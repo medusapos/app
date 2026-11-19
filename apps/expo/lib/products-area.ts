@@ -9,6 +9,8 @@ export type ProductAreaRow = {
   regularPrice: string; salePrice: string; onSale: boolean;
   // The product's Medusa tag ids, shared by its variant rows.
   tagIds: string[];
+  // The product's Medusa product collection id (null without one), shared by its variant rows.
+  collectionId: string | null;
   // The product's primary image (Medusa's thumbnail), shared by its variant rows.
   imageUrl?: string;
   // The product's Medusa product type value ('' without one), shared by its variant rows.
@@ -79,12 +81,33 @@ export function productTags(doc: unknown): ProductTag[] {
     && typeof tag.value === 'string' && tag.value !== '').map(({ id, value }) => ({ id, value }));
 }
 
+const byValue = (a: ProductTag, b: ProductTag) =>
+  a.value.localeCompare(b.value, undefined, { numeric: true, sensitivity: 'base' }) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
 /** Every tag across the products, once per id (the first value seen), by value in natural order, then by id. */
 export function listProductTags(products: readonly unknown[]): ProductTag[] {
   const byId = new Map<string, ProductTag>();
   for (const product of products) for (const tag of productTags(product)) if (!byId.has(tag.id)) byId.set(tag.id, tag);
-  return [...byId.values()].sort((a, b) =>
-    a.value.localeCompare(b.value, undefined, { numeric: true, sensitivity: 'base' }) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+  return [...byId.values()].sort(byValue);
+}
+
+/** The Medusa product's `collection_id`, or null when it is missing, empty or not a string. */
+function productCollectionId(doc: unknown): string | null {
+  const id = (doc as { collection_id?: unknown } | null)?.collection_id;
+  return typeof id === 'string' && id !== '' ? id : null;
+}
+
+/** The products' non-empty `collection_id`s, once each, sorted. */
+export function productCollectionIds(products: readonly unknown[]): string[] {
+  return [...new Set(products.map(productCollectionId).filter((id): id is string => id !== null))].sort();
+}
+
+/** The products' collections that have a title in `titles` (id → title), as `{ id, value: title }`, sorted as the tags. */
+export function listProductCollections(products: readonly unknown[], titles: ReadonlyMap<string, string>): ProductTag[] {
+  return productCollectionIds(products).flatMap((id) => {
+    const value = titles.get(id);
+    return value ? [{ id, value }] : [];
+  }).sort(byValue);
 }
 
 export const PRODUCTS_ADMIN_NOTE = 'Products are read-only here. Edit names, prices and stock in Medusa Admin.';
@@ -102,6 +125,10 @@ export const PRODUCTS_TAGS_LABEL = 'Tags';
 export const PRODUCTS_TAGS_SEARCH = 'Search Tags';
 export const PRODUCTS_TAGS_NONE = 'No tags match.';
 export const PRODUCTS_NONE_TAGGED = (tag: string) => `No products tagged “${tag}” match.`;
+export const PRODUCTS_COLLECTIONS_LABEL = 'Collections';
+export const PRODUCTS_COLLECTIONS_SEARCH = 'Search Collections';
+export const PRODUCTS_COLLECTIONS_NONE = 'No collections match.';
+export const PRODUCTS_NONE_IN_COLLECTION = (title: string) => `No products in “${title}” match.`;
 // The footer under the list: rows shown after the search and chips, of the sellable catalogue's rows.
 export const PRODUCTS_SHOWING = (shown: number, total: number) => `Showing ${shown} of ${total}`;
 
@@ -142,6 +169,7 @@ export function productAreaRows(products: readonly unknown[], traits: ProductTra
       categories: categories.map((category) => category.name).join(', '),
       categoryIds: categories.map((category) => category.id),
       tagIds: productTags(product).map((tag) => tag.id),
+      collectionId: productCollectionId(product),
       imageUrl: traits.getImageUrl(product),
       type: productTypeValue(product, types),
       attributes: variantAttributes(product, variant.id),
@@ -196,6 +224,7 @@ export function productAreaProducts(products: readonly unknown[], traits: Produc
       categories: categories.map((category) => category.name).join(', '),
       categoryIds: categories.map((category) => category.id),
       tagIds: productTags(product).map((tag) => tag.id),
+      collectionId: productCollectionId(product),
       imageUrl: traits.getImageUrl(product),
     };
   });
@@ -254,6 +283,12 @@ export function filterProductAreaRowsByCategory(rows: ProductAreaRow[], category
 export function filterProductAreaRowsByTag(rows: ProductAreaRow[], tagId: string | null): ProductAreaRow[] {
   if (!tagId) return rows;
   return rows.filter((row) => row.tagIds.includes(tagId));
+}
+
+/** Rows of products in the collection; no collection (null or '') keeps them all. */
+export function filterProductAreaRowsByCollection(rows: ProductAreaRow[], collectionId: string | null): ProductAreaRow[] {
+  if (!collectionId) return rows;
+  return rows.filter((row) => row.collectionId === collectionId);
 }
 
 /** Rows whose name, SKU or barcode holds every term of the query, ignoring case (v2: "finds products by name, SKU or
