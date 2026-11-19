@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadPrintingSettings } from '../lib/printing-settings';
+import { BUILT_IN_PRINTER, printTestPage } from '../lib/printers';
 import { printReceiptPage } from '../lib/receipt-templates';
 import { saveSession } from '../lib/session';
 import { saveCachedSettings } from '../lib/store-settings';
@@ -30,6 +31,11 @@ vi.mock('expo-router', () => ({
   </> },
 }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+// A printer's Test print, observed; the rest of the module (profiles, test page) stays real.
+vi.mock('../lib/printers', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/printers')>(),
+  printTestPage: vi.fn(),
+}));
 // Test print goes to the print dialog; the rest of the module (templates, sample, page) stays real.
 vi.mock('../lib/receipt-templates', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/receipt-templates')>(),
@@ -239,6 +245,80 @@ describe('Settings › Printing › Receipt templates', () => {
         expect(screen.queryByTestId(`settings-receipt-template-${id}-preview`)).toBeNull();
       }
       expect(screen.queryByRole('button', { name: /^Preview/ })).toBeNull();
+    } finally { Platform.OS = original; }
+  });
+});
+
+describe('Settings › Printing › Printers', () => {
+  async function openPrinting() {
+    setWindowWidth(1280, 800);
+    await mount();
+    fireEvent.click(screen.getByTestId('settings-nav-printing'));
+    return screen.getByTestId('settings-printers');
+  }
+
+  it('on a wide window lists the built-in print dialog between Printing and Receipt templates, with no Add printer', async () => {
+    const group = await openPrinting();
+    expect(follows(screen.getByTestId('settings-printing'), group)).toBe(true);
+    expect(follows(group, screen.getByTestId('settings-receipt-templates'))).toBe(true);
+    expect(within(group).getByText('Printers')).toBeTruthy();
+    expect(within(group).getByText('Devices receipts can be sent to.')).toBeTruthy();
+    const row = within(group).getByTestId('settings-printer-system');
+    expect(within(row).getByText('Print dialog')).toBeTruthy();
+    expect(within(row).getByText('Built-in')).toBeTruthy();
+    expect(within(row).getByRole('button', { name: 'Test print Print dialog' }).textContent).toBe('Test print');
+    expect(within(group).queryByTestId('settings-printer-system-print-status')).toBeNull();
+    expect(screen.queryByText(/Add printer/i)).toBeNull();
+    expect(screen.queryByLabelText(/Add printer/i)).toBeNull();
+    expect(screen.queryByRole('button', { name: /Add printer/i })).toBeNull();
+  });
+
+  it('Test print prints a test page through the built-in printer and says how it went', async () => {
+    saveCachedSettings(localStorage, baseUrl, {
+      storeName: 'Corner shop', currency: 'GBP', location: { id: 'loc', name: 'Main', countryCode: 'GB', addressLine: '2 Low Road' },
+    });
+    vi.mocked(printTestPage).mockResolvedValueOnce(undefined);
+    await openPrinting();
+    await act(async () => { fireEvent.click(screen.getByTestId('settings-printer-system-test-print')); });
+    expect(printTestPage).toHaveBeenCalledOnce();
+    const [profile, page] = vi.mocked(printTestPage).mock.calls[0]!;
+    expect(profile).toEqual(BUILT_IN_PRINTER);
+    expect(page).toContain('Corner shop');
+    expect(page).toContain('Test print');
+    expect((await screen.findByTestId('settings-printer-system-print-status')).textContent).toBe('Sent to Print dialog');
+
+    vi.mocked(printTestPage).mockRejectedValueOnce(new Error('jammed'));
+    await act(async () => { fireEvent.click(screen.getByTestId('settings-printer-system-test-print')); });
+    await waitFor(() => expect(screen.getByTestId('settings-printer-system-print-status').textContent).toBe("Couldn't print. Try again."));
+
+    let settle!: () => void;
+    vi.mocked(printTestPage).mockReturnValueOnce(new Promise<void>((resolve) => { settle = resolve; }));
+    await act(async () => { fireEvent.click(screen.getByTestId('settings-printer-system-test-print')); });
+    expect(screen.getByTestId('settings-printer-system-test-print').getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { fireEvent.click(screen.getByTestId('settings-printer-system-test-print')); });
+    expect(printTestPage).toHaveBeenCalledTimes(3);
+    await act(async () => { settle(); });
+    expect(screen.getByTestId('settings-printer-system-test-print').getAttribute('aria-disabled')).not.toBe('true');
+    expect(screen.getByTestId('settings-printer-system-print-status').textContent).toBe('Sent to Print dialog');
+  });
+
+  it('on a phone shows the Printers group and its Test print', async () => {
+    setWindowWidth(390, 844);
+    params.section = 'printing';
+    await mount();
+    expect(within(screen.getByTestId('settings-printers')).getByTestId('settings-printer-system-test-print')).toBeTruthy();
+  });
+
+  it('on a native till says the printer is not available, with no Test print', async () => {
+    const original = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      setWindowWidth(390, 844);
+      params.section = 'printing';
+      await mount();
+      expect(screen.getByTestId('settings-printer-system-status').textContent).toBe('Not available on this device');
+      expect(screen.queryByTestId('settings-printer-system-test-print')).toBeNull();
+      expect(screen.queryByRole('button', { name: /^Test print/ })).toBeNull();
     } finally { Platform.OS = original; }
   });
 });

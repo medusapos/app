@@ -9,6 +9,7 @@ import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
+import { PrintersGroup } from '../components/printers-group';
 import { ReceiptTemplatesGroup } from '../components/receipt-templates';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { StripHeightContext } from '../components/store-refused';
@@ -313,6 +314,7 @@ function PrintingSection({ session }: { session: Session }) {
       <Text testID="settings-printing-method" className="max-w-40 text-right text-sm text-foreground">{printMethodLabel()}</Text>
     } />
   </SettingsGroup>
+  <PrintersGroup session={session} />
   <ReceiptTemplatesGroup session={session} />
   </>;
 }

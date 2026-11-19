@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import type { RxCollection } from 'rxdb';
 import {
-  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type UseOrderOutboxResult,
+  createHttpCommandTransport, getDeviceId, PosOrderOpenClosedError, useOrderOutbox, type PosOrder, type UseOrderOutboxResult,
 } from '@tallyui/pos';
 import { markBusy, reportStorageStartFailure, storageStartFailureOf } from './live-tab';
 import { openOrderStore } from './order-store';
@@ -65,4 +66,9 @@ export function useOutboxContext() {
   const outbox = useContext(OutboxContext);
   if (!outbox) throw new Error('useOutboxContext must be used inside OutboxProvider');
   return outbox;
+}
+
+/** The outbox's order collection, or null outside an OutboxProvider (a settings test mounts none); never throws. */
+export function useOutboxOrders(): RxCollection<PosOrder> | null {
+  return useContext(OutboxContext)?.orders ?? null;
 }
