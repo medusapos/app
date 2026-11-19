@@ -73,7 +73,7 @@ it('opens a Product Settings sheet with a switch for each optional column, Image
   for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe(off.includes(id) ? 'false' : 'true');
 });
 
-// jsdom's react-native-web drops className, so the strike-through is checked in the browser (e2e/products-area.spec.ts).
+// jsdom's react-native-web drops className, so the greying is checked in the browser (e2e/products-area.spec.ts).
 it("shows v2's Regular price and Sale price columns when their switches go on, and saves the choice", () => {
   openSheet();
   fireEvent.click(column('regularPrice'));

@@ -233,7 +233,7 @@ test('the Products area\'s settings switches show whole inside the sheet at 1280
   await page.getByTestId('products-settings-close').click();
 });
 
-test('the Products area\'s Regular price and Sale price columns strike a sale variant\'s regular price beside its sale price', async ({ page }) => {
+test('the Products area\'s Regular price and Sale price columns grey a sale variant\'s regular price beside its sale price', async ({ page }) => {
   const token = await adminToken();
   const variantId = await variantIdBySku(token, 'E2E-3');
   const created = await fetch(`${backend}/admin/price-lists`, {
@@ -259,16 +259,17 @@ test('the Products area\'s Regular price and Sale price columns strike a sale va
     await page.getByTestId('products-settings-close').click();
     await expect(head('Regular price')).toBeVisible();
     await expect(head('Sale price')).toBeVisible();
-    // E2E product 3 is on sale at €3.00: its €4.25 regular price is struck through.
+    // E2E product 3 is on sale at €3.00: its €4.25 regular price is greyed, as v2's demo, not struck through.
     await expect(page.getByTestId(`product-sale-price-${variantId}`)).toHaveText('€3.00');
     const saleRegular = page.getByTestId(`product-regular-price-${variantId}`);
     await expect(saleRegular).toHaveText('€4.25');
-    await expect(saleRegular).toHaveCSS('text-decoration-line', /line-through/);
     // E2E product 1 has no sale: its regular price stands and its sale cell is empty.
     const first = page.locator('[data-testid^="product-row-"]', { hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first();
     const regular = first.locator('[data-testid^="product-regular-price-"]');
     await expect(regular).toHaveText('€2.00');
-    await expect(regular).not.toHaveCSS('text-decoration-line', /line-through/);
+    await expect(saleRegular).not.toHaveCSS('text-decoration-line', /line-through/);
+    const colour = (cell: typeof regular) => cell.evaluate((el) => getComputedStyle(el).color);
+    expect(await colour(saleRegular)).not.toBe(await colour(regular));
     await expect(first.locator('[data-testid^="product-sale-price-"]')).toHaveText('');
     await page.getByTestId('products-settings-button').click();
     await page.getByTestId('products-settings-restore').click();

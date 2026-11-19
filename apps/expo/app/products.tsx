@@ -54,9 +54,9 @@ const COLUMNS: ProductTableColumn<ProductAreaRow>[] = [
   { id: 'category', header: 'Category', flex: 1.5, sortValue: (row) => row.categories,
     render: (row) => <Text numberOfLines={1}>{row.categories}</Text> },
   { id: 'price', header: 'Price', align: 'right', flex: 1, render: (row) => <Text className="tabular-nums">{row.price}</Text> },
-  // v2's Regular and Sale price: the regular price is struck through beside a sale price.
+  // v2's Regular and Sale price: the regular price is greyed beside a sale price, as v2's demo.
   { id: 'regularPrice', header: 'Regular price', align: 'right', flex: 1, render: (row) =>
-    <Text className={`tabular-nums${row.onSale ? ' line-through text-muted-foreground' : ''}`}
+    <Text className={`tabular-nums${row.onSale ? ' text-muted-foreground' : ''}`}
       testID={`product-regular-price-${row.id}`}>{row.regularPrice}</Text> },
   { id: 'salePrice', header: 'Sale price', align: 'right', flex: 1, render: (row) =>
     <Text className="tabular-nums" testID={`product-sale-price-${row.id}`}>{row.salePrice}</Text> },
