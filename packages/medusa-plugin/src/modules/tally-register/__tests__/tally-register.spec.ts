@@ -164,22 +164,21 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
         expect(await snapshot()).toEqual(before)
       })
 
-      it('a session opened at contract 1 is refused register_session_closed with no data at every command contract', async () => {
+      it('a session opened at contract 1 is refused register_session_superseded with the take-over data at every command contract', async () => {
         const legacyOwner = { ...first, deviceId: 'device-1' }
         await service.openSession(legacyOwner)
         await service.recordMovement(movement)
         await service.openSession(taker)
         const before = await snapshot()
-        const closed = { kind: 'conflict', code: 'register_session_closed' }
         for (const contract of [undefined, 1, 2, 3]) {
-          expect(await service.recordMovement({ ...movement, movementId: randomUUID(), contract })).toEqual(closed)
-          expect(await service.voidMovement({ ...voidPayload, contract })).toEqual(closed)
+          expect(await service.recordMovement({ ...movement, movementId: randomUUID(), contract })).toEqual(superseded)
+          expect(await service.voidMovement({ ...voidPayload, contract })).toEqual(superseded)
           for (const status of ['open', 'counting', 'closed'] as const) {
-            expect(await service.transition({ sessionId: first.sessionId, status, at, contract })).toEqual(closed)
+            expect(await service.transition({ sessionId: first.sessionId, status, at, contract })).toEqual(superseded)
           }
-          expect(await service.submitClosure({ ...closure(), contract })).toEqual(closed)
+          expect(await service.submitClosure({ ...closure(), contract })).toEqual(superseded)
         }
-        for (const contract of [undefined, 2]) expect(await service.openSession({ ...legacyOwner, contract })).toEqual(closed)
+        for (const contract of [undefined, 2]) expect(await service.openSession({ ...legacyOwner, contract })).toEqual(superseded)
         expect(await snapshot()).toEqual(before)
       })
 
