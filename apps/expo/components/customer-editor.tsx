@@ -133,7 +133,11 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
     {optionalDetails && !(open.billing && open.shipping) && <View className="flex-row flex-wrap gap-2 px-4 pb-4">
       {([['billing', 'Billing Address'], ['shipping', 'Shipping Address']] as const).filter(([block]) => !open[block])
         .map(([block, label]) => <Button key={block} variant="outline" testID={`customer-add-${block}`}
-          disabled={billingStatus !== 'ready'} onPress={() => setOpen((current) => ({ ...current, [block]: true }))}>
+          disabled={billingStatus !== 'ready'} onPress={() => {
+            // Shipping added with no billing on screen opens its own fields: there is no billing to be the same as.
+            if (block === 'shipping' && !open.billing) setSameAsBilling(false);
+            setOpen((current) => ({ ...current, [block]: true }));
+          }}>
           <View className="text-foreground"><PlusIcon size={14} /></View>
           <Text>{label}</Text>
         </Button>)}

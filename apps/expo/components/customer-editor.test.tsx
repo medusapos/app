@@ -285,7 +285,6 @@ describe('CustomerEditor shipping', () => {
     changeForm('email@example.com', created.email);
     changeForm('First name', 'Nia');
     fireEvent.click(screen.getByTestId('customer-add-shipping'));
-    fireEvent.click(screen.getByTestId('customer-shipping-different'));
     change('Shipping city', 'York');
     await submit();
     const context = { connectorId: 'medusa', baseUrl: 'https://store.test', headers: { Authorization: 'Bearer t' } };
@@ -369,6 +368,36 @@ describe('CustomerEditor optional details', () => {
     expect(screen.getByTestId('customer-shipping-different')).toBeTruthy();
     expect(screen.queryByTestId('customer-add-billing')).toBeNull();
     expect(screen.queryByTestId('customer-add-shipping')).toBeNull();
+  });
+  it('opens the shipping fields when Shipping Address is pressed with the billing block closed', () => {
+    render(<CustomerEditor customer={null} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails />);
+    fireEvent.click(screen.getByTestId('customer-add-shipping'));
+    expect(input('Shipping address line 1')).toBeTruthy();
+    expect(screen.queryByTestId('customer-shipping-different')).toBeNull();
+    expect(screen.queryByLabelText('Address line 1')).toBeNull();
+    expect(screen.getByTestId('customer-add-billing')).toBeTruthy();
+    change('Shipping address line 1', '2 Dock Rd');
+    fireEvent.click(screen.getByTestId('customer-add-billing'));
+    expect(input('Address line 1')).toBeTruthy();
+    expect(input('Shipping address line 1').value).toBe('2 Dock Rd');
+  });
+  it('saves a shipping address typed with no billing block as shipping alone', async () => {
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<CustomerEditor customer={null} save={save} onUnauthorized={vi.fn()} optionalDetails />);
+    fireEvent.click(screen.getByTestId('customer-add-shipping'));
+    change('Shipping address line 1', '2 Dock Rd');
+    change('Shipping city', 'Hull');
+    changeForm('email@example.com', 'nia@example.com');
+    await submit();
+    expect(save).toHaveBeenCalledExactlyOnceWith(expect.any(Object), undefined, { address1: '2 Dock Rd', city: 'Hull' });
+  });
+  it('still opens shipping as Same as billing when billing was opened first', () => {
+    render(<CustomerEditor customer={null} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails />);
+    fireEvent.click(screen.getByTestId('customer-add-billing'));
+    fireEvent.click(screen.getByTestId('customer-add-shipping'));
+    expect(screen.getByText('Same as billing')).toBeTruthy();
+    expect(screen.getByTestId('customer-shipping-different')).toBeTruthy();
+    expect(screen.queryByLabelText('Shipping address line 1')).toBeNull();
   });
   it('opens both blocks for an edit with a stored billing address', async () => {
     render(<CustomerEditor customer={ada} save={vi.fn()} onUnauthorized={vi.fn()} optionalDetails
