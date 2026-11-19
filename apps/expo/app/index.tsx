@@ -491,7 +491,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         <View className="flex-1">{paidReceipt}</View>
         <View dataSet={{ print: 'hide' }} className="w-96 self-stretch" style={{ paddingTop: topInset }}>
           <PaidSummary order={sale.stage.order} posOrder={sale.stage.posOrder} storeName={receiptStore.name}
-            taxLabel={taxLabel} formatDate={(iso) => formatPaidDate(iso)} />
+            taxLabel={taxLabel} formatDate={(iso) => formatPaidDate(iso)} awaiting={awaiting} />
         </View>
       </View> : paidReceipt :
         <View dataSet={{ print: 'hide' }} className="flex-1 bg-background">
