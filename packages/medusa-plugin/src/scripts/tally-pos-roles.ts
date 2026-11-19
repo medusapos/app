@@ -24,8 +24,8 @@ export const POS_CASHIER_POLICIES = [
   'customer:create',
 ]
 
-// A flat list of cashier policies plus variance approval; no role inheritance.
-export const POS_MANAGER_POLICIES = [...POS_CASHIER_POLICIES, 'tally_pos:approve_variance']
+// A flat list of cashier policies plus variance and device-clear approval; no role inheritance.
+export const POS_MANAGER_POLICIES = [...POS_CASHIER_POLICIES, 'tally_pos:approve_variance', 'tally_pos:clear_device']
 
 export default async function tallyPosRoles({ container }: ExecArgs) {
   const logger = container.resolve<Logger>(ContainerRegistrationKeys.LOGGER)
@@ -37,7 +37,7 @@ export default async function tallyPosRoles({ container }: ExecArgs) {
     const rbac = container.resolve(Modules.RBAC)
     for (const { name, description, keys } of [
       { name: 'POS cashier', description: 'Use the POS and access its catalogue and customers', keys: POS_CASHIER_POLICIES },
-      { name: 'POS manager', description: 'Use the POS and approve register close variances', keys: POS_MANAGER_POLICIES },
+      { name: 'POS manager', description: 'Use the POS, approve register close variances and approve clearing a device', keys: POS_MANAGER_POLICIES },
     ]) {
       const [existing] = await rbac.listRbacRoles({ name })
       const role = existing ?? (await rbac.createRbacRoles([{ name, description }]))[0]
