@@ -171,6 +171,31 @@ medusaIntegrationTestRunner({
       expect(response.data).toEqual({ code: 'approval_rate_limited', message: 'Too many failed approvals. Try again in a few minutes.' })
     })
 
+    // Each actor fires `each` wrong-password register approvals (one session apiece) and `each` device-clear approvals
+    // at once, all at one manager email.
+    async function burst(actors: Record<string, string>[], each: number, email: string) {
+      const sessions = Array.from({ length: actors.length * each }, () => open())
+      await post(sessions)
+      const responses = await Promise.all(actors.flatMap((actor, a) => Array.from({ length: each }, (_, i) => [
+        approve({ sessionId: sessions[a * each + i].payload.sessionId, email, password: 'wrong-password' }, actor),
+        api.post('/tally/v1/device-clear-approvals', { email, password: 'wrong-password' },
+          { headers: actor, validateStatus: () => true }),
+      ]).flat()))
+      return responses.map(response => response.status).sort()
+    }
+
+    it('a parallel burst across both approval routes gets exactly the actor\'s budget', async () => {
+      for (let round = 0; round < 3; round++) {
+        const target = (await makeUser()).email
+        expect(await burst([await cashier()], 5, target)).toEqual([...Array(5).fill(401), ...Array(5).fill(429)])
+      }
+    })
+
+    it('a parallel burst from three actors gets exactly the email\'s budget', async () => {
+      const actors = [await cashier(), await cashier(), await cashier()]
+      expect(await burst(actors, 2, manager.email)).toEqual([...Array(10).fill(401), ...Array(2).fill(429)])
+    })
+
     it('limits a normalized target email after ten failures across two actors', async () => {
       for (const actor of [headers, await cashier()]) {
         for (let i = 0; i < 5; i++) expect((await approve({

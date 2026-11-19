@@ -19,9 +19,8 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
     check(typeof value === 'string' && value.length > 0, field, 'a non-empty string')
   if (errors.length) return res.status(400).json({ code: 'invalid_payload', message: errors.join('; ') })
 
-  const stored = await req.scope.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE)
-    .approvalFailureCounts(req.auth_context.actor_id, email as string)
-  const attempt = deviceClearAttempts.admit(req.auth_context.actor_id, email as string, stored)
+  const attempt = await req.scope.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE).withApprovalBudget(
+    req.auth_context.actor_id, email as string, stored => deviceClearAttempts.admit(req.auth_context.actor_id, email as string, stored))
   if (!attempt) return res.status(429).json({ code: 'approval_rate_limited',
     message: 'Too many failed approvals. Try again in a few minutes.' })
   const { success, authIdentity, mfaChallenge } = await req.scope.resolve(Modules.AUTH)

@@ -43,6 +43,13 @@ it('stops counting attempts older than the failure window', () => {
   expect(attempts.admit('user_a', 'manager@example.com')).toBeDefined()
 })
 
+it('counts() drops attempts older than the failure window without an admit', () => {
+  const { attempts, advance } = setup()
+  for (let i = 0; i < 3; i++) expect(attempts.admit('user_a', 'manager@example.com')).toBeDefined()
+  advance(APPROVAL_FAILURE_WINDOW_MS + 1)
+  expect(attempts.counts('user_a', 'manager@example.com')).toEqual({ actor: 0, email: 0 })
+})
+
 it('counts stored register failures against the device-clear limit', () => {
   const { attempts } = setup()
   expect(attempts.admit('user_a', 'manager@example.com', { actor: 4, email: 0 })).toBeDefined()

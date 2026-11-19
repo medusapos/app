@@ -3,7 +3,7 @@ import {
 } from '../../../../modules/tally-register/service'
 
 // Failed device-clear approvals, counted in this process's memory. They share one budget with register approvals:
-// each route adds the other's count before its limit check. This in-memory half resets on restart and is per server
+// each route adds the other's count under the same advisory locks. This in-memory half resets on restart, per server
 // instance. No stored row, because tally_register_approval binds each approval to a register session and a device
 // clear has none.
 export type DeviceClearAttempt = { succeed(): void }
