@@ -61,7 +61,7 @@ describe('Demo card', () => {
       'Ring up a sale and take cash or card',
       'Split a payment: part card, the rest cash (Split payment at checkout)',
       'Attach a customer to a sale: search one, or add a new one',
-      'Park a sale, then resume it from Parked sales',
+      'Park a sale with +, then resume it from its tab',
       "Change a line's price in the cart",
       'Add a fee, shipping or a custom item to a sale (Add charge in the cart)',
       'Close the register with a cash count',

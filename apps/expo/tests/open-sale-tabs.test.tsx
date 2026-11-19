@@ -35,6 +35,28 @@ const button = (name: string | RegExp) => screen.getByRole('button', { name });
 const saleTabs = () => within(within(screen.getByTestId('open-sale-tabs')).getByRole('tablist'));
 const add = () => fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 const drafts = () => draftsCollection(store.orders)!;
+const newSale = () => act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
+// jsdom lays nothing out: these getters make the tabs' scroller 1000 wide inside 300, so the strip overflows.
+const widths = { scrollWidth: 1000, clientWidth: 300 } as const;
+const realWidths = Object.fromEntries(Object.keys(widths)
+  .map((key) => [key, Object.getOwnPropertyDescriptor(HTMLElement.prototype, key)]));
+function overflowTabs() {
+  for (const [key, size] of Object.entries(widths)) Object.defineProperty(HTMLElement.prototype, key, {
+    configurable: true, get(this: HTMLElement) { return this.getAttribute('role') === 'tablist' ? size : 0; } });
+}
+function fitTabs() {
+  for (const [key, real] of Object.entries(realWidths)) {
+    if (real) Object.defineProperty(HTMLElement.prototype, key, real);
+    else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[key];
+  }
+}
+async function parkTwo() {
+  await mount();
+  add(); await newSale();
+  add(); await newSale();
+  await waitFor(() => expect(screen.getAllByTestId(/^open-sale-tab-.*-who$/)).toHaveLength(2));
+  return (await drafts().find().exec()).map((draft) => draft.id).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
 
 beforeEach(async () => {
   setWindowWidth(1280, 800);
@@ -63,6 +85,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   cleanup();
+  fitTabs();
   await store.close();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
@@ -81,24 +104,109 @@ it('shows an empty tab strip and New for a blank cart', async () => {
   expect(within(screen.getByTestId('new-sale-tab')).getByText('New')).toBeTruthy();
 });
 
-it('shows no parked-sales chip when nothing is parked, and no header link', async () => {
+it('shows no count when nothing is parked, and no header link', async () => {
   await mount();
-  expect(screen.queryByTestId('parked-sales-chip')).toBeNull();
+  expect(screen.queryByTestId('open-orders-count')).toBeNull();
   expect(screen.queryByText('Parked sales')).toBeNull();
 });
 
-it('counts a parked sale and opens the parked sales sheet from the chip', async () => {
-  await mount(); add();
-  await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
-  const chip = screen.getByTestId('parked-sales-chip');
-  await waitFor(() => expect(chip.textContent).toBe('1 ▴'));
-  expect(button('Parked sales (1)')).toBe(chip);
-  const strip = screen.getByTestId('open-sale-tabs');
-  expect(chip.parentElement?.firstElementChild).toBe(chip);
-  expect(chip.nextElementSibling).toBe(strip.parentElement);
+it('with a parked sale whose tabs fit, no count shows: its tab is the way back', async () => {
+  await mount(); add(); await newSale();
+  const [draft] = await drafts().find().exec();
+  await waitFor(() => expect(screen.getAllByTestId(/^open-sale-tab-.*-who$/)).toHaveLength(1));
+  expect(screen.queryByTestId('open-orders-count')).toBeNull();
+  await act(async () => { fireEvent.click(screen.getByTestId(`open-sale-tab-${draft.id}`)); });
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+});
+
+it('when the tabs overflow, the count sits left of the tabs and opens the Open orders list in the cart\'s place', async () => {
+  overflowTabs();
+  const ids = await parkTwo();
+  const count = await screen.findByTestId('open-orders-count');
+  expect(count.textContent).toBe('2 ▴');
+  expect(button('Open orders (2)')).toBe(count);
+  expect(count.parentElement?.firstElementChild).toBe(count);
+  expect(count.nextElementSibling).toBe(screen.getByTestId('open-sale-tabs').parentElement);
+  expect(screen.queryByTestId('open-orders-list')).toBeNull();
   expect(screen.queryByTestId('parked-sales')).toBeNull();
-  fireEvent.click(chip);
-  expect(await screen.findByTestId('parked-sales')).toBeTruthy();
+  const amount = screen.getByTestId(`open-sale-tab-${ids[0]}-amount`).textContent;
+  fireEvent.click(count);
+  const list = within(await screen.findByTestId('open-orders-list'));
+  expect(list.getAllByTestId(/^open-orders-row-.*-who$/).map((who) => who.getAttribute('data-testid')))
+    .toEqual(ids.map((id) => `open-orders-row-${id}-who`));
+  for (const id of ids) {
+    expect(list.getByTestId(`open-orders-row-${id}-who`).textContent).toBe('Guest');
+    expect(list.getByTestId(`open-orders-row-${id}-items`).textContent).toBe('Shirt');
+    expect(list.getByTestId(`open-orders-row-${id}-total`).textContent).toBe(amount);
+  }
+  expect(amount).toBe('€15.00');
+  expect(screen.queryByTestId('cart-empty')).toBeNull();
+  expect(screen.getByTestId('open-orders-count').textContent).toBe('2 ▾');
+});
+
+it('a row switches to its sale and closes the list', async () => {
+  overflowTabs();
+  const [first] = await parkTwo();
+  fireEvent.click(await screen.findByTestId('open-orders-count'));
+  await act(async () => { fireEvent.click(await screen.findByTestId(`open-orders-row-${first}`)); });
+  expect(screen.queryByTestId('open-orders-list')).toBeNull();
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  expect(screen.getByTestId(`open-sale-tab-${first}`).getAttribute('aria-selected')).toBe('true');
+});
+
+it('the list marks only the sale on screen, and the mark moves with a switch', async () => {
+  overflowTabs();
+  const ids = await parkTwo();
+  const selected = () => ids.map((id) => screen.getByTestId(`open-orders-row-${id}`).getAttribute('aria-selected'));
+  for (const [index, id] of ids.entries()) {
+    fireEvent.click(await screen.findByTestId('open-orders-count'));
+    await act(async () => { fireEvent.click(await screen.findByTestId(`open-orders-row-${id}`)); });
+    expect(screen.queryByTestId('open-orders-list')).toBeNull();
+    fireEvent.click(screen.getByTestId('open-orders-count'));
+    await screen.findByTestId('open-orders-list');
+    await waitFor(() => expect(selected()).toEqual(ids.map((_, i) => String(i === index))));
+    fireEvent.click(screen.getByTestId('open-orders-close'));
+  }
+});
+
+it('a row shows its sale\'s customer, and a guest sale\'s row says Guest', async () => {
+  overflowTabs();
+  const [withCustomer, guest] = await parkTwo();
+  // Seed the parked draft as parkDraft writes a sale on a customer: the snapshot's customer and its summary name.
+  const doc = await drafts().findOne(withCustomer).exec(true);
+  const snapshot = JSON.parse(doc.get('data') as string);
+  await doc.incrementalPatch({ customerName: 'Ada Lovelace',
+    data: JSON.stringify({ ...snapshot, customer: { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.test' } }) });
+  fireEvent.click(await screen.findByTestId('open-orders-count'));
+  const list = within(await screen.findByTestId('open-orders-list'));
+  await waitFor(() => expect(list.getByTestId(`open-orders-row-${withCustomer}-who`).textContent).toBe('Ada Lovelace'));
+  expect(list.getByTestId(`open-orders-row-${guest}-who`).textContent).toBe('Guest');
+});
+
+it('Close and a second tap on the count both close the list', async () => {
+  overflowTabs();
+  await parkTwo();
+  const count = await screen.findByTestId('open-orders-count');
+  fireEvent.click(count);
+  fireEvent.click(await screen.findByTestId('open-orders-close'));
+  expect(screen.queryByTestId('open-orders-list')).toBeNull();
+  expect(screen.getByTestId('cart-empty')).toBeTruthy();
+  fireEvent.click(count);
+  expect(await screen.findByTestId('open-orders-list')).toBeTruthy();
+  fireEvent.click(count);
+  expect(screen.queryByTestId('open-orders-list')).toBeNull();
+  expect(count.textContent).toBe('2 ▴');
+});
+
+it('the count hides, and an open list closes, when the tabs fit again', async () => {
+  overflowTabs();
+  const [first] = await parkTwo();
+  fireEvent.click(await screen.findByTestId('open-orders-count'));
+  expect(await screen.findByTestId('open-orders-list')).toBeTruthy();
+  fitTabs();
+  await act(async () => { fireEvent.click(screen.getByTestId(`open-sale-tab-${first}`)); });
+  await waitFor(() => expect(screen.queryByTestId('open-orders-count')).toBeNull());
+  expect(screen.queryByTestId('open-orders-list')).toBeNull();
 });
 
 it('shows the added line as a selected Guest · Shirt tab', async () => {

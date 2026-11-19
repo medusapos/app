@@ -274,7 +274,7 @@ describe('the register on the sale screen', () => {
     await screen.findByRole('button', { name: 'Open register panel' });
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
-    await waitFor(() => expect(screen.getByTestId('parked-sales-chip').textContent).toBe('1 ▴'));
+    await waitFor(() => expect(screen.getAllByTestId(/^open-sale-tab-.*-who$/)).toHaveLength(1));
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     const count = await startCount();
     const warning = await screen.findByTestId('count-open-carts');

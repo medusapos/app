@@ -33,7 +33,7 @@ test('signed-out demo Quick start opens the docs and keeps What to try visible',
     'Ring up a sale and take cash or card',
     'Split a payment: part card, the rest cash (Split payment at checkout)',
     'Attach a customer to a sale: search one, or add a new one',
-    'Park a sale, then resume it from Parked sales',
+    'Park a sale with +, then resume it from its tab',
     "Change a line's price in the cart",
     'Add a fee, shipping or a custom item to a sale (Add charge in the cart)',
     'Close the register with a cash count',
@@ -85,10 +85,8 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.getByTestId('price-popover-cancel').click();
   await expect(page.getByTestId('price-popover')).toHaveCount(0);
   await page.getByTestId('new-sale-tab').click();
-  await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
-  await expect(page.getByTestId(/^parked-resume-/)).toBeVisible();
-  await page.getByTestId(/^parked-resume-/).click();
+  await expect(page.getByTestId(/^open-sale-tab-.*-who$/)).toBeVisible();
+  await page.getByTestId(/^open-sale-tab-.*-who$/).click();
   await page.getByTestId('cart-checkout').click();
   await expect(page.getByTestId('tender-method-external')).toBeVisible();
   await expect(page.getByTestId('tender-method-cash')).toBeVisible();

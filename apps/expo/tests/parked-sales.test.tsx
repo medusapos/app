@@ -80,16 +80,17 @@ async function mount() {
   await screen.findByTestId('product-tile-Shirt');
   return view;
 }
+const whoTabs = () => screen.queryAllByTestId(/^open-sale-tab-.*-who$/);
 async function park() {
-  const chip = screen.queryByTestId('parked-sales-chip');
-  if (chip) {
-    fireEvent.click(chip);
-    await act(async () => { fireEvent.click(screen.getByTestId('parked-sales-park')); });
-    await screen.findAllByTestId(/^parked-resume-/);
-  } else {
-    await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
-    await screen.findByRole('button', { name: /^Parked sales \(\d+\)$/ });
-  }
+  // The live sale already has its tab; once parked the cart is blank, so every tab is a parked sale's.
+  const before = (await drafts().find().exec()).length;
+  await act(async () => { fireEvent.click(screen.getByTestId('new-sale-tab')); });
+  await waitFor(() => expect(whoTabs()).toHaveLength(before + 1));
+}
+// Resume the one parked sale from its tab.
+async function resume() {
+  const [draft] = await drafts().find().exec();
+  await act(async () => { fireEvent.click(screen.getByTestId(`open-sale-tab-${draft.id}`)); });
 }
 function price(value = '10.00') {
   // v2's price popover (lineEditor="popover"): tap the line's price, key the new one in, Apply. It takes no reason.
@@ -118,8 +119,7 @@ it('parks the cart with New, starts an empty sale, and resumes the parked cart w
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   lineAction('quantity', 'Remove');
   expect(screen.getByTestId('cart-empty')).toBeTruthy();
-  fireEvent.click(button('Parked sales (1)'));
-  await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
+  await resume();
   expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
   expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €30.00');
   expect(await drafts().find().exec()).toHaveLength(0);
@@ -131,13 +131,12 @@ it('a parked sale resumed after a catalogue price change is re-priced to today\'
   add();
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   await park();
-  fireEvent.click(button('Parked sales (1)'));
   const replicated = vi.mocked(useReplicatedProducts).mock.results.at(-1)!.value;
   const product = replicated.products[0];
   vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [{ ...product,
     variants: [{ ...product.variants[0], prices: [{ amount: 15, currency_code: 'eur' }] }] }] });
   view.rerender(<><ProductsScreen /><PortalHost /></>);
-  await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
+  await resume();
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€15.00', '€15.00']);
   expect([row('Subtotal'), row('VAT 25%')]).toEqual(['Subtotal€15.00', 'VAT 25%€3.75']);
   expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €18.75');
@@ -147,12 +146,11 @@ it('a parked sale resumed after a catalogue price change is re-priced to today\'
 it('a variant no longer in the catalogue keeps its parked price on resume', async () => {
   const view = await mount();
   add(); await park();
-  fireEvent.click(button('Parked sales (1)'));
   const replicated = vi.mocked(useReplicatedProducts).mock.results.at(-1)!.value;
   vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [] });
   view.rerender(<><ProductsScreen /><PortalHost /></>);
   expect(screen.queryByTestId('product-tile-Shirt')).toBeNull();
-  await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
+  await resume();
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
   expect(screen.queryByText(/Prices changed/)).toBeNull();
@@ -160,40 +158,21 @@ it('a variant no longer in the catalogue keeps its parked price on resume', asyn
 
 it('an unchanged catalogue resumes at the same prices with no Prices changed note', async () => {
   await mount(); add(); await park();
-  fireEvent.click(button('Parked sales (1)'));
-  await act(async () => { fireEvent.click(screen.getByTestId(/^parked-resume-/)); });
+  await resume();
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
   expect(screen.queryByText(/Prices changed/)).toBeNull();
 });
 
-it('the opener counts parked sales', async () => {
+it('each parked sale is a tab, and no count shows while the tabs fit', async () => {
   await mount();
-  expect(screen.queryByTestId('parked-sales-chip')).toBeNull();
+  expect(screen.queryByTestId('open-orders-count')).toBeNull();
   for (const count of [1, 2]) {
     add();
     await park();
-    if (screen.queryByTestId('parked-sales')) fireEvent.click(screen.getByTestId('parked-sales-dismiss'));
-    expect(await screen.findByRole('button', { name: `Parked sales (${count})` })).toBeTruthy();
+    expect(whoTabs()).toHaveLength(count);
+    expect(screen.queryByTestId('open-orders-count')).toBeNull();
   }
-});
-
-it('discarding a parked sale asks first, then removes it', async () => {
-  await mount(); add(); await park();
-  fireEvent.click(button('Parked sales (1)'));
-  const [draft] = await drafts().find().exec();
-  fireEvent.click(screen.getByTestId(`parked-discard-${draft.id}`));
-  expect(screen.getByText('Discard this parked sale?')).toBeTruthy();
-  expect(await drafts().find().exec()).toHaveLength(1);
-  fireEvent.click(screen.getByTestId(`parked-discard-cancel-${draft.id}`));
-  expect(await drafts().find().exec()).toHaveLength(1);
-  fireEvent.click(screen.getByTestId(`parked-discard-${draft.id}`));
-  await act(async () => { fireEvent.click(screen.getByTestId(`parked-discard-confirm-${draft.id}`)); });
-  expect(await screen.findByTestId('parked-sales-empty')).toBeTruthy();
-  expect(await drafts().find().exec()).toHaveLength(0);
-  fireEvent.click(screen.getByTestId('parked-sales-dismiss'));
-  expect(screen.queryByTestId('parked-sales-chip')).toBeNull();
-  expect(record).not.toHaveBeenCalled();
 });
 
 it('the Price action on a line changes its unit price, and the line and total follow', async () => {

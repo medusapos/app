@@ -79,12 +79,11 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await openCart(page);
       await addNote(page, 'Park me');
       await page.getByTestId('new-sale-tab').click();
-      await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
+      await expect(page.getByTestId(/^open-sale-tab-.*-who$/)).toBeVisible();
       await expect(page.getByTestId('cart-empty')).toBeVisible();
       await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
       await expect(noteRow(page)).toHaveCount(0);
-      await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
-      await page.getByTestId(/^parked-resume-/).click();
+      await page.getByTestId(/^open-sale-tab-.*-who$/).click();
       await expect(noteRow(page)).toContainText('Park me');
       await expect(noteRow(page)).toBeInViewport();
       await payCashExact(page);
