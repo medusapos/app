@@ -103,6 +103,15 @@ describe('SettingsScreen', () => {
     await mount(<><SettingsScreen /><PortalHost /></>);
     fireEvent.click(screen.getByRole('button', { name: 'Default customer: Ada Lovelace' }));
     expect(screen.getByTestId('settings-default-customer-guest').getAttribute('aria-selected')).toBe('false');
+    expect(screen.queryByTestId('settings-default-customer-guest-check')).toBeNull();
+  });
+
+  it('with no saved default the dialog\'s Guest shows the check, and its accessible name stays Guest', async () => {
+    params.section = 'store';
+    await mount(<><SettingsScreen /><PortalHost /></>);
+    fireEvent.click(screen.getByTestId('settings-default-customer-field'));
+    expect(screen.getByTestId('settings-default-customer-guest-check')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Guest' })).toBe(screen.getByTestId('settings-default-customer-guest'));
   });
 
   it('turns on Default customer is cashier and says which Medusa customer new sales start on', async () => {

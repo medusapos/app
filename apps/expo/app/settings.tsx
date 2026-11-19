@@ -40,6 +40,7 @@ const UNKNOWN = '—';
 const SETTINGS_SPLIT_MIN_WIDTH = 768;
 const ChevronRightIcon = createSvgIcon('ChevronRightIcon', () => <Path d="m9 18 6-6-6-6" />);
 const ChevronLeftIcon = createSvgIcon('ChevronLeftIcon', () => <Path d="m15 18-6-6 6-6" />);
+const CheckIcon = createSvgIcon('CheckIcon', () => <Path d="M20 6 9 17l-5-5" />);
 
 function Field({ label, help, ...input }: { label: string; help?: string } & ComponentProps<typeof TextInput>) {
   return <View className="gap-1">
@@ -270,8 +271,12 @@ function DefaultCustomerSection({ session }: { session: Session }) {
         <ScrollView contentContainerClassName="gap-3">
           <Pressable testID="settings-default-customer-guest" accessibilityRole="button" aria-selected={!customer}
             accessibilityState={{ selected: !customer }} onPress={() => { save(null); setOpen(false); }}
-            className="items-center rounded-lg border border-border px-4 py-3">
+            // Chosen Guest wears the TallyUI customer select's chosen look, with a check after the label.
+            className={customer ? 'items-center rounded-lg border border-border px-4 py-3'
+              : 'flex-row items-center justify-center gap-2 rounded-lg border border-primary bg-primary/5 px-4 py-3'}>
             <Text className="text-sm font-semibold text-foreground">Guest</Text>
+            {!customer && <View testID="settings-default-customer-guest-check" className="text-primary" aria-hidden
+              importantForAccessibility="no-hide-descendants"><CheckIcon size={18} /></View>}
           </Pressable>
           <CustomerPicker selected={customer}
             // Settings has no sync state; the picker reports a failed search itself.
