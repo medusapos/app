@@ -17,24 +17,25 @@ const KEY = 'medusapos.products-area-columns.https://a.test';
 describe('products-area-columns', () => {
   it("lists the switches in v2's order", () => {
     expect(PRODUCTS_AREA_COLUMNS.map((column) => column.id))
-      .toEqual(['image', 'id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price']);
+      .toEqual(['image', 'id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price', 'regularPrice', 'salePrice']);
   });
 
   it('starts with Image on, ID and Barcode off and the other columns on, as v2', () => {
     expect(DEFAULT_PRODUCTS_AREA_COLUMNS)
-      .toEqual({ image: true, id: false, sku: true, barcode: false, stock: true, stockStatus: true, category: true, price: true });
+      .toEqual({ image: true, id: false, sku: true, barcode: false, stock: true, stockStatus: true, category: true, price: true,
+        regularPrice: false, salePrice: false });
   });
 
   it('loads a choice stored before ID and Barcode existed, with both off', () => {
     const old = { sku: false, stock: true, stockStatus: true, category: true, price: true };
     expect(loadProductsAreaColumns(fakeStorage({ [KEY]: JSON.stringify(old) }), 'https://a.test'))
-      .toEqual({ ...old, image: true, id: false, barcode: false });
+      .toEqual({ ...old, image: true, id: false, barcode: false, regularPrice: false, salePrice: false });
   });
 
   it('loads a choice stored before Image existed, with Image on and the stored values kept', () => {
     const old = { id: true, sku: false, barcode: true, stock: true, stockStatus: false, category: true, price: true };
     expect(loadProductsAreaColumns(fakeStorage({ [KEY]: JSON.stringify(old) }), 'https://a.test'))
-      .toEqual({ ...old, image: true });
+      .toEqual({ ...old, image: true, regularPrice: false, salePrice: false });
   });
 
   it('returns the defaults when nothing is stored', () => {
@@ -44,12 +45,24 @@ describe('products-area-columns', () => {
 
   it('round-trips a saved value, every column off included', () => {
     const storage = fakeStorage();
-    const settings = { image: true, id: true, sku: false, barcode: true, stock: true, stockStatus: false, category: true, price: false };
+    const settings = { image: true, id: true, sku: false, barcode: true, stock: true, stockStatus: false, category: true, price: false,
+      regularPrice: true, salePrice: false };
     saveProductsAreaColumns(storage, 'https://a.test', settings);
     expect(loadProductsAreaColumns(storage, 'https://a.test')).toEqual(settings);
-    const none = { image: false, id: false, sku: false, barcode: false, stock: false, stockStatus: false, category: false, price: false };
+    const none = { image: false, id: false, sku: false, barcode: false, stock: false, stockStatus: false, category: false, price: false,
+      regularPrice: false, salePrice: false };
     saveProductsAreaColumns(storage, 'https://a.test', none);
     expect(loadProductsAreaColumns(storage, 'https://a.test')).toEqual(none);
+  });
+
+  it('ends the list with Price, Regular price and Sale price, both new switches off by default and in older stored choices', () => {
+    expect(PRODUCTS_AREA_COLUMNS.slice(-3).map((column) => column.label)).toEqual(['Price', 'Regular price', 'Sale price']);
+    expect(DEFAULT_PRODUCTS_AREA_COLUMNS.regularPrice).toBe(false);
+    expect(DEFAULT_PRODUCTS_AREA_COLUMNS.salePrice).toBe(false);
+    expect(loadProductsAreaColumns(fakeStorage({ [KEY]: JSON.stringify({ price: false }) }), 'https://a.test'))
+      .toMatchObject({ price: false, regularPrice: false, salePrice: false });
+    expect(loadProductsAreaColumns(fakeStorage({ [KEY]: JSON.stringify({ regularPrice: true, salePrice: true }) }), 'https://a.test'))
+      .toMatchObject({ regularPrice: true, salePrice: true });
   });
 
   it('keeps the other defaults for a partial stored value', () => {
