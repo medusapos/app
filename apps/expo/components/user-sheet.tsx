@@ -7,8 +7,10 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { medusaAdminUrl, openMedusaAdmin } from '../lib/medusa-admin';
 import { localDayStartIso, salesRoomFigures } from '../lib/reports';
+import { formatShiftDuration, SHIFT_TICK_MS } from '../lib/shift-duration';
 import type { Session } from '../lib/session';
 import { closureContext } from './register-close';
+import { DrawerIcon } from './drawer-icon';
 import { ExternalLinkIcon } from './external-link-icon';
 import { WarningIcon } from './warning-icon';
 
@@ -46,6 +48,16 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
   // Only while shown: closureContext reads the device locale.
   const since = open && drawerOpen && register.session
     ? formatClosureDate(register.session.opened_at_gmt, closureContext(currency, { name: storeName })).time : null;
+  // The shift duration ticks only while the sheet shows it.
+  const ticking = open && drawerOpen;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!ticking) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), SHIFT_TICK_MS);
+    return () => clearInterval(timer);
+  }, [ticking]);
+  const duration = since && register.session ? formatShiftDuration(register.session.opened_at_gmt, now) : null;
   const openedBy = register.session?.opened_by;
   // opened_by is the opener's cashier id, which this app records as the cashier's email.
   const opener = !openedBy ? null : openedBy === session.email ? displayName : openedBy;
@@ -62,7 +74,7 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
         <View className="min-w-0 flex-1 gap-2">
           <DialogTitle testID="user-sheet-name">{displayName}</DialogTitle>
           <Text testID="user-sheet-context" className="text-muted-foreground">
-            {[session.email !== displayName && session.email, storeName, registerName, since && `since ${since}`].filter(Boolean).join(' · ')}
+            {[session.email !== displayName && session.email, storeName, registerName, since && `since ${since}`, duration].filter(Boolean).join(' · ')}
           </Text>
         </View>
         <IconButton testID="user-sheet-x" accessibilityLabel="Close" className="h-11 w-11" onPress={() => onOpenChange(false)}>
@@ -77,14 +89,22 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
         <Text className="font-semibold tabular-nums">{formatMoney({ amount: totals.grossMinor, currency })}</Text>
       </View>}
       {drawerOpen && <View testID="user-sheet-drawer" className="gap-2 rounded-md border border-border p-3">
-        <Text>In the drawer</Text>
-        {since && <View className="flex-row items-center gap-2">
-          <Text testID="user-sheet-drawer-opened" className="text-sm text-muted-foreground">
-            {[registerName, `opened ${since}${opener ? ` by ${opener}` : ''}`].filter(Boolean).join(' · ')}
-          </Text>
-          {opener && <Avatar testID="user-sheet-drawer-opener-avatar" aria-hidden size="sm" tone="primary" fallback={avatarInitials(opener)} />}
-        </View>}
-        {!register.blind && <Text className="text-xl font-semibold tabular-nums">{formatMoney({ amount: register.expected.cash ?? 0, currency })}</Text>}
+        {/* As v2: the cash badge, the label over the opened line, and the amount at the row's end. */}
+        <View className="flex-row items-center gap-3">
+          <View testID="user-sheet-drawer-icon" aria-hidden className="h-11 w-11 items-center justify-center rounded-full bg-muted text-muted-foreground">
+            <DrawerIcon size={20} />
+          </View>
+          <View className="min-w-0 flex-1 gap-1">
+            <Text className="text-sm text-muted-foreground">In the drawer</Text>
+            {since && <View className="flex-row items-center gap-2">
+              <Text testID="user-sheet-drawer-opened" className="text-sm text-muted-foreground">
+                {[registerName, `opened ${since}${opener ? ` by ${opener}` : ''}`].filter(Boolean).join(' · ')}
+              </Text>
+              {opener && <Avatar testID="user-sheet-drawer-opener-avatar" aria-hidden size="sm" tone="primary" fallback={avatarInitials(opener)} />}
+            </View>}
+          </View>
+          {!register.blind && <Text className="text-xl font-semibold tabular-nums">{formatMoney({ amount: register.expected.cash ?? 0, currency })}</Text>}
+        </View>
         <Pressable testID="user-sheet-register" accessibilityRole="button" className="min-h-11 flex-row items-center justify-between gap-2"
           onPress={() => { onOpenChange(false); onRegister(); }}>
           <Text>Pay in · Pay out · Close register</Text><Text>›</Text>

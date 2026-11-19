@@ -154,10 +154,36 @@ describe('Settings › Printing › Receipt templates', () => {
       expect(within(row).getByText(expected[i]![1]!)).toBeTruthy();
       expect(within(row).getByTestId(`settings-receipt-template-${templateIds[i]}-printer`).textContent).toBe('Auto — Print dialog');
     });
+    for (const id of templateIds) expect(screen.queryByTestId(`settings-receipt-template-${id}-actions`)).toBeNull();
     expect(screen.queryByTestId('settings-receipt-template-standard-preview')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Preview Standard Receipt' })).toBeNull();
     expect(screen.getByTestId('settings-receipt-template-thermal-80mm-preview').textContent).toBe('Preview');
     expect(screen.getByTestId('settings-receipt-template-thermal-58mm-preview').textContent).toBe('Preview');
+  });
+
+  it("on a phone puts each template's tag, printer and Preview on a line below its name", async () => {
+    setWindowWidth(390, 844);
+    params.section = 'printing';
+    await mount();
+    const expected = [
+      ['Standard Receipt', 'Sales'], ['Thermal Receipt (80mm)', 'Thermal 80mm'], ['Thermal Receipt (58mm)', 'Thermal 58mm'],
+    ];
+    const rows = templateIds.map((id) => screen.getByTestId(`settings-receipt-template-${id}`));
+    const actions = templateIds.map((id) => screen.getByTestId(`settings-receipt-template-${id}-actions`));
+    templateIds.forEach((id, i) => {
+      const [name, tag] = expected[i]!;
+      expect(within(rows[i]!).getByText(name!)).toBeTruthy();
+      expect(within(rows[i]!).queryByTestId(`settings-receipt-template-${id}-printer`)).toBeNull();
+      expect(within(rows[i]!).queryByText(tag!)).toBeNull();
+      expect(follows(rows[i]!, actions[i]!)).toBe(true);
+      expect(rows[i]!.contains(actions[i]!)).toBe(false);
+      if (i > 0) expect(follows(actions[i - 1]!, rows[i]!)).toBe(true);
+      expect(within(actions[i]!).getByText(tag!)).toBeTruthy();
+      expect(within(actions[i]!).getByTestId(`settings-receipt-template-${id}-printer`).textContent).toBe('Auto — Print dialog');
+      const preview = within(actions[i]!).queryByTestId(`settings-receipt-template-${id}-preview`);
+      if (id === 'standard') expect(preview).toBeNull();
+      else expect(preview?.textContent).toBe('Preview');
+    });
   });
 
   it("Preview opens the template filled with a sample sale from the cached store, until Close", async () => {

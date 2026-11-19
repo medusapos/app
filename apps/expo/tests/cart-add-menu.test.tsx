@@ -133,13 +133,26 @@ it('Add new customer creates the customer and makes it the sale\'s customer', as
   await start();
   openMenu('Add new customer');
   const dialog = screen.getByTestId('new-customer-dialog');
-  expect(within(dialog).getByText('Add new customer')).toBeTruthy();
+  expect(within(dialog).getByRole('heading', { name: 'Add Customer' })).toBeTruthy();
   fireEvent.change(screen.getByPlaceholderText('email@example.com'), { target: { value: 'new@example.com' } });
   fireEvent.change(screen.getByPlaceholderText('First name'), { target: { value: 'Nia' } });
   await act(async () => { fireEvent.click(screen.getByTestId('customer-save')); });
   expect(createCustomer).toHaveBeenCalledExactlyOnceWith(expect.anything(), { email: 'new@example.com', firstName: 'Nia' });
   expect(screen.getByTestId('customer-chip').getAttribute('aria-label')).toBe('Customer: Nia');
   expect(screen.queryByTestId('new-customer-dialog')).toBeNull();
+  expect(screen.getByTestId('customer-saved-toast').textContent).toBe('Nia saved');
+});
+it('the "Nia saved" message hides when a tender starts', async () => {
+  await start();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  openMenu('Add new customer');
+  fireEvent.change(screen.getByPlaceholderText('email@example.com'), { target: { value: 'new@example.com' } });
+  fireEvent.change(screen.getByPlaceholderText('First name'), { target: { value: 'Nia' } });
+  await act(async () => { fireEvent.click(screen.getByTestId('customer-save')); });
+  expect(screen.getByTestId('customer-saved-toast').textContent).toBe('Nia saved');
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  expect(screen.getByTestId('tender-slot')).toBeTruthy();
+  expect(screen.queryByTestId('customer-saved-toast')).toBeNull();
 });
 it('greys Add new customer when the connector cannot create customers', async () => {
   connectorOptions.createCustomer = false;

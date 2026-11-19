@@ -5,13 +5,15 @@ import type { Customer, CustomerInput, CustomerPatch } from '@tallyui/core';
 import { CustomerEditor } from './customer-editor';
 import { saveNewCustomer } from '../lib/save-new-customer';
 
-/** v2's cart "+" menu "Add new customer": the Customers screen's new-customer form in a dialog. */
-export function NewCustomerDialog({ open, onOpenChange, create, update, onSaved, onUnauthorized }: {
+/** v2's cart "+" menu "Add new customer": v2's Add Customer form, the Customers screen's own, in a dialog. */
+export function NewCustomerDialog({ open, onOpenChange, create, update, onSaved, onAdded, onUnauthorized }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   create: (input: CustomerInput) => Promise<Customer>;
   update?: (id: string, patch: CustomerPatch) => Promise<Customer>;
   onSaved: (customer: Customer) => void;
+  /** Once per successful save of this opening, with the final customer, before the dialog closes. */
+  onAdded?: (customer: Customer) => void;
   onUnauthorized: () => void;
 }) {
   // A save belongs to the opening it started in: each opening gets its own `created` holder (the customer an earlier Save
@@ -21,12 +23,13 @@ export function NewCustomerDialog({ open, onOpenChange, create, update, onSaved,
   else if (!session.current) session.current = { current: null };
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent testID="new-customer-dialog" className="max-h-[90%]">
-      <DialogTitle>Add new customer</DialogTitle>
+      <DialogTitle>Add Customer</DialogTitle>
       <ScrollView keyboardShouldPersistTaps="handled">
-        {open && <CustomerEditor customer={null} onUnauthorized={onUnauthorized} save={async (values, billing, shipping) => {
+        {open && <CustomerEditor customer={null} onUnauthorized={onUnauthorized} saveLabel="Add Customer" optionalDetails save={async (values, billing, shipping) => {
           const created = session.current!;
-          await saveNewCustomer({ create, update }, values, billing, shipping, created, (c) => { if (session.current === created) onSaved(c); });
+          const added = await saveNewCustomer({ create, update }, values, billing, shipping, created, (c) => { if (session.current === created) onSaved(c); });
           if (session.current !== created) return;
+          onAdded?.(added);
           onOpenChange(false);
         }} />}
       </ScrollView>
