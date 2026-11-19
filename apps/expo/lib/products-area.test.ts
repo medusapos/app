@@ -556,6 +556,13 @@ describe('variant attributes and option lines', () => {
     expect(variantAttributes(shirt, 's-red')).toBe('Size: S, Color: Red');
   });
 
+  it("takes the option a value's option_id names, even when its id is missing or not among that option's values", () => {
+    const tee = { id: 'tee', title: 'Tee', options, variants: [
+      variant('xl', 'XL', [{ value: 'XL', option_id: 'opt_size' }, { id: 'optval_new', value: 'Green', option_id: 'opt_color' }]),
+    ] };
+    expect(variantAttributes(tee, 'xl')).toBe('Size: XL, Color: Green');
+  });
+
   it("gives '' for a variant with no options, an unknown variant or a malformed document, and skips unresolved values", () => {
     expect(variantAttributes(shirt, 'bare')).toBe('');
     expect(variantAttributes(shirt, 'missing')).toBe('');
