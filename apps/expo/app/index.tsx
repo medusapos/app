@@ -6,7 +6,7 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, OpenSaleTabs, ParkedSales, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
+  Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
@@ -27,6 +27,7 @@ import { CustomerChip } from '../components/customer-chip';
 import { CustomerSavedToast, useCustomerSavedToast } from '../components/customer-saved-toast';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { OfflineToast, useOfflineToast } from '../components/offline-toast';
+import { OpenOrdersList, OpenOrdersStrip } from '../components/open-orders';
 import { ScanToast, scanAddedDescription, useScanToast } from '../components/scan-toast';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
@@ -142,8 +143,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2 dims the product side during the count (row 09e).
   const counting = register.session?.status === 'counting' || register.closing;
   const drafts = draftsCollection(orders);
-  const { parked, discard } = useParkedSales(drafts);
-  const [parkedOpen, setParkedOpen] = useState(false);
+  const { parked } = useParkedSales(drafts);
+  const [ordersListOpen, setOrdersListOpen] = useState(false);
   const [switchRefusal, setSwitchRefusal] = useState<string | null>(null);
   const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
   const [customerOpen, setCustomerOpen] = useState(false);
@@ -357,17 +358,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </View>;
   // The till's open sales: the strip's tabs, and the count's "carts still open" line (row 09e.2).
   const tillSales = openSales(sale.order, parked);
-  const openOrdersRow = <View className="flex-row items-stretch">
-    {parked.length > 0 && <Pressable testID="parked-sales-chip" accessibilityRole="button"
-      accessibilityLabel={`Parked sales (${parked.length})`} onPress={() => setParkedOpen(true)}
-      className="h-14 justify-center border-t border-r border-border bg-card px-3">
-      <Text className="font-medium text-foreground tabular-nums">{parked.length} ▴</Text>
-    </Pressable>}
-    <View className="min-w-0 flex-1">
-      <OpenSaleTabs sales={tillSales} currency={pricing.currency}
-        onSelect={(id) => switchTo(id)} onNew={() => switchTo(null)} />
-    </View>
-  </View>;
+  const openOrdersRow = <OpenOrdersStrip sales={tillSales} currency={pricing.currency} listOpen={ordersListOpen}
+    onListOpenChange={setOrdersListOpen} onSelect={(id) => switchTo(id)} onNew={() => { setOrdersListOpen(false); switchTo(null); }} />;
   // v2's note row sits in the totals, nearest Checkout; an empty cart draws no totals, so it takes the link's place.
   const noteSet = (sale.order.note ?? '').trim() !== '';
   const hasLines = sale.order.lineItems.length > 0;
@@ -377,6 +369,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
   const cart = <RegisterGate currency={pricing.currency} online={online} refused={refused} cartEmpty={!sale.order.lineItems.length} openSaleCount={tillSales.length} focus={{ key: gateFocus, handled: gateFocusHandled }}>
     {cartSettings.settings.openOrders === 'top' && openOrdersRow}
+    {/* v2's Open orders list takes the cart's place beside the strip. */}
+    {ordersListOpen ? <OpenOrdersList sales={tillSales} currency={pricing.currency}
+      onSelect={(id) => { setOrdersListOpen(false); switchTo(id); }} onClose={() => setOrdersListOpen(false)} /> : <>
     <View className="flex-row items-center justify-end gap-4 px-3">
       {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)}
         onAddress={sale.order.customer && online && connector.getCustomer && connector.updateCustomer
@@ -392,6 +387,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       afterSubtotal={couponField || noteInTotals ? <>{couponField}{noteInTotals && noteRow}</> : undefined}
       couponDiscountMinor={couponDiscountMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
+    </>}
     {cartSettings.settings.openOrders === 'bottom' && openOrdersRow}
     {switchRefusal ? <Text testID="open-sale-refusal" accessibilityRole="alert" className="px-3 py-1 text-destructive">{switchRefusal}</Text> : null}
     {voidOpen && <AlertDialog open onOpenChange={(next) => { if (!next) setVoidOpen(false); }}>
@@ -465,8 +461,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         onChooseRegister={sheetFromArea ? () => { router.dismissTo('/'); openGate(); } : openGate}
         signOut={signOut} signOutLocked={signOutLocked} lockMessage={lockMessage} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
-      <ParkedSales sale={sale} parked={parked} onDiscard={discard} currency={pricing.currency}
-        open={parkedOpen} onOpenChange={setParkedOpen} hour12={hour12} />
       {connector.searchCustomers && <Dialog open={customerOpen && sale.stage.kind === 'cart'} onOpenChange={setCustomerOpen}>
         <DialogContent testID="customer-dialog"><DialogTitle>Customer</DialogTitle>
           <ScrollView><CustomerPicker selected={sale.order.customer} online={online}

@@ -77,7 +77,7 @@ test.describe('with a parked sale', () => {
     await signIn(page);
     await addE2E1(page);
     await page.getByTestId('new-sale-tab').click();
-    await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
+    await expect(page.getByTestId(/^open-sale-tab-.*-who$/)).toBeVisible();
     await expect(page.getByTestId('cart-empty')).toBeVisible();
 
     await openArea(page, 'Settings');

@@ -256,7 +256,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await signIn(page, 'Europe', false);
       await addE2E1(page);
       await page.getByTestId('new-sale-tab').click();
-      await expect(page.getByRole('button', { name: 'Parked sales (1)', exact: true })).toBeVisible();
+      await expect(page.getByTestId(/^open-sale-tab-.*-who$/)).toBeVisible();
       await expect(page.getByTestId('cart-empty')).toBeVisible();
       const before = await dump(page);
       expect(before.docs.drafts).toHaveLength(1);
@@ -380,8 +380,7 @@ test('a 3.2.x till (pos_orders v7) upgrades to 3.3.0 (v8): sales, split payments
       const split = OLD.docs.pos_orders.find(order => order.totalMinor === 500)!;
       const splitOrder = (await ordersByClientId(token)).find(order => order.metadata.tally_client_id === split.id)!;
       expect((splitOrder.metadata as { tally_payments: unknown[] }).tally_payments).toHaveLength(2);
-      await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
-      await page.getByTestId(/^parked-resume-/).click();
+      await page.getByTestId(/^open-sale-tab-.*-who$/).click();
       await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
       const resumed = await sellBySku(page, [], 'exact');
       expect(resumed).toStrictEqual(2.5);
@@ -557,8 +556,7 @@ test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades with pos_orders moving to 
       const split = OLD.docs.pos_orders.find(order => order.totalMinor === 500)!;
       const splitOrder = (await ordersByClientId(token)).find(order => order.metadata.tally_client_id === split.id)!;
       expect((splitOrder.metadata as { tally_payments: unknown[] }).tally_payments).toHaveLength(2);
-      await page.getByRole('button', { name: 'Parked sales (1)', exact: true }).click();
-      await page.getByTestId(/^parked-resume-/).click();
+      await page.getByTestId(/^open-sale-tab-.*-who$/).click();
       await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
       const resumed = await sellBySku(page, [], 'exact');
       expect(resumed).toStrictEqual(2.5);
