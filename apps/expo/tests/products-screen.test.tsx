@@ -2254,6 +2254,89 @@ describe('ProductsScreen wedge scan anywhere (wide)', () => {
   });
 });
 
+// Row 02f.4: on a phone the Products view takes a wedge scan as the Cart view does, and stays on Products; the search
+// box keeps its own input, and an area over the Sale takes none.
+describe('ProductsScreen wedge scan anywhere (phone Products view)', () => {
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+  afterEach(() => { vi.mocked(usePathname).mockReturnValue('/'); });
+
+  // A keyboard-wedge scan: one keyDown per character, then Enter, on whatever has focus.
+  function wedgeScan(code: string) {
+    const target = document.activeElement ?? document.body;
+    for (const key of code) fireEvent.keyDown(target, { key });
+    fireEvent.keyDown(target, { key: 'Enter' });
+  }
+  const blurSearch = () => act(() => { screen.getByRole('searchbox').blur(); });
+  const productsTab = () => screen.getByRole('tab', { name: 'Products' });
+  async function mountPhone() {
+    setWindowWidth(390, 844);
+    await mount();
+    expect(productsTab().getAttribute('aria-selected')).toBe('true');
+  }
+
+  it('adds the scanned product with nothing focused, stays on Products and shows the Added to cart toast', async () => {
+    await mountPhone();
+    blurSearch();
+    expect(document.activeElement).toBe(document.body);
+    wedgeScan('AB123');
+    expect(screen.getByRole('tab', { name: 'Cart, 1 item' })).toBeTruthy();
+    expect(productsTab().getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Added to cart');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Shirt');
+  });
+
+  it('adds once with the tapped product tile focused, and the Enter does not press the tile again', async () => {
+    await mountPhone();
+    const tile = screen.getByTestId('product-tile-Shirt');
+    fireEvent.click(tile);
+    expect(screen.getByRole('tab', { name: 'Cart, 1 item' })).toBeTruthy();
+    act(() => { tile.focus(); });
+    expect(document.activeElement).toBe(tile);
+    wedgeScan('AB123');
+    expect(screen.getByRole('tab', { name: 'Cart, 2 items' })).toBeTruthy();
+    expect(productsTab().getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('adds with the Cart tab focused, and the Enter does not open the Cart view', async () => {
+    await mountPhone();
+    const cartTab = screen.getByRole('tab', { name: /^Cart, / });
+    act(() => { cartTab.focus(); });
+    expect(document.activeElement).toBe(cartTab);
+    wedgeScan('AB123');
+    expect(screen.getByRole('tab', { name: 'Cart, 1 item' })).toBeTruthy();
+    expect(productsTab().getAttribute('aria-selected')).toBe('true');
+  });
+
+  it('shows the Barcode not found toast for an unknown code, and the cart stays new', async () => {
+    await mountPhone();
+    blurSearch();
+    wedgeScan('NOPE1');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('Barcode not found');
+    expect(screen.getByTestId('scan-toast').textContent).toContain('NOPE1 — not in this store');
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
+  });
+
+  it('ignores a scan typed into the search box (no double add)', async () => {
+    await mountPhone();
+    const search = screen.getByRole('searchbox');
+    act(() => { search.focus(); });
+    expect(document.activeElement).toBe(search);
+    wedgeScan('AB123');
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
+  });
+
+  it('adds nothing while an area is over the Sale', async () => {
+    vi.mocked(usePathname).mockReturnValue('/orders');
+    await mountPhone();
+    blurSearch();
+    wedgeScan('AB123');
+    expect(screen.getByRole('tab', { name: 'Cart, New' })).toBeTruthy();
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
+  });
+});
+
 // Row 14a (#443): an area's avatar opens the Sale's user sheet through the frame's account. The probe stands in for an
 // area's avatar (AreaAccountButton), pressing the account's open() under the real AppFrame.
 describe('ProductsScreen user sheet opened from an area', () => {
