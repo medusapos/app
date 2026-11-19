@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, useContext } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
 import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, usePathname } from 'expo-router';
@@ -153,11 +153,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
   // Clear and Refresh (v2): the search is Catalogue's own state, so a new key empties it; the filters go back to the start.
   const [catalogueKey, setCatalogueKey] = useState(0);
-  const clearCatalogue = () => {
+  // Stable, so the published snapshot (the Products area's sync arrow) does not change every render.
+  const clearCatalogue = useCallback(() => {
     clearAndRefresh();
     setFilters({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
     setCatalogueKey((key) => key + 1);
-  };
+  }, [clearAndRefresh]);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
   token.current = session.token;
@@ -247,10 +248,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   entriesRef.current = entries;
   // The Products area reads this catalogue; it stays live while the area is pushed over the Sale.
   const catalogueState = catalogueStatus(products.length, state);
+  const catalogueSyncing = pullState === 'syncing' || pullState === 'connecting';
   useEffect(() => {
     publishCatalogue({ owner: 'sale', baseUrl: session.baseUrl, products: sorted, traits, currency: pricing.currency,
-      status: catalogueState, error: error ?? undefined });
-  }, [session.baseUrl, sorted, traits, pricing.currency, catalogueState, error]);
+      status: catalogueState, error: error ?? undefined, sync: syncNow, clearAndRefresh: clearCatalogue, syncing: catalogueSyncing });
+  }, [session.baseUrl, sorted, traits, pricing.currency, catalogueState, error, syncNow, clearCatalogue, catalogueSyncing]);
   useEffect(() => () => withdrawCatalogue('sale'), []);
   const scanToast = useScanToast();
   const clearScanToast = scanToast.clear;
