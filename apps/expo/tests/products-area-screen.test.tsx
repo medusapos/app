@@ -6,6 +6,7 @@ import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StoreSettingsError, type ProductTraits, type StoreSettings as PricingSettings, type VariantSummary } from '@tallyui/core';
 import { useStoreSettings } from '@tallyui/pos';
+import { PortalHost } from '@tallyui/primitives';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
 import {
@@ -368,6 +369,65 @@ describe('ProductsAreaScreen', () => {
       mount();
       expect(screen.getByTestId('products-loading')).toBeTruthy();
       expect(screen.queryByTestId('products-footer')).toBeNull();
+    });
+  });
+
+  // v2's footer ends with the catalogue sync arrow, after "Showing n of m"; it acts on the catalogue the screen shows.
+  describe('the footer sync icon', () => {
+    const footer = () => screen.getByTestId('products-footer');
+
+    it('on a tablet the arrow follows Showing n of m in the footer and a tap syncs the Sale\'s catalogue', () => {
+      const sync = vi.fn();
+      const clearAndRefresh = vi.fn();
+      sessionState.session = session;
+      publishCatalogue(sale({ sync, clearAndRefresh }));
+      mount();
+      const button = screen.getByTestId('catalogue-sync');
+      expect(footer().contains(button)).toBe(true);
+      expect(screen.getByText('Showing 3 of 3').compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(footer().textContent).toBe('Showing 3 of 3');
+      fireEvent.click(button);
+      expect(sync).toHaveBeenCalledTimes(1);
+      expect(clearAndRefresh).not.toHaveBeenCalled();
+    });
+
+    it('on a phone the footer has the arrow too', () => {
+      setWindowWidth(390, 844);
+      const sync = vi.fn();
+      sessionState.session = session;
+      publishCatalogue(sale({ sync, clearAndRefresh: vi.fn() }));
+      mount();
+      const button = screen.getByTestId('catalogue-sync');
+      expect(footer().contains(button)).toBe(true);
+      fireEvent.click(button);
+      expect(sync).toHaveBeenCalledTimes(1);
+    });
+
+    it('on the screen\'s own read it syncs that read; Clear and Refresh also empties the search and turns In stock off', async () => {
+      const syncNow = vi.fn();
+      const clearAndRefresh = vi.fn();
+      vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: medusaProducts, state: 'synced', syncNow, clearAndRefresh }));
+      sessionState.session = session;
+      // The menu renders in a portal.
+      await act(async () => { render(<><ProductsAreaScreen /><PortalHost /></>); });
+      fireEvent.click(screen.getByTestId('catalogue-sync'));
+      expect(syncNow).toHaveBeenCalledTimes(1);
+      fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E' } });
+      fireEvent.click(screen.getByTestId('products-in-stock'));
+      expect(screen.getByTestId('products-in-stock').getAttribute('aria-pressed')).toBe('true');
+      fireEvent.contextMenu(screen.getByTestId('catalogue-sync'));
+      fireEvent.click(screen.getByTestId('catalogue-clear-refresh'));
+      expect(clearAndRefresh).toHaveBeenCalledTimes(1);
+      expect((screen.getByTestId('products-search') as HTMLInputElement).value).toBe('');
+      expect(screen.getByTestId('products-in-stock').getAttribute('aria-pressed')).toBe('false');
+    });
+
+    it('no arrow for a catalogue published without sync and Clear and Refresh', () => {
+      sessionState.session = session;
+      publishCatalogue(sale());
+      mount();
+      expect(footer().textContent).toBe('Showing 3 of 3');
+      expect(within(footer()).queryByTestId('catalogue-sync')).toBeNull();
     });
   });
 });

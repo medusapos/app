@@ -8,6 +8,8 @@ import type { SyncState } from './use-replicated-products';
 export type CatalogueSnapshot = {
   owner: 'sale' | 'products'; baseUrl: string; products: readonly unknown[]; traits: ProductTraits; currency: string;
   status: 'loading' | 'ready' | 'error'; error?: string; retry?: () => void;
+  // The owner's sync arrow: a sync, a Clear and Refresh, and whether a pull is running.
+  sync?: () => void; clearAndRefresh?: () => void; syncing?: boolean;
 };
 
 let current: CatalogueSnapshot | null = null;

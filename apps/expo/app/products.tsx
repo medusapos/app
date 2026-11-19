@@ -7,6 +7,7 @@ import {
 import { listCategories, sortProducts } from '@tallyui/pos';
 import { Image } from '@tallyui/primitives';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { ProductsAreaColumnsButton } from '../components/products-area-columns-settings';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
@@ -76,13 +77,14 @@ function PhoneRow({ row, image }: { row: ProductAreaRow; image: boolean }) {
 // The area's own catalogue read, while no Sale holds one: the Sale's replication over the same cache, read-only.
 // It publishes what it reads and renders nothing.
 function ProductsCatalogue({ session, connector, syncContext, onUnauthorized, pricing, retry }: TillCatalogueLeafProps & { retry: () => void }) {
-  const { products, state, error, stockOverlay } = useReplicatedProducts(connector, syncContext, onUnauthorized);
+  const { products, state, error, stockOverlay, syncNow, clearAndRefresh } = useReplicatedProducts(connector, syncContext, onUnauthorized);
   const catalogue = useMemo(() => sellableCatalogue(products, connector, stockOverlay), [products, connector, stockOverlay]);
   const status = catalogueStatus(products.length, state);
+  const syncing = state === 'syncing' || state === 'connecting';
   useEffect(() => {
     publishCatalogue({ owner: 'products', baseUrl: session.baseUrl, products: catalogue, traits: connector.traits.product,
-      currency: pricing.currency, status, error: error ?? undefined, retry });
-  }, [session.baseUrl, catalogue, connector, pricing.currency, status, error, retry]);
+      currency: pricing.currency, status, error: error ?? undefined, retry, sync: syncNow, clearAndRefresh, syncing });
+  }, [session.baseUrl, catalogue, connector, pricing.currency, status, error, retry, syncNow, clearAndRefresh, syncing]);
   useEffect(() => () => withdrawCatalogue('products'), []);
   return null;
 }
@@ -122,6 +124,12 @@ export default function ProductsAreaScreen() {
   if (!session) return <Redirect href="/login" />;
   // One cache per store and pricing context: the area reads only while the Sale holds no catalogue for this store.
   const saleHolds = loaded?.owner === 'sale';
+  // Clear and Refresh empties the search and the In stock chip too, as the Sale's does; the kept category stays.
+  const clearAndRefresh = () => {
+    ready?.clearAndRefresh?.();
+    setSearch('');
+    setInStockOnly(false);
+  };
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
     : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
   return <View className="flex-1 bg-background" role="main" aria-label="Products">
@@ -161,9 +169,11 @@ export default function ProductsAreaScreen() {
       <ProductTable testID="products-table" items={items} columns={tableColumns as ProductTableColumn[]}
         defaultSort={{ field: 'name', dir: 'asc' }} emptyState={emptyState} />
     </Card> : null}
-    {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue. */}
-    {ready ? <View className="items-end px-4 py-2" testID="products-footer">
+    {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue; its sync arrow after it. */}
+    {ready ? <View className="flex-row items-center justify-end gap-1 px-4 py-2" testID="products-footer">
       <Text className="text-sm text-muted-foreground tabular-nums">{PRODUCTS_SHOWING(items.length, rows.length)}</Text>
+      {ready.sync && ready.clearAndRefresh
+        ? <CatalogueSyncButton onSync={ready.sync} onClearAndRefresh={clearAndRefresh} syncing={!!ready.syncing} /> : null}
     </View> : null}
     {loaded?.status === 'loading' ? <View className="flex-1 items-center justify-center gap-3 px-4" testID="products-loading">
       <Loader />

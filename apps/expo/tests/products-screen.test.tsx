@@ -358,6 +358,19 @@ describe('ProductsScreen catalogue', () => {
     expect(seen).toBeNull();
   });
 
+  it('publishes its sync and Clear and Refresh with the catalogue, for the Products area\'s sync arrow', async () => {
+    const syncNow = vi.fn();
+    const clearAndRefresh = vi.fn();
+    vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ syncNow, clearAndRefresh }));
+    let seen: ReturnType<typeof useCatalogueSnapshot> | undefined;
+    const Probe = () => { seen = useCatalogueSnapshot(); return null; };
+    await mount();
+    render(<Probe />);
+    expect(seen?.sync).toBe(syncNow);
+    act(() => seen!.clearAndRefresh!());
+    expect(clearAndRefresh).toHaveBeenCalledTimes(1);
+  });
+
   it('starts with In Stock off and toggles out-of-stock product visibility', async () => {
     const products = [
       { id: 'apple', title: 'Apple', status: 'published', variants: [{ id: 'apple-one', title: 'One size',
