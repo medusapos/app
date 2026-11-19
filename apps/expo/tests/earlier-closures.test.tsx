@@ -154,7 +154,7 @@ it('choosing a cashier after an unfiltered load refetches for that cashier and k
   const onCashiers = vi.fn();
   const { rerender } = render(mountCashier(null, onCashiers));
   await screen.findByTestId('earlier-closure-c11');
-  expect(onCashiers).toHaveBeenLastCalledWith(['user-1', 'user-2']);
+  await vi.waitFor(() => expect(onCashiers).toHaveBeenLastCalledWith(['user-1', 'user-2']));
   rerender(mountCashier('user-1', onCashiers));
   await vi.waitFor(() => expect(screen.queryByTestId('earlier-closure-c11')).toBeNull());
   await screen.findByTestId('earlier-closure-c12');
