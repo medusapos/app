@@ -1,7 +1,7 @@
 import type { ExecArgs, Logger } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 
-// App and TallyUI connector: /admin/products, /admin/product-variants, /admin/inventory-items,
+// App and TallyUI connector: /admin/products, /admin/product-variants, /admin/product-types, /admin/inventory-items,
 // /admin/stores, /admin/sales-channels/:id with stock locations, /admin/regions,
 // /admin/price-preferences, /admin/tax-regions, /admin/api-keys?type=publishable,
 // /admin/users/me, and /admin/customers (read and create).
@@ -9,6 +9,7 @@ export const POS_CASHIER_POLICIES = [
   'tally_pos:use',
   'product:read',
   'product_variant:read',
+  'product_type:read',
   'inventory_item:read',
   'inventory_level:read',
   'stock_location:read',

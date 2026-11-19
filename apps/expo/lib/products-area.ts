@@ -11,7 +11,63 @@ export type ProductAreaRow = {
   tagIds: string[];
   // The product's primary image (Medusa's thumbnail), shared by its variant rows.
   imageUrl?: string;
+  // The product's Medusa product type value ('' without one), shared by its variant rows.
+  type: string;
+  // The variant's option values, "Size: M, Color: Blue" in the product's option order ('' without any).
+  attributes: string;
 };
+
+/** The product type's value: the document's own `type.value`, else the `type_id` looked up in `types`, else ''. */
+export function productTypeValue(doc: unknown, types?: ReadonlyMap<string, string>): string {
+  const { type, type_id: id } = (doc ?? {}) as { type?: { value?: unknown } | null; type_id?: unknown };
+  const value = type?.value;
+  if (typeof value === 'string' && value !== '') return value;
+  return (typeof id === 'string' && types?.get(id)) || '';
+}
+
+/** The products' non-empty `type_id`s, once each, sorted. */
+export function productTypeIds(products: readonly unknown[]): string[] {
+  const ids = new Set<string>();
+  for (const product of products) {
+    const id = (product as { type_id?: unknown } | null)?.type_id;
+    if (typeof id === 'string' && id !== '') ids.add(id);
+  }
+  return [...ids].sort();
+}
+
+type ProductOption = { id: string; title: string; values: { id?: unknown; value: string }[] };
+// The cached Medusa product's `options` ({ id, title, values: [{ id, value }] }), malformed entries dropped.
+function productOptions(doc: unknown): ProductOption[] {
+  const options = (doc as { options?: unknown } | null)?.options;
+  if (!Array.isArray(options)) return [];
+  return options.filter((option) => typeof option?.id === 'string' && typeof option.title === 'string').map((option) => ({
+    id: option.id, title: option.title,
+    values: Array.isArray(option.values) ? option.values.filter((value: { value?: unknown } | null) => typeof value?.value === 'string') : [],
+  }));
+}
+
+/** One "<title>: <value>, <value>" line per option of the document that has values, in the document's order. */
+export function productOptionLines(doc: unknown): string[] {
+  return productOptions(doc).filter((option) => option.values.length)
+    .map((option) => `${option.title}: ${option.values.map(({ value }) => value).join(', ')}`);
+}
+
+/** The variant's option values as "<title>: <value>" joined by ", " in the product's option order; a value resolves to
+ * its option by `option_id`, else by its own id among the option's values, and is skipped when neither matches. */
+export function variantAttributes(doc: unknown, variantId: string): string {
+  const variants = (doc as { variants?: unknown } | null)?.variants;
+  const values = Array.isArray(variants) ? variants.find((variant) => variant?.id === variantId)?.options : undefined;
+  if (!Array.isArray(values)) return '';
+  const options = productOptions(doc);
+  const chosen = new Map<string, string>();
+  for (const value of values) {
+    if (typeof value?.value !== 'string' || value.value === '') continue;
+    const option = options.find(({ id }) => id === value.option_id)
+      ?? (typeof value.id === 'string' ? options.find((candidate) => candidate.values.some(({ id }) => id === value.id)) : undefined);
+    if (option && !chosen.has(option.id)) chosen.set(option.id, value.value);
+  }
+  return options.filter(({ id }) => chosen.has(id)).map(({ id, title }) => `${title}: ${chosen.get(id)}`).join(', ');
+}
 
 export type ProductTag = { id: string; value: string };
 
@@ -64,8 +120,9 @@ export function productAreaStockLine(row: Pick<ProductAreaRow, 'stock' | 'stockS
   return row.stock === label ? label : `${row.stock} · ${label}`;
 }
 
-/** One row per sellable variant, as the Sale's catalogue lists them. */
-export function productAreaRows(products: readonly unknown[], traits: ProductTraits, currency: string): ProductAreaRow[] {
+/** One row per sellable variant, as the Sale's catalogue lists them; `types` maps a product type id to its value. */
+export function productAreaRows(products: readonly unknown[], traits: ProductTraits, currency: string,
+  types?: ReadonlyMap<string, string>): ProductAreaRow[] {
   return catalogueEntries([...products], traits).map(({ product, variant }) => {
     const name = traits.getName(product);
     const categories = productCategories(product, traits);
@@ -86,13 +143,15 @@ export function productAreaRows(products: readonly unknown[], traits: ProductTra
       categoryIds: categories.map((category) => category.id),
       tagIds: productTags(product).map((tag) => tag.id),
       imageUrl: traits.getImageUrl(product),
+      type: productTypeValue(product, types),
+      attributes: variantAttributes(product, variant.id),
     };
   });
 }
 
 // v2's Expanded rows: a product with several sellable variants has a row of its own, its variants open as rows under it.
-export type ProductAreaProduct = Omit<ProductAreaRow, 'sku' | 'barcode' | 'salePrice' | 'onSale'> & {
-  sku: ''; barcode: ''; salePrice: ''; onSale: false;
+export type ProductAreaProduct = Omit<ProductAreaRow, 'sku' | 'barcode' | 'salePrice' | 'onSale' | 'attributes'> & {
+  sku: ''; barcode: ''; salePrice: ''; onSale: false; attributes: '';
   // One "<group>: <value>, <value>" line per option group, as v2's "Size: XS, S, M".
   options: string[];
   // Its variant rows' ids in catalogue order, with the variant's title (its id when it has none).
@@ -108,7 +167,8 @@ const rangeLabel = (range?: { min: Money; max: Money }) => {
 const STATUS_ORDER: StockLevel['status'][] = ['in_stock', 'backorder', 'out_of_stock'];
 
 /** One entry per product with more than one sellable variant; a single-variant product stays a plain variant row. */
-export function productAreaProducts(products: readonly unknown[], traits: ProductTraits, currency: string): ProductAreaProduct[] {
+export function productAreaProducts(products: readonly unknown[], traits: ProductTraits, currency: string,
+  types?: ReadonlyMap<string, string>): ProductAreaProduct[] {
   const byProduct = new Map<unknown, ReturnType<typeof catalogueEntries>>();
   for (const entry of catalogueEntries([...products], traits)) {
     byProduct.set(entry.product, [...byProduct.get(entry.product) ?? [], entry]);
@@ -118,14 +178,16 @@ export function productAreaProducts(products: readonly unknown[], traits: Produc
     const categories = productCategories(product, traits);
     const stockStatus = STATUS_ORDER.find((status) => variants.some((variant) => variant.stock.status === status)) ?? 'unknown';
     const quantities = variants.map((variant) => variant.stock.quantity);
+    // TallyUI's getVariantOptions when it gives groups; else the cached document's own options.
+    const groups = traits.getVariantOptions?.(product) ?? [];
     const regular = variants.map((variant) => resolvePrice(variant.prices, currency)).flatMap((resolved) =>
       resolved ? [{ prices: [{ ...(resolved.was ?? resolved.current), kind: 'base' as const }] }] : []);
     return {
       id: traits.getId ? traits.getId(product) : (product as { id: string }).id,
       name: traits.getName(product),
-      options: (traits.getVariantOptions?.(product) ?? []).map((group) => `${group.name}: ${group.values.join(', ')}`),
+      options: groups.length ? groups.map((group) => `${group.name}: ${group.values.join(', ')}`) : productOptionLines(product),
       variants: variants.map((variant) => ({ id: variant.id, title: variant.title || variant.id })),
-      sku: '', barcode: '', salePrice: '', onSale: false,
+      sku: '', barcode: '', salePrice: '', onSale: false, attributes: '', type: productTypeValue(product, types),
       price: rangeLabel(resolvePriceRange(variants, currency)),
       regularPrice: rangeLabel(resolvePriceRange(regular, currency)),
       stock: quantities.every((quantity) => typeof quantity === 'number')

@@ -100,7 +100,8 @@ medusaIntegrationTestRunner({
       const [role] = await container.resolve(Modules.RBAC).listRbacRoles({ name: 'POS cashier' })
       const headers = await loginWithRoles([role.id])
       for (const url of [
-        '/tally/v1/info', '/tally/v1/changes/tick', '/admin/products?limit=1', '/admin/users/me',
+        '/tally/v1/info', '/tally/v1/changes/tick', '/admin/products?limit=1', '/admin/product-types?limit=1',
+        '/admin/users/me',
       ]) {
         const response = await api.get(url, { headers })
         expect(response.status).toBe(200)

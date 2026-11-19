@@ -404,3 +404,59 @@ test('on a phone a barcode scan into the Products search filters the list and ad
   await openArea(page, 'POS');
   await expect(cartTab(page)).toHaveAccessibleName('Cart, New');
 });
+
+test('the Products area\'s Type column and Product SKU and Attributes lines show a Medusa product type and a variant\'s options', async ({ page }) => {
+  const token = await adminToken();
+  const json = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+  const created = await fetch(`${backend}/admin/product-types`, { method: 'POST', headers: json,
+    body: JSON.stringify({ value: 'E2E Apparel' }) });
+  expect(created.ok, await created.clone().text()).toBeTruthy();
+  const typeId: string = (await created.json()).product_type.id;
+  const found = await fetch(`${backend}/admin/products?title=${encodeURIComponent('E2E product 4')}&fields=id,type_id`, { headers: json });
+  expect(found.ok, await found.clone().text()).toBeTruthy();
+  const [product] = (await found.json()).products as { id: string; type_id: string | null }[];
+  const setType = (value: string | null) => fetch(`${backend}/admin/products/${product.id}`,
+    { method: 'POST', headers: json, body: JSON.stringify({ type_id: value }) });
+  const typed = await setType(typeId);
+  try {
+    expect(typed.ok, await typed.clone().text()).toBeTruthy();
+    const bId = await variantIdBySku(token, 'E2E-4B');
+    const firstId = await variantIdBySku(token, 'E2E-1');
+    await signIn(page);
+    await openArea(page, 'Products');
+    const table = page.getByTestId('products-table');
+    // A head's text, past the sort arrow the sorted column carries ("Product ▲").
+    const head = (name: string) => table.getByRole('columnheader').filter({ hasText: new RegExp(`^${name}( [▲▼])?$`) });
+    await expect(head('Product')).toBeVisible();
+    await expect(head('Type')).toHaveCount(0);
+    await page.getByTestId('products-settings-button').click();
+    await expect(page.getByTestId('products-settings-product')).toHaveText('Product');
+    await page.getByTestId('products-settings-column-type').click();
+    await page.getByTestId('products-settings-product-sku').click();
+    await page.getByTestId('products-settings-product-attributes').click();
+    await expect(page.getByTestId('products-settings-product-attributes')).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByTestId('products-settings-product-barcode')).toHaveAttribute('aria-checked', 'false');
+    await page.getByTestId('products-settings-close').click();
+    await expect(head('Type')).toBeVisible();
+    await expect(page.getByTestId(`product-type-${product.id}`)).toHaveText('E2E Apparel');
+    await page.getByRole('button', { name: '2 variations, E2E product 4', exact: true }).click();
+    await expect(page.getByTestId(`product-type-${bId}`)).toHaveText('E2E Apparel');
+    await expect(page.getByTestId(`product-line-sku-${bId}`)).toHaveText('E2E-4B');
+    await expect(page.getByTestId(`product-line-attributes-${bId}`)).toHaveText('Variant: B');
+    await expect(page.getByTestId(`product-line-barcode-${bId}`)).toHaveCount(0);
+    // E2E product 1 has no type: an empty Type cell, and its one variant's option on its attributes line.
+    await expect(page.getByTestId(`product-type-${firstId}`)).toHaveText('');
+    await expect(page.getByTestId(`product-line-attributes-${firstId}`)).toHaveText('Variant: Default');
+    await page.getByTestId('products-settings-button').click();
+    await page.getByTestId('products-settings-restore').click();
+    await page.getByTestId('products-settings-close').click();
+    await expect(head('Type')).toHaveCount(0);
+    await expect(page.getByTestId(`product-line-sku-${bId}`)).toHaveCount(0);
+  } finally {
+    const restored = await setType(product.type_id);
+    expect(restored.ok, await restored.clone().text()).toBeTruthy();
+    const removed = await fetch(`${backend}/admin/product-types/${typeId}`, { method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` } });
+    expect(removed.ok, await removed.clone().text()).toBeTruthy();
+  }
+});
