@@ -43,18 +43,11 @@ medusaIntegrationTestRunner({
       expect(response.status).toBe(401)
     })
 
-    it('no token: /tally/v1/cashiers is 401, not 403', async () => {
-      const response = await api.get('/tally/v1/cashiers', {
-        headers: { 'X-Tally-Protocol': '1' }, validateStatus: () => true,
-      })
-      expect(response.status).toBe(401)
-    })
-
     it('a user with no roles is refused 403 on every /tally/v1 route', async () => {
       const headers = await loginWithRoles([])
       for (const url of [
         '/tally/v1/info', '/tally/v1/registers/reg_x', '/tally/v1/changes', '/tally/v1/changes/tick',
-        '/tally/v1/registers/reg_x/closures', '/tally/v1/cashiers',
+        '/tally/v1/registers/reg_x/closures',
       ]) {
         const response = await api.get(url, { headers, validateStatus: () => true })
         expect(response.status).toBe(403)
@@ -76,14 +69,6 @@ medusaIntegrationTestRunner({
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data.contracts).toEqual(expect.any(Object))
-    })
-
-    it('role_super_admin may list the cashiers, itself among them', async () => {
-      const headers = await loginWithRoles(['role_super_admin'])
-      const me = await api.get('/admin/users/me', { headers })
-      const response = await api.get('/tally/v1/cashiers', { headers })
-      expect(response.status).toBe(200)
-      expect(response.data.cashiers).toEqual(expect.arrayContaining([expect.objectContaining({ email: me.data.user.email })]))
     })
 
     it('tally-pos-roles creates POS cashier and POS manager once, with their policies', async () => {

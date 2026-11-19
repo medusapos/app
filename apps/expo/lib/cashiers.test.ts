@@ -1,56 +1,57 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fetchCashiers, reportCashierOptions } from './cashiers';
-import { authHeaders } from './pos-connector';
+import { describe, expect, it } from 'vitest';
+import { reportCashierOptions } from './cashiers';
 
-const session = { baseUrl: 'https://shop.test', token: 't0k' };
-const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
-
-describe('fetchCashiers', () => {
-  it('asks the store for its cashiers with the session token and values each by email', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () => response({ cashiers: [
-      { id: 'user_ana', email: 'ana@store.test', name: 'Ana' },
-      { id: 'user_ben', email: 'ben@store.test', name: 'Ben Ito' },
-    ] }));
-    await expect(fetchCashiers(session, fetchImpl)).resolves.toEqual([
-      { value: 'ana@store.test', label: 'Ana' }, { value: 'ben@store.test', label: 'Ben Ito' },
-    ]);
-    expect(fetchImpl).toHaveBeenCalledWith('https://shop.test/tally/v1/cashiers', { headers: authHeaders('t0k') });
-  });
-
-  it('skips a row without an email or a name', async () => {
-    const fetchImpl = vi.fn<typeof fetch>(async () => response({ cashiers: [
-      { id: 'user_x', name: 'No email' }, { id: 'user_y', email: '', name: 'Empty' }, { id: 'user_z', email: 'z@store.test' },
-      null, { id: 'user_ana', email: 'ana@store.test', name: 'Ana' },
-    ] }));
-    await expect(fetchCashiers(session, fetchImpl)).resolves.toEqual([{ value: 'ana@store.test', label: 'Ana' }]);
-  });
-
-  it('answers no cashiers when the request throws, an older plugin answers 404, or the body has no list', async () => {
-    await expect(fetchCashiers(session, vi.fn<typeof fetch>(async () => { throw new TypeError('offline'); }))).resolves.toEqual([]);
-    await expect(fetchCashiers(session, vi.fn<typeof fetch>(async () => response({ message: 'Not found' }, 404)))).resolves.toEqual([]);
-    await expect(fetchCashiers(session, vi.fn<typeof fetch>(async () => response({ users: [] })))).resolves.toEqual([]);
-    await expect(fetchCashiers(session, vi.fn<typeof fetch>(async () => new Response('not json')))).resolves.toEqual([]);
-  });
-});
+const sale = (cashierRef?: string) => ({ cashierRef }) as { cashierRef: string };
+const me = { email: 'admin@store.test', name: 'Dana Cole' };
 
 describe('reportCashierOptions', () => {
-  const ana = { value: 'ana@store.test', label: 'Ana' };
-  const ben = { value: 'ben@store.test', label: 'Ben' };
-
-  it('adds the signed-in user when the list lacks them, by name or else by email', () => {
-    expect(reportCashierOptions([ben, ana], { email: 'cat@store.test', name: 'Cat' }))
-      .toEqual([ana, ben, { value: 'cat@store.test', label: 'Cat' }]);
-    expect(reportCashierOptions([], { email: 'admin@store.test' }))
-      .toEqual([{ value: 'admin@store.test', label: 'admin@store.test' }]);
+  it('lists each cashier found in the sales once, valued by the exact cashierRef', () => {
+    expect(reportCashierOptions([sale('ben@store.test'), sale('ana@store.test'), sale('ben@store.test')], me, null))
+      .toEqual([
+        { value: 'ana@store.test', label: 'ana' }, { value: 'ben@store.test', label: 'ben' },
+        { value: 'admin@store.test', label: 'Dana Cole' },
+      ]);
   });
 
-  it('lists the signed-in user once when the store already has them, and each value once', () => {
-    expect(reportCashierOptions([ben, ana, { value: 'ana@store.test', label: 'Ana again' }], { email: 'ana@store.test', name: 'Me' }))
-      .toEqual([ana, ben]);
+  it('lists the signed-in user with no sales, by name or else by their email\'s local part', () => {
+    expect(reportCashierOptions([], me, null)).toEqual([{ value: 'admin@store.test', label: 'Dana Cole' }]);
+    expect(reportCashierOptions([], { email: 'admin@store.test' }, null)).toEqual([{ value: 'admin@store.test', label: 'admin' }]);
+    expect(reportCashierOptions([], { email: 'admin@store.test', name: '' }, null)).toEqual([{ value: 'admin@store.test', label: 'admin' }]);
+  });
+
+  it('labels the signed-in user by name even when their own sales are listed, and lists them once', () => {
+    expect(reportCashierOptions([sale('admin@store.test'), sale('admin@store.test')], me, null))
+      .toEqual([{ value: 'admin@store.test', label: 'Dana Cole' }]);
+  });
+
+  it('keeps the selected cashier when no sale in the range has them', () => {
+    expect(reportCashierOptions([sale('ana@store.test')], me, 'ben@store.test')).toEqual([
+      { value: 'ana@store.test', label: 'ana' }, { value: 'ben@store.test', label: 'ben' },
+      { value: 'admin@store.test', label: 'Dana Cole' },
+    ]);
+    expect(reportCashierOptions([sale('ana@store.test')], me, 'ana@store.test').map((option) => option.value))
+      .toEqual(['ana@store.test', 'admin@store.test']);
+  });
+
+  it('skips sales with an empty or missing cashierRef', () => {
+    expect(reportCashierOptions([sale(''), sale(undefined), sale('ana@store.test')], { email: 'admin@store.test' }, null))
+      .toEqual([{ value: 'admin@store.test', label: 'admin' }, { value: 'ana@store.test', label: 'ana' }]);
+  });
+
+  it('labels a ref with no @ by itself', () => {
+    expect(reportCashierOptions([sale('till-7')], me, null)).toContainEqual({ value: 'till-7', label: 'till-7' });
   });
 
   it('sorts by label', () => {
-    expect(reportCashierOptions([{ value: 'z@store.test', label: 'zoe' }, ben], { email: 'ana@store.test', name: 'Ana' })
-      .map((option) => option.label)).toEqual(['Ana', 'Ben', 'zoe']);
+    expect(reportCashierOptions([sale('zoe@store.test'), sale('Ben@store.test'), sale('ana@store.test')], me, null)
+      .map((option) => option.label)).toEqual(['ana', 'Ben', 'Dana Cole', 'zoe']);
+  });
+
+  it('never shows an @ in a label', () => {
+    const options = reportCashierOptions(
+      [sale('ana@store.test'), sale('ben.ito@shop.example'), sale('till-7'), sale('@odd')],
+      { email: 'admin@store.test', name: 'boss@store.test' }, 'cat@store.test');
+    expect(options).toHaveLength(6);
+    for (const option of options) expect(option.label).not.toContain('@');
   });
 });

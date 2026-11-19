@@ -61,8 +61,5 @@ export default defineMiddlewares({
     { matcher: '/tally/v1/changes/tick', middlewares: [tallyCors('GET')] },
     { matcher: '/tally/v1/changes/tick', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
     { matcher: '/tally/v1/changes/tick', methods: ['GET'], policies: [TALLY_POS_USE] },
-    { matcher: '/tally/v1/cashiers', middlewares: [tallyCors('GET')] },
-    { matcher: '/tally/v1/cashiers', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
-    { matcher: '/tally/v1/cashiers', methods: ['GET'], policies: [TALLY_POS_USE] },
   ],
 })
