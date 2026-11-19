@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProductTraits, VariantSummary } from '@tallyui/core';
 import {
-  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock, listProductTags,
-  loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine, productTags, saveProductsAreaCategory,
+  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
+  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine, productTags, saveProductsAreaCategory,
   saveProductsAreaTag, STOCK_STATUS_DOTS, type ProductAreaRow,
 } from './products-area';
 import type { SessionStorage } from './session';
@@ -191,6 +191,23 @@ describe('filterProductAreaRowsInStock', () => {
 
   it('keeps only in-stock rows when on', () => {
     expect(filterProductAreaRowsInStock(rows, true).map((r) => r.id)).toEqual(['in']);
+  });
+});
+
+describe('filterProductAreaRowsOnSale', () => {
+  const mug: Doc = { id: 'mug', title: 'Mug', variants: [
+    { id: 'mug-a', title: 'A', prices: [{ amount: 1000, currency: 'EUR', kind: 'base' }, { amount: 800, currency: 'EUR', kind: 'sale' }],
+      stock: { status: 'in_stock' } },
+    { id: 'mug-b', title: 'B', prices: eur(600), stock: { status: 'in_stock' } },
+  ] };
+  const rows = productAreaRows([mug], traits, 'EUR');
+
+  it('returns the same array when off', () => {
+    expect(filterProductAreaRowsOnSale(rows, false)).toBe(rows);
+  });
+
+  it('keeps only rows on sale when on', () => {
+    expect(filterProductAreaRowsOnSale(rows, true).map((r) => r.id)).toEqual(['mug-a']);
   });
 });
 

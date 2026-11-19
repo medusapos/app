@@ -14,11 +14,11 @@ import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
-  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock, listProductTags,
-  loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine,
+  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
+  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine,
   PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
-  PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_SHOWING, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS,
-  STOCK_STATUS_LABELS, type ProductAreaRow,
+  PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE, PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL,
+  PRODUCTS_SHOWING, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
 } from '../lib/products-area';
 import { useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
 import { defaultStorage } from '../lib/session';
@@ -119,6 +119,7 @@ export default function ProductsAreaScreen() {
     session ? loadProductsAreaCategory(defaultStorage(), session.baseUrl) : null);
   const [tagId, setTagId] = useState<string | null>(() => session ? loadProductsAreaTag(defaultStorage(), session.baseUrl) : null);
   const [inStockOnly, setInStockOnly] = useState(false);
+  const [onSaleOnly, setOnSaleOnly] = useState(false);
   const columns = useProductsAreaColumns(defaultStorage(), session?.baseUrl ?? '');
   // The Product column always shows; the rest follow the settings sheet, in table order.
   const tableColumns = useMemo(() => COLUMNS.filter(({ id }) =>
@@ -137,9 +138,9 @@ export default function ProductsAreaScreen() {
   // A chosen tag no longer in the catalogue counts as none, as the category does.
   const activeTag = tags.find((tag) => tag.id === tagId) ?? null;
   const activeTagId = activeTag?.id ?? null;
-  const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsInStock(
-    filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId), inStockOnly), search),
-  [rows, activeId, activeTagId, inStockOnly, search]);
+  const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsOnSale(filterProductAreaRowsInStock(
+    filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId), inStockOnly), onSaleOnly), search),
+  [rows, activeId, activeTagId, inStockOnly, onSaleOnly, search]);
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
   const phoneItems = useMemo(() => phone ? sortProducts(items, NAME_SORT, (row) => row.name) : [], [phone, items]);
   // v2's Products has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
@@ -149,14 +150,16 @@ export default function ProductsAreaScreen() {
   if (!session) return <Redirect href="/login" />;
   // One cache per store and pricing context: the area reads only while the Sale holds no catalogue for this store.
   const saleHolds = loaded?.owner === 'sale';
-  // Clear and Refresh empties the search and the In stock chip too, as the Sale's does; the kept category and tag stay.
+  // Clear and Refresh empties the search and the In stock and On sale chips too, as the Sale's does; the kept category and tag stay.
   const clearAndRefresh = () => {
     ready?.clearAndRefresh?.();
     setSearch('');
     setInStockOnly(false);
+    setOnSaleOnly(false);
   };
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
-    : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
+    : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
+      : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
   return <View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
@@ -165,13 +168,19 @@ export default function ProductsAreaScreen() {
       {!phone && <ProductsAreaColumnsButton {...columns} />}
       {!openMenu && <AreaAccountButton />}
     </View>
-    {/* In stock first, as in v2's chip row, Tags last; the category and tag are kept per store, In stock is not. */}
+    {/* In stock and On sale lead, as in v2's chip row, Tags last; the category and tag are kept per store, neither chip is. */}
     {ready ? <View className="flex-row items-center pl-4">
-      <View className="py-2">
+      <View className="flex-row gap-2 py-2">
         <Pressable testID="products-in-stock" role="button" aria-pressed={inStockOnly} accessibilityLabel={PRODUCTS_IN_STOCK_LABEL}
           onPress={() => setInStockOnly((on) => !on)} className={`rounded-md px-3 py-1.5 ${inStockOnly ? 'bg-primary' : 'bg-muted'}`}>
           <Text className={`text-sm font-medium ${inStockOnly ? 'text-primary-foreground' : 'text-foreground'}`}>
             {PRODUCTS_IN_STOCK_LABEL}
+          </Text>
+        </Pressable>
+        <Pressable testID="products-on-sale" role="button" aria-pressed={onSaleOnly} accessibilityLabel={PRODUCTS_ON_SALE_LABEL}
+          onPress={() => setOnSaleOnly((on) => !on)} className={`rounded-md px-3 py-1.5 ${onSaleOnly ? 'bg-primary' : 'bg-muted'}`}>
+          <Text className={`text-sm font-medium ${onSaleOnly ? 'text-primary-foreground' : 'text-foreground'}`}>
+            {PRODUCTS_ON_SALE_LABEL}
           </Text>
         </Pressable>
       </View>

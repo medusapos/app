@@ -10,8 +10,8 @@ import { PortalHost } from '@tallyui/primitives';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
 import {
-  PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH, PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_TAGGED,
-  PRODUCTS_TAGS_NONE, PRODUCTS_TAGS_SEARCH, saveProductsAreaCategory, saveProductsAreaTag,
+  PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH, PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE,
+  PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL, PRODUCTS_TAGS_NONE, PRODUCTS_TAGS_SEARCH, saveProductsAreaCategory, saveProductsAreaTag,
 } from '../lib/products-area';
 import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../lib/store-settings';
 import { playScanBeep } from '../lib/scan-beep';
@@ -591,6 +591,127 @@ describe('ProductsAreaScreen', () => {
       expect(clearAndRefresh).toHaveBeenCalledTimes(1);
       expect(chip().textContent).toBe('Organic');
       expect(rowIds()).toEqual(['v1', 'v5']);
+    });
+  });
+
+  // v2's On Sale chip, right after In stock: rows whose till price comes from a Medusa sale price list; not kept.
+  describe('the On sale chip', () => {
+    const organic = { id: 'tag_organic', value: 'Organic' };
+    const seasonal = { id: 'tag_seasonal', value: 'Seasonal' };
+    const onSale = (base: number, sale: number) => [...eur(base), { amount: sale, currency: 'EUR', kind: 'sale' as const }];
+    // On sale: v1 (in stock), v4b (backorder) and v5 (out of stock); v4a is base-only.
+    const saleDocs: Doc[] = [
+      { ...categorized[0], tags: [organic], variants: [{ ...products[0].variants[0], prices: onSale(1000, 800) }] },
+      { ...categorized[1], tags: [seasonal], variants: [products[1].variants[0], { ...products[1].variants[1], prices: onSale(2500, 2000) }] },
+      { id: 'p5', title: 'E2E product 5', categories: [{ id: 'cat_food', name: 'Food' }], tags: [organic], variants: [
+        { id: 'v5', title: 'Default', sku: 'E2E-5', prices: onSale(500, 400), stock: { status: 'out_of_stock', quantity: 0 } }] },
+    ];
+    // The tag list renders in a portal.
+    const mountSale = () => render(<><ProductsAreaScreen /><PortalHost /></>);
+    const chip = () => screen.getByTestId('products-on-sale');
+    const footer = () => screen.getByTestId('products-footer').textContent;
+
+    it('sits right after In stock, before the category chips, and a press narrows the table to the sale rows and back', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: saleDocs }));
+      mountSale();
+      expect(chip().getAttribute('aria-label')).toBe(PRODUCTS_ON_SALE_LABEL);
+      expect(chip().textContent).toBe('On sale');
+      expect(inStock().compareDocumentPosition(chip()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(chip().compareDocumentPosition(screen.getByTestId('category-nav-')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(chip().getAttribute('aria-pressed')).toBe('false');
+      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      press('products-on-sale');
+      expect(chip().getAttribute('aria-pressed')).toBe('true');
+      expect(rowIds()).toEqual(['v1', 'v4b', 'v5']);
+      press('products-on-sale');
+      expect(chip().getAttribute('aria-pressed')).toBe('false');
+      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+    });
+
+    it('narrows together with In stock, the category, the tag and the search; the footer counts n of the catalogue', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: saleDocs }));
+      mountSale();
+      press('products-on-sale');
+      expect(footer()).toBe('Showing 3 of 4');
+      press('products-in-stock');
+      expect(rowIds()).toEqual(['v1']);
+      expect(footer()).toBe('Showing 1 of 4');
+      press('products-in-stock');
+      press('category-nav-cat_food');
+      expect(rowIds()).toEqual(['v4b', 'v5']);
+      expect(footer()).toBe('Showing 2 of 4');
+      press('products-tags');
+      press(`products-tag-${seasonal.id}`);
+      expect(rowIds()).toEqual(['v4b']);
+      expect(footer()).toBe('Showing 1 of 4');
+      fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-5' } });
+      expect(rowIds()).toEqual([]);
+      expect(footer()).toBe('Showing 0 of 4');
+    });
+
+    it('is not kept: a new mount starts with it off and every row shown', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: saleDocs }));
+      mountSale();
+      press('products-on-sale');
+      expect(rowIds()).toEqual(['v1', 'v4b', 'v5']);
+      cleanup();
+      mountSale();
+      expect(chip().getAttribute('aria-pressed')).toBe('false');
+      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+    });
+
+    it('says nothing is on sale, or nothing on sale is in stock, and a search with no match still says so', () => {
+      sessionState.session = session;
+      publishCatalogue(sale());
+      mount();
+      expect(chip()).toBeTruthy();
+      press('products-on-sale');
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NONE_ON_SALE)).toBeTruthy();
+      cleanup();
+      act(() => withdrawCatalogue('sale'));
+      publishCatalogue(sale({ products: [{ ...products[1], variants: [products[1].variants[0],
+        { ...products[1].variants[1], prices: onSale(2500, 2000) }] }] }));
+      mount();
+      press('products-on-sale');
+      expect(rowIds()).toEqual(['v4b']);
+      press('products-in-stock');
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NONE_ON_SALE_IN_STOCK)).toBeTruthy();
+      fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'hat' } });
+      expect(screen.getByText(PRODUCTS_NO_MATCH('hat'))).toBeTruthy();
+    });
+
+    it('on a phone the chip narrows the two-line list', () => {
+      setWindowWidth(390, 844);
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: saleDocs }));
+      mountSale();
+      press('products-on-sale');
+      expect(Array.from(document.querySelectorAll('[data-testid^="product-list-row-"]')).map((row) => row.getAttribute('data-testid')))
+        .toEqual(['product-list-row-v1', 'product-list-row-v4b', 'product-list-row-v5']);
+    });
+
+    it('Clear and Refresh on the screen\'s own read turns On sale off', async () => {
+      const clearAndRefresh = vi.fn();
+      vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: medusaProducts, state: 'synced', syncNow: vi.fn(),
+        clearAndRefresh }));
+      sessionState.session = session;
+      // The menu renders in a portal.
+      await act(async () => { render(<><ProductsAreaScreen /><PortalHost /></>); });
+      press('products-on-sale');
+      expect(chip().getAttribute('aria-pressed')).toBe('true');
+      fireEvent.contextMenu(screen.getByTestId('catalogue-sync'));
+      fireEvent.click(screen.getByTestId('catalogue-clear-refresh'));
+      expect(clearAndRefresh).toHaveBeenCalledTimes(1);
+      expect(chip().getAttribute('aria-pressed')).toBe('false');
     });
   });
 });
