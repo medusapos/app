@@ -140,3 +140,28 @@ test('the Products area\'s settings sheet shows v2\'s ID and Barcode columns, of
   await expect(head('ID')).toHaveCount(0);
   await expect(head('Barcode')).toHaveCount(0);
 });
+
+test('the Products area\'s settings sheet lists v2\'s Image switch first, on, and each row shows its image tile', async ({ page }) => {
+  await signIn(page);
+  await openArea(page, 'Products');
+  const table = page.getByTestId('products-table');
+  const first = table.locator('[data-testid^="product-row-"]', { hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first();
+  await expect(first).toBeVisible();
+  const id = (await first.getAttribute('data-testid'))?.replace(/^product-row-/, '') ?? '';
+  // The e2e products have no thumbnail, so each row shows the plain tile.
+  await expect(first.getByTestId(`product-image-placeholder-${id}`)).toBeVisible();
+  await page.getByTestId('products-settings-button').click();
+  const image = page.getByTestId('products-settings-column-image');
+  await expect(page.locator('[data-testid^="products-settings-column-"]').first())
+    .toHaveAttribute('data-testid', 'products-settings-column-image');
+  await expect(image).toHaveAttribute('aria-checked', 'true');
+  await image.click();
+  await expect(image).toHaveAttribute('aria-checked', 'false');
+  await page.getByTestId('products-settings-close').click();
+  await expect(first).toBeVisible();
+  await expect(table.locator('[data-testid^="product-image-"]')).toHaveCount(0);
+  await page.getByTestId('products-settings-button').click();
+  await page.getByTestId('products-settings-restore').click();
+  await page.getByTestId('products-settings-close').click();
+  await expect(first.getByTestId(`product-image-placeholder-${id}`)).toBeVisible();
+});

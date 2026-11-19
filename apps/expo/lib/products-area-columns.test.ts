@@ -17,18 +17,24 @@ const KEY = 'medusapos.products-area-columns.https://a.test';
 describe('products-area-columns', () => {
   it("lists the switches in v2's order", () => {
     expect(PRODUCTS_AREA_COLUMNS.map((column) => column.id))
-      .toEqual(['id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price']);
+      .toEqual(['image', 'id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price']);
   });
 
-  it('starts with ID and Barcode off and the other columns on, as v2', () => {
+  it('starts with Image on, ID and Barcode off and the other columns on, as v2', () => {
     expect(DEFAULT_PRODUCTS_AREA_COLUMNS)
-      .toEqual({ id: false, sku: true, barcode: false, stock: true, stockStatus: true, category: true, price: true });
+      .toEqual({ image: true, id: false, sku: true, barcode: false, stock: true, stockStatus: true, category: true, price: true });
   });
 
   it('loads a choice stored before ID and Barcode existed, with both off', () => {
     const old = { sku: false, stock: true, stockStatus: true, category: true, price: true };
     expect(loadProductsAreaColumns(fakeStorage({ [KEY]: JSON.stringify(old) }), 'https://a.test'))
-      .toEqual({ ...old, id: false, barcode: false });
+      .toEqual({ ...old, image: true, id: false, barcode: false });
+  });
+
+  it('loads a choice stored before Image existed, with Image on and the stored values kept', () => {
+    const old = { id: true, sku: false, barcode: true, stock: true, stockStatus: false, category: true, price: true };
+    expect(loadProductsAreaColumns(fakeStorage({ [KEY]: JSON.stringify(old) }), 'https://a.test'))
+      .toEqual({ ...old, image: true });
   });
 
   it('returns the defaults when nothing is stored', () => {
@@ -38,10 +44,10 @@ describe('products-area-columns', () => {
 
   it('round-trips a saved value, every column off included', () => {
     const storage = fakeStorage();
-    const settings = { id: true, sku: false, barcode: true, stock: true, stockStatus: false, category: true, price: false };
+    const settings = { image: true, id: true, sku: false, barcode: true, stock: true, stockStatus: false, category: true, price: false };
     saveProductsAreaColumns(storage, 'https://a.test', settings);
     expect(loadProductsAreaColumns(storage, 'https://a.test')).toEqual(settings);
-    const none = { id: false, sku: false, barcode: false, stock: false, stockStatus: false, category: false, price: false };
+    const none = { image: false, id: false, sku: false, barcode: false, stock: false, stockStatus: false, category: false, price: false };
     saveProductsAreaColumns(storage, 'https://a.test', none);
     expect(loadProductsAreaColumns(storage, 'https://a.test')).toEqual(none);
   });

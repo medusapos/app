@@ -5,6 +5,7 @@ import {
   Button, Card, CategoryNav, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
 } from '@tallyui/components';
 import { listCategories, sortProducts } from '@tallyui/pos';
+import { Image } from '@tallyui/primitives';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { ProductsAreaColumnsButton } from '../components/products-area-columns-settings';
 import { StripHeightContext } from '../components/store-refused';
@@ -21,7 +22,18 @@ import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
+// The row's product thumbnail, or a plain tile of the same size when the product has none.
+function ProductThumb({ row, size }: { row: ProductAreaRow; size: number }) {
+  return row.imageUrl
+    ? <Image.Root source={{ uri: row.imageUrl }} alt={row.name} contentFit="cover" className="rounded border border-border"
+      style={{ width: size, height: size }} testID={`product-image-${row.id}`} />
+    : <View className="rounded border border-border bg-muted" style={{ width: size, height: size }}
+      testID={`product-image-placeholder-${row.id}`} />;
+}
+
 const COLUMNS: ProductTableColumn<ProductAreaRow>[] = [
+  // v2's image column: no head label, not sortable.
+  { id: 'image', header: 'Image', hideHeader: true, flex: 0.75, render: (row) => <ProductThumb row={row} size={40} /> },
   // The row's Medusa id (the variant's); long, so one line.
   { id: 'id', header: 'ID', flex: 2, sortValue: (row) => row.id, render: (row) => <Text numberOfLines={1}>{row.id}</Text> },
   { id: 'name', header: 'Product', flex: 3, sortValue: (row) => row.name, render: (row) => <Text>{row.name}</Text> },
@@ -43,9 +55,10 @@ const PHONE_BREAKPOINT = 600;
 // The table's default order, so both layouts list rows alike.
 const NAME_SORT = { field: 'name', dir: 'asc' } as const;
 
-// v2's phone row: name over SKU, price over the stock line. Rows open nothing, as the table's do.
-function PhoneRow({ row }: { row: ProductAreaRow }) {
+// v2's phone row: the thumbnail while Image is on, name over SKU, price over the stock line. Rows open nothing, as the table's do.
+function PhoneRow({ row, image }: { row: ProductAreaRow; image: boolean }) {
   return <View className="flex-row gap-3 px-4 py-3" testID={`product-list-row-${row.id}`}>
+    {image ? <ProductThumb row={row} size={40} /> : null}
     <View className="min-w-0 flex-1">
       <Text>{row.name}</Text>
       {row.sku ? <Text className="text-sm text-muted-foreground">{row.sku}</Text> : null}
@@ -142,7 +155,7 @@ export default function ProductsAreaScreen() {
     {saleHolds ? null : <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
       onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
     {ready && phone ? <ProductList testID="products-list" items={phoneItems} emptyState={emptyState}
-      renderItem={(row: ProductAreaRow) => <PhoneRow row={row} />} /> : null}
+      renderItem={(row: ProductAreaRow) => <PhoneRow row={row} image={columns.settings.image} />} /> : null}
     {/* v2's table sits in a bordered box, inset as the search row; its phone rows run full width. */}
     {ready && !phone ? <Card testID="products-table-card" className="mx-4 flex-1 overflow-hidden">
       <ProductTable testID="products-table" items={items} columns={tableColumns as ProductTableColumn[]}

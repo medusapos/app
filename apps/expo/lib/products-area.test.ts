@@ -6,9 +6,10 @@ import {
 } from './products-area';
 import type { SessionStorage } from './session';
 
-type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[] };
+type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[]; thumbnail?: string };
 const traits = {
   getName: (doc: Doc) => doc.title,
+  getImageUrl: (doc: Doc) => doc.thumbnail,
   getVariantCount: (doc: Doc) => doc.variants.length,
   getVariants: (doc: Doc) => doc.variants,
   getCategories: (doc: Doc) => doc.categories ?? [],
@@ -60,6 +61,20 @@ describe('productAreaRows', () => {
       { id: 'b-1', stockStatus: 'backorder', categories: 'Drinks, Food', categoryIds: ['c1', 'c2'] },
       { id: 'n-1', stockStatus: 'out_of_stock', categories: '', categoryIds: [] },
     ]);
+  });
+
+  it("gives every variant row its product's thumbnail, and none without one", () => {
+    const mug: Doc = { id: 'mug', title: 'Mug', thumbnail: 'https://img.test/mug.png', variants: [
+      { id: 'mug-a', title: 'A', prices: eur(500), stock: { status: 'in_stock' } },
+      { id: 'mug-b', title: 'B', prices: eur(600), stock: { status: 'in_stock' } },
+    ] };
+    const plain: Doc = { id: 'p', title: 'Plain', variants: [{ id: 'p-1', prices: eur(100), stock: { status: 'in_stock' } }] };
+    expect(productAreaRows([mug, plain], traits, 'EUR').map(({ id, imageUrl }) => ({ id, imageUrl }))).toEqual([
+      { id: 'mug-a', imageUrl: 'https://img.test/mug.png' },
+      { id: 'mug-b', imageUrl: 'https://img.test/mug.png' },
+      { id: 'p-1', imageUrl: undefined },
+    ]);
+    expect(productAreaRows([plain], traits, 'EUR')[0].imageUrl).toBeUndefined();
   });
 });
 
