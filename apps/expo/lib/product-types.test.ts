@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { fetchProductTypes } from './product-types';
+// @vitest-environment jsdom
+import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { fetchProductTypes, useProductTypes } from './product-types';
 
 const session = { baseUrl: 'https://store.test', token: 'tok' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
@@ -55,5 +57,26 @@ describe('fetchProductTypes', () => {
       .mockResolvedValueOnce(json({ product_types: [{ id: 'ptyp_0', value: 'First' }] }))
       .mockResolvedValueOnce(json({}, 403));
     expect(await fetchProductTypes(session, ids, fetchImpl)).toEqual(new Map([['ptyp_0', 'First']]));
+  });
+});
+
+describe('useProductTypes', () => {
+  afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
+
+  it('drops a product-types answer that lands after the store changed', async () => {
+    const pending = new Map<string, (response: Response) => void>();
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => new Promise<Response>((resolve) => {
+      pending.set(new URL(String(input)).origin, resolve);
+    })));
+    const storeA = { baseUrl: 'https://a.test', token: 'tok' };
+    const storeB = { baseUrl: 'https://b.test', token: 'tok' };
+    const hook = renderHook(({ store }) => useProductTypes(store, ['ptyp_1'], true), { initialProps: { store: storeA } });
+    await waitFor(() => expect(pending.has('https://a.test')).toBe(true));
+    hook.rerender({ store: storeB });
+    await waitFor(() => expect(pending.has('https://b.test')).toBe(true));
+    await act(async () => { pending.get('https://b.test')!(json({ product_types: [{ id: 'ptyp_1', value: 'B-type' }] })); });
+    await waitFor(() => expect(hook.result.current.get('ptyp_1')).toBe('B-type'));
+    await act(async () => { pending.get('https://a.test')!(json({ product_types: [{ id: 'ptyp_1', value: 'A-type' }] })); });
+    expect(hook.result.current.get('ptyp_1')).toBe('B-type');
   });
 });

@@ -35,30 +35,50 @@ export default class TallyRegisterModuleService extends MedusaService({
   TallyRegisterApproval,
 }) {
   @InjectManager()
-  async admitApproval(p: { sessionId: string; variance: Record<string, number>; requestedBy: string; email: string },
-    @MedusaContext() sharedContext: Context = {}): Promise<AdmitApprovalResult> {
+  async admitApproval(p: { sessionId: string; variance: Record<string, number>; requestedBy: string; email: string;
+    otherFailures?: () => { actor: number; email: number } }, @MedusaContext() sharedContext: Context = {}): Promise<AdmitApprovalResult> {
     return (sharedContext.manager as EntityManager).transactional(async (em): Promise<AdmitApprovalResult> => {
       const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'refused', code: 'approval_session_unknown' }
       if (session.status === 'superseded' || (await em.execute(
         'select id from tally_register_closure where session_id = ?', [session.id])).length)
         return { kind: 'refused', code: 'approval_session_closed' }
-      const email = p.email.trim().toLowerCase()
-      await em.execute('select pg_advisory_xact_lock(hashtextextended(?, 0))', [`tally_approval_actor:${p.requestedBy}`])
-      await em.execute('select pg_advisory_xact_lock(hashtextextended(?, 0))', [`tally_approval_email:${email}`])
-      const [actor] = await em.execute(`select count(*) as count from tally_register_approval
-        where requested_by = ? and token_hash is null and created_at > now() - (? * interval '1 millisecond')`,
-      [p.requestedBy, APPROVAL_FAILURE_WINDOW_MS])
-      const [target] = await em.execute(`select count(*) as count from tally_register_approval
-        where target_email = ? and token_hash is null and created_at > now() - (? * interval '1 millisecond')`,
-      [email, APPROVAL_FAILURE_WINDOW_MS])
-      if (Number(actor.count) >= MAX_APPROVAL_FAILURES_PER_ACTOR || Number(target.count) >= MAX_APPROVAL_FAILURES_PER_EMAIL)
+      const email = await this.lockApprovalBudget(p.requestedBy, p.email, em)
+      const stored = await this.storedFailureCounts(p.requestedBy, email, em)
+      const other = p.otherFailures?.() ?? { actor: 0, email: 0 }
+      if (stored.actor + other.actor >= MAX_APPROVAL_FAILURES_PER_ACTOR
+        || stored.email + other.email >= MAX_APPROVAL_FAILURES_PER_EMAIL)
         return { kind: 'refused', code: 'approval_rate_limited' }
       const id = `apv_${randomUUID()}`
       await em.execute(`insert into tally_register_approval (id, session_id, variance, requested_by, target_email)
         values (?, ?, ?::jsonb, ?, ?)`, [id, session.id, JSON.stringify(p.variance), p.requestedBy, email])
       return { kind: 'admitted', id }
     })
+  }
+
+  // Device-clear approvals decide, against the stored register-approval failures, under admitApproval's locks (ADR 0023).
+  @InjectManager()
+  async withApprovalBudget<T>(requestedBy: string, email: string, decide: (stored: { actor: number; email: number }) => T,
+    @MedusaContext() sharedContext: Context = {}): Promise<T> {
+    return (sharedContext.manager as EntityManager).transactional(async em =>
+      decide(await this.storedFailureCounts(requestedBy, await this.lockApprovalBudget(requestedBy, email, em), em)))
+  }
+
+  private async lockApprovalBudget(requestedBy: string, rawEmail: string, em: EntityManager): Promise<string> {
+    const email = rawEmail.trim().toLowerCase()
+    await em.execute('select pg_advisory_xact_lock(hashtextextended(?, 0))', [`tally_approval_actor:${requestedBy}`])
+    await em.execute('select pg_advisory_xact_lock(hashtextextended(?, 0))', [`tally_approval_email:${email}`])
+    return email
+  }
+
+  private async storedFailureCounts(requestedBy: string, email: string, em: EntityManager) {
+    const [actor] = await em.execute(`select count(*) as count from tally_register_approval
+      where requested_by = ? and token_hash is null and created_at > now() - (? * interval '1 millisecond')`,
+    [requestedBy, APPROVAL_FAILURE_WINDOW_MS])
+    const [target] = await em.execute(`select count(*) as count from tally_register_approval
+      where target_email = ? and token_hash is null and created_at > now() - (? * interval '1 millisecond')`,
+    [email, APPROVAL_FAILURE_WINDOW_MS])
+    return { actor: Number(actor.count), email: Number(target.count) }
   }
 
   @InjectManager()

@@ -77,6 +77,8 @@ A new route: **`POST /tally/v1/register-approvals`**, behind the same `authentic
      - 10 per target email, across all tills.
 
      Past either limit the answer is 429 `approval_rate_limited`. Admission is atomic. The attempt's row is inserted before the credential check, in a transaction holding `pg_advisory_xact_lock` on the requesting actor, and pending rows count. So parallel requests can't slip past the limit. The endpoint is a password oracle behind a cashier token, and the plugin can't count on a rate limit in front of the store. The rows live in the plugin's approval table, not the cache module, so the limit survives a restart.
+
+     Device-clear approvals (`POST /tally/v1/device-clear-approvals`, #495) count against the same per-actor and per-email budget, and both routes decide admission under the same two advisory locks, on the actor and then the email. Their failures are held in the server process's memory, because a device clear has no register session to store a row against. Known limit: that half resets when the server restarts and is per server instance.
   3. **The credential.** `authModuleService.authenticate('emailpass', …)`, server side. Failure is 401 `approval_invalid_credentials`. An `mfaChallenge` is 401 `approval_mfa_unsupported`.
   4. **The permission.** The identity's `app_metadata.user_id` must be a user whose live roles grant `tally_pos:approve_variance`. Otherwise 403 `approval_forbidden`.
   5. **Issue.** 32 random bytes, base64url, are the proof. The store keeps only their sha256.

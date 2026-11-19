@@ -43,6 +43,27 @@ it('stops counting attempts older than the failure window', () => {
   expect(attempts.admit('user_a', 'manager@example.com')).toBeDefined()
 })
 
+it('counts() drops attempts older than the failure window without an admit', () => {
+  const { attempts, advance } = setup()
+  for (let i = 0; i < 3; i++) expect(attempts.admit('user_a', 'manager@example.com')).toBeDefined()
+  advance(APPROVAL_FAILURE_WINDOW_MS + 1)
+  expect(attempts.counts('user_a', 'manager@example.com')).toEqual({ actor: 0, email: 0 })
+})
+
+it('counts stored register failures against the device-clear limit', () => {
+  const { attempts } = setup()
+  expect(attempts.admit('user_a', 'manager@example.com', { actor: 4, email: 0 })).toBeDefined()
+  expect(attempts.admit('user_a', 'manager@example.com', { actor: 4, email: 0 })).toBeUndefined()
+  expect(setup().attempts.admit('user_b', 'other@example.com', { actor: 0, email: 10 })).toBeUndefined()
+})
+
+it('reports its in-memory counts per actor and normalised email', () => {
+  const { attempts } = setup()
+  for (let i = 0; i < 2; i++) expect(attempts.admit('user_a', 'Manager@Example.com ')).toBeDefined()
+  expect(attempts.counts('user_a', 'manager@example.com')).toEqual({ actor: 2, email: 2 })
+  expect(attempts.counts('user_b', 'other@example.com')).toEqual({ actor: 0, email: 0 })
+})
+
 it('grants device-clear and variance approval to the POS manager only', () => {
   expect(POS_MANAGER_POLICIES).toEqual(expect.arrayContaining(['tally_pos:clear_device', 'tally_pos:approve_variance']))
   expect(POS_CASHIER_POLICIES).not.toContain('tally_pos:clear_device')

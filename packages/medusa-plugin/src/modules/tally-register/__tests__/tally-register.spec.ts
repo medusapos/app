@@ -916,6 +916,23 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
       }
     })
 
+    it("admitApproval counts the other route's email failures", async () => {
+      await service.openSession(first)
+      const admit = (email: number) => service.admitApproval({ sessionId: first.sessionId, variance: { cash: -100 },
+        requestedBy: 'cashier', email: 'manager@example.com', otherFailures: () => ({ actor: 0, email }) })
+      expect(await admit(MAX_APPROVAL_FAILURES_PER_EMAIL)).toEqual({ kind: 'refused', code: 'approval_rate_limited' })
+      expect(await admit(MAX_APPROVAL_FAILURES_PER_EMAIL - 1)).toEqual(expect.objectContaining({ kind: 'admitted' }))
+    })
+
+    it('withApprovalBudget reads stored failures for the normalised email', async () => {
+      await service.openSession(first)
+      for (let i = 0; i < 2; i++) expect(await service.admitApproval({ sessionId: first.sessionId, variance: { cash: -100 },
+        requestedBy: 'cashier', email: 'manager@example.com' })).toEqual(expect.objectContaining({ kind: 'admitted' }))
+      const stored = await service.withApprovalBudget('other-actor', 'manager@example.com', s => s)
+      expect(stored.email).toBe(2)
+      expect(await service.withApprovalBudget('other-actor', '  Manager@Example.COM ', s => s)).toEqual(stored)
+    })
+
     it('registerState returns null for an unknown register, and the open session with counters', async () => {
       expect(await service.registerState(first.registerId)).toBeNull()
       await service.openSession(first)
