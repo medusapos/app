@@ -243,6 +243,52 @@ moduleIntegrationTestRunner<TallyRegisterModuleService>({
           kind: 'conflict', code: 'register_closure_exists', data: { closureId: closing.closureId } })
       })
 
+      it('an open that arrives while the closure insert holds the session lock closes from the closure, never supersedes', async () => {
+        await service.openSession(owner)
+        await sql(`create function delay_closure_insert() returns trigger language plpgsql as $$
+          begin perform pg_sleep(1); return new; end $$`)
+        await sql(`create trigger delay_closure_insert before insert on tally_register_closure
+          for each row execute function delay_closure_insert()`)
+        const closing = closure()
+        const pendingClosure = service.submitClosure(closing)
+        let pendingOpen: Promise<unknown> | undefined
+        try {
+          let sleeping = false
+          for (let attempt = 0; attempt < 100 && !sleeping; attempt++) {
+            ;[{ sleeping }] = await sql(`select exists(select 1 from pg_stat_activity where datname = current_database()
+              and wait_event = 'PgSleep' and query like 'insert into tally_register_closure%') as sleeping`)
+            if (!sleeping) await sql('select pg_sleep(0.01)')
+          }
+          expect(sleeping).toBe(true)
+          pendingOpen = service.openSession(taker)
+          const [submitted, opened] = await Promise.all([pendingClosure, pendingOpen])
+          expect(submitted).toMatchObject({ kind: 'ok' })
+          expect(opened).not.toHaveProperty('register.superseded')
+          expect(await sql('select status, counted from tally_register_session where id = ?', [first.sessionId]))
+            .toEqual([{ status: 'closed', counted: closing.counted }])
+          expect(await sql(`select id from tally_register_session where register_id = ? and status in ('open','counting')`,
+            [first.registerId])).toEqual([{ id: second.sessionId }])
+        } finally {
+          await Promise.allSettled([pendingClosure, pendingOpen])
+          await sql('drop trigger delay_closure_insert on tally_register_closure')
+          await sql('drop function delay_closure_insert()')
+        }
+      })
+
+      it('an open over a session waiting on manager approval stays a take-over', async () => {
+        await service.openSession({ ...owner, contract: 3 })
+        expect(await service.submitClosure({ ...closure({ counted: { cash: 11000, card: 3000 } }), contract: 3, thresholdMinor: 100 }))
+          .toMatchObject({ kind: 'conflict', code: 'register_approval_required' })
+        const admitted = await service.admitApproval({ sessionId: first.sessionId, variance: { cash: -1000 },
+          requestedBy: 'cashier', email: 'manager@example.com' })
+        expect(admitted).toMatchObject({ kind: 'admitted' })
+        expect(await sql('select session_id from tally_register_approval')).toEqual([{ session_id: first.sessionId }])
+        expect(await service.openSession({ ...taker, contract: 3 }))
+          .toMatchObject({ kind: 'ok', register: { superseded: { sessionId: first.sessionId } } })
+        expect(await sql('select status from tally_register_session where id = ?', [first.sessionId])).toEqual([{ status: 'superseded' }])
+        expect(await sql('select id from tally_register_closure')).toEqual([])
+      })
+
       it.each([
         ['v2 with no supersedes', { ...taker, supersedes: undefined }],
         ['contract 1', { ...second, deviceId: 'device-2' }],
