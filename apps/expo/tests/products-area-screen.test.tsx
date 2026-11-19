@@ -55,6 +55,7 @@ const traits = {
   getVariants: (doc: Doc) => doc.variants,
   getCategories: (doc: Doc) => doc.categories ?? [],
   getCategoryNames: (doc: Doc) => (doc.categories ?? []).map((category) => category.name),
+  getImageUrl: () => undefined,
 } as unknown as ProductTraits;
 const eur = (amount: number) => [{ amount, currency: 'EUR', kind: 'base' as const }];
 const products: Doc[] = [
