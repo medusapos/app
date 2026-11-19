@@ -23,7 +23,9 @@ export function ProductsAreaColumnsButton({ settings, save, reset }: ReturnType<
             const testID = `products-settings-column-${id}`;
             return <View key={id} className="flex-row items-center justify-between gap-2">
               <Label nativeID={`${testID}-label`}>{label}</Label>
-              <Switch testID={testID} aria-labelledby={`${testID}-label`} checked={settings[id]}
+              {/* TallyUI's Switch track sets no flex direction and react-native-web defaults to column, so
+                  items-center would center the thumb and the "on" translate would push it past the track. */}
+              <Switch testID={testID} className="flex-row" aria-labelledby={`${testID}-label`} checked={settings[id]}
                 onCheckedChange={(on) => save({ ...settings, [id]: on })} />
             </View>;
           })}
