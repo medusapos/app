@@ -19,16 +19,19 @@ const eur = (amount: number) => [{ amount, currency: 'EUR', kind: 'base' as cons
 describe('productAreaRows', () => {
   it('gives one row per variant: name, SKU, price and stock quantity', () => {
     const shirt: Doc = { id: 'shirt', title: 'Shirt', variants: [
-      { id: 'shirt-one', title: 'One size', sku: 'SHIRT', prices: eur(1250), stock: { status: 'in_stock', quantity: 7 } },
+      { id: 'shirt-one', title: 'One size', sku: 'SHIRT', barcode: '5012345678900', prices: eur(1250),
+        stock: { status: 'in_stock', quantity: 7 } },
     ] };
     const mug: Doc = { id: 'mug', title: 'Mug', variants: [
       { id: 'mug-a', title: 'A', sku: 'MUG-A', prices: eur(500), stock: { status: 'in_stock', quantity: 3 } },
       { id: 'mug-b', title: 'B', sku: 'MUG-B', prices: eur(600), stock: { status: 'out_of_stock', quantity: 0 } },
     ] };
     expect(productAreaRows([shirt, mug], traits, 'EUR')).toEqual([
-      { id: 'shirt-one', name: 'Shirt', sku: 'SHIRT', price: '€12.50', stock: '7', stockStatus: 'in_stock', categories: '', categoryIds: [] },
-      { id: 'mug-a', name: 'Mug · A', sku: 'MUG-A', price: '€5.00', stock: '3', stockStatus: 'in_stock', categories: '', categoryIds: [] },
-      { id: 'mug-b', name: 'Mug · B', sku: 'MUG-B', price: '€6.00', stock: '0', stockStatus: 'out_of_stock', categories: '',
+      { id: 'shirt-one', name: 'Shirt', sku: 'SHIRT', barcode: '5012345678900', price: '€12.50', stock: '7', stockStatus: 'in_stock',
+        categories: '', categoryIds: [] },
+      { id: 'mug-a', name: 'Mug · A', sku: 'MUG-A', barcode: '', price: '€5.00', stock: '3', stockStatus: 'in_stock', categories: '',
+        categoryIds: [] },
+      { id: 'mug-b', name: 'Mug · B', sku: 'MUG-B', barcode: '', price: '€6.00', stock: '0', stockStatus: 'out_of_stock', categories: '',
         categoryIds: [] },
     ]);
   });
@@ -43,8 +46,8 @@ describe('productAreaRows', () => {
 
   it('shows a missing SKU as empty and a missing price as a dash', () => {
     const doc: Doc = { id: 'p', title: 'Plain', variants: [{ id: 'v', prices: [], stock: { status: 'unknown' } }] };
-    expect(productAreaRows([doc], traits, 'EUR')).toEqual([{ id: 'v', name: 'Plain', sku: '', price: '—', stock: '—',
-      stockStatus: 'unknown', categories: '', categoryIds: [] }]);
+    expect(productAreaRows([doc], traits, 'EUR')).toEqual([{ id: 'v', name: 'Plain', sku: '', barcode: '', price: '—',
+      stock: '—', stockStatus: 'unknown', categories: '', categoryIds: [] }]);
   });
 
   it("gives each row its stock status and its product's categories", () => {
@@ -61,7 +64,7 @@ describe('productAreaRows', () => {
 });
 
 describe('productAreaStockLine', () => {
-  const row = (stock: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id: 'v', name: 'P', sku: 'P',
+  const row = (stock: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id: 'v', name: 'P', sku: 'P', barcode: '',
     price: '€1.00', stock, stockStatus, categories: '', categoryIds: [] });
 
   it('puts the quantity before the status when the variant has one', () => {
@@ -76,7 +79,7 @@ describe('productAreaStockLine', () => {
 });
 
 describe('filterProductAreaRows', () => {
-  const row = (id: string, name: string, sku: string): ProductAreaRow => ({ id, name, sku, price: '€1.00', stock: '1',
+  const row = (id: string, name: string, sku: string): ProductAreaRow => ({ id, name, sku, barcode: '', price: '€1.00', stock: '1',
     stockStatus: 'in_stock', categories: '', categoryIds: [] });
   const rows = [row('1', 'E2E product 1', 'E2E-1'), row('4a', 'E2E product 4 · A', 'E2E-4'), row('4b', 'E2E product 4 · B', 'E2E-4B')];
 
@@ -104,7 +107,7 @@ describe('filterProductAreaRows', () => {
 });
 
 describe('filterProductAreaRowsByCategory', () => {
-  const row = (id: string, categoryIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, price: '€1.00', stock: '1',
+  const row = (id: string, categoryIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, barcode: '', price: '€1.00', stock: '1',
     stockStatus: 'in_stock', categories: '', categoryIds });
   const rows = [row('1', ['drinks']), row('2', ['drinks', 'food']), row('3', ['food']), row('4', [])];
 
@@ -128,8 +131,8 @@ describe('STOCK_STATUS_DOTS', () => {
 });
 
 describe('filterProductAreaRowsInStock', () => {
-  const row = (id: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id, name: id, sku: id, price: '€1.00',
-    stock: '1', stockStatus, categories: '', categoryIds: [] });
+  const row = (id: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id, name: id, sku: id, barcode: '',
+    price: '€1.00', stock: '1', stockStatus, categories: '', categoryIds: [] });
   const rows = [row('in', 'in_stock'), row('back', 'backorder'), row('out', 'out_of_stock'), row('unknown', 'unknown')];
 
   it('returns the same array when off', () => {

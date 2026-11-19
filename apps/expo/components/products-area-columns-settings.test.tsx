@@ -4,6 +4,7 @@ import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProductsAreaScreen from '../app/products';
 import type { ProductAreaRow } from '../lib/products-area';
+import { DEFAULT_PRODUCTS_AREA_COLUMNS } from '../lib/products-area-columns';
 
 // jsdom gives react-native-web no window width; a tablet's, so the table (not the phone list) renders.
 vi.mock('react-native', async (importOriginal) => ({
@@ -22,7 +23,8 @@ vi.mock('../lib/catalogue-snapshot', async (importOriginal) => ({
   useCatalogueSnapshot: () => ({ owner: 'sale', baseUrl: 'https://store.test', status: 'ready', products: [], traits: {}, currency: 'EUR' }),
 }));
 const tea: ProductAreaRow = {
-  id: 'p1', name: 'Tea', sku: 'TEA-1', price: '€3.00', stock: '12', stockStatus: 'in_stock', categories: 'Drinks', categoryIds: ['c1'],
+  id: 'p1', name: 'Tea', sku: 'TEA-1', barcode: '4006381333931', price: '€3.00', stock: '12', stockStatus: 'in_stock',
+  categories: 'Drinks', categoryIds: ['c1'],
 };
 vi.mock('../lib/products-area', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/products-area')>(),
@@ -34,7 +36,7 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 }));
 
 const KEY = 'medusapos.products-area-columns.https://store.test';
-const IDS = ['sku', 'stock', 'stockStatus', 'category', 'price'];
+const IDS = ['id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price'] as const;
 const column = (id: string) => screen.getByTestId(`products-settings-column-${id}`);
 // A head's text without the sort arrow the sorted column carries ("Product ▲").
 const heads = () => screen.getAllByRole('columnheader').map((head) => head.textContent?.replace(/ [▲▼]$/, ''));
@@ -56,14 +58,27 @@ function openSheet() {
   fireEvent.click(screen.getByTestId('products-settings-button'));
 }
 
-it('opens a Product Settings sheet with a checked switch for each optional column', () => {
+it('opens a Product Settings sheet with a switch for each optional column, ID and Barcode off and the rest on', () => {
   openSheet();
   const sheet = screen.getByTestId('products-settings-sheet');
   expect(sheet.textContent).toContain('Product Settings');
-  expect(sheet.querySelectorAll('[role="switch"]')).toHaveLength(5);
+  expect(sheet.querySelectorAll('[role="switch"]')).toHaveLength(7);
   const labels = IDS.map((id) => document.getElementById(`products-settings-column-${id}-label`)?.textContent);
-  expect(labels).toEqual(['SKU', 'Stock', 'Stock status', 'Category', 'Price']);
-  for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe('true');
+  expect(labels).toEqual(['ID', 'SKU', 'Barcode', 'Stock', 'Stock status', 'Category', 'Price']);
+  for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe(id === 'id' || id === 'barcode' ? 'false' : 'true');
+});
+
+it('shows the ID and Barcode columns, in v2\'s order, when their switches go on, and saves the choice', () => {
+  openSheet();
+  expect(heads()).not.toContain('ID');
+  expect(heads()).not.toContain('Barcode');
+  fireEvent.click(column('id'));
+  fireEvent.click(column('barcode'));
+  expect(heads()).toEqual(['ID', 'Product', 'SKU', 'Barcode', 'Stock', 'Stock status', 'Category', 'Price']);
+  const row = screen.getByTestId('product-row-p1');
+  expect(row.textContent).toContain('p1');
+  expect(row.textContent).toContain('4006381333931');
+  expect(JSON.parse(localStorage.getItem(KEY) ?? 'null')).toMatchObject({ id: true, barcode: true });
 });
 
 it('hides the SKU column when its switch goes off, keeps Product, and saves the choice for the store', () => {
@@ -76,14 +91,14 @@ it('hides the SKU column when its switch goes off, keeps Product, and saves the 
   expect(JSON.parse(localStorage.getItem(KEY) ?? 'null')).toMatchObject({ sku: false });
 });
 
-it('honours a stored choice on first render, and Restore Default Settings brings every column back', () => {
+it('honours a stored choice on first render, and Restore Default Settings brings the defaults back', () => {
   localStorage.setItem(KEY, JSON.stringify({ price: false, category: false }));
   openSheet();
   expect(heads()).not.toContain('Price');
   expect(heads()).not.toContain('Category');
   fireEvent.click(screen.getByTestId('products-settings-restore'));
   expect(heads()).toEqual(['Product', 'SKU', 'Stock', 'Stock status', 'Category', 'Price']);
-  for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe('true');
+  for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe(String(DEFAULT_PRODUCTS_AREA_COLUMNS[id]));
 });
 
 it('closes the sheet on Close', () => {

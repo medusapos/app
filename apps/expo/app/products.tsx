@@ -22,8 +22,11 @@ import { useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 
 const COLUMNS: ProductTableColumn<ProductAreaRow>[] = [
+  // The row's Medusa id (the variant's); long, so one line.
+  { id: 'id', header: 'ID', flex: 2, sortValue: (row) => row.id, render: (row) => <Text numberOfLines={1}>{row.id}</Text> },
   { id: 'name', header: 'Product', flex: 3, sortValue: (row) => row.name, render: (row) => <Text>{row.name}</Text> },
   { id: 'sku', header: 'SKU', flex: 1.5, sortValue: (row) => row.sku, render: (row) => <Text>{row.sku}</Text> },
+  { id: 'barcode', header: 'Barcode', flex: 1.5, sortValue: (row) => row.barcode, render: (row) => <Text>{row.barcode}</Text> },
   { id: 'stock', header: 'Stock', align: 'right', flex: 1, render: (row) => <Text className="tabular-nums">{row.stock}</Text> },
   { id: 'stockStatus', header: 'Stock status', flex: 1.5, sortValue: (row) => STOCK_STATUS_LABELS[row.stockStatus], render: (row) =>
     <View className="flex-row items-center gap-1.5" testID={`product-stock-status-${row.id}`}>
