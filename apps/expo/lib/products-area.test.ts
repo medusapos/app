@@ -121,6 +121,12 @@ describe('filterProductAreaRows', () => {
   it('gives [] with no match', () => {
     expect(filterProductAreaRows(rows, 'hat')).toEqual([]);
   });
+
+  // v2: "finds products by name, SKU or barcode", so a scanned barcode finds its row.
+  it('matches by barcode', () => {
+    const scanned = [...rows, { ...row('2', 'E2E product 2', 'E2E-2'), barcode: '2000000000011' }];
+    expect(filterProductAreaRows(scanned, '2000000000011').map((r) => r.id)).toEqual(['2']);
+  });
 });
 
 describe('filterProductAreaRowsByCategory', () => {
