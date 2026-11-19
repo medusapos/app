@@ -24,6 +24,7 @@ import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerChip } from '../components/customer-chip';
+import { CustomerSavedToast, useCustomerSavedToast } from '../components/customer-saved-toast';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { OfflineToast, useOfflineToast } from '../components/offline-toast';
 import { ScanToast, scanAddedDescription, useScanToast } from '../components/scan-toast';
@@ -255,6 +256,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const clearScanToast = scanToast.clear;
   // v2's scan toasts belong to the cart stage: leaving it (tender, receipt) hides the current one.
   useEffect(() => { if (sale.stage.kind !== 'cart') clearScanToast(); }, [sale.stage.kind, clearScanToast]);
+  // v2's "<name> saved" after the cart's Add Customer, the Customers screen's own message; it too belongs to the cart stage.
+  const customerSaved = useCustomerSavedToast();
+  const clearCustomerSaved = customerSaved.clear;
+  useEffect(() => { if (sale.stage.kind !== 'cart') clearCustomerSaved(); }, [sale.stage.kind, clearCustomerSaved]);
   const pathname = usePathname();
   // v2 scans anywhere in the POS; an editable target (search box, coupon field) keeps its own input, so no double add; off while an area is over the Sale and in tender.
   // On a phone only the cart view listens.
@@ -428,6 +433,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const phoneTender = phone && sale.stage.kind === 'tender';
   const offlineShown = offline.kind !== null && sale.stage.kind === 'cart' && (!phone || !cartOpen);
   const scanToastShown = scanToast.toast !== null && sale.stage.kind === 'cart';
+  const customerSavedShown = customerSaved.name !== null && sale.stage.kind === 'cart';
   return (
     <ConnectorProvider connector={connector} traitContext={traitContext}>
       <Stack.Screen options={{
@@ -475,7 +481,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         create={(input) => connector.createCustomer!(syncContext, input)}
         update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
-        onUnauthorized={onUnauthorized} />}
+        onAdded={(c) => customerSaved.show(c.name)} onUnauthorized={onUnauthorized} />}
       {connector.getCustomer && connector.updateCustomer && <CustomerAddressDialog customerId={sale.stage.kind === 'cart' ? addressCustomerId : null}
         onClose={() => setAddressCustomerId(null)} getCustomer={(id) => connector.getCustomer!(syncContext, id)}
         loadAddresses={(id) => loadCustomerAddresses(syncContext, id)}
@@ -513,10 +519,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
                 onSelect={(tab) => setCartOpen(tab === 'cart')} />
             </>}
           {/* The till's one toast host, floating over the top of the screen in every layout; the empty sides stay tappable.
-              v2's "Device went offline" toast shows over the products only, the scan toasts in the whole cart stage. */}
-          {(offlineShown || scanToastShown) && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center gap-2 px-2">
+              v2's "Device went offline" toast shows over the products only, the scan toasts and the "<name> saved" message
+              in the whole cart stage. */}
+          {(offlineShown || scanToastShown || customerSavedShown) && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center gap-2 px-2">
             {offlineShown && <OfflineToast kind={offline.kind!} onClose={offline.close} />}
             {scanToastShown && <ScanToast toast={scanToast.toast!} />}
+            {customerSavedShown && <CustomerSavedToast name={customerSaved.name!} />}
           </View>}
         </View>}
     </ConnectorProvider>
