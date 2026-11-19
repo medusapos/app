@@ -228,13 +228,13 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
           {`${unsynced} ${unsynced === 1 ? 'sale' : 'sales'} not sent yet · ${z.unsynced_total_display}`}</Text> : null}
         {approver ? <Text testID="last-closure-approved-by" className="min-h-11">{`Approved by ${approver}`}</Text> : null}
       </ScrollView>
-      {Platform.OS === 'web' ? <>
-        {error ? <Text testID="last-closure-print-error" accessibilityRole="alert" className="text-destructive">{error}</Text> : null}
-        <Button testID="last-closure-print" className="min-h-11" disabled={busy} onPress={print}>
-          <Text>{busy ? 'Printing…' : 'Print the Z report'}</Text>
-        </Button>
-      </> : null}
-      <Button testID="last-closure-done" variant="outline" className="min-h-11" onPress={() => onOpenChange(false)}><Text>Done</Text></Button>
+      {Platform.OS === 'web' && error ? <Text testID="last-closure-print-error" accessibilityRole="alert" className="text-destructive">{error}</Text> : null}
+      <View className="flex-row gap-2">
+        {Platform.OS === 'web' ? <Button testID="last-closure-print" variant="outline" className="min-h-11 flex-1" disabled={busy} onPress={print}>
+          <Text>{busy ? 'Printing…' : 'Print closure'}</Text>
+        </Button> : null}
+        <Button testID="last-closure-done" className="min-h-11 flex-1" onPress={() => onOpenChange(false)}><Text>Done</Text></Button>
+      </View>
     </DialogContent>
   </Dialog>;
 }
