@@ -43,7 +43,12 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
 
+// A shift 1 h 43 min old, as v2's demo; only the clock and intervals are faked, so act and RTL keep their timeouts.
+const SHIFT_NOW = Date.parse(OPEN_SESSION.opened_at_gmt) + (60 + 43) * 60_000;
+
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] });
+  vi.setSystemTime(SHIFT_NOW);
   sales.orders = [];
   setWindowWidth(1280, 800);
   const data = new Map<string, string>();
@@ -67,7 +72,7 @@ beforeEach(() => {
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [],
     savesInFlight: 0, stuckCommandIds: [], record: vi.fn(), flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn() });
 });
-afterEach(() => { cleanup(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 
 async function mount(name?: string) {
   saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test', name,
@@ -139,7 +144,7 @@ it.each([['Alex Smith', 'AS', 1280], [undefined, 'A', 1280], ['Alex Smith', 'AS'
     expect(screen.queryByTestId('user-sheet')).toBeNull();
     open();
     expect(screen.getByTestId('user-sheet-name').textContent).toBe(displayName);
-    expect(screen.getByTestId('user-sheet-context').textContent).toBe(`${name ? 'admin@store.test · ' : ''}Test shop · Register 1 · since ${openedAt}`);
+    expect(screen.getByTestId('user-sheet-context').textContent).toBe(`${name ? 'admin@store.test · ' : ''}Test shop · Register 1 · since ${openedAt} · 1 h 43 m`);
     expect(screen.getByTestId('user-sheet-avatar').textContent).toBe(initials);
     expect(screen.getByTestId('user-sheet-x').getAttribute('role')).toBe('button');
     const buttons = screen.getByTestId('user-sheet-sign-out').parentElement!;
@@ -214,7 +219,7 @@ it('shows when and by whom the drawer was opened, naming the signed-in opener', 
   vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, opened_by: 'admin@store.test' } } });
   await mount('Alex Smith'); open();
   expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`Register 1 · opened ${openedAt} by Alex Smith`);
-  expect(screen.getByTestId('user-sheet-context').textContent).toMatch(new RegExp(` · since ${openedAt}$`));
+  expect(screen.getByTestId('user-sheet-context').textContent).toMatch(new RegExp(` · since ${openedAt} · 1 h 43 m$`));
 });
 
 it('names another cashier who opened the drawer by the stored id', async () => {
@@ -256,7 +261,7 @@ it('shows the opening time in the header and the drawer while counting', async (
   const register = useRegister().register;
   vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...register, session: { ...register.session!, status: 'counting' } } });
   await mount(); open();
-  expect(screen.getByTestId('user-sheet-context').textContent).toBe(`Test shop · Register 1 · since ${openedAt}`);
+  expect(screen.getByTestId('user-sheet-context').textContent).toBe(`Test shop · Register 1 · since ${openedAt} · 1 h 43 m`);
   expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`Register 1 · opened ${openedAt}`);
 });
 
@@ -264,7 +269,7 @@ it('starts the opened line with the time when the register has no name', async (
   vi.mocked(useRegister).mockReturnValue({ ...useRegister(), registerName: null });
   await mount(); open();
   expect(screen.getByTestId('user-sheet-drawer-opened').textContent).toBe(`opened ${openedAt}`);
-  expect(screen.getByTestId('user-sheet-context').textContent).toBe(`Test shop · since ${openedAt}`);
+  expect(screen.getByTestId('user-sheet-context').textContent).toBe(`Test shop · since ${openedAt} · 1 h 43 m`);
 });
 
 it.each(['open', 'counting'] as const)('shows expected cash while %s and opens the register panel', async (status) => {
@@ -291,6 +296,51 @@ it('hides the drawer amount while blind', async () => {
   expect(screen.getByTestId('user-sheet-drawer').textContent).toBe(`In the drawerRegister 1 · opened ${openedAt}Pay in · Pay out · Close register›Hand the till to the next cashier›`);
   fireEvent.click(screen.getByTestId('user-sheet-sign-out'));
   expect(screen.getByTestId('switch-confirm-title').textContent).toBe('Register 1 is still open. Close it first?');
+});
+
+it('counts the shift duration from the opening time while the sheet is open', async () => {
+  vi.setSystemTime(Date.parse(OPEN_SESSION.opened_at_gmt));
+  await mount(); open();
+  const context = () => screen.getByTestId('user-sheet-context').textContent;
+  expect(context()).toBe(`Test shop · Register 1 · since ${openedAt} · 0 m`);
+  act(() => { vi.advanceTimersByTime(60_000); });
+  expect(context()).toBe(`Test shop · Register 1 · since ${openedAt} · 1 m`);
+  act(() => { vi.advanceTimersByTime(44 * 60_000); });
+  expect(context()).toBe(`Test shop · Register 1 · since ${openedAt} · 45 m`);
+});
+
+it('shows no shift duration for a closed session', async () => {
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), registerName: null, register: { ...useRegister().register, session: null } });
+  await mount(); open();
+  const context = screen.getByTestId('user-sheet-context').textContent;
+  expect(context).toBe('Test shop');
+  expect(context).not.toMatch(/ m$/);
+  expect(context).not.toContain('since');
+});
+
+it('stops the shift clock when the sheet closes and shows the current duration on reopening', async () => {
+  await mount();
+  const before = vi.getTimerCount();
+  open();
+  expect(vi.getTimerCount()).toBe(before + 1);
+  fireEvent.click(screen.getByTestId('user-sheet-close'));
+  expect(vi.getTimerCount()).toBe(before);
+  vi.setSystemTime(SHIFT_NOW + 10 * 60_000);
+  open();
+  expect(screen.getByTestId('user-sheet-context').textContent).toBe(`Test shop · Register 1 · since ${openedAt} · 1 h 53 m`);
+});
+
+it('starts the drawer card with the cash badge, then the label and opened line, then the amount', async () => {
+  vi.mocked(useRegister).mockReturnValue({ ...useRegister(), register: { ...useRegister().register, expected: { cash: 12345 } } });
+  await mount(); open();
+  const card = screen.getByTestId('user-sheet-drawer');
+  const badge = screen.getByTestId('user-sheet-drawer-icon');
+  expect(card.firstElementChild!.firstElementChild).toBe(badge);
+  expect(badge.querySelector('svg')).not.toBeNull();
+  const follows = (a: Node, b: Node) => (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+  const label = within(card).getByText('In the drawer');
+  expect(follows(badge, label)).toBe(true);
+  expect(follows(screen.getByTestId('user-sheet-drawer-opened'), within(card).getByText('€123.45'))).toBe(true);
 });
 
 it('opens Medusa Admin and closes the sheet', async () => {
