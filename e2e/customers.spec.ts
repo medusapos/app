@@ -146,3 +146,25 @@ test('the cart customer chip\'s address button edits the customer\'s billing add
   expect(customers[0].addresses[0]).toMatchObject({ is_default_billing: true, address_1: '1 Market St',
     city: 'Leeds', postal_code: 'LS1 1AA', country_code: 'gb' });
 });
+
+test('the cart\'s Add new customer is v2\'s Add Customer form', async ({ page }) => {
+  const token = await adminToken();
+  const email = `cart-added-${crypto.randomUUID()}@example.com`;
+  await signIn(page);
+  await page.getByTestId('cart-add-menu').click();
+  await page.getByRole('menuitem', { name: 'Add new customer', exact: true }).click();
+  const dialog = page.getByTestId('new-customer-dialog');
+  await expect(dialog.getByRole('heading', { name: 'Add Customer', exact: true })).toBeVisible();
+  await expect(dialog.getByText('Addresses and other optional details', { exact: true })).toBeVisible();
+  await expect(dialog.getByLabel('Address line 1', { exact: true })).not.toBeVisible();
+  await dialog.getByPlaceholder('email@example.com').fill(email);
+  await dialog.getByPlaceholder('First name').fill('Nia');
+  await dialog.getByRole('button', { name: 'Add Customer', exact: true }).click();
+  await expect(page.getByTestId('customer-saved-toast')).toHaveText('Nia saved');
+  await expect(page.getByRole('button', { name: 'Customer: Nia', exact: true })).toBeVisible();
+  const response = await fetch(`${backend}/admin/customers?q=${encodeURIComponent(email)}`, { headers: { Authorization: `Bearer ${token}` } });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  const { customers } = await response.json();
+  expect(customers).toHaveLength(1);
+  expect(customers[0]).toMatchObject({ email, first_name: 'Nia' });
+});

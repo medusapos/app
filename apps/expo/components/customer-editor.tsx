@@ -30,11 +30,11 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
   loadAddresses?: () => Promise<Addresses>;
   /** Places the editor's parts; without it they render in order: form, message, save. */
   layout?: (parts: { form: ReactNode; message: ReactNode; save: ReactNode }) => ReactNode;
-  /** The save button's words; the Customers screen's new-customer form reads v2's "Add Customer". */
+  /** The save button's words; the new-customer forms (Customers screen and the cart's dialog) read v2's "Add Customer". */
   saveLabel?: string;
   /**
    * v2's Add Customer form: the addresses start behind add buttons under "Addresses and other optional details";
-   * a stored address opens its block. Without it both blocks are always open (the cart's dialogs).
+   * a stored address opens its block. Without it both blocks are always open (the cart's address dialog).
    */
   optionalDetails?: boolean;
 }) {
