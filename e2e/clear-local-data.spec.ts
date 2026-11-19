@@ -73,7 +73,7 @@ test.describe('with a parked sale', () => {
   // parked-sales.spec.ts's park steps, at its wide layout.
   test.use({ viewport: { width: 1280, height: 800 } });
 
-  test('the dialog names the parked sale and Confirm waits for CLEAR', async ({ page }) => {
+  test('the dialog names the parked sale and will not clear it on the typed word alone', async ({ page }) => {
     await signIn(page);
     await addE2E1(page);
     await page.getByTestId('new-sale-tab').click();
@@ -87,9 +87,9 @@ test.describe('with a parked sale', () => {
       .toHaveText('1 parked sale on this device has never reached your server and will be permanently lost.');
     await expect(page.getByTestId('clear-local-data-warning-1')).toHaveText('Parked sales are kept only on this device.');
     await expect(page.getByTestId('clear-local-data-confirm')).toBeDisabled();
-    await page.getByTestId('clear-local-data-word').fill('CLEA');
+    // This store's plugin decides which: contract 1 asks for a plugin update; with #495's contract 2 a manager
+    // approves. Either way the typed word alone never enables Clear (#280).
+    await expect(page.getByTestId('clear-local-data-refused').or(page.getByTestId('clear-local-data-approve'))).toBeVisible();
     await expect(page.getByTestId('clear-local-data-confirm')).toBeDisabled();
-    await page.getByTestId('clear-local-data-word').fill('CLEAR');
-    await expect(page.getByTestId('clear-local-data-confirm')).toBeEnabled();
   });
 });

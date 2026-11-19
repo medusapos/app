@@ -52,8 +52,11 @@ export function useApprove(baseUrl: string, online: boolean) {
  * The "Manager approval" dialog. `onResult` fires exactly once: with the approver, or `null` on Cancel, Escape or
  * the dialog closing. Cancel works while a request is in flight: it aborts it, and a late answer is ignored.
  */
-export function ApprovalDialog({ baseUrl, online, request: send, onResult }: {
+export function ApprovalDialog({ baseUrl, online, request: send, onResult, context = APPROVE_CONTEXT, offlineText = APPROVE_OFFLINE,
+  remember = true }: {
   baseUrl: string; online: boolean; request?: ApprovalRequest; onResult: (result: DialogApproval | null) => void;
+  /** The dialog's copy and whether an approver's name is kept (`rememberApprover`); a close's by default. */
+  context?: string; offlineText?: string; remember?: boolean;
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -92,7 +95,7 @@ export function ApprovalDialog({ baseUrl, online, request: send, onResult }: {
         : await requestApproval(baseUrl, email.trim(), secret, { signal: controller.signal, timeoutMs: APPROVAL_TIMEOUT_MS });
       // A late answer after Cancel never approves (and is never kept).
       if (settled.current || controller.signal.aborted) return;
-      rememberApprover(defaultStorage(), baseUrl, approval.approvedBy, approval.approvedByName);
+      if (remember) rememberApprover(defaultStorage(), baseUrl, approval.approvedBy, approval.approvedByName);
       finish(approval);
     } catch (e) {
       if (settled.current) return;
@@ -106,8 +109,8 @@ export function ApprovalDialog({ baseUrl, online, request: send, onResult }: {
   return <Dialog open onOpenChange={(open) => { if (!open) finish(null); }}>
     <DialogContent testID="approval-dialog">
       <DialogTitle>Manager approval</DialogTitle>
-      <Text testID="approval-context" className="text-muted-foreground">{APPROVE_CONTEXT}</Text>
-      {offline ? <Text testID="approval-offline" accessibilityRole="alert">{APPROVE_OFFLINE}</Text> : <>
+      <Text testID="approval-context" className="text-muted-foreground">{context}</Text>
+      {offline ? <Text testID="approval-offline" accessibilityRole="alert">{offlineText}</Text> : <>
         <Label nativeID="approval-email-label">Email</Label>
         <Input><Input.Field testID="approval-email" value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="off"
           keyboardType="email-address" accessibilityLabel="Email" accessibilityLabelledBy="approval-email-label" /></Input>

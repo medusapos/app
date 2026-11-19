@@ -5,6 +5,9 @@ import type { Session } from './session';
 // PLUGIN_CONTRACT (packages/medusa-plugin/src/api/tally/v1/versions.ts) when the app starts depending on something newer.
 // 1: Reports' closures rely on the plugin filtering GET /tally/v1/registers/{id}/closures by `cashier` (#446).
 export const MIN_PLUGIN_CONTRACT = 1;
+// The plugin contract that adds POST /tally/v1/device-clear-approvals (#280); only Clear all local data needs it, so
+// MIN_PLUGIN_CONTRACT stays 1 (raising it would lock every store on an older plugin out of the app).
+export const DEVICE_CLEAR_PLUGIN_CONTRACT = 2;
 
 /** `unknown`: the read was inconclusive (offline, a timeout, a non-2xx, not an info body) and never latches. */
 export type PluginContractStatus = 'ok' | 'too_old' | 'unknown';
@@ -23,15 +26,32 @@ export function pluginContractStatus(body: unknown): PluginContractStatus {
 /** One read of the store's /info; never throws. */
 export async function readPluginContract(session: Pick<Session, 'baseUrl' | 'token'>, fetchImpl = globalThis.fetch,
   timeoutMs = 5000): Promise<PluginContractStatus> {
+  const body = await readInfo(session, fetchImpl, timeoutMs);
+  return body === undefined ? 'unknown' : pluginContractStatus(body);
+}
+
+/**
+ * One read of the store's /info, never throws: an info body's `pluginContract` (0 for a plugin from before the field),
+ * or null when the read was inconclusive (offline, a timeout, a non-2xx, not an info body).
+ */
+export async function readPluginContractVersion(session: Pick<Session, 'baseUrl' | 'token'>, fetchImpl = globalThis.fetch,
+  timeoutMs = 5000): Promise<number | null> {
+  const body = await readInfo(session, fetchImpl, timeoutMs);
+  if (!isRecord(body) || !isRecord(body.contracts)) return null;
+  return typeof body.pluginContract === 'number' && Number.isSafeInteger(body.pluginContract) ? body.pluginContract : 0;
+}
+
+// The /info body of a 2xx answer, or undefined when the read failed or timed out.
+async function readInfo(session: Pick<Session, 'baseUrl' | 'token'>, fetchImpl: typeof fetch, timeoutMs: number): Promise<unknown> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const response = await Promise.race([
       fetchImpl(`${session.baseUrl}/tally/v1/info`, { method: 'GET', headers: authHeaders(session.token) }),
       new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), timeoutMs); }),
     ]);
-    if (!response || !response.ok) return 'unknown';
-    return pluginContractStatus(await response.json());
+    if (!response || !response.ok) return undefined;
+    return await response.json();
   } catch {
-    return 'unknown';
+    return undefined;
   } finally { clearTimeout(timer); }
 }

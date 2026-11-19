@@ -5,11 +5,12 @@ import { createOrderBuilder, finalizeOrder } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ClearLocalDataGate, ClearLocalDataSection } from '../components/clear-local-data';
-import { CLEAR_FLAG_KEY, clearAllLocalData, reloadPage } from '../lib/clear-local-data';
+import { CLEAR_FLAG_KEY, CLEAR_OFFLINE, CLEAR_UPDATE_NEEDED, clearAllLocalData, reloadPage } from '../lib/clear-local-data';
 import { draftsCollection, openOrderStore, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
+import { useNetworkOnline } from '../lib/use-network-online';
 
 vi.mock('../lib/clear-local-data', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/clear-local-data')>(), reloadPage: vi.fn(), clearAllLocalData: vi.fn(),
@@ -17,6 +18,9 @@ vi.mock('../lib/clear-local-data', async (importOriginal) => ({
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/register-context', () => ({ useRegister: vi.fn() }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
+vi.mock('../lib/use-network-online', () => ({ useNetworkOnline: vi.fn(() => true) }));
+// The approval dialog lives in register-close.tsx, which reads the locale for its closure report.
+vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 
 // Only the fields the dialog reads; `orders` is a real (memory) order store's, or null while it opens.
 let store: Awaited<ReturnType<typeof openOrderStore>> | undefined;
@@ -29,12 +33,27 @@ function setTill({ pending = 0, status = 'closed', capabilities = { orderCreate:
   vi.mocked(useRegister).mockReturnValue({
     register: { session: { status } }, registerOutbox: { state: { pending, sending: false } },
   } as unknown as ReturnType<typeof useRegister>);
-  vi.mocked(useSession).mockReturnValue({ session: { capabilities } } as unknown as ReturnType<typeof useSession>);
+  vi.mocked(useSession).mockReturnValue({ session: { baseUrl: 'https://store.test', token: 'cashier-token', capabilities } } as unknown as ReturnType<typeof useSession>);
 }
+
+const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
+const APPROVE_ROUTE = 'https://store.test/tally/v1/device-clear-approvals';
+// The plugin's /info and approval route; a test swaps either answer.
+let answers: { info: () => Response; approve: () => Response };
+let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+const approvalCalls = () => fetchMock.mock.calls.filter(([url]) => String(url) === APPROVE_ROUTE);
 
 let stored: Map<string, string>;
 let locationReload: ReturnType<typeof vi.fn>;
 beforeEach(() => {
+  answers = {
+    info: () => json({ contracts: {}, pluginContract: 2 }),
+    approve: () => json({ approvedBy: 'user_mia', approvedByName: 'Mia Manager', expiresAt: '2026-11-19T10:00:00.000Z' }),
+  };
+  fetchMock = vi.fn<typeof fetch>(async (url) => String(url).endsWith('/tally/v1/info') ? answers.info()
+    : String(url) === APPROVE_ROUTE ? answers.approve() : json({}, 404));
+  vi.stubGlobal('fetch', fetchMock);
+  vi.mocked(useNetworkOnline).mockReturnValue(true);
   stored = new Map();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => stored.get(key) ?? null,
@@ -132,10 +151,23 @@ describe('ClearLocalDataSection', () => {
     builder.addPayment({ method: 'cash', amountMinor: 100 });
     return { ...finalizeOrder(builder.getSnapshot()), id: `order-${i}`, createdAt: at, syncStatus };
   }));
+  const approve = async () => {
+    await act(async () => { fireEvent.click(screen.getByTestId('clear-local-data-approve')); });
+    fireEvent.change(screen.getByTestId('approval-email'), { target: { value: 'mia@store.test' } });
+    fireEvent.change(screen.getByTestId('approval-password'), { target: { value: 'manager-secret' } });
+    await act(async () => { fireEvent.click(screen.getByTestId('approval-approve')); });
+  };
+  // Unsynced data, online (#280): the typed word and a manager's approval, both.
   const lockedUntilClear = async () => {
     await confirm();
     expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
     await type('CLEAR');
+    await confirm();
+    expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
+    await approve();
+    await waitFor(() => expect(screen.getByTestId('clear-local-data-approved').textContent).toBe('Approved by Mia Manager'));
+    expect(approvalCalls()).toHaveLength(1);
+    expect(JSON.parse(String(approvalCalls()[0][1]?.body)).email).toBe('mia@store.test');
     await confirm();
     expect(stored.get(CLEAR_FLAG_KEY)).toBe('1');
   };
@@ -180,6 +212,53 @@ describe('ClearLocalDataSection', () => {
     await lockedUntilClear();
   });
 
+  it('unsynced data can be approved before the word is typed', async () => {
+    await sales('pending');
+    await section();
+    await approve();
+    await waitFor(() => expect(screen.getByTestId('clear-local-data-approved')).toBeTruthy());
+    await confirm();
+    expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
+    await type('CLEAR');
+    await confirm();
+    expect(stored.get(CLEAR_FLAG_KEY)).toBe('1');
+  });
+
+  it('unsynced data offline is refused', async () => {
+    vi.mocked(useNetworkOnline).mockReturnValue(false);
+    await sales('pending');
+    await section();
+    expect(screen.getByTestId('clear-local-data-refused').textContent).toBe(CLEAR_OFFLINE);
+    expect(screen.queryByTestId('clear-local-data-word')).toBeNull();
+    expect(screen.queryByTestId('clear-local-data-approve')).toBeNull();
+    await confirm();
+    expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
+    expect(approvalCalls()).toHaveLength(0);
+  });
+
+  it('a plugin whose /info is below contract 2 needs an update', async () => {
+    answers.info = () => json({ contracts: {}, pluginContract: 1 });
+    await sales('pending');
+    await section();
+    await waitFor(() => expect(screen.getByTestId('clear-local-data-refused').textContent).toBe(CLEAR_UPDATE_NEEDED));
+    expect(screen.queryByTestId('clear-local-data-approve')).toBeNull();
+    await confirm();
+    expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
+  });
+
+  it('a plugin without the approval route needs an update', async () => {
+    answers.info = () => json({}, 500);
+    answers.approve = () => json({ message: 'Not found' }, 404);
+    await sales('pending');
+    await section();
+    await approve();
+    await waitFor(() => expect(screen.queryByTestId('approval-dialog')).toBeNull());
+    expect(approvalCalls()).toHaveLength(1);
+    expect(screen.getByTestId('clear-local-data-refused').textContent).toBe(CLEAR_UPDATE_NEEDED);
+    await confirm();
+    expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
+  });
+
   it('an open till warns and needs the typed word', async () => {
     for (const status of ['open', 'counting'] as const) {
       stored.clear();
@@ -188,6 +267,7 @@ describe('ClearLocalDataSection', () => {
       await section();
       expect(line(1)).toBe(takeOver);
       expect(screen.getByTestId('clear-local-data-word')).toBeTruthy();
+      expect(screen.queryByTestId('clear-local-data-approve')).toBeNull();
       await confirm();
       expect(stored.has(CLEAR_FLAG_KEY)).toBe(false);
       await type('clea');
