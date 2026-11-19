@@ -10,7 +10,8 @@ import { PortalHost } from '@tallyui/primitives';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
 import {
-  PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH, PRODUCTS_NONE_IN_STOCK, saveProductsAreaCategory,
+  PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH, PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_TAGGED,
+  PRODUCTS_TAGS_NONE, PRODUCTS_TAGS_SEARCH, saveProductsAreaCategory, saveProductsAreaTag,
 } from '../lib/products-area';
 import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
@@ -49,7 +50,8 @@ vi.mock('../lib/store-settings', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
 }));
 
-type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[] };
+type Doc = { id: string; title: string; variants: VariantSummary[]; categories?: { id: string; name: string }[];
+  tags?: { id: string; value: string }[] };
 const traits = {
   getName: (doc: Doc) => doc.title,
   getVariantCount: (doc: Doc) => doc.variants.length,
@@ -428,6 +430,164 @@ describe('ProductsAreaScreen', () => {
       mount();
       expect(footer().textContent).toBe('Showing 3 of 3');
       expect(within(footer()).queryByTestId('catalogue-sync')).toBeNull();
+    });
+  });
+
+  // v2's Tags pill, by Medusa product tags: one tag at a time, its value on the chip with a cross, kept per store.
+  describe('the Tags chip', () => {
+    const organic = { id: 'tag_organic', value: 'Organic' };
+    const seasonal = { id: 'tag_seasonal', value: 'Seasonal' };
+    const tagged: Doc[] = [
+      { ...categorized[0], tags: [organic] },
+      { ...categorized[1], tags: [seasonal] },
+      { id: 'p5', title: 'E2E product 5', categories: [{ id: 'cat_food', name: 'Food' }], tags: [seasonal, organic], variants: [
+        { id: 'v5', title: 'Default', sku: 'E2E-5', prices: eur(500), stock: { status: 'out_of_stock', quantity: 0 } }] },
+    ];
+    // The tag list renders in a portal.
+    const mountTags = () => render(<><ProductsAreaScreen /><PortalHost /></>);
+    const chip = () => screen.getByTestId('products-tags');
+    const footer = () => screen.getByTestId('products-footer').textContent;
+    const menuIds = () => Array.from(within(screen.getByTestId('products-tags-menu')).queryAllByRole('radio'))
+      .map((item) => item.getAttribute('data-testid'));
+    const pick = (tag: { id: string }) => {
+      press('products-tags');
+      press(`products-tag-${tag.id}`);
+    };
+
+    it('on a tablet lists the catalogue\'s tags sorted, and a picked tag narrows the rows and shows on the chip', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: tagged }));
+      mountTags();
+      expect(chip().textContent).toBe('Tags');
+      expect(chip().getAttribute('aria-label')).toBe('Tags');
+      expect(screen.queryByTestId('products-tags-menu')).toBeNull();
+      press('products-tags');
+      expect(menuIds()).toEqual(['products-tag-tag_organic', 'products-tag-tag_seasonal']);
+      expect(screen.getByTestId('products-tag-tag_organic').getAttribute('aria-checked')).toBe('false');
+      press('products-tag-tag_organic');
+      expect(screen.queryByTestId('products-tags-menu')).toBeNull();
+      expect(rowIds()).toEqual(['v1', 'v5']);
+      expect(chip().textContent).toBe('Organic');
+      expect(chip().getAttribute('aria-label')).toBe('Tag: Organic');
+      expect(footer()).toBe('Showing 2 of 4');
+      press('products-tags');
+      expect(screen.getByTestId('products-tag-tag_organic').getAttribute('aria-checked')).toBe('true');
+      press('products-tag-tag_seasonal');
+      expect(rowIds()).toEqual(['v4a', 'v4b', 'v5']);
+      expect(chip().textContent).toBe('Seasonal');
+      expect(footer()).toBe('Showing 3 of 4');
+    });
+
+    it('the search box narrows the tag list, says when no tag matches, and is empty again on the next opening', () => {
+      sessionState.session = session;
+      publishCatalogue(sale({ products: tagged }));
+      mountTags();
+      press('products-tags');
+      const search = () => screen.getByTestId('products-tags-search') as HTMLInputElement;
+      expect(search().getAttribute('placeholder')).toBe(PRODUCTS_TAGS_SEARCH);
+      fireEvent.change(search(), { target: { value: ' SEA ' } });
+      expect(menuIds()).toEqual(['products-tag-tag_seasonal']);
+      fireEvent.change(search(), { target: { value: 'hat' } });
+      expect(menuIds()).toEqual([]);
+      expect(within(screen.getByTestId('products-tags-menu')).getByText(PRODUCTS_TAGS_NONE)).toBeTruthy();
+      press('products-tags');
+      expect(screen.queryByTestId('products-tags-menu')).toBeNull();
+      press('products-tags');
+      expect(search().value).toBe('');
+      expect(menuIds()).toHaveLength(2);
+    });
+
+    it('narrows together with the category, In stock and the search', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: tagged }));
+      mountTags();
+      pick(seasonal);
+      press('category-nav-cat_drinks');
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NONE_TAGGED('Seasonal'))).toBeTruthy();
+      press('category-nav-cat_food');
+      expect(rowIds()).toEqual(['v4a', 'v4b', 'v5']);
+      press('products-in-stock');
+      expect(rowIds()).toEqual(['v4a']);
+      expect(footer()).toBe('Showing 1 of 4');
+      fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-5' } });
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NO_MATCH('E2E-5'))).toBeTruthy();
+    });
+
+    it('the cross takes the tag off without opening the list', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: tagged }));
+      mountTags();
+      expect(screen.queryByTestId('products-tags-remove')).toBeNull();
+      pick(organic);
+      expect(rowIds()).toEqual(['v1', 'v5']);
+      expect(screen.getByTestId('products-tags-remove').getAttribute('aria-label')).toBe('Remove tag');
+      press('products-tags-remove');
+      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      expect(chip().textContent).toBe('Tags');
+      expect(screen.queryByTestId('products-tags-remove')).toBeNull();
+      expect(screen.queryByTestId('products-tags-menu')).toBeNull();
+    });
+
+    it('restores the chosen tag on a new mount, per store, and counts a stored tag gone from the catalogue as none', () => {
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: tagged }));
+      mountTags();
+      pick(organic);
+      cleanup();
+      mountTags();
+      expect(chip().textContent).toBe('Organic');
+      expect(rowIds()).toEqual(['v1', 'v5']);
+      cleanup();
+      stubStorage();
+      saveProductsAreaTag(localStorage, 'https://other.test', 'tag_organic');
+      mountTags();
+      expect(chip().textContent).toBe('Tags');
+      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      cleanup();
+      saveProductsAreaTag(localStorage, session.baseUrl, 'tag_gone');
+      mountTags();
+      expect(chip().textContent).toBe('Tags');
+      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      expect(footer()).toBe('Showing 4 of 4');
+    });
+
+    it('no Tags chip when the catalogue has no tags', () => {
+      sessionState.session = session;
+      publishCatalogue(sale({ products: categorized }));
+      mountTags();
+      expect(inStock()).toBeTruthy();
+      expect(screen.queryByTestId('products-tags')).toBeNull();
+    });
+
+    it('on a phone the chip shows and narrows the two-line list', () => {
+      setWindowWidth(390, 844);
+      stubStorage();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: tagged }));
+      mountTags();
+      pick(organic);
+      expect(Array.from(document.querySelectorAll('[data-testid^="product-list-row-"]'))
+        .map((row) => row.getAttribute('data-testid'))).toEqual(['product-list-row-v1', 'product-list-row-v5']);
+    });
+
+    it('Clear and Refresh keeps the chosen tag', () => {
+      stubStorage();
+      const clearAndRefresh = vi.fn();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: tagged, sync: vi.fn(), clearAndRefresh }));
+      mountTags();
+      pick(organic);
+      fireEvent.contextMenu(screen.getByTestId('catalogue-sync'));
+      fireEvent.click(screen.getByTestId('catalogue-clear-refresh'));
+      expect(clearAndRefresh).toHaveBeenCalledTimes(1);
+      expect(chip().textContent).toBe('Organic');
+      expect(rowIds()).toEqual(['v1', 'v5']);
     });
   });
 });

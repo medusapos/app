@@ -24,7 +24,7 @@ vi.mock('../lib/catalogue-snapshot', async (importOriginal) => ({
 }));
 const tea: ProductAreaRow = {
   id: 'p1', name: 'Tea', sku: 'TEA-1', barcode: '4006381333931', price: '€3.00', stock: '12', stockStatus: 'in_stock',
-  categories: 'Drinks', categoryIds: ['c1'], imageUrl: 'https://img.test/tea.png',
+  categories: 'Drinks', categoryIds: ['c1'], tagIds: [], imageUrl: 'https://img.test/tea.png',
 };
 // A product with no image: the placeholder tile.
 const coffee: ProductAreaRow = { ...tea, id: 'p2', name: 'Coffee', sku: 'COF-1', imageUrl: undefined };

@@ -9,14 +9,16 @@ import { Image } from '@tallyui/primitives';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { ProductsAreaColumnsButton } from '../components/products-area-columns-settings';
+import { ProductsTagsChip } from '../components/products-tags-chip';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
-  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsInStock, loadProductsAreaCategory, productAreaRows,
-  productAreaStockLine,
+  filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock, listProductTags,
+  loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine,
   PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
-  PRODUCTS_NONE_IN_STOCK, PRODUCTS_SHOWING, saveProductsAreaCategory, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
+  PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_SHOWING, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS,
+  STOCK_STATUS_LABELS, type ProductAreaRow,
 } from '../lib/products-area';
 import { useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
 import { defaultStorage } from '../lib/session';
@@ -97,6 +99,7 @@ export default function ProductsAreaScreen() {
   const [search, setSearch] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(() =>
     session ? loadProductsAreaCategory(defaultStorage(), session.baseUrl) : null);
+  const [tagId, setTagId] = useState<string | null>(() => session ? loadProductsAreaTag(defaultStorage(), session.baseUrl) : null);
   const [inStockOnly, setInStockOnly] = useState(false);
   const columns = useProductsAreaColumns(defaultStorage(), session?.baseUrl ?? '');
   // The Product column always shows; the rest follow the settings sheet, in table order.
@@ -112,9 +115,13 @@ export default function ProductsAreaScreen() {
   const categories = useMemo(() => ready ? listCategories(ready.products, ready.traits) : [], [ready]);
   // A chosen category no longer in the catalogue counts as All, as the Sale's chips do.
   const activeId = categoryId !== null && categories.some((category) => category.id === categoryId) ? categoryId : null;
-  const items = useMemo(() => filterProductAreaRows(
-    filterProductAreaRowsInStock(filterProductAreaRowsByCategory(rows, activeId), inStockOnly), search),
-  [rows, activeId, inStockOnly, search]);
+  const tags = useMemo(() => ready ? listProductTags(ready.products) : [], [ready]);
+  // A chosen tag no longer in the catalogue counts as none, as the category does.
+  const activeTag = tags.find((tag) => tag.id === tagId) ?? null;
+  const activeTagId = activeTag?.id ?? null;
+  const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsInStock(
+    filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId), inStockOnly), search),
+  [rows, activeId, activeTagId, inStockOnly, search]);
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
   const phoneItems = useMemo(() => phone ? sortProducts(items, NAME_SORT, (row) => row.name) : [], [phone, items]);
   // v2's Products has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
@@ -124,14 +131,14 @@ export default function ProductsAreaScreen() {
   if (!session) return <Redirect href="/login" />;
   // One cache per store and pricing context: the area reads only while the Sale holds no catalogue for this store.
   const saleHolds = loaded?.owner === 'sale';
-  // Clear and Refresh empties the search and the In stock chip too, as the Sale's does; the kept category stays.
+  // Clear and Refresh empties the search and the In stock chip too, as the Sale's does; the kept category and tag stay.
   const clearAndRefresh = () => {
     ready?.clearAndRefresh?.();
     setSearch('');
     setInStockOnly(false);
   };
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
-    : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
+    : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
   return <View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
@@ -140,7 +147,7 @@ export default function ProductsAreaScreen() {
       {!phone && <ProductsAreaColumnsButton {...columns} />}
       {!openMenu && <AreaAccountButton />}
     </View>
-    {/* In stock first, as in v2's chip row; the category is kept per store, In stock is not. */}
+    {/* In stock first, as in v2's chip row, Tags last; the category and tag are kept per store, In stock is not. */}
     {ready ? <View className="flex-row items-center pl-4">
       <View className="py-2">
         <Pressable testID="products-in-stock" role="button" aria-pressed={inStockOnly} accessibilityLabel={PRODUCTS_IN_STOCK_LABEL}
@@ -150,12 +157,19 @@ export default function ProductsAreaScreen() {
           </Text>
         </Pressable>
       </View>
-      {categories.length ? <CategoryNav className="flex-1" testID="products-categories"
+      {/* A style, not a class: react-native-web's ScrollView base style grows, and its atomic class beats Tailwind's grow-0. */}
+      {categories.length ? <CategoryNav className="min-w-0" style={{ flexGrow: 0 }} testID="products-categories"
         categories={[{ id: '', name: 'All products' }, ...categories]} selectedId={activeId ?? ''}
         onSelect={(id) => {
           setCategoryId(id === '' ? null : id);
           saveProductsAreaCategory(defaultStorage(), session.baseUrl, id === '' ? null : id);
         }} /> : null}
+      {tags.length ? <View className="shrink-0 py-2 pr-4 pl-2">
+        <ProductsTagsChip tags={tags} selectedId={activeTagId} onSelect={(id) => {
+          setTagId(id);
+          saveProductsAreaTag(defaultStorage(), session.baseUrl, id);
+        }} />
+      </View> : null}
     </View> : null}
     <View className="px-4 pb-2">
       <Text className="text-sm text-muted-foreground" testID="products-admin-note">{PRODUCTS_ADMIN_NOTE}</Text>
