@@ -3,8 +3,9 @@ import { Platform, ScrollView, View, useWindowDimensions } from 'react-native';
 import { getLocales } from 'expo-localization';
 import { Button, Dialog, DialogContent, DialogTitle, Input, Label, Text } from '@tallyui/components';
 import { formatMoney, minorUnitDigits, moneyFromDecimalString } from '@tallyui/core';
-import { buildClosureDocument, type Closure, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
+import { buildClosureDocument, minorToDecimal, type Closure, type ClosureContext, type useRegisterSession } from '@tallyui/pos';
 import { APPROVAL_TIMEOUT_MS, ApprovalError, rememberApprover, requestApproval, requestStoreApproval, type Approval } from '../lib/approval';
+import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
 import { closureReportHtml, printHtml, PRINT_FAILED } from '../lib/closure-print';
 import { defaultStorage } from '../lib/session';
 
@@ -166,7 +167,17 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   if (!open || !closure) return null;
-  const { closure: z, fiscal } = buildClosureDocument(closure, closureContext(currency, store));
+  const context = closureContext(currency, store);
+  const { closure: z, fiscal } = buildClosureDocument(closure, context);
+  // The frozen payment_methods row for cash (its sales and refunds at close); absent when cash took nothing.
+  const cash = z.breakdowns.payment_methods.find((row) => row.name === 'cash') as
+    { sales_display: string; refunds?: string; refunds_minor?: number } | undefined;
+  const others = z.tenders.filter((tender) => tender.name !== 'cash');
+  const counts = (tender: (typeof z.tenders)[number]) => <>
+    <Row label="Counted" value={tender.counted_display} testID={`last-closure-counted-${tender.name}`} />
+    <Row label="Variance" testID={`last-closure-variance-${tender.name}`}
+      value={tender.has_variance ? `${tender.variance_label} ${tender.variance_absolute_display}` : tender.variance_label} />
+  </>;
   const approver = z.approved_by ? String(z.breakdowns.labels.approved_by_name || z.approved_by) : null;
   const unsynced = z.unsynced_count;
   const movements = z.breakdowns.movements;
@@ -189,13 +200,21 @@ export function LastClosureSheet({ register, currency, store, open, onOpenChange
         <Row label="Closed" value={z.closed_at.datetime} testID="last-closure-closed" />
         <Row label="Sales" value={z.period_sales_total_display} testID="last-closure-sales" />
         <Row label="Opening float" value={z.breakdowns.opening_float.counted_display} testID="last-closure-float" />
-        {z.tenders.map((tender) => <View key={tender.name} testID={`last-closure-tender-${tender.name}`} className="border-t border-border pt-2">
+        {z.tenders.filter((tender) => tender.name === 'cash').map((tender) => <View key={tender.name} testID={`last-closure-tender-${tender.name}`} className="border-t border-border pt-2">
           <Text className="font-semibold">{String(tender.label)}</Text>
+          <Row label="Cash sales" value={cash?.sales_display ?? context.formatMoney(minorToDecimal(0, context.exponent))} testID="last-closure-cash-sales" />
+          {cash && (cash.refunds_minor ?? 0) > 0 ? <Row label="Cash refunds" value={context.formatMoney(`-${cash.refunds}`)} testID="last-closure-cash-refunds" /> : null}
           <Row label="Expected" value={tender.expected_display} testID={`last-closure-expected-${tender.name}`} />
-          <Row label="Counted" value={tender.counted_display} testID={`last-closure-counted-${tender.name}`} />
-          <Row label="Variance" testID={`last-closure-variance-${tender.name}`}
-            value={tender.has_variance ? `${tender.variance_label} ${tender.variance_absolute_display}` : tender.variance_label} />
+          {counts(tender)}
         </View>)}
+        {others.length ? <View testID="last-closure-other-tenders" className="border-t border-border pt-2">
+          <Text className="font-semibold">Other tenders</Text>
+          {others.map((tender) => <View key={tender.name}>
+            <Row label={TILL_PAYMENT_METHODS.find((method) => method.id === tender.name)?.title ?? String(tender.label)}
+              value={tender.expected_display} testID={`last-closure-other-${tender.name}`} />
+            {tender.counted !== '' ? counts(tender) : null}
+          </View>)}
+        </View> : null}
         {movements.length ? <View testID="last-closure-movements" className="border-t border-border pt-2">
           <Text className="font-semibold">Paid in / out</Text>
           {movements.map((movement) => <Row key={movement.id} label={movement.type_label}
