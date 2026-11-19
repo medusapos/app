@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { adminToken, backend, createAdminCustomer, openArea, signIn, test } from './helpers';
+import { adminToken, backend, createAdminCustomer, expectSwitchThumbInTrack, openArea, signIn, test } from './helpers';
 
 test('the Customers area finds and edits a customer', async ({ page }) => {
   const token = await adminToken();
@@ -139,4 +139,25 @@ test('the Customers table opens by Last name ascending, a header tap reverses an
   await expect(header).toContainText('▲');
   await expect.poll(() => rows.evaluateAll((els) => els.map((el) => el.getAttribute('data-testid'))))
     .toEqual([`customer-row-${abbott}`, `customer-row-${young}`]);
+});
+
+test('the Customers settings sheet\'s switch thumbs sit inside their tracks, at the start off and the end on', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+  await openArea(page, 'Customers');
+  await page.getByTestId('customers-settings-button').click();
+  const switches = page.getByTestId(/^customers-settings-column-/);
+  await expect(switches.first()).toBeVisible();
+  for (const sw of await switches.all()) {
+    const was = (await sw.getAttribute('aria-checked')) === 'true';
+    await expectSwitchThumbInTrack(sw);
+    await sw.click();
+    await expect(sw).toHaveAttribute('aria-checked', String(!was));
+    await expectSwitchThumbInTrack(sw);
+    await sw.click();
+    await expect(sw).toHaveAttribute('aria-checked', String(was));
+    await expectSwitchThumbInTrack(sw);
+  }
+  await page.getByTestId('customers-settings-close').click();
+  await expect(page.getByTestId('customers-settings-sheet')).not.toBeVisible();
 });

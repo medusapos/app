@@ -288,7 +288,9 @@ function DefaultCustomerSection({ session }: { session: Session }) {
       </DialogContent>
     </Dialog>}
     {connector.searchCustomers && <SettingsRow label="Default customer is cashier" className="border-t border-border" action={
-      <Switch accessibilityLabel="Default customer is cashier" testID="settings-default-customer-is-cashier"
+      // TallyUI's Switch track sets no flex direction and react-native-web defaults to column, so
+      // items-center would center the thumb and the "on" translate would push it past the track.
+      <Switch accessibilityLabel="Default customer is cashier" testID="settings-default-customer-is-cashier" className="flex-row"
         checked={cashier.on} onCheckedChange={cashier.setOn} />
     } />}
     {connector.searchCustomers && cashierStatus ? <View className="px-4 pb-4">
@@ -304,7 +306,7 @@ function PrintingSection({ session }: { session: Session }) {
   <SettingsGroup title="Printing" testID="settings-printing"
     description="Receipts print through this device's print dialog. Saved on this till only.">
     <SettingsRow label="Automatically print receipt after checkout" action={
-      <Switch accessibilityLabel="Automatically print receipt after checkout" testID="settings-printing-auto-print"
+      <Switch accessibilityLabel="Automatically print receipt after checkout" testID="settings-printing-auto-print" className="flex-row"
         checked={settings.autoPrintReceipt} onCheckedChange={(checked) => save({ ...settings, autoPrintReceipt: checked })} />
     } />
     <View className="px-4 pb-4">
@@ -397,7 +399,7 @@ function ScannerSection({ session }: { session: Session }) {
         </Pressable>
       </View>
       <SettingsRow label="Play a sound on scan" className="border-t border-border px-0" action={
-        <Switch accessibilityLabel="Play a sound on scan" testID="settings-scanner-sound" checked={settings.playSound} onCheckedChange={(checked) => {
+        <Switch accessibilityLabel="Play a sound on scan" testID="settings-scanner-sound" className="flex-row" checked={settings.playSound} onCheckedChange={(checked) => {
           try { save({ ...settings, playSound: checked }); setError(null); }
           catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
         }} />

@@ -50,7 +50,9 @@ export function ProductSettingsButton({ viewState, onViewStateChange, showOutOfS
           </View>
           <View className="flex-row items-center justify-between gap-2">
             <Label nativeID="product-settings-out-of-stock-label">Show out-of-stock products</Label>
-            <Switch testID="product-settings-out-of-stock" aria-labelledby="product-settings-out-of-stock-label"
+            {/* TallyUI's Switch track sets no flex direction and react-native-web defaults to column, so
+                items-center would center the thumb and the "on" translate would push it past the track. */}
+            <Switch testID="product-settings-out-of-stock" className="flex-row" aria-labelledby="product-settings-out-of-stock-label"
               checked={showOutOfStock} onCheckedChange={onShowOutOfStockChange} />
           </View>
           <Text>Sort By</Text>
