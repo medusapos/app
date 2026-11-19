@@ -5,12 +5,14 @@ import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, capturedMinor, type PosOrder, type SentOrder } from '@tallyui/pos';
 import { SummaryPayments } from './summary-payments';
 
-export function PaidSummary({ order, posOrder, storeName, taxLabel, formatDate }: {
+export function PaidSummary({ order, posOrder, storeName, taxLabel, formatDate, awaiting }: {
   order: SentOrder;
   posOrder: PosOrder;
   storeName: string;
   taxLabel: (ratePpm: number) => string;
   formatDate: (iso: string) => string;
+  /** The paid screen's awaiting-store state (useAwaitingStore): each payment then reads "Recorded offline", as v2. */
+  awaiting: boolean;
 }): JSX.Element {
   const receipt = buildReceiptData(order, { storeName });
   const { totals } = receipt;
@@ -33,8 +35,10 @@ export function PaidSummary({ order, posOrder, storeName, taxLabel, formatDate }
       label={`${totals.taxInclusive ? 'incl. ' : ''}${taxLabel(line.ratePpm)}`}
       amount={formatMoney({ amount: line.amountMinor, currency: order.currency })!} />)}
     <SummaryPayments currency={order.currency} totalMinor={totals.totalMinor} paidMinor={paidMinor}
-      payments={posOrder.payments.map(payment => ({ id: payment.id, label: payment.method === 'cash' ? 'Cash' : 'Card terminal',
-        amountMinor: payment.amountMinor, tenderedMinor: payment.tenderedMinor, changeMinor: payment.changeMinor }))} />
+      payments={posOrder.payments.map((payment) => ({ id: payment.id, label: payment.method === 'cash' ? 'Cash' : 'Card terminal',
+        amountMinor: payment.amountMinor, tenderedMinor: payment.tenderedMinor, changeMinor: payment.changeMinor,
+        // A stored payment is always captured (finalizeOrder refuses any other status); v2's paid summary shows it as Captured.
+        status: 'captured' as const, recordedOffline: awaiting }))} />
     {paidMinor >= totals.totalMinor && <Text testID="paid-in-full" className="text-success">Paid in full</Text>}
   </View>;
 }

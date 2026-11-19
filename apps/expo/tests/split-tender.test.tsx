@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
 import { toOrderCreateEnvelope, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -193,6 +193,32 @@ it('shows the screen-only paid summary beside the receipt on wide windows', asyn
   expect(screen.getByLabelText('Total: €24.00')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'New sale' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('shows each payment of a sent split sale as Captured with no Recorded offline', async () => {
+  await startSplit();
+  tender('card', '10.00');
+  tender('cash', '20.00');
+  await complete();
+  const summary = screen.getByTestId('paid-summary');
+  const payments = record.mock.calls[0][0].payments;
+  expect(payments).toHaveLength(2);
+  for (const { id } of payments) {
+    expect(within(summary).getByTestId(`summary-payment-${id}-status`).textContent).toBe('Captured');
+  }
+  expect(summary.textContent).not.toContain('Recorded offline');
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('shows a sent cash payment as Captured', async () => {
+  await startSplit();
+  tender('cash', '24.00');
+  await complete();
+  const summary = screen.getByTestId('paid-summary');
+  const [{ id }] = record.mock.calls[0][0].payments;
+  expect(within(summary).getByTestId(`summary-payment-${id}-status`).textContent).toBe('Captured');
+  expect(summary.textContent).not.toContain('Recorded offline');
 }, 15000);
 
 it('keeps the receipt without a paid summary at column widths', async () => {

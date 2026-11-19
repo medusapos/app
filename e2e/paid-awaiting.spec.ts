@@ -16,8 +16,14 @@ test('an offline sale\'s paid screen says Awaiting store until the store has it'
   await page.getByRole('button', { name: 'Complete sale', exact: true }).click();
   await expect(page.getByTestId('paid-awaiting-status')).toHaveText('Awaiting store · Cash');
   await expect(page.getByTestId('paid-awaiting-figure')).toHaveText(/^Paid /);
+  // v2's paid summary beside the receipt (1280 px): the payment is Captured and Recorded offline while awaiting.
+  const summary = page.getByTestId('paid-summary');
+  await expect(summary.getByText('Recorded offline', { exact: true })).toBeVisible();
+  await expect(summary.getByText('Captured', { exact: true })).toBeVisible();
   await context.setOffline(false);
   // As offline.spec waits for "Sales are up to date.": the outbox's next attempt after reconnecting.
   await expect(page.getByTestId('paid-awaiting')).toBeHidden({ timeout: 3 * 60_000 });
+  await expect(summary.getByText('Recorded offline', { exact: true })).toHaveCount(0);
+  await expect(summary.getByText('Captured', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'New sale', exact: true }).click();
 });

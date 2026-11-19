@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
 import type { ReactElement } from 'react';
 import type { OutboxState, PosOrder } from '@tallyui/pos';
@@ -189,4 +189,40 @@ it('keeps the change as the headline and counts the payments when two cash payme
   await outboxNow(order, 'pending');
   expect(screen.getByTestId('paid-awaiting-figure').textContent).toBe('Change €6.00');
   expect(status()).toBe('Awaiting store · Paid €24.00 · tendered €30.00 in cash · 2 payments');
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('the paid summary marks an awaiting cash payment Captured and Recorded offline, and drops Recorded offline once sent', async () => {
+  syncState('offline');
+  await startTender();
+  takeLeg('cash', '24.00');
+  const order = await complete();
+  await outboxNow(order, 'pending');
+  const id = order.payments[0].id;
+  const row = within(screen.getByTestId('paid-summary')).getByTestId(`summary-payment-${id}`);
+  expect(within(row).getByTestId(`summary-payment-${id}-status`).textContent).toBe('Captured');
+  const offline = within(row).getByTestId(`summary-recorded-offline-${id}`);
+  expect(offline.textContent).toBe('Recorded offline');
+  const tendered = within(row).getByTestId(`summary-payment-${id}-tendered`);
+  expect(tendered.compareDocumentPosition(offline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  syncState('synced');
+  await outboxNow(order, 'applied');
+  expect(screen.queryByTestId(`summary-recorded-offline-${id}`)).toBeNull();
+  expect(screen.getByTestId(`summary-payment-${id}-status`).textContent).toBe('Captured');
+}, 15000);
+
+// The keypad tender pane's steps exceed the 5 s default on CI runners.
+it('marks each payment of an awaiting split sale Recorded offline', async () => {
+  syncState('offline');
+  await startTender();
+  takeLeg('external', '10.00');
+  takeLeg('cash', '14.00');
+  const order = await complete();
+  await outboxNow(order, 'pending');
+  const summary = within(screen.getByTestId('paid-summary'));
+  expect(order.payments).toHaveLength(2);
+  for (const { id } of order.payments) {
+    expect(summary.getByTestId(`summary-payment-${id}-status`).textContent).toBe('Captured');
+    expect(summary.getByTestId(`summary-recorded-offline-${id}`).textContent).toBe('Recorded offline');
+  }
 }, 15000);

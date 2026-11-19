@@ -9,12 +9,14 @@ export type SummaryPayment = {
   tenderedMinor?: number; changeMinor?: number;
   /** Shown beside the amount (ledger label and tone) only when given. */
   status?: PaymentLegStatus;
+  /** v2's muted "Recorded offline" line under the payment, while the sale is awaiting the store. */
+  recordedOffline?: boolean;
 };
 
-// The tender pane's ledger tones (TallyUI TenderPane), so the summary and the ledger agree.
+// The tender pane's ledger tones (TallyUI TenderPane) as v2's status dot, so the summary and the ledger agree.
 const STATUS_TONE: Record<PaymentLegStatus, string> = {
-  pending: 'text-muted-foreground', authorized: 'text-success', captured: 'text-success',
-  failed: 'text-destructive', voided: 'text-muted-foreground',
+  pending: 'bg-muted-foreground', authorized: 'bg-success', captured: 'bg-success',
+  failed: 'bg-destructive', voided: 'bg-muted-foreground',
 };
 
 /** The Payments block shared by the paid screen's summary and the tender's order summary, then Total, Paid (and Remaining). */
@@ -36,12 +38,17 @@ export function SummaryPayments({ currency, payments, totalMinor, paidMinor, rem
     {payments.map(payment => <View key={payment.id} testID={`summary-payment-${payment.id}`} className="gap-1">
       <View className="flex-row items-center gap-3">
         <OrderSummaryLine className="flex-1" label={payment.label} amount={money(payment.amountMinor)} />
-        {payment.status !== undefined && <Text testID={`summary-payment-${payment.id}-status`}
-          className={`text-sm font-semibold ${STATUS_TONE[payment.status]}`}>{t(`pos_checkout.status_${payment.status}`)}</Text>}
+        {payment.status !== undefined && <View className="flex-row items-center gap-1">
+          <View className={`h-2 w-2 rounded-full ${STATUS_TONE[payment.status]}`} />
+          <Text testID={`summary-payment-${payment.id}-status`}
+            className="text-sm text-foreground">{t(`pos_checkout.status_${payment.status}`)}</Text>
+        </View>}
       </View>
       {payment.tenderedMinor !== undefined && <Text testID={`summary-payment-${payment.id}-tendered`} className="text-muted-foreground">
         {`Tendered ${money(payment.tenderedMinor)} · change ${money(payment.changeMinor ?? 0)}`}
       </Text>}
+      {payment.recordedOffline && <Text testID={`summary-recorded-offline-${payment.id}`}
+        className="text-muted-foreground">Recorded offline</Text>}
     </View>)}
     <OrderSummaryLine testID="summary-total" label="Total" bold amount={money(totalMinor)} />
     <OrderSummaryLine testID="summary-paid" label="Paid" amount={money(paidMinor)} />
