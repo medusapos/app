@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { Platform, View } from 'react-native';
+import { Fragment, useRef, useState } from 'react';
+import { Platform, useWindowDimensions, View } from 'react-native';
 import {
   Badge, Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, SettingsGroup, SettingsRow, Text, XIcon,
 } from '@tallyui/components';
@@ -10,10 +10,14 @@ import { loadCachedSettings } from '../lib/store-settings';
 type Template = (typeof RECEIPT_TEMPLATES)[number];
 type PrintStatus = 'idle' | 'printing' | 'sent' | 'failed';
 
+// A phone stacks the actions under the template name, since TU SettingsRow keeps its action beside the label.
+const PHONE_BREAKPOINT = 600;
+
 // v2's Settings › Printing "Receipt templates": each template, its format and the printer it goes to. A browser till
 // has one printer, the print dialog; a native till has none yet.
 export function ReceiptTemplatesGroup({ session }: { session: Session }) {
   const web = Platform.OS === 'web';
+  const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
   const [preview, setPreview] = useState<{ template: Template; page: string } | null>(null);
   const [status, setStatus] = useState<PrintStatus>('idle');
   // Each opening is its own; a print still pending from an earlier opening never shows its outcome here.
@@ -43,19 +47,25 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
   };
   return <SettingsGroup title="Receipt templates" testID="settings-receipt-templates"
     description="Each template and the printer it prints to. Sales print the Standard Receipt.">
-    {RECEIPT_TEMPLATES.map((template, index) => <SettingsRow key={template.id} label={template.name}
-      testID={`settings-receipt-template-${template.id}`} className={index > 0 ? 'border-t border-border' : undefined} action={
-        <View className="flex-row flex-wrap items-center justify-end gap-3">
-          <Badge variant="secondary" label={template.tag} />
-          <Text testID={`settings-receipt-template-${template.id}-printer`} className="text-right text-sm text-foreground">
-            {web ? 'Auto — Print dialog' : 'Not available on this device'}
-          </Text>
-          {web && template.paper ? <Button variant="outline" size="sm" testID={`settings-receipt-template-${template.id}-preview`}
-            accessibilityLabel={`Preview ${template.name}`} onPress={() => open(template)}>
-            <Text>Preview</Text>
-          </Button> : null}
-        </View>
-      } />)}
+    {RECEIPT_TEMPLATES.map((template, index) => {
+      const actions = <>
+        <Badge variant="secondary" label={template.tag} />
+        <Text testID={`settings-receipt-template-${template.id}-printer`} className="text-right text-sm text-foreground">
+          {web ? 'Auto — Print dialog' : 'Not available on this device'}
+        </Text>
+        {web && template.paper ? <Button variant="outline" size="sm" testID={`settings-receipt-template-${template.id}-preview`}
+          accessibilityLabel={`Preview ${template.name}`} onPress={() => open(template)}>
+          <Text>Preview</Text>
+        </Button> : null}
+      </>;
+      return <Fragment key={template.id}>
+        <SettingsRow label={template.name} testID={`settings-receipt-template-${template.id}`}
+          className={index > 0 ? 'border-t border-border' : undefined}
+          action={phone ? undefined : <View className="flex-row flex-wrap items-center justify-end gap-3">{actions}</View>} />
+        {phone ? <View testID={`settings-receipt-template-${template.id}-actions`}
+          className="flex-row flex-wrap items-center gap-3 px-4 pb-3">{actions}</View> : null}
+      </Fragment>;
+    })}
     <Dialog open={preview !== null} onOpenChange={(next) => { if (!next) close(); }}>
       {preview ? <DialogContent side="right" testID="receipt-template-preview" className="flex-col p-0">
         <View className="flex-row items-start justify-between gap-3 p-4">
