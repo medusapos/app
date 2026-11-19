@@ -1,6 +1,6 @@
 import { useState, type JSX } from 'react';
 import { View } from 'react-native';
-import { Button, Dialog, DialogContent, DialogFooter, DialogTitle, IconButton, Input, Label, Text, XIcon } from '@tallyui/components';
+import { Button, Dialog, DialogContent, DialogFooter, DialogTitle, IconButton, Input, Label, Switch, Text, XIcon } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError } from '@tallyui/core';
 import { RECEIPT_EMAIL_FAILED } from '../lib/receipt-email';
 
@@ -9,7 +9,7 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
   orderId: string | undefined;
   online: boolean;
   defaultEmail?: string;
-  send: (orderId: string, email: string) => Promise<void>;
+  send: (orderId: string, email: string, saveToBilling: boolean) => Promise<void>;
   onUnauthorized: () => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
@@ -17,8 +17,10 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
   const [sending, setSending] = useState(false);
   const [sentTo, setSentTo] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [saveToBilling, setSaveToBilling] = useState(false);
   function openDialog() {
     setText(defaultEmail ?? '');
+    setSaveToBilling(false);
     setMessage(null);
     setSentTo(null);
     setOpen(true);
@@ -33,7 +35,7 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
     setSending(true);
     setMessage(null);
     try {
-      await send(orderId, email);
+      await send(orderId, email, saveToBilling);
       setSentTo(email);
       setOpen(false);
     } catch (error) {
@@ -61,6 +63,11 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
           <Input><Input.Field testID="receipt-email-field" value={text} onChangeText={setText} autoFocus
             accessibilityLabel="Email Address" accessibilityLabelledBy="receipt-email-label" keyboardType="email-address"
             autoCapitalize="none" autoComplete="email" onSubmitEditing={() => { void submit(); }} /></Input>
+          <View className="flex-row items-center gap-2">
+            <Switch testID="receipt-email-save-billing" className="flex-row" aria-labelledby="receipt-email-save-billing-label"
+              disabled={sending} checked={saveToBilling} onCheckedChange={setSaveToBilling} />
+            <Label nativeID="receipt-email-save-billing-label">Save email to Billing Address</Label>
+          </View>
           {!online ? <Text className="text-muted-foreground">Connect to the store to email this receipt.</Text>
             : orderId === undefined ? <Text className="text-muted-foreground">You can email the receipt once this sale reaches the store.</Text> : null}
           {message !== null ? <Text className="text-destructive" accessibilityRole="alert">{message}</Text> : null}

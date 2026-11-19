@@ -1,8 +1,9 @@
-import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
+import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/framework/http'
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import { updateOrderWorkflow } from '@medusajs/medusa/core-flows'
 import { buildReceiptNotification, isTillOrder, parseReceiptEmailBody } from '../../receipt-email'
 
-export async function POST(req: MedusaRequest, res: MedusaResponse) {
+export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
   const parsed = parseReceiptEmailBody(req.body)
   if (!parsed.ok) return res.status(400).json({ code: 'invalid_payload', message: parsed.message })
   const { value } = parsed
@@ -27,15 +28,27 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     })
   }
 
+  const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
   let notification
   try {
     notification = await req.scope.resolve(Modules.NOTIFICATION).createNotifications(buildReceiptNotification(order, value.email))
   } catch (error) {
-    const logger = req.scope.resolve(ContainerRegistrationKeys.LOGGER)
     const message = error instanceof Error ? error.message : String(error)
     logger.error(`Receipt email for order ${order.id} failed: ${message}`)
     return res.status(502).json({ code: 'receipt_email_failed', message: "The store's email provider didn't send the receipt." })
   }
-  // saveToBilling is not applied yet: updating the order email can create or re-link a customer.
-  return res.status(202).json({ notificationId: notification.id, savedToBilling: false })
+  let savedToBilling = false
+  if (value.saveToBilling) {
+    try {
+      // Only billing_address: a top-level email makes Medusa find-or-create a customer and re-link the order.
+      await updateOrderWorkflow(req.scope).run({
+        input: { id: order.id, user_id: req.auth_context.actor_id, billing_address: { email: value.email } },
+      })
+      savedToBilling = true
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      logger.error(`Receipt email for order ${order.id}: saving the billing email failed: ${message}`)
+    }
+  }
+  return res.status(202).json({ notificationId: notification.id, savedToBilling })
 }

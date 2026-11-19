@@ -424,7 +424,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
       online={online} defaultEmail={paid?.customer?.email
         ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
-      send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
+      send={(orderId, email, saveToBilling) => connector.emailReceipt!(syncContext, orderId, email, { saveToBilling })} onUnauthorized={onUnauthorized} /> : undefined}
     topInset={paidHeadline ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
     cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
   </> : null;

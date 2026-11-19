@@ -9,7 +9,7 @@ import { RECEIPT_EMAIL_FAILED } from '../lib/receipt-email';
 
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 
-const send = vi.fn<(orderId: string, email: string) => Promise<void>>();
+const send = vi.fn<(orderId: string, email: string, saveToBilling: boolean) => Promise<void>>();
 const onUnauthorized = vi.fn();
 const props = { orderId: 'store-order', online: true, defaultEmail: 'buyer@example.com', send, onUnauthorized };
 beforeEach(() => { send.mockReset().mockResolvedValue(undefined); onUnauthorized.mockReset(); });
@@ -55,7 +55,7 @@ describe('EmailReceipt', () => {
     fireEvent.change(field(), { target: { value: '  other@example.com  ' } });
     expect(send).not.toHaveBeenCalled();
     fireEvent.click(sendButton());
-    expect(send).toHaveBeenCalledExactlyOnceWith('store-order', 'other@example.com');
+    expect(send).toHaveBeenCalledExactlyOnceWith('store-order', 'other@example.com', false);
     expect(sendButton().textContent).toBe('Sending…');
     expect(sendButton().getAttribute('aria-disabled')).toBe('true');
     expect(screen.getByTestId('receipt-email-cancel').getAttribute('aria-disabled')).toBe('true');
@@ -69,6 +69,21 @@ describe('EmailReceipt', () => {
     expect(field().value).toBe('buyer@example.com');
     expect(screen.queryByRole('alert')).toBeNull();
     expect(send).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows v2's Save email to Billing Address switch, off, and sends the flag when turned on", async () => {
+    render(<EmailReceipt {...props} />, { wrapper: Host });
+    fireEvent.click(screen.getByTestId('receipt-email-open'));
+    const toggle = screen.getByTestId('receipt-email-save-billing');
+    expect(screen.getByLabelText('Save email to Billing Address')).toBe(toggle);
+    expect(toggle.getAttribute('aria-checked')).toBe('false');
+    fireEvent.click(toggle);
+    expect(screen.getByTestId('receipt-email-save-billing').getAttribute('aria-checked')).toBe('true');
+    await act(async () => { fireEvent.click(sendButton()); });
+    expect(send).toHaveBeenCalledExactlyOnceWith('store-order', 'buyer@example.com', true);
+    expect(screen.queryByTestId('receipt-email-dialog')).toBeNull();
+    fireEvent.click(screen.getByTestId('receipt-email-open'));
+    expect(screen.getByTestId('receipt-email-save-billing').getAttribute('aria-checked')).toBe('false');
   });
 
   it('keeps the dialog, address and store error, retrying only on another press', async () => {

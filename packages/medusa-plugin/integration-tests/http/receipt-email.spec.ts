@@ -74,15 +74,67 @@ medusaIntegrationTestRunner({
       })
     })
 
-    it('accepts saveToBilling without changing the order', async () => {
+    async function readOrder(id: string) {
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+        entity: 'order', filters: { id },
+        fields: ['email', 'customer_id', 'billing_address.email', 'billing_address.address_1', 'billing_address.city',
+          'billing_address.country_code', 'billing_address.postal_code'],
+      })
+      return order
+    }
+
+    it('saves the address on the billing address only, with no customer', async () => {
       const { orderId } = await sale()
-      const query = container.resolve(ContainerRegistrationKeys.QUERY)
-      const before = await query.graph({ entity: 'order', fields: ['email'], filters: { id: orderId } })
+      const before = await readOrder(orderId)
+      expect(before.email).toBeNull()
+      expect(before.customer_id).toBeNull()
+      expect(before.billing_address).toMatchObject({ address_1: 'Alexanderplatz 1', city: 'Berlin', country_code: 'de', postal_code: '10178' })
+      expect(before.billing_address?.email).not.toBe('buyer@example.com')
       const response = await email(orderId, { email: 'buyer@example.com', saveToBilling: true })
       expect(response.status).toBe(202)
-      expect(response.data).toMatchObject({ savedToBilling: false })
-      const after = await query.graph({ entity: 'order', fields: ['email'], filters: { id: orderId } })
-      expect(after.data[0].email).toBe(before.data[0].email)
+      expect(response.data).toEqual({ notificationId: expect.any(String), savedToBilling: true })
+      const after = await readOrder(orderId)
+      expect(after.billing_address).toMatchObject({
+        email: 'buyer@example.com', address_1: before.billing_address!.address_1, city: before.billing_address!.city,
+        country_code: before.billing_address!.country_code, postal_code: before.billing_address!.postal_code,
+      })
+      expect(after.email).toBe(before.email)
+      expect(after.customer_id).toBe(before.customer_id)
+      expect(await container.resolve(Modules.CUSTOMER).listCustomers({ email: 'buyer@example.com' })).toEqual([])
+    })
+
+    it('writes nothing without saveToBilling', async () => {
+      for (const body of [{ email: 'buyer@example.com' }, { email: 'buyer@example.com', saveToBilling: false }]) {
+        const { orderId } = await sale()
+        const before = await readOrder(orderId)
+        const response = await email(orderId, body)
+        expect(response.status).toBe(202)
+        expect(response.data).toMatchObject({ savedToBilling: false })
+        const after = await readOrder(orderId)
+        expect(after.billing_address?.email).toBe(before.billing_address?.email)
+        expect(after.email).toBe(before.email)
+        expect(after.customer_id).toBe(before.customer_id)
+      }
+    })
+
+    it('refuses a stranger order with saveToBilling and writes nothing', async () => {
+      const stranger = await container.resolve(Modules.ORDER).createOrders({
+        currency_code: 'eur', billing_address: { email: 'old@example.com', country_code: 'de' },
+      })
+      const response = await email(stranger.id, { email: 'buyer@example.com', saveToBilling: true })
+      expect(response.status).toBe(404)
+      expect(response.data).toMatchObject({ code: 'order_not_found' })
+      expect((await readOrder(stranger.id)).billing_address?.email).toBe('old@example.com')
+    })
+
+    it('keeps the order unchanged when the send fails', async () => {
+      const { orderId } = await sale()
+      const before = await readOrder(orderId)
+      jest.spyOn(container.resolve(Modules.NOTIFICATION), 'createNotifications').mockRejectedValueOnce(new Error('provider down'))
+      const response = await email(orderId, { email: 'buyer@example.com', saveToBilling: true })
+      expect(response.status).toBe(502)
+      expect(response.data).toMatchObject({ code: 'receipt_email_failed' })
+      expect((await readOrder(orderId)).billing_address?.email).toBe(before.billing_address?.email)
     })
 
     it('refuses an invalid address with no notification', async () => {
