@@ -1,10 +1,10 @@
-import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Pressable, View, useWindowDimensions } from 'react-native';
 import { Redirect, Stack, usePathname } from 'expo-router';
 import {
-  Button, Card, CategoryNav, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
+  Button, Card, CategoryNav, ChevronDownIcon, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
 } from '@tallyui/components';
-import { listCategories, sortProducts } from '@tallyui/pos';
+import { listCategories, type ProductSort } from '@tallyui/pos';
 import { Image } from '@tallyui/primitives';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { CatalogueSyncButton } from '../components/catalogue-sync-button';
@@ -15,10 +15,11 @@ import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/ti
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
-  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine,
-  PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
+  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaProducts,
+  productAreaRows, productAreaStockLine, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
   PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE, PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL,
-  PRODUCTS_SHOWING, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS, type ProductAreaRow,
+  PRODUCTS_SHOWING, PRODUCTS_VARIATIONS, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS,
+  type ProductAreaItem, type ProductAreaRow,
 } from '../lib/products-area';
 import { useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
 import { defaultStorage } from '../lib/session';
@@ -29,7 +30,7 @@ import { useScannerSettings } from '../lib/scanner-settings';
 import { useWedgeScan, useWedgeScanField } from '../lib/use-wedge-scan';
 
 // The row's product thumbnail, or a plain tile of the same size when the product has none.
-function ProductThumb({ row, size }: { row: ProductAreaRow; size: number }) {
+function ProductThumb({ row, size }: { row: Pick<ProductAreaRow, 'id' | 'name' | 'imageUrl'>; size: number }) {
   return row.imageUrl
     ? <Image.Root source={{ uri: row.imageUrl }} alt={row.name} contentFit="cover" className="rounded border border-border"
       style={{ width: size, height: size }} testID={`product-image-${row.id}`} />
@@ -37,12 +38,34 @@ function ProductThumb({ row, size }: { row: ProductAreaRow; size: number }) {
       testID={`product-image-placeholder-${row.id}`} />;
 }
 
-const COLUMNS: ProductTableColumn<ProductAreaRow>[] = [
+type ProductItem = Extract<ProductAreaItem, { kind: 'product' }>;
+type VariantItem = Extract<ProductAreaItem, { kind: 'variant' }>;
+// Opens or closes a product row's variation sub-rows; the screen provides it, the columns render outside the screen.
+const ToggleVariations = createContext<(productId: string) => void>(() => {});
+
+// v2's "15 variations ›": a plain text button under the product name; the chevron points right while closed, down while open.
+function VariationsToggle({ item }: { item: ProductItem }) {
+  const toggle = useContext(ToggleVariations);
+  const text = PRODUCTS_VARIATIONS(item.shown, item.variants.length);
+  return <Pressable role="button" aria-expanded={item.open} testID={`product-variations-${item.id}`}
+    accessibilityLabel={`${text}, ${item.name}`} onPress={() => toggle(item.id)} className="flex-row items-center gap-1 self-start py-1">
+    <Text className="text-sm">{text}</Text>
+    <ChevronDownIcon size={14} style={item.open ? undefined : { transform: [{ rotate: '-90deg' }] }} />
+  </Pressable>;
+}
+
+const COLUMNS: ProductTableColumn<ProductAreaItem>[] = [
   // v2's image column: no head label, not sortable.
   { id: 'image', header: 'Image', hideHeader: true, flex: 0.75, render: (row) => <ProductThumb row={row} size={40} /> },
   // The row's Medusa id (the variant's); long, so one line.
   { id: 'id', header: 'ID', flex: 2, sortValue: (row) => row.id, render: (row) => <Text numberOfLines={1}>{row.id}</Text> },
-  { id: 'name', header: 'Product', flex: 3, sortValue: (row) => row.name, render: (row) => <Text>{row.name}</Text> },
+  // A product row: its name, its option lines and the variations toggle; a sub-row: the variant's title, indented.
+  { id: 'name', header: 'Product', flex: 3, sortValue: (row) => row.kind === 'product' ? row.name : row.label, render: (row) =>
+    row.kind === 'product' ? <View>
+      <Text className="font-semibold">{row.name}</Text>
+      {row.options.map((line) => <Text key={line} className="text-sm text-muted-foreground">{line}</Text>)}
+      <VariationsToggle item={row} />
+    </View> : <Text className={row.sub ? 'pl-6' : undefined}>{row.label}</Text> },
   { id: 'sku', header: 'SKU', flex: 1.5, sortValue: (row) => row.sku, render: (row) => <Text>{row.sku}</Text> },
   { id: 'barcode', header: 'Barcode', flex: 1.5, sortValue: (row) => row.barcode, render: (row) => <Text>{row.barcode}</Text> },
   { id: 'stock', header: 'Stock', align: 'right', flex: 1, render: (row) => <Text className="tabular-nums">{row.stock}</Text> },
@@ -67,23 +90,44 @@ const PHONE_BREAKPOINT = 600;
 // The table's default order, so both layouts list rows alike.
 const NAME_SORT = { field: 'name', dir: 'asc' } as const;
 
-// v2's phone row: the thumbnail while Image is on, name over SKU, price over the stock line. Rows open nothing, as the table's do.
-function PhoneRow({ row, image }: { row: ProductAreaRow; image: boolean }) {
-  return <View className="flex-row gap-3 px-4 py-3" testID={`product-list-row-${row.id}`}>
-    {image ? <ProductThumb row={row} size={40} /> : null}
-    <View className="min-w-0 flex-1">
-      <Text>{row.name}</Text>
-      {row.sku ? <Text className="text-sm text-muted-foreground">{row.sku}</Text> : null}
-    </View>
-    <View className="items-end">
-      <Text className="tabular-nums">{row.price}</Text>
-      <View className="flex-row items-center gap-1.5" testID={`product-stock-status-${row.id}`}>
-        <View className={`h-2 w-2 rounded-full ${STOCK_STATUS_DOTS[row.stockStatus]}`} />
-        <Text className={`text-sm${row.stockStatus === 'unknown' ? ' text-muted-foreground' : ''}`}>{productAreaStockLine(row)}</Text>
-      </View>
+// The phone row's right side: the price over the stock line.
+function PhonePriceStock({ row }: { row: Pick<ProductAreaRow, 'id' | 'price' | 'stock' | 'stockStatus'> }) {
+  return <View className="items-end">
+    <Text className="tabular-nums">{row.price}</Text>
+    <View className="flex-row items-center gap-1.5" testID={`product-stock-status-${row.id}`}>
+      <View className={`h-2 w-2 rounded-full ${STOCK_STATUS_DOTS[row.stockStatus]}`} />
+      <Text className={`text-sm${row.stockStatus === 'unknown' ? ' text-muted-foreground' : ''}`}>{productAreaStockLine(row)}</Text>
     </View>
   </View>;
 }
+
+// v2's phone row: the thumbnail while Image is on, name over SKU, price over the stock line. Rows open nothing, as the table's do;
+// a variation sub-row is indented under its product row and shows the variant's title.
+function PhoneRow({ row, image }: { row: VariantItem; image: boolean }) {
+  return <View className={`flex-row gap-3 px-4 py-3${row.sub ? ' pl-8' : ''}`} testID={`product-list-row-${row.id}`}>
+    {image ? <ProductThumb row={row} size={40} /> : null}
+    <View className="min-w-0 flex-1">
+      <Text>{row.label}</Text>
+      {row.sku ? <Text className="text-sm text-muted-foreground">{row.sku}</Text> : null}
+    </View>
+    <PhonePriceStock row={row} />
+  </View>;
+}
+
+// v2's phone product row: the name with the variations toggle under it, the price range over the stock line.
+function PhoneProductRow({ item, image }: { item: ProductItem; image: boolean }) {
+  return <View className="flex-row gap-3 px-4 py-3" testID={`product-list-row-${item.id}`}>
+    {image ? <ProductThumb row={item} size={40} /> : null}
+    <View className="min-w-0 flex-1">
+      <Text>{item.name}</Text>
+      <VariationsToggle item={item} />
+    </View>
+    <PhonePriceStock row={item} />
+  </View>;
+}
+
+// A column's sort value for an item, as the table reads it.
+const valueOf = (item: ProductAreaItem, field: string) => COLUMNS.find((column) => column.id === field)?.sortValue?.(item);
 
 // The area's own catalogue read, while no Sale holds one: the Sale's replication over the same cache, read-only.
 // It publishes what it reads and renders nothing.
@@ -131,6 +175,7 @@ export default function ProductsAreaScreen() {
   const loaded = snapshot && session && snapshot.baseUrl === session.baseUrl ? snapshot : null;
   const ready = loaded?.status === 'ready' ? loaded : null;
   const rows = useMemo(() => ready ? productAreaRows(ready.products, ready.traits, ready.currency) : [], [ready]);
+  const products = useMemo(() => ready ? productAreaProducts(ready.products, ready.traits, ready.currency) : [], [ready]);
   const categories = useMemo(() => ready ? listCategories(ready.products, ready.traits) : [], [ready]);
   // A chosen category no longer in the catalogue counts as All, as the Sale's chips do.
   const activeId = categoryId !== null && categories.some((category) => category.id === categoryId) ? categoryId : null;
@@ -141,8 +186,18 @@ export default function ProductsAreaScreen() {
   const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsOnSale(filterProductAreaRowsInStock(
     filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId), inStockOnly), onSaleOnly), search),
   [rows, activeId, activeTagId, inStockOnly, onSaleOnly, search]);
+  // A product row opens on an explicit choice, else while the search has text (a typed or scanned SKU shows its sub-row);
+  // otherwise it starts closed, as v2's. Kept for this visit only.
+  const [openChoices, setOpenChoices] = useState<Record<string, boolean>>({});
+  const searching = search.trim() !== '';
+  const isOpen = useCallback((id: string) => openChoices[id] ?? searching, [openChoices, searching]);
+  const toggleVariations = useCallback((id: string) => setOpenChoices((choices) => ({ ...choices, [id]: !isOpen(id) })), [isOpen]);
+  const [sort, setSort] = useState<ProductSort | null>(NAME_SORT);
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
-  const phoneItems = useMemo(() => phone ? sortProducts(items, NAME_SORT, (row) => row.name) : [], [phone, items]);
+  const phoneItems = useMemo(() => phone ? productAreaItems(items, products, NAME_SORT, isOpen, valueOf) : [],
+    [phone, items, products, isOpen]);
+  const tableItems = useMemo(() => phone ? [] : productAreaItems(items, products, sort, isOpen, valueOf),
+    [phone, items, products, sort, isOpen]);
   // v2's Products has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
   const openMenu = useFrameMenu();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
@@ -160,7 +215,7 @@ export default function ProductsAreaScreen() {
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
     : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
       : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
-  return <View className="flex-1 bg-background" role="main" aria-label="Products">
+  return <ToggleVariations.Provider value={toggleVariations}><View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} onKeyPress={onSearchKeyPress} placeholder="Search Products"
@@ -204,13 +259,15 @@ export default function ProductsAreaScreen() {
     {saleHolds ? null : <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
       onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
     {ready && phone ? <ProductList testID="products-list" items={phoneItems} emptyState={emptyState}
-      renderItem={(row: ProductAreaRow) => <PhoneRow row={row} image={columns.settings.image} />} /> : null}
+      renderItem={(item: ProductAreaItem) => item.kind === 'product' ? <PhoneProductRow item={item} image={columns.settings.image} />
+        : <PhoneRow row={item} image={columns.settings.image} />} /> : null}
     {/* v2's table sits in a bordered box, inset as the search row; its phone rows run full width. */}
     {ready && !phone ? <Card testID="products-table-card" className="mx-4 flex-1 overflow-hidden">
-      <ProductTable testID="products-table" items={items} columns={tableColumns as ProductTableColumn[]}
-        defaultSort={{ field: 'name', dir: 'asc' }} emptyState={emptyState} />
+      <ProductTable testID="products-table" items={tableItems} columns={tableColumns as ProductTableColumn[]}
+        sort={sort} onSortChange={setSort} sortItems={false} emptyState={emptyState} />
     </Card> : null}
-    {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue; its sync arrow after it. */}
+    {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue; its sync arrow after it.
+      n and m count variants (a product row and its sub-rows count as the sub-rows' variants), as v2 counts rows. */}
     {ready ? <View className="flex-row items-center justify-end gap-1 px-4 py-2" testID="products-footer">
       <Text className="text-sm text-muted-foreground tabular-nums">{PRODUCTS_SHOWING(items.length, rows.length)}</Text>
       {ready.sync && ready.clearAndRefresh
@@ -224,5 +281,5 @@ export default function ProductsAreaScreen() {
       <Text className="text-center text-destructive" testID="products-error">{loaded.error ?? PRODUCTS_LOAD_FAILED}</Text>
       {loaded.retry ? <Button variant="outline" testID="products-retry" onPress={loaded.retry}><Text>Retry</Text></Button> : null}
     </View> : null}
-  </View>;
+  </View></ToggleVariations.Provider>;
 }

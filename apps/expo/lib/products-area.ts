@@ -1,5 +1,5 @@
-import { formatMoney, resolvePrice, type Money, type ProductTraits, type StockLevel } from '@tallyui/core';
-import { catalogueEntries, productCategories } from '@tallyui/pos';
+import { formatMoney, resolvePrice, resolvePriceRange, type Money, type ProductTraits, type StockLevel } from '@tallyui/core';
+import { catalogueEntries, productCategories, sortProducts, type ProductSort, type ProductSortValue } from '@tallyui/pos';
 import type { SessionStorage } from './session';
 
 export type ProductAreaRow = {
@@ -59,7 +59,7 @@ export const STOCK_STATUS_DOTS: Record<StockLevel['status'], string> = {
 };
 
 /** The phone row's stock line: "<quantity> · <status>" when the variant has a quantity, else the status alone. */
-export function productAreaStockLine(row: ProductAreaRow): string {
+export function productAreaStockLine(row: Pick<ProductAreaRow, 'stock' | 'stockStatus'>): string {
   const label = STOCK_STATUS_LABELS[row.stockStatus];
   return row.stock === label ? label : `${row.stock} · ${label}`;
 }
@@ -89,6 +89,89 @@ export function productAreaRows(products: readonly unknown[], traits: ProductTra
     };
   });
 }
+
+// v2's Expanded rows: a product with several sellable variants has a row of its own, its variants open as rows under it.
+export type ProductAreaProduct = Omit<ProductAreaRow, 'sku' | 'barcode' | 'salePrice' | 'onSale'> & {
+  sku: ''; barcode: ''; salePrice: ''; onSale: false;
+  // One "<group>: <value>, <value>" line per option group, as v2's "Size: XS, S, M".
+  options: string[];
+  // Its variant rows' ids in catalogue order, with the variant's title (its id when it has none).
+  variants: { id: string; title: string }[];
+};
+
+// "€20.00 – €25.00" (an en dash), one price when the ends meet, or a dash when no variant resolves.
+const rangeLabel = (range?: { min: Money; max: Money }) => {
+  if (!range) return '—';
+  const min = formatMoney(range.min) ?? '—';
+  return range.min.amount === range.max.amount ? min : `${min} – ${formatMoney(range.max) ?? '—'}`;
+};
+const STATUS_ORDER: StockLevel['status'][] = ['in_stock', 'backorder', 'out_of_stock'];
+
+/** One entry per product with more than one sellable variant; a single-variant product stays a plain variant row. */
+export function productAreaProducts(products: readonly unknown[], traits: ProductTraits, currency: string): ProductAreaProduct[] {
+  const byProduct = new Map<unknown, ReturnType<typeof catalogueEntries>>();
+  for (const entry of catalogueEntries([...products], traits)) {
+    byProduct.set(entry.product, [...byProduct.get(entry.product) ?? [], entry]);
+  }
+  return [...byProduct].filter(([, entries]) => entries.length > 1).map(([product, entries]) => {
+    const variants = entries.map(({ variant }) => variant);
+    const categories = productCategories(product, traits);
+    const stockStatus = STATUS_ORDER.find((status) => variants.some((variant) => variant.stock.status === status)) ?? 'unknown';
+    const quantities = variants.map((variant) => variant.stock.quantity);
+    const regular = variants.map((variant) => resolvePrice(variant.prices, currency)).flatMap((resolved) =>
+      resolved ? [{ prices: [{ ...(resolved.was ?? resolved.current), kind: 'base' as const }] }] : []);
+    return {
+      id: traits.getId ? traits.getId(product) : (product as { id: string }).id,
+      name: traits.getName(product),
+      options: (traits.getVariantOptions?.(product) ?? []).map((group) => `${group.name}: ${group.values.join(', ')}`),
+      variants: variants.map((variant) => ({ id: variant.id, title: variant.title || variant.id })),
+      sku: '', barcode: '', salePrice: '', onSale: false,
+      price: rangeLabel(resolvePriceRange(variants, currency)),
+      regularPrice: rangeLabel(resolvePriceRange(regular, currency)),
+      stock: quantities.every((quantity) => typeof quantity === 'number')
+        ? quantities.reduce((sum: number, quantity) => sum + quantity!, 0).toLocaleString() : STOCK_STATUS_LABELS[stockStatus],
+      stockStatus,
+      categories: categories.map((category) => category.name).join(', '),
+      categoryIds: categories.map((category) => category.id),
+      tagIds: productTags(product).map((tag) => tag.id),
+      imageUrl: traits.getImageUrl(product),
+    };
+  });
+}
+
+/** What the table and the phone list render: a product row (`shown` = its variant rows left after the filters), or a
+ * variant row, `sub` under its product row, `label` being what its Product cell shows. */
+export type ProductAreaItem = ({ kind: 'product' } & ProductAreaProduct & { shown: number; open: boolean })
+  | ({ kind: 'variant'; sub: boolean; label: string } & ProductAreaRow);
+
+/** The filtered variant rows as v2's Expanded rows: a product row stands in for its variants, which follow it as sub-rows
+ * (only those shown) while it is open. Top-level items, and each product's sub-rows among themselves, follow `sort`. */
+export function productAreaItems(shown: ProductAreaRow[], products: ProductAreaProduct[], sort: ProductSort | null,
+  isOpen: (productId: string) => boolean, valueOf: (item: ProductAreaItem, field: string) => ProductSortValue): ProductAreaItem[] {
+  const owners = new Map(products.flatMap((product) => product.variants.map((variant) => [variant.id, product] as const)));
+  // Each product's shown variant rows, by product id; the product takes its first shown variant's place.
+  const subRows = new Map<string, ProductAreaRow[]>();
+  const top: (ProductAreaRow | ProductAreaProduct)[] = [];
+  for (const row of shown) {
+    const product = owners.get(row.id);
+    if (!product) { top.push(row); continue; }
+    if (!subRows.has(product.id)) { subRows.set(product.id, []); top.push(product); }
+    subRows.get(product.id)!.push(row);
+  }
+  const items = top.map((entry): ProductAreaItem => 'variants' in entry
+    ? { ...entry, kind: 'product', shown: subRows.get(entry.id)!.length, open: isOpen(entry.id) }
+    : { ...entry, kind: 'variant', sub: false, label: entry.name });
+  return sortProducts(items, sort, valueOf).flatMap((item) => {
+    if (item.kind !== 'product' || !item.open) return [item];
+    const subs = subRows.get(item.id)!.map((row): ProductAreaItem => ({ ...row, kind: 'variant', sub: true,
+      label: item.variants.find(({ id }) => id === row.id)!.title }));
+    return [item, ...sortProducts(subs, sort, valueOf)];
+  });
+}
+
+/** The product row's toggle: "2 variations", or "1 of 2 variations" while the filters leave fewer. */
+export const PRODUCTS_VARIATIONS = (shown: number, total: number) =>
+  `${shown === total ? '' : `${shown} of `}${total} ${total === 1 ? 'variation' : 'variations'}`;
 
 /** Rows of products in the category; no category (null or '') keeps them all. */
 export function filterProductAreaRowsByCategory(rows: ProductAreaRow[], categoryId: string | null): ProductAreaRow[] {
