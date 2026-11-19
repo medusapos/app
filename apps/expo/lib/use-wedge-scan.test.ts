@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { NativeSyntheticEvent, TextInputKeyPressEventData } from 'react-native';
 import { DEFAULT_SCANNER_SETTINGS, type ScannerSettings } from './scanner-settings';
-import { stripScanAffixes, useWedgeScan, WEDGE_STALE_GAP_MS } from './use-wedge-scan';
+import { scanCode, stripScanAffixes, useWedgeScan, useWedgeScanField, WEDGE_STALE_GAP_MS } from './use-wedge-scan';
 
 function keydown(key: string, target: EventTarget = document.body): KeyboardEvent {
   const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -166,5 +167,71 @@ describe('stripScanAffixes', () => {
     ['', '#', '!', ''],
   ])('strips %s with prefix %s and suffix %s to %s', (raw, prefix, suffix, code) => {
     expect(stripScanAffixes(raw, { ...DEFAULT_SCANNER_SETTINGS, prefix, suffix })).toBe(code);
+  });
+});
+
+describe('scanCode', () => {
+  const settings: ScannerSettings = { ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!' };
+
+  it('gives the stripped code for a fast buffer', () => {
+    expect(scanCode('#E2E-2!', 1_000, 1_060, settings)).toBe('E2E-2');
+  });
+
+  it('gives null for a buffer slower than avgKeyMs', () => {
+    expect(scanCode('#E2E-2!', 1_000, 1_000 + 6 * 200, settings)).toBeNull();
+  });
+
+  it('gives null for a code shorter than minChars after stripping', () => {
+    expect(scanCode('#AB!', 1_000, 1_030, settings)).toBeNull();
+  });
+});
+
+describe('useWedgeScanField', () => {
+  const settings: ScannerSettings = { ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!' };
+  const field = (onScan: (code: string) => void) => {
+    const { result } = renderHook(() => useWedgeScanField(settings, onScan));
+    return (key: string) => result.current({ nativeEvent: { key } } as NativeSyntheticEvent<TextInputKeyPressEventData>);
+  };
+  // Presses each key `gapMs` apart from `startAt`; returns the time after the last one.
+  const press = (keyPress: (key: string) => void, keys: string[], gapMs: number, startAt: number) => {
+    let t = startAt;
+    for (const key of keys) { vi.setSystemTime(t); keyPress(key); t += gapMs; }
+    return t;
+  };
+
+  it('calls onScan once with the stripped code for a fast buffer and Enter', () => {
+    const onScan = vi.fn();
+    const keyPress = field(onScan);
+    press(keyPress, [...Array.from('#E2E-2!'), 'Enter'], 10, 1_000);
+    expect(onScan).toHaveBeenCalledExactlyOnceWith('E2E-2');
+  });
+
+  it('does not call onScan for keys slower than avgKeyMs', () => {
+    const onScan = vi.fn();
+    const keyPress = field(onScan);
+    press(keyPress, [...Array.from('#E2E-2!'), 'Enter'], 200, 1_000);
+    expect(onScan).not.toHaveBeenCalled();
+  });
+
+  it('ignores Shift between the characters', () => {
+    const onScan = vi.fn();
+    const keyPress = field(onScan);
+    press(keyPress, ['#', 'Shift', 'E', '2', 'Shift', 'E', '-', '2', '!', 'Enter'], 10, 1_000);
+    expect(onScan).toHaveBeenCalledExactlyOnceWith('E2E-2');
+  });
+
+  it('empties the buffer on Backspace, so an edit never turns into a scan', () => {
+    const onScan = vi.fn();
+    const keyPress = field(onScan);
+    press(keyPress, [...Array.from('shirx'), 'Backspace', 't', 'Enter'], 10, 1_000);
+    expect(onScan).not.toHaveBeenCalled();
+  });
+
+  it('drops the keys before a gap over WEDGE_STALE_GAP_MS', () => {
+    const onScan = vi.fn();
+    const keyPress = field(onScan);
+    const stale = press(keyPress, ['a', 'b'], 300, 1_000);
+    press(keyPress, [...Array.from('E2E-2'), 'Enter'], 10, stale + WEDGE_STALE_GAP_MS + 100);
+    expect(onScan).toHaveBeenCalledExactlyOnceWith('E2E-2');
   });
 });

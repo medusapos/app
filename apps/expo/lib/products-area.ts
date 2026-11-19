@@ -99,14 +99,16 @@ export function filterProductAreaRowsByTag(rows: ProductAreaRow[], tagId: string
   return rows.filter((row) => row.tagIds.includes(tagId));
 }
 
-/** Rows whose name or SKU holds every term of the query, ignoring case; an empty query keeps them all. */
+/** Rows whose name, SKU or barcode holds every term of the query, ignoring case (v2: "finds products by name, SKU or
+ * barcode"); an empty query keeps them all. */
 export function filterProductAreaRows(rows: ProductAreaRow[], query: string): ProductAreaRow[] {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
   if (!terms.length) return rows;
   return rows.filter((row) => {
     const name = row.name.toLowerCase();
     const sku = row.sku.toLowerCase();
-    return terms.every((term) => name.includes(term) || sku.includes(term));
+    const barcode = row.barcode.toLowerCase();
+    return terms.every((term) => name.includes(term) || sku.includes(term) || barcode.includes(term));
   });
 }
 

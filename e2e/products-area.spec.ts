@@ -1,5 +1,5 @@
-import { expect } from '@playwright/test';
-import { adminToken, backend, openArea, signIn, test, variantIdBySku } from './helpers';
+import { expect, type Page } from '@playwright/test';
+import { adminToken, backend, cartTab, openArea, signIn, test, variantIdBySku } from './helpers';
 
 test('the Products area lists the catalogue read-only and finds a variant by SKU', async ({ page }) => {
   await signIn(page);
@@ -279,4 +279,64 @@ test('the Products area\'s Regular price and Sale price columns strike a sale va
     const removed = await fetch(`${backend}/admin/price-lists/${priceListId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
     expect(removed.ok, await removed.clone().text()).toBeTruthy();
   }
+});
+
+// Settings › Barcode Scanning: save prefix # and suffix !, turn Play a sound on scan on, then open Products.
+async function openProductsWithScanAffixes(page: Page) {
+  const phone = (page.viewportSize()?.width ?? 1280) < 768;
+  await openArea(page, 'Settings');
+  await page.getByTestId(phone ? 'settings-list-scanner' : 'settings-nav-scanner').click();
+  await page.getByLabel('Scanner prefix', { exact: true }).fill('#');
+  await page.getByLabel('Scanner suffix', { exact: true }).fill('!');
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  const sound = page.getByRole('switch', { name: 'Play a sound on scan' });
+  await sound.click();
+  await expect(sound).toBeChecked();
+  // A phone's section page has a back button, not the Menu: back to the list first.
+  if (phone) {
+    await page.goBack();
+    await expect(page.getByTestId('settings-list')).toBeVisible();
+  }
+  await openArea(page, 'Products');
+}
+
+// v2: "On the Products and Orders screens, a scan goes into that screen's search box instead".
+test('a barcode scan into the Products search, or with nothing focused, becomes the search without its affixes', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+  await openProductsWithScanAffixes(page);
+  const search = page.getByTestId('products-search');
+  const rows = page.locator('[data-testid^="product-row-"]');
+  await search.click();
+  await search.pressSequentially('#2000000000011!', { delay: 10 });
+  await search.press('Enter');
+  await expect(search).toHaveValue('2000000000011');
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('E2E product 1');
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await page.keyboard.type('#E2E-4B!', { delay: 10 });
+  await page.keyboard.press('Enter');
+  await expect(search).toHaveValue('E2E-4B');
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('E2E product 4 · B');
+  // Ordinary typing still searches (each term on its own, so "2" also matches the other E2E names).
+  await search.fill('E2E product 2');
+  await expect(search).toHaveValue('E2E product 2');
+  await expect(rows.filter({ hasText: 'E2E product 2' }).first()).toBeVisible();
+});
+
+test('on a phone a barcode scan into the Products search filters the list and adds nothing to the cart', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await signIn(page);
+  await openProductsWithScanAffixes(page);
+  const search = page.getByTestId('products-search');
+  const rows = page.locator('[data-testid^="product-list-row-"]');
+  await search.click();
+  await search.pressSequentially('#2000000000011!', { delay: 10 });
+  await search.press('Enter');
+  await expect(search).toHaveValue('2000000000011');
+  await expect(rows).toHaveCount(1);
+  await expect(rows).toContainText('E2E product 1');
+  await openArea(page, 'POS');
+  await expect(cartTab(page)).toHaveAccessibleName('Cart, New');
 });

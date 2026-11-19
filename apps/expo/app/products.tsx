@@ -1,6 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Pressable, View, useWindowDimensions } from 'react-native';
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, Stack, usePathname } from 'expo-router';
 import {
   Button, Card, CategoryNav, Loader, ProductList, ProductTable, SearchInput, Text, type ProductTableColumn,
 } from '@tallyui/components';
@@ -24,6 +24,9 @@ import { useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
+import { playScanBeep } from '../lib/scan-beep';
+import { useScannerSettings } from '../lib/scanner-settings';
+import { useWedgeScan, useWedgeScanField } from '../lib/use-wedge-scan';
 
 // The row's product thumbnail, or a plain tile of the same size when the product has none.
 function ProductThumb({ row, size }: { row: ProductAreaRow; size: number }) {
@@ -103,6 +106,15 @@ export default function ProductsAreaScreen() {
   const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
   const snapshot = useCatalogueSnapshot();
   const [search, setSearch] = useState('');
+  // v2: "On the Products and Orders screens, a scan goes into that screen's search box": a scan typed into the box,
+  // or with nothing editable focused, becomes the search text without its prefix and suffix. It never touches a cart.
+  const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session?.baseUrl ?? '');
+  const onScan = (code: string) => {
+    if (scannerSettings.playSound) playScanBeep();
+    setSearch(code);
+  };
+  const onSearchKeyPress = useWedgeScanField(scannerSettings, onScan);
+  useWedgeScan(usePathname() === '/products', scannerSettings, onScan);
   const [categoryId, setCategoryId] = useState<string | null>(() =>
     session ? loadProductsAreaCategory(defaultStorage(), session.baseUrl) : null);
   const [tagId, setTagId] = useState<string | null>(() => session ? loadProductsAreaTag(defaultStorage(), session.baseUrl) : null);
@@ -148,7 +160,7 @@ export default function ProductsAreaScreen() {
   return <View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
-      <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Products"
+      <SearchInput className="flex-1" value={search} onChangeText={setSearch} onKeyPress={onSearchKeyPress} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
       {!phone && <ProductsAreaColumnsButton {...columns} />}
       {!openMenu && <AreaAccountButton />}
