@@ -1,4 +1,4 @@
-import { expect, test as base, type BrowserContext, type Page, type Request, type Response } from '@playwright/test';
+import { expect, test as base, type BrowserContext, type Locator, type Page, type Request, type Response } from '@playwright/test';
 import { E2E_RUN } from './ports';
 
 // The e2e Medusa store this run talks to (per-checkout port, e2e/ports.ts).
@@ -141,6 +141,24 @@ export async function openArea(page: Page, area: 'POS' | 'Products' | 'Orders' |
   const { width, height } = page.viewportSize() ?? { width: 1280, height: 720 };
   if (width < 768 || height < 480) await page.getByRole('button', { name: 'Menu', exact: true }).click();
   await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: area, exact: true }).click();
+}
+
+// A TallyUI Switch's root is its track and its first child the thumb (row 15x.1, #480): the thumb lies inside the
+// track, its centre right of the track's centre when the switch is on and left of it when off.
+export async function expectSwitchThumbInTrack(sw: Locator) {
+  const id = await sw.getAttribute('data-testid');
+  const on = (await sw.getAttribute('aria-checked')) === 'true';
+  const state = on ? 'on' : 'off';
+  await expect(async () => {
+    const r = await sw.boundingBox();
+    const t = await sw.locator('> *').first().boundingBox();
+    if (!r || !t) throw new Error(`no box for switch ${id} (${state})`);
+    console.log(`switch ${id} ${state}: root ${r.x}-${r.x + r.width}, thumb ${t.x}-${t.x + t.width}`);
+    expect(t.x >= r.x - 0.5 && t.x + t.width <= r.x + r.width + 0.5, `${id} (${state}) thumb inside its root`).toBe(true);
+    const offset = t.x + t.width / 2 - (r.x + r.width / 2);
+    if (on) expect(offset, `${id} (on) thumb centre right of the root centre`).toBeGreaterThan(0);
+    else expect(offset, `${id} (off) thumb centre left of the root centre`).toBeLessThan(0);
+  }).toPass();
 }
 
 // Numeric cash is in EUR major units. Return the displayed receipt total before New sale.

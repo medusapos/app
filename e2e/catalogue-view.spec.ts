@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { signIn, test } from './helpers';
+import { expectSwitchThumbInTrack, signIn, test } from './helpers';
 
 // The catalogue's category nav and grid/table toggle (V2-PARITY, Products and search). The e2e seed puts E2E products
 // 1 and 2 in Drinks and 3 in Food; 4 and 5 have no category. The view is kept per store on this device.
@@ -29,6 +29,31 @@ test.describe('at 1280 × 800', () => {
     await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
     await expect(view.getByTestId('view-toggle-table')).toBeChecked();
     await expect(page.getByTestId('product-table-sort-name')).toBeVisible();
+  });
+
+  test('the sale screen\'s Product and Cart Settings switch thumbs sit inside their tracks, at the start off and the end on', async ({ page }) => {
+    await signIn(page);
+    for (const [sheet, ids] of [['product', ['product-settings-out-of-stock']],
+      ['cart', ['cart-settings-auto-show-receipt', /^cart-settings-column-/]]] as const) {
+      await page.getByTestId(`${sheet}-settings-button`).click();
+      await expect(page.getByTestId(`${sheet}-settings-sheet`)).toBeVisible();
+      for (const id of ids) {
+        const matched = page.getByTestId(id);
+        await expect(matched.first()).toBeVisible();
+        for (const sw of await matched.all()) {
+          const was = (await sw.getAttribute('aria-checked')) === 'true';
+          await expectSwitchThumbInTrack(sw);
+          await sw.click();
+          await expect(sw).toHaveAttribute('aria-checked', String(!was));
+          await expectSwitchThumbInTrack(sw);
+          await sw.click();
+          await expect(sw).toHaveAttribute('aria-checked', String(was));
+          await expectSwitchThumbInTrack(sw);
+        }
+      }
+      await page.getByTestId(`${sheet}-settings-close`).click();
+      await expect(page.getByTestId(`${sheet}-settings-sheet`)).not.toBeVisible();
+    }
   });
 });
 

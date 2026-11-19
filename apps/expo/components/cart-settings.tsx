@@ -103,7 +103,9 @@ export function CartSettingsButton({ settings, save, reset, phone = false }: Ret
         <Text className="text-muted-foreground">As the cashier sees them on the price keypad. Tap a key to change it.</Text>
         {error ? <Text className="text-destructive" accessibilityRole="alert">{error}</Text> : null}
         <View className="flex-row items-center gap-2">
-          <Switch testID="cart-settings-auto-show-receipt" aria-labelledby="cart-settings-auto-show-receipt-label"
+          {/* TallyUI's Switch track sets no flex direction and react-native-web defaults to column, so
+              items-center would center the thumb and the "on" translate would push it past the track. */}
+          <Switch testID="cart-settings-auto-show-receipt" className="flex-row" aria-labelledby="cart-settings-auto-show-receipt-label"
             checked={settings.autoShowReceipt} onCheckedChange={(on) => save({ ...settings, autoShowReceipt: on })} />
           <Label nativeID="cart-settings-auto-show-receipt-label">Automatically show receipt after checkout</Label>
         </View>
@@ -114,7 +116,7 @@ export function CartSettingsButton({ settings, save, reset, phone = false }: Ret
           const checked = value ?? (flag === 'show' && SHOWN_BY_DEFAULT.includes(column));
           return <View key={id} className={`flex-row items-center justify-between gap-2${flag === 'show' ? '' : ' pl-8'}`}>
             <Label nativeID={`${id}-label`}>{label}</Label>
-            <Switch testID={id} aria-labelledby={`${id}-label`} checked={checked} onCheckedChange={(on) => save({ ...settings,
+            <Switch testID={id} className="flex-row" aria-labelledby={`${id}-label`} checked={checked} onCheckedChange={(on) => save({ ...settings,
               columns: { ...settings.columns, [column]: { ...settings.columns[column], [flag]: on } } })} />
           </View>;
         })}

@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, captureCommands, cartLineQuantity, cartTab, closeStoreRegister, openArea, openRegister, productsTab, refusedStoreOpen, signIn, test } from './helpers';
+import { addE2E1, captureCommands, cartLineQuantity, cartTab, closeStoreRegister, expectSwitchThumbInTrack, openArea, openRegister, productsTab, refusedStoreOpen, signIn, test } from './helpers';
 
 // Settings → Scanner (ADR 0016): minChars gates the phone-cart wedge listener, and the test-scan
 // field judges a scan the same way, against the currently saved settings.
@@ -242,4 +242,27 @@ test('Scale: Regular is the default, Auto persists after reload, and Regular res
   await expect(page.getByTestId('scale-choice-regular')).toHaveAttribute('aria-pressed', 'true');
   await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--text-base').trim())).toBe('14px');
   expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('regular');
+});
+
+test.describe('at 1280 × 800', () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test('Settings\' switch thumbs sit inside their tracks at 1280 wide, at the start off and the end on', async ({ page }) => {
+    await signIn(page);
+    await openArea(page, 'Settings');
+    for (const [nav, id] of [['store', 'settings-default-customer-is-cashier'], ['printing', 'settings-printing-auto-print'],
+      ['scanner', 'settings-scanner-sound']]) {
+      await page.getByTestId(`settings-nav-${nav}`).click();
+      const sw = page.getByTestId(id);
+      await sw.scrollIntoViewIfNeeded();
+      const was = (await sw.getAttribute('aria-checked')) === 'true';
+      await expectSwitchThumbInTrack(sw);
+      await sw.click();
+      await expect(sw).toHaveAttribute('aria-checked', String(!was));
+      await expectSwitchThumbInTrack(sw);
+      await sw.click();
+      await expect(sw).toHaveAttribute('aria-checked', String(was));
+      await expectSwitchThumbInTrack(sw);
+    }
+  });
 });
