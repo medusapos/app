@@ -29,6 +29,6 @@ it('accepts supported register versions, subject to the optional minimum', () =>
 })
 
 // The app's MIN_PLUGIN_CONTRACT (apps/expo/lib/plugin-contract.ts) latches "Update required" below this.
-it('advertises plugin contract 1', () => {
-  expect(PLUGIN_CONTRACT).toBe(1)
+it('advertises plugin contract 2', () => {
+  expect(PLUGIN_CONTRACT).toBe(2)
 })

@@ -77,9 +77,9 @@ medusaIntegrationTestRunner({
         await tallyPosRoles({ container, args: [] })
         await tallyPosRoles({ container, args: [] })
         const rbac = container.resolve(Modules.RBAC)
-        for (const { name, keys } of [
-          { name: 'POS cashier', keys: POS_CASHIER_POLICIES },
-          { name: 'POS manager', keys: POS_MANAGER_POLICIES },
+        for (const { name, keys, clearsDevice } of [
+          { name: 'POS cashier', keys: POS_CASHIER_POLICIES, clearsDevice: false },
+          { name: 'POS manager', keys: POS_MANAGER_POLICIES, clearsDevice: true },
         ]) {
           const roles = await rbac.listRbacRoles({ name })
           expect(roles).toHaveLength(1)
@@ -87,6 +87,7 @@ medusaIntegrationTestRunner({
           const policies = await rbac.listRbacPolicies({ id: links.map(link => link.policy_id) })
           expect(new Set(policies.map(policy => policy.key))).toEqual(new Set(keys))
           expect(links).toHaveLength(keys.length)
+          expect(policies.map(policy => policy.key).includes('tally_pos:clear_device')).toBe(clearsDevice)
         }
         expect(process.exitCode).not.toBe(1)
       } finally {

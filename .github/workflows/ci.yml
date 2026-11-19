@@ -288,7 +288,10 @@ jobs:
         working-directory: app/packages/medusa-plugin
       - run: npm run test:integration:modules -- --maxWorkers=1
         working-directory: app/packages/medusa-plugin
-      - run: npm run test:integration:http -- --maxWorkers=1
+      # Two shards, two processes: one process ran out of heap at 22 http specs (2026-11-19).
+      - run: npm run test:integration:http -- --maxWorkers=1 --shard=1/2
+        working-directory: app/packages/medusa-plugin
+      - run: npm run test:integration:http -- --maxWorkers=1 --shard=2/2
         working-directory: app/packages/medusa-plugin
       # The rejected-order backfill as an operator runs it, through npx medusa exec (see its README).
       - run: bash integration-tests/backfill-seed/run.sh

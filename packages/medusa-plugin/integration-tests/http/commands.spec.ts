@@ -145,7 +145,7 @@ medusaIntegrationTestRunner({
           lineTax: { none: false, classes: false },
           coupons: true,
           registerApproval: { thresholdMinor: 500 },
-          pluginContract: 1,
+          pluginContract: 2,
         }])
       }
       expect((await info({})).status).toBe(401)
@@ -168,7 +168,7 @@ medusaIntegrationTestRunner({
         lineTax: { none: false, classes: false },
         coupons: true,
         registerApproval: { thresholdMinor: 500 },
-        pluginContract: 1,
+        pluginContract: 2,
       })
     })
 
