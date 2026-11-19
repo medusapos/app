@@ -154,6 +154,35 @@ it('a row switches to its sale and closes the list', async () => {
   expect(screen.getByTestId(`open-sale-tab-${first}`).getAttribute('aria-selected')).toBe('true');
 });
 
+it('the list marks only the sale on screen, and the mark moves with a switch', async () => {
+  overflowTabs();
+  const ids = await parkTwo();
+  const selected = () => ids.map((id) => screen.getByTestId(`open-orders-row-${id}`).getAttribute('aria-selected'));
+  for (const [index, id] of ids.entries()) {
+    fireEvent.click(await screen.findByTestId('open-orders-count'));
+    await act(async () => { fireEvent.click(await screen.findByTestId(`open-orders-row-${id}`)); });
+    expect(screen.queryByTestId('open-orders-list')).toBeNull();
+    fireEvent.click(screen.getByTestId('open-orders-count'));
+    await screen.findByTestId('open-orders-list');
+    await waitFor(() => expect(selected()).toEqual(ids.map((_, i) => String(i === index))));
+    fireEvent.click(screen.getByTestId('open-orders-close'));
+  }
+});
+
+it('a row shows its sale\'s customer, and a guest sale\'s row says Guest', async () => {
+  overflowTabs();
+  const [withCustomer, guest] = await parkTwo();
+  // Seed the parked draft as parkDraft writes a sale on a customer: the snapshot's customer and its summary name.
+  const doc = await drafts().findOne(withCustomer).exec(true);
+  const snapshot = JSON.parse(doc.get('data') as string);
+  await doc.incrementalPatch({ customerName: 'Ada Lovelace',
+    data: JSON.stringify({ ...snapshot, customer: { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.test' } }) });
+  fireEvent.click(await screen.findByTestId('open-orders-count'));
+  const list = within(await screen.findByTestId('open-orders-list'));
+  await waitFor(() => expect(list.getByTestId(`open-orders-row-${withCustomer}-who`).textContent).toBe('Ada Lovelace'));
+  expect(list.getByTestId(`open-orders-row-${guest}-who`).textContent).toBe('Guest');
+});
+
 it('Close and a second tap on the count both close the list', async () => {
   overflowTabs();
   await parkTwo();
