@@ -78,4 +78,15 @@ describe('printers', () => {
     unmount();
     expect(await printers.count().exec()).toBe(2);
   });
+
+  it('usePrinterProfiles shows the built-in alone while the live collection is empty, then the live list', async () => {
+    const { db, printers } = await database();
+    const orders = { database: db } as unknown as RxCollection<PosOrder>;
+    const { result, unmount } = renderHook(() => usePrinterProfiles(orders));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(result.current).toEqual([BUILT_IN_PRINTER]);
+    await printers.insert(counter);
+    await waitFor(() => expect(result.current).toEqual([counter]));
+    unmount();
+  });
 });

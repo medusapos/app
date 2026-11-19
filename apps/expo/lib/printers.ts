@@ -37,7 +37,8 @@ export function usePrinterProfiles(orders: RxCollection<PosOrder> | null): Print
     });
     return () => subscription.unsubscribe();
   }, [collection]);
-  return collection && seen?.collection === collection ? seen.profiles : [BUILT_IN_PRINTER];
+  // An empty live list (the built-in insert failed on open) shows the built-in alone, as no collection does.
+  return collection && seen?.collection === collection && seen.profiles.length > 0 ? seen.profiles : [BUILT_IN_PRINTER];
 }
 
 const ENTITIES: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
