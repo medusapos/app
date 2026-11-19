@@ -111,3 +111,32 @@ test('the Products area\'s settings sheet hides a column, keeps it across a page
   await page.getByTestId('products-settings-close').click();
   await expect(head('SKU')).toBeVisible();
 });
+
+test('the Products area\'s settings sheet shows v2\'s ID and Barcode columns, off until switched on', async ({ page }) => {
+  await signIn(page);
+  await openArea(page, 'Products');
+  const table = page.getByTestId('products-table');
+  // A head's text, past the sort arrow the sorted column carries ("Product ▲").
+  const head = (name: string) => table.getByRole('columnheader').filter({ hasText: new RegExp(`^${name}( [▲▼])?$`) });
+  await expect(head('Product')).toBeVisible();
+  await expect(head('ID')).toHaveCount(0);
+  await expect(head('Barcode')).toHaveCount(0);
+  await page.getByTestId('products-settings-button').click();
+  await page.getByTestId('products-settings-column-barcode').click();
+  await page.getByTestId('products-settings-column-id').click();
+  await expect(page.getByTestId('products-settings-column-id')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('products-settings-close').click();
+  await expect(head('Barcode')).toBeVisible();
+  await expect(head('ID')).toBeVisible();
+  const first = page.locator('[data-testid^="product-row-"]', { hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first();
+  await expect(first).toContainText('2000000000011');
+  // The ID cell shows the row's own Medusa variant id.
+  const id = (await first.getAttribute('data-testid'))?.replace(/^product-row-/, '') ?? '';
+  expect(id).toMatch(/^variant_/);
+  await expect(first).toContainText(id);
+  await page.getByTestId('products-settings-button').click();
+  await page.getByTestId('products-settings-restore').click();
+  await page.getByTestId('products-settings-close').click();
+  await expect(head('ID')).toHaveCount(0);
+  await expect(head('Barcode')).toHaveCount(0);
+});

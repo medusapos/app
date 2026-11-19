@@ -3,7 +3,7 @@ import { catalogueEntries, productCategories, variantPriceLabel } from '@tallyui
 import type { SessionStorage } from './session';
 
 export type ProductAreaRow = {
-  id: string; name: string; sku: string; price: string; stock: string;
+  id: string; name: string; sku: string; barcode: string; price: string; stock: string;
   stockStatus: StockLevel['status']; categories: string; categoryIds: string[];
 };
 
@@ -42,6 +42,7 @@ export function productAreaRows(products: readonly unknown[], traits: ProductTra
       id: variant.id,
       name: traits.getVariantCount(product) > 1 && variant.title ? `${name} · ${variant.title}` : name,
       sku: variant.sku ?? '',
+      barcode: variant.barcode ?? '',
       price: variantPriceLabel(variant, currency) ?? '—',
       stock: typeof variant.stock.quantity === 'number' ? variant.stock.quantity.toLocaleString() : STOCK_STATUS_LABELS[variant.stock.status],
       stockStatus: variant.stock.status,
