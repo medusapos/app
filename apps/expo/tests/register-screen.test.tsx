@@ -321,7 +321,7 @@ describe('closing the register', () => {
     appPrint.mockRestore();
   });
 
-  it("the last closure's Print the Z report prints that closure", async () => {
+  it("the last closure's Print closure prints that closure", async () => {
     document.getElementById(PRINT_FRAME_ID)?.remove();
     await openTestRegister(store.orders, baseUrl);
     await mount();
@@ -337,8 +337,24 @@ describe('closing the register', () => {
       expect(frame.contentDocument!.querySelector('h2')?.textContent).toBe('Z report · Closure #1');
       const salesRow = Array.from(frame.contentDocument!.querySelectorAll('tr')).find((tr) => tr.querySelector('th')?.textContent === 'Sales');
       expect(salesRow?.querySelector('td')?.textContent).toBe(sheet.getByTestId('last-closure-sales').textContent);
-      expect(sheet.getByTestId('last-closure-print').textContent).toBe('Print the Z report');
+      expect(sheet.getByTestId('last-closure-print').textContent).toBe('Print closure');
     });
+  });
+
+  it('the last closure sheet puts Print closure and Done in one row, and Done closes it', async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await closeWith(await startCount(), '100.00');
+    await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+    const sheet = within(await screen.findByTestId('last-closure'));
+    const print = sheet.getByTestId('last-closure-print');
+    const done = sheet.getByTestId('last-closure-done');
+    // jsdom does not apply the Button variant classes, so the proof here is the layout: one row, Print then Done.
+    expect(print.parentElement).toBe(done.parentElement);
+    expect(print.compareDocumentPosition(done) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(done);
+    await waitFor(() => expect(screen.queryByTestId('last-closure')).toBeNull());
   });
 
   it('a failed print shows why under the last closure, and the sheet stays open', async () => {
@@ -356,7 +372,7 @@ describe('closing the register', () => {
     await waitFor(() => {
       expect(sheet.getByTestId('last-closure-print-error').textContent).toBe(PRINT_FAILED);
       expect(screen.getByTestId('last-closure')).toBeTruthy();
-      expect(sheet.getByTestId('last-closure-print').textContent).toBe('Print the Z report');
+      expect(sheet.getByTestId('last-closure-print').textContent).toBe('Print closure');
     });
     warn.mockRestore();
   });
