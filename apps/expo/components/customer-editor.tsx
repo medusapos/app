@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { Pressable, TextInput, View } from 'react-native';
-import { Button, CustomerForm, Text, type CustomerFormValues } from '@tallyui/components';
+import { Path } from 'react-native-svg';
+import { Button, createSvgIcon, CustomerForm, Text, type CustomerFormValues } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, type Customer, type CustomerAddress } from '@tallyui/core';
 import { billingAddress, billingChanged, billingCountryValid, billingFields, hasBilling, BillingNotSavedError,
   BILLING_COUNTRY_HINT, BILLING_LOAD_FAILED, BILLING_NOT_SAVED, SHIPPING_COUNTRY_HINT, type BillingFields } from '../lib/customer-billing';
@@ -12,8 +13,16 @@ export const CUSTOMER_SAVE_FAILED = "Couldn't save the customer. Try again.";
 type Addresses = { billing?: CustomerAddress; shipping?: CustomerAddress };
 /** Shipping starts as "Same as billing" when there is none stored or its six fields match billing's. */
 const shippingIsBilling = ({ billing, shipping }: Addresses) => !shipping || !billingChanged(billingFields(shipping), billing);
+/** Which address blocks start open behind `optionalDetails`: a stored billing opens both, a stored shipping its own. */
+const openBlocks = ({ billing, shipping }: Addresses) => {
+  const billingOpen = hasBilling(billingFields(billing));
+  return { billing: billingOpen, shipping: billingOpen || hasBilling(billingFields(shipping)) };
+};
+// v2's add-row glyph, tabler's `plus`.
+const PlusIcon = createSvgIcon('PlusIcon', () => <><Path d="M12 5l0 14" /><Path d="M5 12l14 0" /></>);
 
-export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, layout, saveLabel = 'Save customer' }: {
+export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, layout, saveLabel = 'Save customer',
+  optionalDetails }: {
   customer: Customer | null;
   save: (values: CustomerFormValues, billing: CustomerAddress | undefined, shipping: CustomerAddress | undefined) => Promise<void>;
   onUnauthorized: () => void;
@@ -23,6 +32,11 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
   layout?: (parts: { form: ReactNode; message: ReactNode; save: ReactNode }) => ReactNode;
   /** The save button's words; the Customers screen's new-customer form reads v2's "Add Customer". */
   saveLabel?: string;
+  /**
+   * v2's Add Customer form: the addresses start behind add buttons under "Addresses and other optional details";
+   * a stored address opens its block. Without it both blocks are always open (the cart's dialogs).
+   */
+  optionalDetails?: boolean;
 }) {
   const [values, setValues] = useState<CustomerFormValues>({ firstName: customer?.firstName ?? '',
     lastName: customer?.lastName ?? '', email: customer?.email ?? '', phone: customer?.phone ?? '', address: '' });
@@ -34,6 +48,7 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
   const [shippingFields, setShippingFields] = useState(() => billingFields(storedShipping));
   const [sameAsBilling, setSameAsBilling] = useState(() => shippingIsBilling({ billing: stored, shipping: storedShipping }));
   const [billingStatus, setBillingStatus] = useState(customer && loadAddresses ? 'loading' : 'ready');
+  const [open, setOpen] = useState(() => openBlocks({ billing: stored, shipping: storedShipping }));
   const countryValid = billingCountryValid(fields);
   const shippingCountryValid = sameAsBilling || billingCountryValid(shippingFields);
   useEffect(() => {
@@ -46,6 +61,7 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
       setStoredShipping(addresses.shipping);
       setShippingFields(billingFields(addresses.shipping));
       setSameAsBilling(shippingIsBilling(addresses));
+      setOpen(openBlocks(addresses));
       setBillingStatus('ready');
     }, (error) => {
       if (!live) return;
@@ -84,14 +100,18 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
   const form = <>
     <CustomerForm values={values} onChangeField={(field, value) => setValues((current) => ({ ...current, [field]: value }))}
       showAddress={false} />
-    <View className="gap-3 p-4">
+    {optionalDetails && <View className="gap-3 px-4 pt-4">
+      <Text className="text-sm font-medium text-muted-foreground">Addresses and other optional details</Text>
+      {billingStatus === 'failed' && <Text className="text-sm text-muted-foreground">{BILLING_LOAD_FAILED}</Text>}
+    </View>}
+    {(!optionalDetails || open.billing) && <View className="gap-3 p-4">
       <Text className="text-sm font-medium text-foreground">Billing address</Text>
       <AddressGrid fields={fields} disabled={billingStatus !== 'ready'} countryTestID="customer-billing-country"
         onChange={(field, value) => setFields((current) => ({ ...current, [field]: value }))} />
       {billingStatus === 'failed' && <Text className="text-sm text-muted-foreground">{BILLING_LOAD_FAILED}</Text>}
       {!countryValid && <Text className="text-sm text-destructive">{BILLING_COUNTRY_HINT}</Text>}
-    </View>
-    <View className="gap-3 p-4">
+    </View>}
+    {(!optionalDetails || open.shipping) && <View className="gap-3 p-4">
       <Text className="text-sm font-medium text-foreground">Shipping address</Text>
       {sameAsBilling ? <>
         <Text className="text-sm text-muted-foreground">Same as billing</Text>
@@ -109,7 +129,19 @@ export function CustomerEditor({ customer, save, onUnauthorized, loadAddresses, 
           <Text>Same as billing</Text>
         </Button>
       </>}
-    </View>
+    </View>}
+    {optionalDetails && !(open.billing && open.shipping) && <View className="flex-row flex-wrap gap-2 px-4 pb-4">
+      {([['billing', 'Billing Address'], ['shipping', 'Shipping Address']] as const).filter(([block]) => !open[block])
+        .map(([block, label]) => <Button key={block} variant="outline" testID={`customer-add-${block}`}
+          disabled={billingStatus !== 'ready'} onPress={() => {
+            // Shipping added with no billing on screen opens its own fields: there is no billing to be the same as.
+            if (block === 'shipping' && !open.billing) setSameAsBilling(false);
+            setOpen((current) => ({ ...current, [block]: true }));
+          }}>
+          <View className="text-foreground"><PlusIcon size={14} /></View>
+          <Text>{label}</Text>
+        </Button>)}
+    </View>}
   </>;
   const shown = message ? <Text accessibilityRole="alert" className="text-sm text-destructive">{message}</Text> : null;
   const saveButton = <Button testID="customer-save" disabled={saving || values.email.trim() === '' || !countryValid || !shippingCountryValid}

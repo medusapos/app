@@ -24,6 +24,8 @@ test('the Customers area adds a customer', async ({ page }) => {
   await signIn(page);
   await openArea(page, 'Customers');
   await page.getByTestId('customers-add').click();
+  await expect(page.getByText('Addresses and other optional details', { exact: true })).toBeVisible();
+  await expect(page.getByLabel('Address line 1', { exact: true })).not.toBeVisible();
   await page.getByPlaceholder('email@example.com').fill(email);
   await page.getByPlaceholder('First name').fill('Nia');
   await page.getByTestId('customer-save').click();
@@ -44,6 +46,7 @@ test('the Customers area adds a customer with a billing address', async ({ page 
   await page.getByTestId('customers-add').click();
   await page.getByPlaceholder('email@example.com').fill(email);
   await page.getByPlaceholder('First name').fill('Nia');
+  await page.getByTestId('customer-add-billing').click();
   await page.getByLabel('Address line 1', { exact: true }).fill('1 Market St');
   await page.getByLabel('City', { exact: true }).fill('Leeds');
   await page.getByLabel('Postal code', { exact: true }).fill('LS1 1AA');

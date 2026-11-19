@@ -122,7 +122,7 @@ function CustomersSearch({ session, onUnauthorized }: { session: Session; onUnau
             }
             createdCustomer.current = null;
             setEditing(null);
-          }} saveLabel={editing === 'new' ? 'Add Customer' : undefined} />}
+          }} saveLabel={editing === 'new' ? 'Add Customer' : undefined} optionalDetails />}
         </ScrollView>
       </DialogContent>
     </Dialog>

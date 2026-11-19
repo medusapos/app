@@ -151,6 +151,7 @@ describe('CustomersScreen', () => {
     fireEvent.click(screen.getByTestId('customers-add'));
     changeField('email@example.com', 'new@example.com');
     changeField('First name', 'Nia');
+    fireEvent.click(screen.getByTestId('customer-add-billing'));
     fireEvent.change(screen.getByLabelText('Address line 1'), { target: { value: '1 Market St' } });
     await saveCustomer();
     expect(createCustomer).toHaveBeenCalledOnce();
