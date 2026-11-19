@@ -282,6 +282,40 @@ test('the Products area\'s Regular price and Sale price columns grey a sale vari
   }
 });
 
+test('the Products area\'s On sale chip narrows the rows to a variant on a Medusa sale price list, and back', async ({ page }) => {
+  const token = await adminToken();
+  const variantId = await variantIdBySku(token, 'E2E-3');
+  const created = await fetch(`${backend}/admin/price-lists`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'E2E sale', description: 'E2E sale', type: 'sale', status: 'active',
+      prices: [{ variant_id: variantId, currency_code: 'eur', amount: 3 }] }),
+  });
+  expect(created.ok, await created.clone().text()).toBeTruthy();
+  const priceListId: string = (await created.json()).price_list.id;
+  try {
+    await signIn(page);
+    await openArea(page, 'Products');
+    const rows = page.locator('[data-testid^="product-row-"]');
+    const first = rows.filter({ hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first();
+    await expect(first).toBeVisible();
+    const onSale = page.getByRole('button', { name: 'On sale', exact: true });
+    await expect(onSale).toHaveAttribute('aria-pressed', 'false');
+    await onSale.click();
+    await expect(onSale).toHaveAttribute('aria-pressed', 'true');
+    await expect(rows).toHaveCount(1);
+    await expect(rows).toContainText('E2E product 3');
+    await expect(rows).toContainText('E2E-3');
+    await expect(first).toHaveCount(0);
+    await expect(page.getByTestId('products-footer')).toHaveText(/^Showing 1 of \d+$/);
+    await onSale.click();
+    await expect(onSale).toHaveAttribute('aria-pressed', 'false');
+    await expect(first).toBeVisible();
+  } finally {
+    const removed = await fetch(`${backend}/admin/price-lists/${priceListId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    expect(removed.ok, await removed.clone().text()).toBeTruthy();
+  }
+});
+
 // Settings › Barcode Scanning: save prefix # and suffix !, turn Play a sound on scan on, then open Products.
 async function openProductsWithScanAffixes(page: Page) {
   const phone = (page.viewportSize()?.width ?? 1280) < 768;

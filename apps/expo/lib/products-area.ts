@@ -39,6 +39,9 @@ export const PRODUCTS_EMPTY = 'No products in the catalogue yet.';
 export const PRODUCTS_NO_MATCH =(query: string) => `No products match “${query}”.`;
 export const PRODUCTS_IN_STOCK_LABEL = 'In stock';
 export const PRODUCTS_NONE_IN_STOCK = 'No products are in stock.';
+export const PRODUCTS_ON_SALE_LABEL = 'On sale';
+export const PRODUCTS_NONE_ON_SALE = 'No products are on sale.';
+export const PRODUCTS_NONE_ON_SALE_IN_STOCK = 'No products on sale are in stock.';
 export const PRODUCTS_TAGS_LABEL = 'Tags';
 export const PRODUCTS_TAGS_SEARCH = 'Search Tags';
 export const PRODUCTS_TAGS_NONE = 'No tags match.';
@@ -116,6 +119,12 @@ export function filterProductAreaRows(rows: ProductAreaRow[], query: string): Pr
 export function filterProductAreaRowsInStock(rows: ProductAreaRow[], inStockOnly: boolean): ProductAreaRow[] {
   if (!inStockOnly) return rows;
   return rows.filter((row) => row.stockStatus === 'in_stock');
+}
+
+/** Only rows on a Medusa sale price list (`onSale`) when `onSaleOnly`; off returns the same array. */
+export function filterProductAreaRowsOnSale(rows: ProductAreaRow[], onSaleOnly: boolean): ProductAreaRow[] {
+  if (!onSaleOnly) return rows;
+  return rows.filter((row) => row.onSale);
 }
 
 // The Products area's category choice per store on this device, kept apart from the Sale's catalogue view.
