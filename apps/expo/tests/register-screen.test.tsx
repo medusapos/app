@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
 import { COUNTING_DRAWER, PRICE_CHECK_ONLY } from '../components/price-check-banner';
 import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
-import { APPROVE_OFFLINE } from '../components/register-close';
+import { APPROVE_OFFLINE, closureContext } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
 import { PRINT_FAILED, PRINT_FRAME_ID, printXReport } from '../lib/closure-print';
 import { openOrderStore, registerCollections } from '../lib/order-store';
@@ -570,6 +570,13 @@ describe('closing the register', () => {
     expect(figures.getByTestId('last-closure-expected-cash').textContent).toBe('€105.00');
     expect(figures.getByTestId('last-closure-counted-cash').textContent).toBe('€105.00');
     expect(figures.getByTestId('last-closure-variance-cash').textContent).toBe('Exact');
+    // The card sale is no cash sale; it shows under Other tenders, uncounted.
+    expect(figures.getByTestId('last-closure-cash-sales').textContent).toBe('€0.00');
+    expect(figures.queryByTestId('last-closure-cash-refunds')).toBeNull();
+    const otherTenders = within(figures.getByTestId('last-closure-other-tenders'));
+    expect(otherTenders.getByTestId('last-closure-other-external').textContent).toBe('€15.00');
+    expect(otherTenders.getByTestId('last-closure-other-external').parentElement!.firstChild!.textContent).toBe('Card terminal');
+    expect(figures.queryByTestId('last-closure-counted-external')).toBeNull();
     // Each movement is a row (label, then amount and reason); the order is the closure's row order.
     const movementRows = within(figures.getByTestId('last-closure-movements'));
     for (const [label, value] of [['Paid in', '€5.00 · Float top-up'], ['Paid out', '€2.00 · Stamps · undone'], ['Void', '€2.00 · Stamps']]) {
@@ -601,6 +608,35 @@ describe('closing the register', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
     const figures = within(await screen.findByTestId('last-closure'));
     expect(figures.getByTestId('last-closure-tax-rounding-note').textContent).toBe(TAX_ROUNDING_MIXED_NOTE);
+  });
+
+  it("the last closure shows the frozen cash sales and refunds, and each other tender's recorded amount with its count", async () => {
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await payByCard();
+    await act(async () => { fireEvent.click(await screen.findByRole('button', { name: 'Complete sale' })); });
+    await act(async () => { fireEvent.click(button('New sale')); });
+    await closeWith(await startCount(), '100.00');
+    await act(async () => { fireEvent.click(await screen.findByTestId('closure-done')); });
+    const [closure] = await closures();
+    await act(async () => {
+      await (await registerCollections(store.orders).closures.findOne(closure.id).exec())!.incrementalPatch({
+        breakdowns: { ...closure.breakdowns, payment_methods: { cash: { sales_minor: 2500, refunds_minor: 600 }, external: { sales_minor: 1500, refunds_minor: 0 } } },
+        counted: { ...closure.counted, external: 1500 },
+        expected: { ...closure.expected, external: 1500 },
+        variance: { ...closure.variance, external: 0 },
+      });
+    });
+    fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+    const figures = within(await screen.findByTestId('last-closure'));
+    expect(figures.getByTestId('last-closure-cash-sales').textContent).toBe('€25.00');
+    expect(figures.getByTestId('last-closure-cash-refunds').textContent).toBe(closureContext('EUR', { name: 'Store' }).formatMoney('-6.00'));
+    const other = within(figures.getByTestId('last-closure-other-tenders'));
+    expect(other.getByTestId('last-closure-other-external').textContent).toBe('€15.00');
+    expect(other.getByTestId('last-closure-other-external').parentElement!.firstChild!.textContent).toBe('Card terminal');
+    expect(other.getByTestId('last-closure-counted-external').textContent).toBe('€15.00');
+    expect(other.getByTestId('last-closure-variance-external').textContent).toBe('Exact');
   });
 
   it('at 360, Close register shows the count in the cart view, even with an empty cart', async () => {
