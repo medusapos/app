@@ -3,7 +3,7 @@ import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
 import { Path } from 'react-native-svg';
-import { createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesCardId, type SalesFilters } from '@tallyui/components';
+import { createSvgIcon, SalesCards, SalesFiltersBar, SalesHero, type SalesCardId, type SalesFilters, type SalesOption } from '@tallyui/components';
 import { comparisonRange, presetRange, watchFresh, type PosOrder } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, useFrameAccount, useFrameMenu } from '../components/app-frame';
 import { ClosuresView } from '../components/closures-view';
@@ -11,6 +11,7 @@ import { ReportSheet } from '../components/report-sheet';
 import { closureContext, printClosure } from '../components/register-close';
 import { RegisterStrip } from '../components/register-strip';
 import { StripHeightContext } from '../components/store-refused';
+import { fetchCashiers, reportCashierOptions } from '../lib/cashiers';
 import { PRINT_FAILED, printHtml, printSalesSummary, printXReport, SUMMARY_PRINT_FAILED, X_PRINT_FAILED } from '../lib/closure-print';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
@@ -37,6 +38,7 @@ export default function ReportsScreen() {
     status: 'all', cashierId: null, registerId: null,
   }));
   const [sales, setSales] = useState<PosOrder[]>([]);
+  const [cashiers, setCashiers] = useState<SalesOption[]>([]);
   // v2 opens Closures from the strip's › as its own view; it is state here, so the rail keeps Reports active.
   const [view, setView] = useState<'sales' | 'closures'>('sales');
   const [xBusy, setXBusy] = useState(false);
@@ -59,6 +61,13 @@ export default function ReportsScreen() {
     const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(from) } } }).subscribe(setSales);
     return () => subscription.unsubscribe();
   }, [orders, filters]);
+
+  useEffect(() => {
+    if (!session?.baseUrl || !session.token) return;
+    let live = true;
+    void fetchCashiers({ baseUrl: session.baseUrl, token: session.token }).then((fetched) => { if (live) setCashiers(fetched); });
+    return () => { live = false; setCashiers([]); };
+  }, [session?.baseUrl, session?.token]);
 
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
   const pricing = session?.baseUrl ? loadCachedPricing(defaultStorage(), session.baseUrl) : null;
@@ -137,7 +146,7 @@ export default function ReportsScreen() {
             <View className="flex-row flex-wrap items-start gap-2">
               <View className="flex-1">
                 <SalesFiltersBar filters={filters} onFiltersChange={setFilters} timezone="device" statusOptions={STATUS_OPTIONS}
-                  cashierOptions={[]} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
+                  cashierOptions={reportCashierOptions(cashiers, session)} registerOptions={registers.map(({ id, name }) => ({ value: id, label: name }))} />
               </View>
               {Platform.OS === 'web' ? <Pressable testID="reports-print-summary" accessibilityRole="button" disabled={summaryBusy}
                 className="min-h-11 flex-row items-center justify-center gap-2 rounded-md px-4 border border-border"

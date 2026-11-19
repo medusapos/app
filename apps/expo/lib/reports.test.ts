@@ -188,7 +188,7 @@ describe('salesRoomFigures', () => {
       order({ id: 'pending', syncStatus: 'pending', totalMinor: 800, payments: [{ id: 'card', method: 'external', amountMinor: 800 }] }),
       order({ id: 'rejected', syncStatus: 'rejected', totalMinor: 500, payments: [{ id: 'cash', method: 'cash', amountMinor: 500 }] }),
       order({ id: 'usd', currency: 'USD', syncStatus: 'pending', totalMinor: 700 }),
-    ], { ...filters, cashierId: 'ignored' }, 'eur');
+    ], filters, 'eur');
     expect(summary.figures.totals).toMatchObject({ orderCount: 3, grossMinor: 2500 });
     expect(summary).toMatchObject({ notSentCount: 1, leftOutCount: 1 });
   });
@@ -206,6 +206,18 @@ describe('salesRoomFigures', () => {
     ], { ...filters, status, registerId }, 'EUR');
     expect(summary.figures.totals).toMatchObject({ grossMinor, orderCount });
     expect(summary).toMatchObject({ notSentCount, leftOutCount: 1 });
+  });
+  it('counts only the chosen cashier\'s orders, and everyone\'s with no cashier chosen', () => {
+    const orders = [
+      order({ id: 'ana', cashierRef: 'ana@store.test' }),
+      order({ id: 'ben', cashierRef: 'ben@store.test', totalMinor: 800 }),
+    ];
+    const ana = salesRoomFigures(orders, { ...filters, cashierId: 'ana@store.test' }, 'EUR');
+    expect(ana.figures.totals).toMatchObject({ orderCount: 1, grossMinor: 1200 });
+    expect(ana.periodOrders.map((o) => o.id)).toEqual(['ana']);
+    const everyone = salesRoomFigures(orders, filters, 'EUR');
+    expect(everyone.figures.totals).toMatchObject({ orderCount: 2, grossMinor: 2000 });
+    expect(everyone.periodOrders.map((o) => o.id).sort()).toEqual(['ana', 'ben']);
   });
   it('puts yesterday\'s orders in the comparison, outside today\'s totals and notes', () => {
     const createdAt = new Date(2026, 10, 9, 23, 30).toISOString();

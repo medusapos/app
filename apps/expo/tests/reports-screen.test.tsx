@@ -620,3 +620,55 @@ describe('the header', () => {
   });
 
 });
+
+describe('the Sales cashier menu', () => {
+  const answerCashiers = (cashiers: Response) => vi.stubGlobal('fetch', vi.fn<typeof fetch>(async (url) =>
+    String(url).endsWith('/tally/v1/cashiers') ? cashiers.clone() : new Response('{}', { status: 404 })));
+  const twoUsers = () => new Response(JSON.stringify({ cashiers: [
+    { id: 'user_ana', email: 'ana@store.test', name: 'Ana' }, { id: 'user_ben', email: 'ben@store.test', name: 'Ben' },
+  ] }));
+  const menuOptions = () => screen.getAllByTestId(/^sales-filter-cashier-option-/).map((option) => option.getAttribute('data-testid'));
+
+  it('lists the store\'s users by name and the signed-in user after Everyone', async () => {
+    answerCashiers(twoUsers());
+    mount();
+    expect(await screen.findByTestId('sales-room')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    await waitFor(() => expect(screen.getByTestId('sales-filter-cashier-option-ana@store.test').textContent).toBe('Ana'));
+    expect(screen.getByTestId('sales-filter-cashier-option-ben@store.test').textContent).toBe('Ben');
+    expect(screen.getByTestId('sales-filter-cashier-option-admin@store.test').textContent).toBe('admin@store.test');
+    expect(menuOptions()).toEqual(['sales-filter-cashier-option-all', 'sales-filter-cashier-option-admin@store.test',
+      'sales-filter-cashier-option-ana@store.test', 'sales-filter-cashier-option-ben@store.test']);
+  });
+
+  it('narrows the figures to the chosen cashier\'s sales, and Everyone shows them all again', async () => {
+    answerCashiers(twoUsers());
+    await store.orders.insert(order(1200, 'cash', { cashierRef: 'ana@store.test' }));
+    await store.orders.insert(order(800, 'external', { cashierRef: 'ben@store.test' }));
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('20.00')));
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    fireEvent.click(await screen.findByTestId('sales-filter-cashier-option-ana@store.test'));
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('12.00')));
+    expect(screen.getByTestId('card-orders-figure').textContent).toBe('1');
+    expect(screen.getByTestId('sales-filter-cashier').textContent).toBe('Ana');
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    fireEvent.click(screen.getByTestId('sales-filter-cashier-option-all'));
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('20.00')));
+    expect(screen.getByTestId('card-orders-figure').textContent).toBe('2');
+  });
+
+  it('lists Everyone and the signed-in user only when the store has no cashiers route', async () => {
+    answerCashiers(new Response(JSON.stringify({ message: 'Not found' }), { status: 404 }));
+    await store.orders.insert(order(1200, 'cash'));
+    mount();
+    const ctx = closureContext('EUR', { name: 'Test shop' });
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('12.00')));
+    await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledWith(`${baseUrl}/tally/v1/cashiers`, expect.anything()));
+    fireEvent.click(screen.getByTestId('sales-filter-cashier'));
+    expect(menuOptions()).toEqual(['sales-filter-cashier-option-all', 'sales-filter-cashier-option-admin@store.test']);
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByTestId('card-orders-figure').textContent).toBe('1');
+  });
+});

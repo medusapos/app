@@ -37,6 +37,7 @@ export function salesRoomFigures(orders: readonly PosOrder[], filters: SalesFilt
 } {
   const counted = orders.filter((order) => order.currency.toUpperCase() === currency.toUpperCase()
     && (filters.registerId === null || order.registerId === filters.registerId)
+    && (filters.cashierId === null || order.cashierRef === filters.cashierId)
     && (filters.status === 'all' || order.syncStatus === filters.status));
   const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
   const reportOrders = counted.map((order) => reportOrderFromPosOrder(order)).map((order) => ({
