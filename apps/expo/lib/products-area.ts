@@ -5,6 +5,8 @@ import type { SessionStorage } from './session';
 export type ProductAreaRow = {
   id: string; name: string; sku: string; barcode: string; price: string; stock: string;
   stockStatus: StockLevel['status']; categories: string; categoryIds: string[];
+  // The product's primary image (Medusa's thumbnail), shared by its variant rows.
+  imageUrl?: string;
 };
 
 export const PRODUCTS_ADMIN_NOTE = 'Products are read-only here. Edit names, prices and stock in Medusa Admin.';
@@ -48,6 +50,7 @@ export function productAreaRows(products: readonly unknown[], traits: ProductTra
       stockStatus: variant.stock.status,
       categories: categories.map((category) => category.name).join(', '),
       categoryIds: categories.map((category) => category.id),
+      imageUrl: traits.getImageUrl(product),
     };
   });
 }

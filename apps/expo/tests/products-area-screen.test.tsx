@@ -55,6 +55,7 @@ const traits = {
   getVariants: (doc: Doc) => doc.variants,
   getCategories: (doc: Doc) => doc.categories ?? [],
   getCategoryNames: (doc: Doc) => (doc.categories ?? []).map((category) => category.name),
+  getImageUrl: () => undefined,
 } as unknown as ProductTraits;
 const eur = (amount: number) => [{ amount, currency: 'EUR', kind: 'base' as const }];
 const products: Doc[] = [
@@ -432,6 +433,17 @@ describe('on a phone', () => {
     expect(listRowIds()).toEqual(['v1', 'v4a', 'v4b']);
     expect(texts('v1')).toEqual(['E2E product 1', 'E2E-1', '€10.00', '5 · In stock']);
     expect(texts('v4b')).toEqual(['E2E product 4 · B', 'E2E-4B', '€25.00', 'On backorder']);
+  });
+
+  // v2's phone row starts with the product's image tile while the Image column is on (its default).
+  it('starts each row with the image tile, a plain one for a product with no image', () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    mount();
+    expect(listRowIds()).toEqual(['v1', 'v4a', 'v4b']);
+    for (const id of listRowIds()) {
+      expect(within(screen.getByTestId(`product-list-row-${id}`)).getByTestId(`product-image-placeholder-${id}`)).toBeTruthy();
+    }
   });
 
   // v2's column settings belong to the tablet table; a phone's two-line rows have no columns to choose.
