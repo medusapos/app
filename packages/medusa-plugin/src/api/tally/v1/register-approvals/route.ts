@@ -5,6 +5,7 @@ import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/frame
 import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 import { TALLY_REGISTER_MODULE } from '../../../../modules/tally-register'
 import type TallyRegisterModuleService from '../../../../modules/tally-register/service'
+import { deviceClearAttempts } from '../device-clear-approvals/attempts'
 
 export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse) {
   const { sessionId, variance, email, password } = (req.body ?? {}) as Record<string, unknown>
@@ -27,7 +28,8 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
 
   const service = req.scope.resolve<TallyRegisterModuleService>(TALLY_REGISTER_MODULE)
   const admitted = await service.admitApproval({ sessionId: sessionId as string, variance: variance as Record<string, number>,
-    requestedBy: req.auth_context.actor_id, email: email as string })
+    requestedBy: req.auth_context.actor_id, email: email as string,
+    otherFailures: deviceClearAttempts.counts(req.auth_context.actor_id, email as string) })
   if (admitted.kind === 'refused') {
     const messages = {
       approval_session_unknown: 'This register session is not known to the store.',
