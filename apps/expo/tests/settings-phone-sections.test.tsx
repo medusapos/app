@@ -29,6 +29,8 @@ vi.mock('expo-router', () => ({
   </> },
 }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+// Settings' Danger zone imports the approval dialog, which reads the locale.
+vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 
 const SECTION_TEST_IDS = ['settings-store', 'settings-tax', 'settings-printing', 'settings-card-readers', 'settings-scanner',
   'settings-theme', 'settings-register', 'settings-danger'];

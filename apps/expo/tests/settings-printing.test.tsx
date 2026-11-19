@@ -31,6 +31,8 @@ vi.mock('expo-router', () => ({
   </> },
 }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+// Settings' Danger zone imports the approval dialog, which reads the locale.
+vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 // A printer's Test print, observed; the rest of the module (profiles, test page) stays real.
 vi.mock('../lib/printers', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/printers')>(),

@@ -2,14 +2,19 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, View } from 'react-native';
 import type { MangoQuerySelector, RxCollection } from 'rxdb';
 import { Button, Dialog, DialogContent, DialogTitle, Input, Label, SettingsGroup, Text } from '@tallyui/components';
+import { APPROVAL_TIMEOUT_MS, ApprovalError, requestDeviceClearApproval } from '../lib/approval';
 import {
-  CLEAR_BODY, CLEAR_CONFIRM_WORD, CLEAR_FLAG_KEY, clearAllLocalData, clearWarnings, defaultClearDeps, isClearPending, reloadPage,
-  requestClearLocalData,
+  CLEAR_APPROVE_CONTEXT, CLEAR_APPROVE_OFFLINE, CLEAR_BODY, CLEAR_CONFIRM_WORD, CLEAR_FLAG_KEY, CLEAR_OFFLINE, CLEAR_UPDATE_NEEDED,
+  clearAllLocalData, clearGate, clearWarnings, defaultClearDeps, hasUnsynced, isClearPending, reloadPage, requestClearLocalData,
+  type ClearRisk,
 } from '../lib/clear-local-data';
 import { useOutboxContext } from '../lib/outbox-context';
+import { readPluginContractVersion } from '../lib/plugin-contract';
 import { useRegister } from '../lib/register-context';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { useNetworkOnline } from '../lib/use-network-online';
+import { ApprovalDialog } from './register-close';
 
 /** Above SessionProvider: with the clear flag set (web), wipes local data before the app renders, then reloads. */
 export function ClearLocalDataGate({ children }: { children: ReactNode }) {
@@ -41,7 +46,7 @@ export function ClearLocalDataGate({ children }: { children: ReactNode }) {
   </View>;
 }
 
-/** Settings › Danger zone (web only: native storage is in memory). Warns, never refuses (WCPOS v2). */
+/** Settings › Danger zone (web only: native storage is in memory). Unsent data needs a manager's approval, and is refused offline (#280). */
 export function ClearLocalDataSection() {
   const [open, setOpen] = useState(false);
   if (Platform.OS !== 'web') return null;
@@ -80,7 +85,12 @@ function ClearLocalDataDialog({ onClose }: { onClose: () => void }) {
   const { savesInFlight, orders } = useOutboxContext();
   const { register } = useRegister();
   const { session } = useSession();
+  const online = useNetworkOnline();
   const [word, setWord] = useState('');
+  const [approval, setApproval] = useState<{ approvedByName: string } | null>(null);
+  const [approving, setApproving] = useState(false);
+  const [routeMissing, setRouteMissing] = useState(false);
+  const [pluginContract, setPluginContract] = useState<number | null>(null);
   const status = register.session?.status;
   const registerContract = session?.capabilities?.register ?? 0;
   const collections = orders?.database.collections as Record<string, RxCollection> | undefined;
@@ -91,26 +101,62 @@ function ClearLocalDataDialog({ onClose }: { onClose: () => void }) {
   const closures = useLiveCount(registerContract === 0 ? collections?.closures : undefined, EVERY);
   const pending = useLiveCount(orders ?? undefined, PENDING);
   const rejected = useLiveCount(orders ?? undefined, REJECTED);
-  const { lines, atRisk } = clearWarnings({
+  const risk: ClearRisk = {
     sales: pending === null || rejected === null ? null : pending + rejected + savesInFlight,
     parked, tillEntries, localClosures: registerContract === 0 ? closures : 0,
     tillOpen: status === 'open' || status === 'counting',
     registerContract,
-  });
-  const locked = atRisk && word.trim().toUpperCase() !== CLEAR_CONFIRM_WORD;
+  };
+  const { lines, atRisk } = clearWarnings(risk);
+  const gate = clearGate(risk, { online, pluginContract, routeMissing });
+  // Whether the plugin has the approval route: read once per open, and only while it matters.
+  const contractRead = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const readContract = hasUnsynced(risk) && online && session !== null;
+  useEffect(() => {
+    if (!readContract || !session || contractRead.current) return;
+    contractRead.current = true;
+    void readPluginContractVersion(session).then((version) => { if (mounted.current) setPluginContract(version); });
+  }, [readContract, session]);
+  const matches = word.trim().toUpperCase() === CLEAR_CONFIRM_WORD;
+  const locked = atRisk && !matches;
+  const canClear = gate === 'confirm' ? !locked : gate === 'approve' && approval !== null && matches;
   const prompt = `Type ${CLEAR_CONFIRM_WORD} to confirm`;
+  // Swapped in for the clear dialog, never nested in it; the typed word stays in this component's state.
+  if (approving && session) {
+    return <ApprovalDialog baseUrl={session.baseUrl} online={online} context={CLEAR_APPROVE_CONTEXT} offlineText={CLEAR_APPROVE_OFFLINE}
+      remember={false} request={async (email, password, signal) => {
+        try {
+          const { approvedBy, approvedByName } = await requestDeviceClearApproval(session.baseUrl, session.token, { email, password },
+            { signal, timeoutMs: APPROVAL_TIMEOUT_MS });
+          return { approvedBy, approvedByName };
+        } catch (error) {
+          // A plugin without the route: back to the clear dialog, which then asks for the update.
+          if (error instanceof ApprovalError && error.code === 'unsupported') { setRouteMissing(true); setApproving(false); }
+          throw error;
+        }
+      }} onResult={(result) => { setApproving(false); if (result) setApproval({ approvedByName: result.approvedByName }); }} />;
+  }
   return <Dialog open onOpenChange={(next) => { if (!next) onClose(); }}>
     <DialogContent testID="clear-local-data-dialog">
       <DialogTitle>Clear all local data?</DialogTitle>
       {lines.map((line, i) => <Text key={i} testID={i === 0 ? 'clear-local-data-warning' : `clear-local-data-warning-${i}`}>{line}</Text>)}
       <Text>{CLEAR_BODY}</Text>
-      {atRisk ? <>
+      {gate === 'offline' || gate === 'update' ? <Text testID="clear-local-data-refused" accessibilityRole="alert">
+        {gate === 'offline' ? CLEAR_OFFLINE : CLEAR_UPDATE_NEEDED}</Text> : null}
+      {gate === 'approve' ? approval
+        ? <Text testID="clear-local-data-approved">{`Approved by ${approval.approvedByName}`}</Text>
+        : <Button variant="outline" testID="clear-local-data-approve" className="min-h-11" onPress={() => setApproving(true)}>
+          <Text>Manager approval</Text>
+        </Button> : null}
+      {(gate === 'confirm' && atRisk) || gate === 'approve' ? <>
         <Label nativeID="clear-local-data-word-label">{prompt}</Label>
         <Input><Input.Field testID="clear-local-data-word" value={word} onChangeText={setWord} autoCapitalize="characters" autoComplete="off"
           accessibilityLabel={prompt} accessibilityLabelledBy="clear-local-data-word-label" /></Input>
       </> : null}
-      <Button variant="destructive" testID="clear-local-data-confirm" className="min-h-11" disabled={locked}
-        onPress={() => { if (!locked) requestClearLocalData(localStorage); }}>
+      <Button variant="destructive" testID="clear-local-data-confirm" className="min-h-11" disabled={!canClear}
+        onPress={() => { if (canClear) requestClearLocalData(localStorage); }}>
         <Text>Clear all local data</Text>
       </Button>
       <Button variant="outline" testID="clear-local-data-cancel" className="min-h-11" onPress={onClose}>

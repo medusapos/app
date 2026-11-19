@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { APPROVAL_TIMEOUT_MS, ApprovalError, loadApprovers, rememberApprover, requestApproval, requestStoreApproval } from './approval';
+import { APPROVAL_TIMEOUT_MS, ApprovalError, loadApprovers, rememberApprover, requestApproval, requestDeviceClearApproval, requestStoreApproval } from './approval';
 import type { SessionStorage } from './session';
 
 const baseUrl = 'https://store.test';
@@ -154,6 +154,42 @@ describe('requestStoreApproval', () => {
       expect(await result).toMatchObject({ code: 'offline' });
       expect(fetch.mock.calls[0][1]?.signal?.aborted).toBe(true);
     } finally { vi.useRealTimers(); }
+  });
+});
+
+describe('requestDeviceClearApproval', () => {
+  const credentials = { email: 'mia@store.test', password: 'secret-pw' };
+  const route = (answer: () => Response | Promise<Response>) => vi.fn(async (_url: string | URL | Request, _init?: RequestInit) => answer());
+  const approved = { approvedBy: 'user_mgr', approvedByName: 'Mia Manager', expiresAt: '2026-11-19T10:00:00.000Z' };
+  const clearRequest = (fetch: ReturnType<typeof route>) =>
+    requestDeviceClearApproval(`${baseUrl}/`, 'cashier-token', credentials, { fetchImpl: fetch as unknown as typeof globalThis.fetch });
+
+  it("posts the manager's credentials to the device-clear route with the cashier's token", async () => {
+    const fetch = route(() => json(approved));
+    await expect(clearRequest(fetch)).resolves.toEqual(approved);
+    expect(fetch).toHaveBeenCalledOnce();
+    const [url, init] = fetch.mock.calls[0];
+    expect(String(url)).toBe(`${baseUrl}/tally/v1/device-clear-approvals`);
+    expect(init?.method).toBe('POST');
+    expect(JSON.parse(String(init?.body))).toStrictEqual(credentials);
+    expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer cashier-token');
+    expect(new Headers(init?.headers).get('Content-Type')).toBe('application/json');
+  });
+
+  it.each([
+    [400, { code: 'invalid_payload', message: 'email: expected a string' }, 'failed', 'email: expected a string'],
+    [401, { code: 'approval_mfa_unsupported', message: 'Needs a second step.' }, 'failed', 'Needs a second step.'],
+    [403, { code: 'approval_forbidden', message: "This user can't approve clearing a device." }, 'failed', "This user can't approve clearing a device."],
+    [429, { code: 'approval_rate_limited', message: 'Too many failed approvals.' }, 'failed', 'Too many failed approvals.'],
+    [401, { code: 'approval_invalid_credentials', message: 'Not correct.' }, 'invalid', "That email and password didn't work."],
+    [404, { message: 'Cannot POST /tally/v1/device-clear-approvals' }, 'unsupported', "This store's MedusaPOS plugin can't approve clearing a device yet."],
+    [500, { code: 'unknown_error', message: 'An unknown error occurred.' }, 'failed', "Couldn't check the approval. Try again."],
+  ])('maps each refusal (%i %j)', async (status, body, code, message) => {
+    await expect(clearRequest(route(() => json(body, status)))).rejects.toEqual(new ApprovalError(code as ApprovalError['code'], message));
+  });
+
+  it('maps a network failure to offline', async () => {
+    await expect(clearRequest(route(() => { throw new TypeError('Failed to fetch'); }))).rejects.toMatchObject({ code: 'offline' });
   });
 });
 

@@ -1,3 +1,5 @@
+import { DEVICE_CLEAR_PLUGIN_CONTRACT } from './plugin-contract';
+
 // Settings › Danger zone › Clear all local data (WCPOS v2's, web only): Settings sets the flag and reloads; the
 // gate (components/clear-local-data.tsx) wipes at startup, before the session is read or any database opens.
 export const CLEAR_FLAG_KEY = 'medusapos.clear-on-next-load';
@@ -113,4 +115,28 @@ export function clearWarnings(risk: ClearRisk): { lines: string[]; atRisk: boole
     lines.push(`This store doesn't keep till records, so this device's till history (${counted(closures, 'till closure', 'till closures')}) will be lost.`);
   }
   return { lines, atRisk: unknown || sales + parked + tillEntries + closures > 0 || tillOpen };
+}
+
+export const CLEAR_OFFLINE = "This device is offline and has data your server doesn't have yet. Reconnect so it can be sent, then try again.";
+export const CLEAR_UPDATE_NEEDED = "This store's MedusaPOS plugin needs an update before this device can be cleared while it has unsent data. Ask whoever runs your Medusa server to update it.";
+export const CLEAR_APPROVE_CONTEXT = "Unsent data on this device will be lost. A manager's admin login approves clearing it.";
+export const CLEAR_APPROVE_OFFLINE = 'Connect to approve clearing this device.';
+
+/** What the dialog asks for: the typed word alone, a manager's approval too, or a refusal (offline, or a plugin to update). */
+export type ClearGate = 'confirm' | 'approve' | 'offline' | 'update';
+
+/** Any sale, parked sale, till entry or local closure not on the server, or a count not read yet (unknown is at risk). */
+export function hasUnsynced(risk: Pick<ClearRisk, 'sales' | 'parked' | 'tillEntries' | 'localClosures'>): boolean {
+  return [risk.sales, risk.parked, risk.tillEntries, risk.localClosures].some((n) => n === null || n > 0);
+}
+
+// The front desk's ruling (#280, 2026-11-19): unsynced data needs a manager's approval online and is refused offline;
+// an open till alone keeps the typed word. An unknown plugin contract (null) tries the route, whose 404 means update.
+export function clearGate(risk: ClearRisk, { online, pluginContract, routeMissing }: {
+  online: boolean; pluginContract: number | null; routeMissing: boolean;
+}): ClearGate {
+  if (!hasUnsynced(risk)) return 'confirm';
+  if (!online) return 'offline';
+  if (routeMissing || (pluginContract !== null && pluginContract < DEVICE_CLEAR_PLUGIN_CONTRACT)) return 'update';
+  return 'approve';
 }
