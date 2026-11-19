@@ -10,9 +10,36 @@ test('the Products area lists the catalogue read-only and finds a variant by SKU
     .toBeVisible();
   await page.getByTestId('products-search').fill('E2E-4B');
   const rows = page.locator('[data-testid^="product-row-"]');
-  await expect(rows).toHaveCount(1);
-  await expect(rows).toContainText('E2E product 4 · B');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'E2E-4B' })).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'E2E product 4' })).toHaveCount(1);
   await expect(page.getByTestId('products-footer')).toHaveText(/^Showing 1 of \d+$/);
+});
+
+// v2's Expanded rows: a product with several variants is one row, closed; its "2 variations" toggle shows them under it.
+test('the Products area shows E2E product 4 as one row whose variations toggle opens and closes its Default and B sub-rows', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const token = await adminToken();
+  const defaultId = await variantIdBySku(token, 'E2E-4');
+  const bId = await variantIdBySku(token, 'E2E-4B');
+  await signIn(page);
+  await openArea(page, 'Products');
+  const rows = page.locator('[data-testid^="product-row-"]');
+  const product = rows.filter({ hasText: 'E2E product 4' });
+  await expect(product).toHaveCount(1);
+  await expect(product).toContainText('2 variations');
+  await expect(rows.filter({ hasText: 'E2E-4B' })).toHaveCount(0);
+  const toggle = page.getByRole('button', { name: '2 variations, E2E product 4', exact: true });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.getByTestId(`product-row-${defaultId}`)).toContainText('Default');
+  await expect(page.getByTestId(`product-row-${bId}`)).toContainText('B');
+  await expect(page.getByTestId(`product-row-${bId}`)).toContainText('E2E-4B');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByTestId(`product-row-${defaultId}`)).toHaveCount(0);
+  await expect(page.getByTestId(`product-row-${bId}`)).toHaveCount(0);
 });
 
 test('the Products area narrows by category chip and shows each row\'s stock status and category', async ({ page }) => {
@@ -109,8 +136,9 @@ test('on a phone the Products area lists two-line rows, not the table, and finds
   await expect(first).toBeVisible();
   await expect(first.locator('[data-testid^="product-stock-status-"]')).toContainText('In stock');
   await page.getByTestId('products-search').fill('E2E-4B');
-  await expect(rows).toHaveCount(1);
-  await expect(rows).toContainText('E2E product 4 · B');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'E2E-4B' })).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'E2E product 4' })).toHaveCount(1);
 });
 
 test('the Products area\'s settings sheet hides a column, keeps it across a page load, and restores the defaults', async ({ page }) => {
@@ -352,8 +380,9 @@ test('a barcode scan into the Products search, or with nothing focused, becomes 
   await page.keyboard.type('#E2E-4B!', { delay: 10 });
   await page.keyboard.press('Enter');
   await expect(search).toHaveValue('E2E-4B');
-  await expect(rows).toHaveCount(1);
-  await expect(rows).toContainText('E2E product 4 · B');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.filter({ hasText: 'E2E-4B' })).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'E2E product 4' })).toHaveCount(1);
   // Ordinary typing still searches (each term on its own, so "2" also matches the other E2E names).
   await search.fill('E2E product 2');
   await expect(search).toHaveValue('E2E product 2');

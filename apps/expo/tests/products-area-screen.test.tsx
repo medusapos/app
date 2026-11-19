@@ -125,8 +125,9 @@ describe('ProductsAreaScreen', () => {
     expect(screen.getByTestId('products-table')).toBeTruthy();
     const cells = (id: string) => within(screen.getByTestId(`product-row-${id}`)).getAllByText(/./).map((node) => node.textContent);
     expect(cells('v1')).toEqual(['E2E product 1', 'E2E-1', '5', 'In stock', '€10.00']);
-    expect(cells('v4a')).toEqual(['E2E product 4 · A', 'E2E-4', '2', 'In stock', '€20.00']);
-    expect(cells('v4b')).toEqual(['E2E product 4 · B', 'E2E-4B', 'On backorder', 'On backorder', '€25.00']);
+    press('product-variations-p4');
+    expect(cells('v4a')).toEqual(['A', 'E2E-4', '2', 'In stock', '€20.00']);
+    expect(cells('v4b')).toEqual(['B', 'E2E-4B', 'On backorder', 'On backorder', '€25.00']);
   });
 
   it('filters to a SKU, and says when nothing matches', () => {
@@ -135,7 +136,7 @@ describe('ProductsAreaScreen', () => {
     mount();
     fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
     expect(Array.from(document.querySelectorAll('[data-testid^="product-row-"]')).map((row) => row.getAttribute('data-testid')))
-      .toEqual(['product-row-v4b']);
+      .toEqual(['product-row-p4', 'product-row-v4b']);
     fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'hat' } });
     expect(document.querySelector('[data-testid^="product-row-"]')).toBeNull();
     expect(screen.getByText(PRODUCTS_NO_MATCH('hat'))).toBeTruthy();
@@ -196,6 +197,7 @@ describe('ProductsAreaScreen', () => {
     act(() => publishCatalogue(sale()));
     act(() => view.rerender(<ProductsAreaScreen />));
     expect(vi.mocked(useReplicatedProducts).mock.calls.length).toBe(calls);
+    press('product-variations-p4');
     expect(screen.getByTestId('product-row-v4b')).toBeTruthy();
     expect(screen.queryByTestId('products-loading')).toBeNull();
   });
@@ -258,12 +260,14 @@ describe('ProductsAreaScreen', () => {
     cleanup();
     mount();
     expect(screen.getByTestId('category-nav-cat_food').getAttribute('aria-checked')).toBe('true');
-    expect(rowIds()).toEqual(['v4a', 'v4b']);
+    press('product-variations-p4');
+    expect(rowIds()).toEqual(['p4', 'v4a', 'v4b']);
     press('category-nav-');
     cleanup();
     mount();
     expect(screen.getByTestId('category-nav-').getAttribute('aria-checked')).toBe('true');
-    expect(rowIds()).toEqual(['v1', 'v4a', 'v4b']);
+    press('product-variations-p4');
+    expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b']);
   });
 
   it('keeps the choice per store', () => {
@@ -273,7 +277,8 @@ describe('ProductsAreaScreen', () => {
     publishCatalogue(sale({ products: categorized }));
     mount();
     expect(screen.getByTestId('category-nav-').getAttribute('aria-checked')).toBe('true');
-    expect(rowIds()).toEqual(['v1', 'v4a', 'v4b']);
+    press('product-variations-p4');
+    expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b']);
   });
 
   it('shows All products for a stored category missing from the catalogue', () => {
@@ -283,7 +288,8 @@ describe('ProductsAreaScreen', () => {
     publishCatalogue(sale({ products: categorized }));
     mount();
     expect(screen.getByTestId('category-nav-').getAttribute('aria-checked')).toBe('true');
-    expect(rowIds()).toEqual(['v1', 'v4a', 'v4b']);
+    press('product-variations-p4');
+    expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b']);
   });
 
   it('narrows to in-stock rows with the In stock chip, with category and search, and does not keep it', () => {
@@ -294,9 +300,10 @@ describe('ProductsAreaScreen', () => {
     expect(inStock().getAttribute('aria-pressed')).toBe('false');
     press('products-in-stock');
     expect(inStock().getAttribute('aria-pressed')).toBe('true');
-    expect(rowIds()).toEqual(['v1', 'v4a']);
+    press('product-variations-p4');
+    expect(rowIds()).toEqual(['p4', 'v1', 'v4a']);
     press('category-nav-cat_food');
-    expect(rowIds()).toEqual(['v4a']);
+    expect(rowIds()).toEqual(['p4', 'v4a']);
     fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
     expect(rowIds()).toEqual([]);
     expect(screen.getByText(PRODUCTS_NO_MATCH('E2E-4B'))).toBeTruthy();
@@ -304,7 +311,8 @@ describe('ProductsAreaScreen', () => {
     mount();
     expect(inStock().getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByTestId('category-nav-cat_food').getAttribute('aria-checked')).toBe('true');
-    expect(rowIds()).toEqual(['v4a', 'v4b']);
+    press('product-variations-p4');
+    expect(rowIds()).toEqual(['p4', 'v4a', 'v4b']);
   });
 
   it('says nothing is in stock when the In stock chip leaves no row and there is no search', () => {
@@ -343,13 +351,14 @@ describe('ProductsAreaScreen', () => {
       sessionState.session = session;
       publishCatalogue(sale({ products: categorized }));
       mount();
-      expect(rowIds()).toHaveLength(3);
+      press('product-variations-p4');
+      expect(rowIds()).toHaveLength(4);
       expect(footer()).toBe('Showing 3 of 3');
       press('products-in-stock');
-      expect(rowIds()).toHaveLength(2);
+      expect(rowIds()).toHaveLength(3);
       expect(footer()).toBe('Showing 2 of 3');
       press('category-nav-cat_food');
-      expect(rowIds()).toHaveLength(1);
+      expect(rowIds()).toHaveLength(2);
       expect(footer()).toBe('Showing 1 of 3');
       fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
       expect(rowIds()).toHaveLength(0);
@@ -477,7 +486,8 @@ describe('ProductsAreaScreen', () => {
       press('products-tags');
       expect(screen.getByTestId('products-tag-tag_organic').getAttribute('aria-checked')).toBe('true');
       press('products-tag-tag_seasonal');
-      expect(rowIds()).toEqual(['v4a', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v4a', 'v4b', 'v5']);
       expect(chip().textContent).toBe('Seasonal');
       expect(footer()).toBe('Showing 3 of 4');
     });
@@ -511,9 +521,10 @@ describe('ProductsAreaScreen', () => {
       expect(rowIds()).toEqual([]);
       expect(screen.getByText(PRODUCTS_NONE_TAGGED('Seasonal'))).toBeTruthy();
       press('category-nav-cat_food');
-      expect(rowIds()).toEqual(['v4a', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v4a', 'v4b', 'v5']);
       press('products-in-stock');
-      expect(rowIds()).toEqual(['v4a']);
+      expect(rowIds()).toEqual(['p4', 'v4a']);
       expect(footer()).toBe('Showing 1 of 4');
       fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-5' } });
       expect(rowIds()).toEqual([]);
@@ -530,7 +541,8 @@ describe('ProductsAreaScreen', () => {
       expect(rowIds()).toEqual(['v1', 'v5']);
       expect(screen.getByTestId('products-tags-remove').getAttribute('aria-label')).toBe('Remove tag');
       press('products-tags-remove');
-      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b', 'v5']);
       expect(chip().textContent).toBe('Tags');
       expect(screen.queryByTestId('products-tags-remove')).toBeNull();
       expect(screen.queryByTestId('products-tags-menu')).toBeNull();
@@ -551,12 +563,14 @@ describe('ProductsAreaScreen', () => {
       saveProductsAreaTag(localStorage, 'https://other.test', 'tag_organic');
       mountTags();
       expect(chip().textContent).toBe('Tags');
-      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b', 'v5']);
       cleanup();
       saveProductsAreaTag(localStorage, session.baseUrl, 'tag_gone');
       mountTags();
       expect(chip().textContent).toBe('Tags');
-      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b', 'v5']);
       expect(footer()).toBe('Showing 4 of 4');
     });
 
@@ -621,13 +635,14 @@ describe('ProductsAreaScreen', () => {
       expect(inStock().compareDocumentPosition(chip()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(chip().compareDocumentPosition(screen.getByTestId('category-nav-')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(chip().getAttribute('aria-pressed')).toBe('false');
-      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b', 'v5']);
       press('products-on-sale');
       expect(chip().getAttribute('aria-pressed')).toBe('true');
-      expect(rowIds()).toEqual(['v1', 'v4b', 'v5']);
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4b', 'v5']);
       press('products-on-sale');
       expect(chip().getAttribute('aria-pressed')).toBe('false');
-      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b', 'v5']);
     });
 
     it('narrows together with In stock, the category, the tag and the search; the footer counts n of the catalogue', () => {
@@ -642,11 +657,12 @@ describe('ProductsAreaScreen', () => {
       expect(footer()).toBe('Showing 1 of 4');
       press('products-in-stock');
       press('category-nav-cat_food');
-      expect(rowIds()).toEqual(['v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v4b', 'v5']);
       expect(footer()).toBe('Showing 2 of 4');
       press('products-tags');
       press(`products-tag-${seasonal.id}`);
-      expect(rowIds()).toEqual(['v4b']);
+      expect(rowIds()).toEqual(['p4', 'v4b']);
       expect(footer()).toBe('Showing 1 of 4');
       fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-5' } });
       expect(rowIds()).toEqual([]);
@@ -659,11 +675,13 @@ describe('ProductsAreaScreen', () => {
       publishCatalogue(sale({ products: saleDocs }));
       mountSale();
       press('products-on-sale');
-      expect(rowIds()).toEqual(['v1', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4b', 'v5']);
       cleanup();
       mountSale();
       expect(chip().getAttribute('aria-pressed')).toBe('false');
-      expect(rowIds()).toEqual(['v1', 'v4a', 'v4b', 'v5']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v4a', 'v4b', 'v5']);
     });
 
     it('says nothing is on sale, or nothing on sale is in stock, and a search with no match still says so', () => {
@@ -680,7 +698,8 @@ describe('ProductsAreaScreen', () => {
         { ...products[1].variants[1], prices: onSale(2500, 2000) }] }] }));
       mount();
       press('products-on-sale');
-      expect(rowIds()).toEqual(['v4b']);
+      press('product-variations-p4');
+      expect(rowIds()).toEqual(['p4', 'v4b']);
       press('products-in-stock');
       expect(rowIds()).toEqual([]);
       expect(screen.getByText(PRODUCTS_NONE_ON_SALE_IN_STOCK)).toBeTruthy();
@@ -695,8 +714,9 @@ describe('ProductsAreaScreen', () => {
       publishCatalogue(sale({ products: saleDocs }));
       mountSale();
       press('products-on-sale');
+      press('product-variations-p4');
       expect(Array.from(document.querySelectorAll('[data-testid^="product-list-row-"]')).map((row) => row.getAttribute('data-testid')))
-        .toEqual(['product-list-row-v1', 'product-list-row-v4b', 'product-list-row-v5']);
+        .toEqual(['product-list-row-v1', 'product-list-row-p4', 'product-list-row-v4b', 'product-list-row-v5']);
     });
 
     it('Clear and Refresh on the screen\'s own read turns On sale off', async () => {
@@ -766,6 +786,7 @@ describe('on a phone', () => {
   const listRows = () => Array.from(document.querySelectorAll('[data-testid^="product-list-row-"]'));
   const listRowIds = () => listRows().map((row) => row.getAttribute('data-testid')!.replace('product-list-row-', ''));
   const texts = (id: string) => within(screen.getByTestId(`product-list-row-${id}`)).getAllByText(/./).map((node) => node.textContent);
+  const openP4 = () => fireEvent.click(screen.getByTestId('product-variations-p4'));
 
   it('lists two-line rows instead of the table, by name ascending', () => {
     sessionState.session = session;
@@ -774,9 +795,10 @@ describe('on a phone', () => {
     mount();
     expect(screen.getByTestId('products-list')).toBeTruthy();
     expect(screen.queryByTestId('products-table')).toBeNull();
-    expect(listRowIds()).toEqual(['v1', 'v4a', 'v4b']);
+    openP4();
+    expect(listRowIds()).toEqual(['v1', 'p4', 'v4a', 'v4b']);
     expect(texts('v1')).toEqual(['E2E product 1', 'E2E-1', '€10.00', '5 · In stock']);
-    expect(texts('v4b')).toEqual(['E2E product 4 · B', 'E2E-4B', '€25.00', 'On backorder']);
+    expect(texts('v4b')).toEqual(['B', 'E2E-4B', '€25.00', 'On backorder']);
   });
 
   // v2's phone row starts with the product's image tile while the Image column is on (its default).
@@ -784,7 +806,8 @@ describe('on a phone', () => {
     sessionState.session = session;
     publishCatalogue(sale());
     mount();
-    expect(listRowIds()).toEqual(['v1', 'v4a', 'v4b']);
+    openP4();
+    expect(listRowIds()).toEqual(['v1', 'p4', 'v4a', 'v4b']);
     for (const id of listRowIds()) {
       expect(within(screen.getByTestId(`product-list-row-${id}`)).getByTestId(`product-image-placeholder-${id}`)).toBeTruthy();
     }
@@ -803,8 +826,12 @@ describe('on a phone', () => {
     sessionState.session = session;
     publishCatalogue(sale());
     mount();
-    expect(listRows()).toHaveLength(3);
-    for (const row of listRows()) expect(within(row as HTMLElement).queryAllByRole('button')).toEqual([]);
+    openP4();
+    expect(listRows()).toHaveLength(4);
+    for (const row of listRows()) {
+      expect(within(row as HTMLElement).queryAllByRole('button')).toEqual(row.getAttribute('data-testid') === 'product-list-row-p4'
+        ? [screen.getByTestId('product-variations-p4')] : []);
+    }
   });
 
   it('narrows with the search and the In stock chip, and says when nothing matches', () => {
@@ -812,13 +839,14 @@ describe('on a phone', () => {
     publishCatalogue(sale());
     mount();
     fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
-    expect(listRowIds()).toEqual(['v4b']);
+    expect(listRowIds()).toEqual(['p4', 'v4b']);
     fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'hat' } });
     expect(listRowIds()).toEqual([]);
     expect(screen.getByText(PRODUCTS_NO_MATCH('hat'))).toBeTruthy();
     fireEvent.change(screen.getByTestId('products-search'), { target: { value: '' } });
     fireEvent.click(screen.getByTestId('products-in-stock'));
-    expect(listRowIds()).toEqual(['v1', 'v4a']);
+    openP4();
+    expect(listRowIds()).toEqual(['v1', 'p4', 'v4a']);
   });
 
   it('shows the table from 600 px wide', () => {
@@ -870,7 +898,7 @@ describe('a barcode scan', () => {
     mountWith(scanner);
     typeInBox('#E2E-4B!', 10);
     expect(box().value).toBe('E2E-4B');
-    expect(rowIds()).toEqual(['v4b']);
+    expect(rowIds()).toEqual(['p4', 'v4b']);
     expect(playScanBeep).toHaveBeenCalledOnce();
   });
 
@@ -878,7 +906,7 @@ describe('a barcode scan', () => {
     mountWith(scanner);
     scanOnBody('#E2E-4B!');
     expect(box().value).toBe('E2E-4B');
-    expect(rowIds()).toEqual(['v4b']);
+    expect(rowIds()).toEqual(['p4', 'v4b']);
     expect(playScanBeep).toHaveBeenCalledOnce();
   });
 
@@ -886,7 +914,7 @@ describe('a barcode scan', () => {
     mountWith({ ...scanner, playSound: false });
     typeInBox('#E2E-4B!', 10);
     expect(box().value).toBe('E2E-4B');
-    expect(rowIds()).toEqual(['v4b']);
+    expect(rowIds()).toEqual(['p4', 'v4b']);
     expect(playScanBeep).not.toHaveBeenCalled();
   });
 
@@ -894,7 +922,80 @@ describe('a barcode scan', () => {
     mountWith(scanner);
     typeInBox('E2E-4B', 200);
     expect(box().value).toBe('E2E-4B');
-    expect(rowIds()).toEqual(['v4b']);
+    expect(rowIds()).toEqual(['p4', 'v4b']);
     expect(playScanBeep).not.toHaveBeenCalled();
+  });
+});
+
+// v2's Expanded rows: a product with several variants is one row; "2 variations ›" opens its variants as rows under it.
+describe('variation sub-rows', () => {
+  const rowIds = () => Array.from(document.querySelectorAll('[data-testid^="product-row-"]'))
+    .map((row) => row.getAttribute('data-testid')!.replace('product-row-', ''));
+  const cells = (id: string) => within(screen.getByTestId(`product-row-${id}`)).getAllByText(/./).map((node) => node.textContent);
+  const toggle = () => screen.getByTestId('product-variations-p4');
+  const show = () => {
+    sessionState.session = session;
+    publishCatalogue(sale());
+    mount();
+  };
+
+  it('on a tablet p4 is one closed row; its toggle shows the sub-rows A and B right after it, and hides them again', () => {
+    show();
+    expect(rowIds()).toEqual(['v1', 'p4']);
+    expect(toggle().textContent).toBe('2 variations');
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(toggle().getAttribute('aria-label')).toBe('2 variations, E2E product 4');
+    expect(within(screen.getByTestId('product-row-p4')).getByTestId('product-variations-p4')).toBeTruthy();
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(rowIds()).toEqual(['v1', 'p4', 'v4a', 'v4b']);
+    expect(cells('v4a')).toEqual(['A', 'E2E-4', '2', 'In stock', '€20.00']);
+    expect(cells('v4b')).toEqual(['B', 'E2E-4B', 'On backorder', 'On backorder', '€25.00']);
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute('aria-expanded')).toBe('false');
+    expect(rowIds()).toEqual(['v1', 'p4']);
+  });
+
+  it("p4's row shows its price range and stock status, with no SKU", () => {
+    show();
+    expect(cells('p4')).toEqual(['E2E product 4', '2 variations', 'In stock', 'In stock', '€20.00 – €25.00']);
+    expect(screen.getByTestId('product-stock-status-p4').textContent).toBe('In stock');
+  });
+
+  it('a search for a SKU opens p4 with only that variant under it', () => {
+    show();
+    fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
+    expect(rowIds()).toEqual(['p4', 'v4b']);
+    expect(toggle().textContent).toBe('1 of 2 variations');
+    expect(toggle().getAttribute('aria-expanded')).toBe('true');
+    expect(screen.getByTestId('products-footer').textContent).toBe('Showing 1 of 3');
+  });
+
+  it('the In stock chip narrows p4 to v4a', () => {
+    show();
+    fireEvent.click(screen.getByTestId('products-in-stock'));
+    expect(rowIds()).toEqual(['v1', 'p4']);
+    expect(toggle().textContent).toBe('1 of 2 variations');
+    fireEvent.click(toggle());
+    expect(rowIds()).toEqual(['v1', 'p4', 'v4a']);
+  });
+
+  // The header cycles asc, desc, none; the table starts ascending, so one press sorts descending.
+  it('sorting the Product column descending puts p4 first, its sub-rows B then A right under it', () => {
+    show();
+    fireEvent.click(toggle());
+    fireEvent.click(screen.getByTestId('product-table-sort-name'));
+    expect(rowIds()).toEqual(['p4', 'v4b', 'v4a', 'v1']);
+  });
+
+  it('on a phone p4 is one list row with the toggle, which shows its sub-rows after it', () => {
+    setWindowWidth(390, 844);
+    show();
+    const listRowIds = () => Array.from(document.querySelectorAll('[data-testid^="product-list-row-"]'))
+      .map((row) => row.getAttribute('data-testid')!.replace('product-list-row-', ''));
+    expect(listRowIds()).toEqual(['v1', 'p4']);
+    expect(within(screen.getByTestId('product-list-row-p4')).getByTestId('product-variations-p4').textContent).toBe('2 variations');
+    fireEvent.click(toggle());
+    expect(listRowIds()).toEqual(['v1', 'p4', 'v4a', 'v4b']);
   });
 });

@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProductTraits, VariantSummary } from '@tallyui/core';
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
-  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaRows, productAreaStockLine, productTags, saveProductsAreaCategory,
-  saveProductsAreaTag, STOCK_STATUS_DOTS, type ProductAreaRow,
+  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaProducts, productAreaRows,
+  productAreaStockLine, productTags, PRODUCTS_VARIATIONS, saveProductsAreaCategory,
+  saveProductsAreaTag, STOCK_STATUS_DOTS, type ProductAreaItem, type ProductAreaRow,
 } from './products-area';
 import type { SessionStorage } from './session';
 
@@ -370,5 +371,118 @@ describe('loadProductsAreaTag / saveProductsAreaTag', () => {
     expect(() => saveProductsAreaTag(broken, store, 'ptag_organic')).not.toThrow();
     expect(warn).toHaveBeenCalledWith('Could not save the Products tag:', expect.any(Error));
     warn.mockRestore();
+  });
+});
+
+// v2's Expanded rows: a product with several variants has a row of its own.
+describe('productAreaProducts', () => {
+  const shirt: Doc = { id: 'shirt', title: 'Shirt', variants: [
+    { id: 'shirt-one', title: 'One size', sku: 'SHIRT', prices: eur(1250), stock: { status: 'in_stock', quantity: 7 } }] };
+  const twoOf = (a: Partial<VariantSummary>, b: Partial<VariantSummary>): Doc => ({ id: 'mug', title: 'Mug', variants: [
+    { id: 'mug-a', title: 'A', prices: eur(2000), stock: { status: 'in_stock', quantity: 3 }, ...a },
+    { id: 'mug-b', title: 'B', prices: eur(2500), stock: { status: 'out_of_stock', quantity: 0 }, ...b }] });
+
+  it('gives no entry for a single-variant product and one for a two-variant product, with the price range', () => {
+    const mug: Doc = { ...twoOf({ sku: 'MUG-A' }, { sku: 'MUG-B' }), thumbnail: 'https://img.test/mug.png',
+      categories: [{ id: 'c1', name: 'Kitchen' }], tags: [{ id: 'tag_a', value: 'A' }] };
+    expect(productAreaProducts([shirt], traits, 'EUR')).toEqual([]);
+    expect(productAreaProducts([shirt, mug], traits, 'EUR')).toEqual([{ id: 'mug', name: 'Mug', options: [],
+      variants: [{ id: 'mug-a', title: 'A' }, { id: 'mug-b', title: 'B' }], sku: '', barcode: '', price: '€20.00 – €25.00',
+      regularPrice: '€20.00 – €25.00', salePrice: '', onSale: false, stock: '3', stockStatus: 'in_stock', categories: 'Kitchen',
+      categoryIds: ['c1'], tagIds: ['tag_a'], imageUrl: 'https://img.test/mug.png' }]);
+  });
+
+  it('gives one price when both variants cost the same, and a dash when none resolves', () => {
+    expect(productAreaProducts([twoOf({ prices: eur(500) }, { prices: eur(500) })], traits, 'EUR')[0].price).toBe('€5.00');
+    const none = productAreaProducts([twoOf({ prices: [] }, { prices: [] })], traits, 'EUR')[0];
+    expect([none.price, none.regularPrice]).toEqual(['—', '—']);
+  });
+
+  it("ranges the regular price over each variant's price before a sale", () => {
+    const onSale = [{ amount: 1000, currency: 'EUR', kind: 'base' as const }, { amount: 800, currency: 'EUR', kind: 'sale' as const }];
+    const [mug] = productAreaProducts([twoOf({ prices: onSale }, { prices: eur(600) })], traits, 'EUR');
+    expect([mug.price, mug.regularPrice, mug.salePrice, mug.onSale]).toEqual(['€6.00 – €8.00', '€6.00 – €10.00', '', false]);
+  });
+
+  it('gives one line per option group from getVariantOptions, none without it, and a variant id for an untitled variant', () => {
+    const withOptions = { ...traits, getVariantOptions: () => [{ name: 'Size', values: ['S', 'M'] }, { name: 'Color', values: ['Blue', 'Red'] }] };
+    expect(productAreaProducts([twoOf({}, {})], withOptions as ProductTraits, 'EUR')[0].options).toEqual(['Size: S, M', 'Color: Blue, Red']);
+    const [mug] = productAreaProducts([twoOf({}, { title: undefined })], traits, 'EUR');
+    expect([mug.options, mug.variants]).toEqual([[], [{ id: 'mug-a', title: 'A' }, { id: 'mug-b', title: 'mug-b' }]]);
+  });
+
+  it('sums the stock when every variant has a quantity, else shows the status label', () => {
+    expect(productAreaProducts([twoOf({ stock: { status: 'in_stock', quantity: 2 } }, { stock: { status: 'in_stock', quantity: 5 } })],
+      traits, 'EUR')[0].stock).toBe('7');
+    expect(productAreaProducts([twoOf({ stock: { status: 'in_stock', quantity: 2 } }, { stock: { status: 'backorder' } })],
+      traits, 'EUR')[0].stock).toBe('In stock');
+  });
+
+  it('is in stock if any variant is, else on backorder, else out of stock, else unknown', () => {
+    const status = (a: VariantSummary['stock']['status'], b: VariantSummary['stock']['status']) =>
+      productAreaProducts([twoOf({ stock: { status: a } }, { stock: { status: b } })], traits, 'EUR')[0].stockStatus;
+    expect(status('backorder', 'in_stock')).toBe('in_stock');
+    expect(status('out_of_stock', 'backorder')).toBe('backorder');
+    expect(status('unknown', 'out_of_stock')).toBe('out_of_stock');
+    expect(status('unknown', 'unknown')).toBe('unknown');
+  });
+});
+
+describe('productAreaItems', () => {
+  const shirt: Doc = { id: 'shirt', title: 'Shirt', variants: [
+    { id: 'shirt-one', title: 'One size', sku: 'SHIRT', prices: eur(1250), stock: { status: 'in_stock', quantity: 7 } }] };
+  const mug: Doc = { id: 'mug', title: 'Mug', variants: [
+    { id: 'mug-a', title: 'A', sku: 'MUG-A', prices: eur(500), stock: { status: 'in_stock', quantity: 3 } },
+    { id: 'mug-b', title: 'B', sku: 'MUG-B', prices: eur(600), stock: { status: 'out_of_stock', quantity: 0 } }] };
+  const rows = productAreaRows([shirt, mug], traits, 'EUR');
+  const products = productAreaProducts([shirt, mug], traits, 'EUR');
+  const valueOf = (item: ProductAreaItem, field: string) =>
+    field === 'name' ? (item.kind === 'product' ? item.name : item.label) : undefined;
+  const asc = { field: 'name', dir: 'asc' } as const;
+  const open = () => true;
+  const closed = () => false;
+  const ids = (items: ProductAreaItem[]) => items.map((item) => item.id);
+
+  it('keeps a single-variant row as one item with its fields, sub false and its name as label', () => {
+    expect(productAreaItems(rows, products, asc, open, valueOf).find((item) => item.id === 'shirt-one'))
+      .toEqual({ ...rows[0], kind: 'variant', sub: false, label: 'Shirt' });
+  });
+
+  it('gives a closed product its row only, with the count shown', () => {
+    const items = productAreaItems(rows, products, asc, closed, valueOf);
+    expect(ids(items)).toEqual(['mug', 'shirt-one']);
+    expect(items[0]).toMatchObject({ kind: 'product', name: 'Mug', shown: 2, open: false });
+  });
+
+  it("adds an open product's sub-rows after it, labelled by the variant title", () => {
+    const items = productAreaItems(rows, products, asc, (id) => id === 'mug', valueOf);
+    expect(ids(items)).toEqual(['mug', 'mug-a', 'mug-b', 'shirt-one']);
+    expect(items[0]).toMatchObject({ kind: 'product', open: true });
+    expect(items.slice(1, 3).map((item) => item.kind === 'variant' && [item.sub, item.label, item.sku]))
+      .toEqual([[true, 'A', 'MUG-A'], [true, 'B', 'MUG-B']]);
+  });
+
+  it('lists only the shown variants under an open product, and leaves out a product with none shown', () => {
+    const narrowed = productAreaItems(rows.filter((row) => row.id !== 'mug-a'), products, asc, open, valueOf);
+    expect(ids(narrowed)).toEqual(['mug', 'mug-b', 'shirt-one']);
+    expect(narrowed[0]).toMatchObject({ shown: 1 });
+    expect(ids(productAreaItems(rows.filter((row) => row.id === 'shirt-one'), products, asc, open, valueOf))).toEqual(['shirt-one']);
+  });
+
+  it("sorts name descending with each product's sub-rows directly under it, descending among themselves", () => {
+    expect(ids(productAreaItems(rows, products, { field: 'name', dir: 'desc' }, open, valueOf)))
+      .toEqual(['shirt-one', 'mug', 'mug-b', 'mug-a']);
+  });
+
+  it('keeps catalogue order with no sort', () => {
+    expect(ids(productAreaItems(rows, products, null, open, valueOf))).toEqual(['shirt-one', 'mug', 'mug-a', 'mug-b']);
+  });
+});
+
+describe('PRODUCTS_VARIATIONS', () => {
+  it('counts the variations, and how many of them the filters leave', () => {
+    expect(PRODUCTS_VARIATIONS(2, 2)).toBe('2 variations');
+    expect(PRODUCTS_VARIATIONS(1, 2)).toBe('1 of 2 variations');
+    expect(PRODUCTS_VARIATIONS(1, 1)).toBe('1 variation');
   });
 });
