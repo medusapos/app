@@ -1,10 +1,12 @@
-import type { ProductTraits, StockLevel } from '@tallyui/core';
-import { catalogueEntries, productCategories, variantPriceLabel } from '@tallyui/pos';
+import { formatMoney, resolvePrice, type Money, type ProductTraits, type StockLevel } from '@tallyui/core';
+import { catalogueEntries, productCategories } from '@tallyui/pos';
 import type { SessionStorage } from './session';
 
 export type ProductAreaRow = {
   id: string; name: string; sku: string; barcode: string; price: string; stock: string;
   stockStatus: StockLevel['status']; categories: string; categoryIds: string[];
+  // v2's Regular and Sale price: the price before a Medusa sale price list, and the sale price ('' without a sale).
+  regularPrice: string; salePrice: string; onSale: boolean;
   // The product's Medusa tag ids, shared by its variant rows.
   tagIds: string[];
   // The product's primary image (Medusa's thumbnail), shared by its variant rows.
@@ -64,12 +66,17 @@ export function productAreaRows(products: readonly unknown[], traits: ProductTra
   return catalogueEntries([...products], traits).map(({ product, variant }) => {
     const name = traits.getName(product);
     const categories = productCategories(product, traits);
+    const resolved = resolvePrice(variant.prices, currency);
+    const label = (money?: Money) => (money ? formatMoney(money) : undefined) ?? '—';
     return {
       id: variant.id,
       name: traits.getVariantCount(product) > 1 && variant.title ? `${name} · ${variant.title}` : name,
       sku: variant.sku ?? '',
       barcode: variant.barcode ?? '',
-      price: variantPriceLabel(variant, currency) ?? '—',
+      price: label(resolved?.current),
+      regularPrice: label(resolved?.was ?? resolved?.current),
+      salePrice: resolved?.was ? label(resolved.current) : '',
+      onSale: Boolean(resolved?.was),
       stock: typeof variant.stock.quantity === 'number' ? variant.stock.quantity.toLocaleString() : STOCK_STATUS_LABELS[variant.stock.status],
       stockStatus: variant.stock.status,
       categories: categories.map((category) => category.name).join(', '),

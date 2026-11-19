@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { cartTab, openArea, signIn, test } from './helpers';
+import { adminToken, backend, cartTab, openArea, signIn, test, variantIdBySku } from './helpers';
 
 test('the Products area lists the catalogue read-only and finds a variant by SKU', async ({ page }) => {
   await signIn(page);
@@ -231,6 +231,55 @@ test('the Products area\'s settings switches show whole inside the sheet at 1280
   }).toPass();
   await page.getByTestId('products-settings-restore').click();
   await page.getByTestId('products-settings-close').click();
+});
+
+test('the Products area\'s Regular price and Sale price columns grey a sale variant\'s regular price beside its sale price', async ({ page }) => {
+  const token = await adminToken();
+  const variantId = await variantIdBySku(token, 'E2E-3');
+  const created = await fetch(`${backend}/admin/price-lists`, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title: 'E2E sale', description: 'E2E sale', type: 'sale', status: 'active',
+      prices: [{ variant_id: variantId, currency_code: 'eur', amount: 3 }] }),
+  });
+  expect(created.ok, await created.clone().text()).toBeTruthy();
+  const priceListId: string = (await created.json()).price_list.id;
+  try {
+    await signIn(page);
+    await openArea(page, 'Products');
+    const table = page.getByTestId('products-table');
+    // A head's text, past the sort arrow the sorted column carries ("Product ▲").
+    const head = (name: string) => table.getByRole('columnheader').filter({ hasText: new RegExp(`^${name}( [▲▼])?$`) });
+    await expect(head('Product')).toBeVisible();
+    await expect(head('Regular price')).toHaveCount(0);
+    await expect(head('Sale price')).toHaveCount(0);
+    await page.getByTestId('products-settings-button').click();
+    await page.getByTestId('products-settings-column-regularPrice').click();
+    await page.getByTestId('products-settings-column-salePrice').click();
+    await expect(page.getByTestId('products-settings-column-salePrice')).toHaveAttribute('aria-checked', 'true');
+    await page.getByTestId('products-settings-close').click();
+    await expect(head('Regular price')).toBeVisible();
+    await expect(head('Sale price')).toBeVisible();
+    // E2E product 3 is on sale at €3.00: its €4.25 regular price is greyed, as v2's demo, not struck through.
+    await expect(page.getByTestId(`product-sale-price-${variantId}`)).toHaveText('€3.00');
+    const saleRegular = page.getByTestId(`product-regular-price-${variantId}`);
+    await expect(saleRegular).toHaveText('€4.25');
+    // E2E product 1 has no sale: its regular price stands and its sale cell is empty.
+    const first = page.locator('[data-testid^="product-row-"]', { hasText: 'E2E product 1' }).filter({ hasText: 'E2E-1' }).first();
+    const regular = first.locator('[data-testid^="product-regular-price-"]');
+    await expect(regular).toHaveText('€2.00');
+    await expect(saleRegular).not.toHaveCSS('text-decoration-line', /line-through/);
+    const colour = (cell: typeof regular) => cell.evaluate((el) => getComputedStyle(el).color);
+    expect(await colour(saleRegular)).not.toBe(await colour(regular));
+    await expect(first.locator('[data-testid^="product-sale-price-"]')).toHaveText('');
+    await page.getByTestId('products-settings-button').click();
+    await page.getByTestId('products-settings-restore').click();
+    await page.getByTestId('products-settings-close').click();
+    await expect(head('Regular price')).toHaveCount(0);
+    await expect(head('Sale price')).toHaveCount(0);
+  } finally {
+    const removed = await fetch(`${backend}/admin/price-lists/${priceListId}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    expect(removed.ok, await removed.clone().text()).toBeTruthy();
+  }
 });
 
 // Settings › Barcode Scanning: save prefix # and suffix !, turn Play a sound on scan on, then open Products.

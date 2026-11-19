@@ -2,15 +2,18 @@ import { useCallback, useEffect, useState } from 'react';
 import type { SessionStorage } from './session';
 
 // The Products table's optional columns, in v2's order (Image first); the Product (name) column always shows.
-export type ProductsAreaColumn = 'image' | 'id' | 'sku' | 'barcode' | 'stock' | 'stockStatus' | 'category' | 'price';
+export type ProductsAreaColumn = 'image' | 'id' | 'sku' | 'barcode' | 'stock' | 'stockStatus' | 'category' | 'price'
+  | 'regularPrice' | 'salePrice';
 export const PRODUCTS_AREA_COLUMNS: { id: ProductsAreaColumn; label: string }[] = [
   { id: 'image', label: 'Image' }, { id: 'id', label: 'ID' }, { id: 'sku', label: 'SKU' }, { id: 'barcode', label: 'Barcode' }, { id: 'stock', label: 'Stock' },
   { id: 'stockStatus', label: 'Stock status' }, { id: 'category', label: 'Category' }, { id: 'price', label: 'Price' },
+  { id: 'regularPrice', label: 'Regular price' }, { id: 'salePrice', label: 'Sale price' },
 ];
 export type ProductsAreaColumnSettings = Record<ProductsAreaColumn, boolean>;
-// v2's Products table starts with Image on, ID and Barcode off and the rest on.
+// v2's Products table starts with Image on, ID, Barcode, Regular price and Sale price off and the rest on.
 export const DEFAULT_PRODUCTS_AREA_COLUMNS: ProductsAreaColumnSettings = {
   image: true, id: false, sku: true, barcode: false, stock: true, stockStatus: true, category: true, price: true,
+  regularPrice: false, salePrice: false,
 };
 const PREFIX = 'medusapos.products-area-columns.';
 

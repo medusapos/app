@@ -25,9 +25,11 @@ vi.mock('../lib/catalogue-snapshot', async (importOriginal) => ({
 const tea: ProductAreaRow = {
   id: 'p1', name: 'Tea', sku: 'TEA-1', barcode: '4006381333931', price: '€3.00', stock: '12', stockStatus: 'in_stock',
   categories: 'Drinks', categoryIds: ['c1'], tagIds: [], imageUrl: 'https://img.test/tea.png',
+  regularPrice: '€3.00', salePrice: '', onSale: false,
 };
-// A product with no image: the placeholder tile.
-const coffee: ProductAreaRow = { ...tea, id: 'p2', name: 'Coffee', sku: 'COF-1', imageUrl: undefined };
+// A product with no image (the placeholder tile), on sale.
+const coffee: ProductAreaRow = { ...tea, id: 'p2', name: 'Coffee', sku: 'COF-1', imageUrl: undefined,
+  price: '€2.00', regularPrice: '€2.50', salePrice: '€2.00', onSale: true };
 vi.mock('../lib/products-area', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/products-area')>(),
   productAreaRows: () => [tea, coffee],
@@ -38,7 +40,7 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 }));
 
 const KEY = 'medusapos.products-area-columns.https://store.test';
-const IDS = ['image', 'id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price'] as const;
+const IDS = ['image', 'id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price', 'regularPrice', 'salePrice'] as const;
 const column = (id: string) => screen.getByTestId(`products-settings-column-${id}`);
 // A head's text without the sort arrow the sorted column carries ("Product ▲").
 const heads = () => screen.getAllByRole('columnheader').map((head) => head.textContent?.replace(/ [▲▼]$/, ''));
@@ -60,14 +62,28 @@ function openSheet() {
   fireEvent.click(screen.getByTestId('products-settings-button'));
 }
 
-it('opens a Product Settings sheet with a switch for each optional column, Image first, ID and Barcode off and the rest on', () => {
+it('opens a Product Settings sheet with a switch for each optional column, Image first, ID, Barcode, Regular price and Sale price off and the rest on', () => {
   openSheet();
   const sheet = screen.getByTestId('products-settings-sheet');
   expect(sheet.textContent).toContain('Product Settings');
-  expect(sheet.querySelectorAll('[role="switch"]')).toHaveLength(8);
+  expect(sheet.querySelectorAll('[role="switch"]')).toHaveLength(10);
   const labels = IDS.map((id) => document.getElementById(`products-settings-column-${id}-label`)?.textContent);
-  expect(labels).toEqual(['Image', 'ID', 'SKU', 'Barcode', 'Stock', 'Stock status', 'Category', 'Price']);
-  for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe(id === 'id' || id === 'barcode' ? 'false' : 'true');
+  expect(labels).toEqual(['Image', 'ID', 'SKU', 'Barcode', 'Stock', 'Stock status', 'Category', 'Price', 'Regular price', 'Sale price']);
+  const off = ['id', 'barcode', 'regularPrice', 'salePrice'];
+  for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe(off.includes(id) ? 'false' : 'true');
+});
+
+// jsdom's react-native-web drops className, so the greying is checked in the browser (e2e/products-area.spec.ts).
+it("shows v2's Regular price and Sale price columns when their switches go on, and saves the choice", () => {
+  openSheet();
+  fireEvent.click(column('regularPrice'));
+  fireEvent.click(column('salePrice'));
+  expect(heads()).toEqual(['', 'Product', 'SKU', 'Stock', 'Stock status', 'Category', 'Price', 'Regular price', 'Sale price']);
+  expect(screen.getByTestId('product-regular-price-p2').textContent).toBe('€2.50');
+  expect(screen.getByTestId('product-sale-price-p2').textContent).toBe('€2.00');
+  expect(screen.getByTestId('product-regular-price-p1').textContent).toBe('€3.00');
+  expect(screen.getByTestId('product-sale-price-p1').textContent).toBe('');
+  expect(JSON.parse(localStorage.getItem(KEY) ?? 'null')).toMatchObject({ regularPrice: true, salePrice: true });
 });
 
 it('shows the ID and Barcode columns, in v2\'s order, when their switches go on, and saves the choice', () => {

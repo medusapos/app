@@ -31,11 +31,11 @@ describe('productAreaRows', () => {
     ] };
     expect(productAreaRows([shirt, mug], traits, 'EUR')).toEqual([
       { id: 'shirt-one', name: 'Shirt', sku: 'SHIRT', barcode: '5012345678900', price: '€12.50', stock: '7', stockStatus: 'in_stock',
-        categories: '', categoryIds: [], tagIds: [] },
+        categories: '', categoryIds: [], tagIds: [], regularPrice: '€12.50', salePrice: '', onSale: false },
       { id: 'mug-a', name: 'Mug · A', sku: 'MUG-A', barcode: '', price: '€5.00', stock: '3', stockStatus: 'in_stock', categories: '',
-        categoryIds: [], tagIds: [] },
+        categoryIds: [], tagIds: [], regularPrice: '€5.00', salePrice: '', onSale: false },
       { id: 'mug-b', name: 'Mug · B', sku: 'MUG-B', barcode: '', price: '€6.00', stock: '0', stockStatus: 'out_of_stock', categories: '',
-        categoryIds: [], tagIds: [] },
+        categoryIds: [], tagIds: [], regularPrice: '€6.00', salePrice: '', onSale: false },
     ]);
   });
 
@@ -50,7 +50,7 @@ describe('productAreaRows', () => {
   it('shows a missing SKU as empty and a missing price as a dash', () => {
     const doc: Doc = { id: 'p', title: 'Plain', variants: [{ id: 'v', prices: [], stock: { status: 'unknown' } }] };
     expect(productAreaRows([doc], traits, 'EUR')).toEqual([{ id: 'v', name: 'Plain', sku: '', barcode: '', price: '—',
-      stock: '—', stockStatus: 'unknown', categories: '', categoryIds: [], tagIds: [] }]);
+      stock: '—', stockStatus: 'unknown', categories: '', categoryIds: [], tagIds: [], regularPrice: '—', salePrice: '', onSale: false }]);
   });
 
   it("gives each row its stock status and its product's categories", () => {
@@ -78,11 +78,38 @@ describe('productAreaRows', () => {
     ]);
     expect(productAreaRows([plain], traits, 'EUR')[0].imageUrl).toBeUndefined();
   });
+
+  it("gives a sale variant v2's regular price, its sale price and onSale; a base-only sibling has no sale", () => {
+    const mug: Doc = { id: 'mug', title: 'Mug', variants: [
+      { id: 'mug-a', title: 'A', prices: [{ amount: 1000, currency: 'EUR', kind: 'base' }, { amount: 800, currency: 'EUR', kind: 'sale' }],
+        stock: { status: 'in_stock' } },
+      { id: 'mug-b', title: 'B', prices: eur(600), stock: { status: 'in_stock' } },
+    ] };
+    expect(productAreaRows([mug], traits, 'EUR').map(({ id, price, regularPrice, salePrice, onSale }) =>
+      ({ id, price, regularPrice, salePrice, onSale }))).toEqual([
+      { id: 'mug-a', price: '€8.00', regularPrice: '€10.00', salePrice: '€8.00', onSale: true },
+      { id: 'mug-b', price: '€6.00', regularPrice: '€6.00', salePrice: '', onSale: false },
+    ]);
+  });
+
+  it('counts no sale for a sale entry not below the base, or one in another currency', () => {
+    const doc: Doc = { id: 'p', title: 'P', variants: [
+      { id: 'above', title: 'Above', prices: [{ amount: 1000, currency: 'EUR', kind: 'base' }, { amount: 1200, currency: 'EUR', kind: 'sale' }],
+        stock: { status: 'in_stock' } },
+      { id: 'usd', title: 'USD', prices: [{ amount: 1000, currency: 'EUR', kind: 'base' }, { amount: 800, currency: 'USD', kind: 'sale' }],
+        stock: { status: 'in_stock' } },
+    ] };
+    expect(productAreaRows([doc], traits, 'EUR').map(({ id, price, regularPrice, salePrice, onSale }) =>
+      ({ id, price, regularPrice, salePrice, onSale }))).toEqual([
+      { id: 'above', price: '€10.00', regularPrice: '€10.00', salePrice: '', onSale: false },
+      { id: 'usd', price: '€10.00', regularPrice: '€10.00', salePrice: '', onSale: false },
+    ]);
+  });
 });
 
 describe('productAreaStockLine', () => {
   const row = (stock: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id: 'v', name: 'P', sku: 'P', barcode: '',
-    price: '€1.00', stock, stockStatus, categories: '', categoryIds: [], tagIds: [] });
+    price: '€1.00', stock, stockStatus, categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
 
   it('puts the quantity before the status when the variant has one', () => {
     expect(productAreaStockLine(row('5', 'in_stock'))).toBe('5 · In stock');
@@ -97,7 +124,7 @@ describe('productAreaStockLine', () => {
 
 describe('filterProductAreaRows', () => {
   const row = (id: string, name: string, sku: string): ProductAreaRow => ({ id, name, sku, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds: [] });
+    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
   const rows = [row('1', 'E2E product 1', 'E2E-1'), row('4a', 'E2E product 4 · A', 'E2E-4'), row('4b', 'E2E product 4 · B', 'E2E-4B')];
 
   it('returns the same array for a blank query', () => {
@@ -131,7 +158,7 @@ describe('filterProductAreaRows', () => {
 
 describe('filterProductAreaRowsByCategory', () => {
   const row = (id: string, categoryIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds, tagIds: [] });
+    stockStatus: 'in_stock', categories: '', categoryIds, tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
   const rows = [row('1', ['drinks']), row('2', ['drinks', 'food']), row('3', ['food']), row('4', [])];
 
   it('keeps only rows in the category', () => {
@@ -155,7 +182,7 @@ describe('STOCK_STATUS_DOTS', () => {
 
 describe('filterProductAreaRowsInStock', () => {
   const row = (id: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id, name: id, sku: id, barcode: '',
-    price: '€1.00', stock: '1', stockStatus, categories: '', categoryIds: [], tagIds: [] });
+    price: '€1.00', stock: '1', stockStatus, categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
   const rows = [row('in', 'in_stock'), row('back', 'backorder'), row('out', 'out_of_stock'), row('unknown', 'unknown')];
 
   it('returns the same array when off', () => {
@@ -264,7 +291,7 @@ describe('listProductTags', () => {
 
 describe('filterProductAreaRowsByTag', () => {
   const row = (id: string, tagIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds });
+    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds, regularPrice: '€1.00', salePrice: '', onSale: false });
   const rows = [row('1', ['organic']), row('2', ['organic', 'seasonal']), row('3', ['seasonal']), row('4', [])];
 
   it('returns the same array for no tag', () => {
