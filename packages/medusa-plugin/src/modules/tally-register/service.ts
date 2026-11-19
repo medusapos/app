@@ -136,11 +136,9 @@ export default class TallyRegisterModuleService extends MedusaService({
     return row?.data ?? null
   }
 
-  // session is a raw tally_register_session row.
+  // session is a raw tally_register_session row. A taken-over session answers superseded whatever contract it opened at (ADR-078 d4, TallyUI #515).
   private async supersededOutcome(session: Record<string, any>, em: EntityManager): Promise<RegisterOutcome> {
-    return (session.open_contract ?? 1) >= 2
-      ? { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(session.id, { manager: em }))! }
-      : { kind: 'conflict', code: 'register_session_closed' }
+    return { kind: 'conflict', code: 'register_session_superseded', data: (await this.supersededData(session.id, { manager: em }))! }
   }
 
   private async sessionState(sessionId: string, em: EntityManager) {
