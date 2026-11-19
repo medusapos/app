@@ -11,7 +11,7 @@ vi.mock('react-native', async (importOriginal) => ({
   ...await importOriginal<typeof import('react-native')>(),
   useWindowDimensions: () => ({ width: 1024, height: 768, scale: 1, fontScale: 1 }),
 }));
-vi.mock('expo-router',() => ({ Redirect: () => null, Stack: { Screen: () => null } }));
+vi.mock('expo-router',() => ({ Redirect: () => null, usePathname: () => '/products', Stack: { Screen: () => null } }));
 vi.mock('./app-frame', () => ({ AreaAccountButton: () => null, FrameMenuButton: () => null, useFrameMenu: () => undefined }));
 vi.mock('../lib/session-context', () => ({ useSession: () => ({
   session: { baseUrl: 'https://store.test', token: 't' },
