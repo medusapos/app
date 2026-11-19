@@ -15,7 +15,7 @@ export const APPROVAL_TIMEOUT_MS = 15000;
 
 export type Approval = { approvedBy: string; approvedByName: string };
 export class ApprovalError extends Error {
-  constructor(readonly code: 'invalid' | 'offline' | 'failed' | 'cancelled', message: string) { super(message); }
+  constructor(readonly code: 'invalid' | 'offline' | 'failed' | 'cancelled' | 'unsupported', message: string) { super(message); }
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -50,23 +50,52 @@ const STORE_REFUSALS = ['approval_mfa_unsupported', 'approval_forbidden', 'appro
 export function requestStoreApproval(baseUrl: string, token: string, { sessionId, variance, email, password }: StoreApprovalRequest,
   options: ApprovalOptions = {}): Promise<StoreApproval> {
   return settleApproval(async (fetchWith) => {
-    let response: Response;
-    try {
-      response = await fetchWith(`${baseUrl.trim().replace(/\/+$/, '')}/tally/v1/register-approvals`, { method: 'POST',
-        headers: { ...authHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, variance, email, password }) });
-    } catch { throw new ApprovalError('offline', 'Could not reach the backend.'); }
-    const body: unknown = await response.json().catch(() => null);
-    const answer = isRecord(body) ? body : {};
-    if (!response.ok) {
-      if (response.status === 401 && answer.code === 'approval_invalid_credentials') throw new ApprovalError('invalid', "That email and password didn't work.");
-      const own = STORE_REFUSALS.includes(answer.code as string) && typeof answer.message === 'string' ? answer.message : '';
-      throw new ApprovalError('failed', own || APPROVE_FAILED);
-    }
+    const answer = await postApproval(fetchWith, baseUrl, 'register-approvals', token, { sessionId, variance, email, password });
     const { approval, approvedBy, approvedByName, expiresAt } = answer;
     if (typeof approval !== 'string' || !approval || typeof approvedBy !== 'string' || !approvedBy) throw new ApprovalError('failed', APPROVE_FAILED);
     return { approval, approvedBy, approvedByName: typeof approvedByName === 'string' && approvedByName ? approvedByName : email,
       ...(typeof expiresAt === 'string' ? { expiresAt } : {}) };
   }, options);
+}
+
+// The device-clear route's refusals whose own `message` the dialog shows (#280, `POST /tally/v1/device-clear-approvals`).
+const DEVICE_CLEAR_REFUSALS = ['invalid_payload', 'approval_mfa_unsupported', 'approval_forbidden', 'approval_rate_limited'];
+
+/**
+ * A manager's approval to clear this device while it has unsent data (#280): posts the manager's credentials to the
+ * plugin's route with the cashier's token. A plugin without the route (404) rejects as `unsupported`. As in
+ * `requestStoreApproval`, the password goes only in the POST body and nothing here stores, logs or returns it.
+ */
+export function requestDeviceClearApproval(baseUrl: string, token: string, { email, password }: { email: string; password: string },
+  options: ApprovalOptions = {}): Promise<Approval & { expiresAt?: string }> {
+  return settleApproval(async (fetchWith) => {
+    const answer = await postApproval(fetchWith, baseUrl, 'device-clear-approvals', token, { email, password }, DEVICE_CLEAR_REFUSALS,
+      "This store's MedusaPOS plugin can't approve clearing a device yet.");
+    const { approvedBy, approvedByName, expiresAt } = answer;
+    if (typeof approvedBy !== 'string' || !approvedBy) throw new ApprovalError('failed', APPROVE_FAILED);
+    return { approvedBy, approvedByName: typeof approvedByName === 'string' && approvedByName ? approvedByName : email,
+      ...(typeof expiresAt === 'string' ? { expiresAt } : {}) };
+  }, options);
+}
+
+// Both plugin approval routes' POST and refusals: the body of a 2xx answer, else the refusal as an ApprovalError. With
+// `missing`, a 404 (a plugin without the route) rejects as `unsupported` with that message.
+async function postApproval(fetchWith: typeof fetch, baseUrl: string, route: string, token: string, payload: Record<string, unknown>,
+  refusals = STORE_REFUSALS, missing?: string): Promise<Record<string, unknown>> {
+  let response: Response;
+  try {
+    response = await fetchWith(`${baseUrl.trim().replace(/\/+$/, '')}/tally/v1/${route}`, { method: 'POST',
+      headers: { ...authHeaders(token), 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+  } catch { throw new ApprovalError('offline', 'Could not reach the backend.'); }
+  const body: unknown = await response.json().catch(() => null);
+  const answer = isRecord(body) ? body : {};
+  if (!response.ok) {
+    if (missing && response.status === 404) throw new ApprovalError('unsupported', missing);
+    if (response.status === 401 && answer.code === 'approval_invalid_credentials') throw new ApprovalError('invalid', "That email and password didn't work.");
+    const own = refusals.includes(answer.code as string) && typeof answer.message === 'string' ? answer.message : '';
+    throw new ApprovalError('failed', own || APPROVE_FAILED);
+  }
+  return answer;
 }
 
 // Both approvals' abort, timeout and Cancel, as `requestApproval` describes them.

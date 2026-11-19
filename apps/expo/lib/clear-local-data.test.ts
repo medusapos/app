@@ -4,7 +4,7 @@ import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { addPosOrderCollection, createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import {
-  CLEAR_FLAG_KEY, clearAllLocalData, clearWarnings, isClearPending, requestClearLocalData,
+  CLEAR_FLAG_KEY, clearAllLocalData, clearGate, clearWarnings, isClearPending, requestClearLocalData,
 } from './clear-local-data';
 import { carryOverOrders, orderDatabaseName } from './order-store';
 
@@ -204,5 +204,38 @@ describe('clearAllLocalData', () => {
     expect(clearWarnings({ ...closed, localClosures: 1 }).lines[1]).toContain('(1 till closure)');
     expect(clearWarnings({ ...closed, localClosures: 0 })).toEqual({
       lines: ['Nothing is waiting to be sent, so your server already has your sales.'], atRisk: false });
+  });
+});
+
+describe('clearGate', () => {
+  const none = { sales: 0, parked: 0, tillEntries: 0, localClosures: 0, tillOpen: false, registerContract: 3 };
+  const current = { online: true, pluginContract: 2, routeMissing: false };
+  const keys = ['sales', 'parked', 'tillEntries', 'localClosures'] as const;
+
+  it('nothing unsynced keeps the typed word alone, online or offline, till open or not', () => {
+    for (const online of [true, false]) for (const tillOpen of [true, false]) {
+      expect(clearGate({ ...none, tillOpen }, { ...current, online })).toBe('confirm');
+    }
+  });
+
+  it('anything unsynced, or a count not read yet, needs approval online', () => {
+    for (const key of keys) {
+      expect(clearGate({ ...none, [key]: 1 }, current)).toBe('approve');
+      expect(clearGate({ ...none, [key]: null }, current)).toBe('approve');
+    }
+  });
+
+  it('unsynced data offline is refused, whatever the plugin', () => {
+    const risk = { ...none, sales: 1 };
+    expect(clearGate(risk, { ...current, online: false })).toBe('offline');
+    expect(clearGate(risk, { online: false, pluginContract: 1, routeMissing: true })).toBe('offline');
+  });
+
+  it('a plugin without the route needs an update; an unknown contract tries it', () => {
+    const risk = { ...none, parked: 2 };
+    expect(clearGate(risk, { ...current, pluginContract: 1 })).toBe('update');
+    expect(clearGate(risk, { ...current, pluginContract: 0 })).toBe('update');
+    expect(clearGate(risk, { ...current, pluginContract: null, routeMissing: true })).toBe('update');
+    expect(clearGate(risk, { ...current, pluginContract: null })).toBe('approve');
   });
 });

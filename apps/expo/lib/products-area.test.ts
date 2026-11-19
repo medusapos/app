@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ProductTraits, VariantSummary } from '@tallyui/core';
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
-  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaProducts, productAreaRows,
+  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaPlaceItems, productAreaProducts, productAreaRows,
   productAreaStockLine, productOptionLines, productTags, productTypeIds, productTypeValue, PRODUCTS_VARIATIONS, saveProductsAreaCategory,
   variantAttributes,
   saveProductsAreaTag, STOCK_STATUS_DOTS, type ProductAreaItem, type ProductAreaRow,
@@ -485,6 +485,39 @@ describe('productAreaItems', () => {
 
   it('keeps catalogue order with no sort', () => {
     expect(ids(productAreaItems(rows, products, null, open, valueOf))).toEqual(['shirt-one', 'mug', 'mug-a', 'mug-b']);
+  });
+});
+
+// v2's Open in place: the opened product's variants fill the list as plain rows.
+describe('productAreaPlaceItems', () => {
+  const shirt: Doc = { id: 'shirt', title: 'Shirt', variants: [
+    { id: 'shirt-one', title: 'One size', sku: 'SHIRT', prices: eur(1250), stock: { status: 'in_stock', quantity: 7 } }] };
+  const mug: Doc = { id: 'mug', title: 'Mug', variants: [
+    { id: 'mug-a', title: 'A', sku: 'MUG-A', prices: eur(500), stock: { status: 'in_stock', quantity: 3 } },
+    { id: 'mug-b', title: 'B', sku: 'MUG-B', prices: eur(600), stock: { status: 'out_of_stock', quantity: 0 } }] };
+  const rows = productAreaRows([shirt, mug], traits, 'EUR');
+  const [product] = productAreaProducts([shirt, mug], traits, 'EUR');
+  const valueOf = (item: ProductAreaItem, field: string) =>
+    field === 'name' ? (item.kind === 'product' ? item.name : item.label) : undefined;
+  const ids = (items: ProductAreaItem[]) => items.map((item) => item.id);
+
+  it("gives only the product's shown variants, as plain rows labelled by title", () => {
+    const items = productAreaPlaceItems(rows, product, { field: 'name', dir: 'asc' }, valueOf);
+    expect(items).toEqual([
+      { ...rows[1], kind: 'variant', sub: false, label: 'A' },
+      { ...rows[2], kind: 'variant', sub: false, label: 'B' },
+    ]);
+    expect(ids(productAreaPlaceItems(rows.filter((row) => row.id !== 'mug-a'), product, null, valueOf))).toEqual(['mug-b']);
+  });
+
+  it('sorts them ascending and descending', () => {
+    const reversed = [rows[2], rows[0], rows[1]];
+    expect(ids(productAreaPlaceItems(reversed, product, { field: 'name', dir: 'asc' }, valueOf))).toEqual(['mug-a', 'mug-b']);
+    expect(ids(productAreaPlaceItems(rows, product, { field: 'name', dir: 'desc' }, valueOf))).toEqual(['mug-b', 'mug-a']);
+  });
+
+  it('gives nothing for an empty shown list', () => {
+    expect(productAreaPlaceItems([], product, { field: 'name', dir: 'asc' }, valueOf)).toEqual([]);
   });
 });
 

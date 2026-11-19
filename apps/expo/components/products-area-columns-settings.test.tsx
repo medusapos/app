@@ -192,6 +192,39 @@ it('hides the image column and its empty head when Image goes off, and saves the
   expect(JSON.parse(localStorage.getItem(KEY) ?? 'null')).toMatchObject({ image: false });
 });
 
+// v2's Variations choice leads the sheet; it is the Sale's own setting, so it is stored under the Sale's key.
+const SALE_KEY = 'medusapos.product-settings.https://store.test';
+const choice = (variations: string) => screen.getByTestId(`products-settings-variations-${variations}`);
+
+it('starts with Variations before Columns, Open in place selected on a new device, and stores Expanded rows when pressed', () => {
+  openSheet();
+  const sheet = screen.getByTestId('products-settings-sheet');
+  const text = sheet.textContent ?? '';
+  expect(text.indexOf('Variations')).toBeGreaterThan(-1);
+  expect(text.indexOf('Variations')).toBeLessThan(text.indexOf('Columns'));
+  expect(choice('list').compareDocumentPosition(choice('popover')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(choice('popover').compareDocumentPosition(column('image')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(choice('list').textContent).toBe('Open in place');
+  expect(choice('popover').textContent).toBe('Expanded rows');
+  expect(choice('list').getAttribute('aria-selected')).toBe('true');
+  expect(choice('popover').getAttribute('aria-selected')).toBe('false');
+  fireEvent.click(choice('popover'));
+  expect(choice('popover').getAttribute('aria-selected')).toBe('true');
+  expect(choice('list').getAttribute('aria-selected')).toBe('false');
+  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover' });
+});
+
+it('Restore Default Settings puts a switched-off column back on and leaves Expanded rows selected', () => {
+  openSheet();
+  fireEvent.click(choice('popover'));
+  fireEvent.click(column('sku'));
+  expect(column('sku').getAttribute('aria-checked')).toBe('false');
+  fireEvent.click(screen.getByTestId('products-settings-restore'));
+  expect(column('sku').getAttribute('aria-checked')).toBe('true');
+  expect(choice('popover').getAttribute('aria-selected')).toBe('true');
+  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover' });
+});
+
 it('closes the sheet on Close', () => {
   openSheet();
   expect(screen.getByTestId('products-settings-sheet')).toBeTruthy();

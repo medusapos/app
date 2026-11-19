@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MIN_PLUGIN_CONTRACT, pluginContractStatus, readPluginContract } from '../lib/plugin-contract';
+import { MIN_PLUGIN_CONTRACT, pluginContractStatus, readPluginContract, readPluginContractVersion } from '../lib/plugin-contract';
 import { authHeaders } from '../lib/pos-connector';
 
 const session = { baseUrl: 'https://store.test', token: 'jwt' };
@@ -42,5 +42,17 @@ describe('readPluginContract', () => {
   it('is unknown when no response arrives within the timeout', async () => {
     const never = vi.fn<typeof fetch>().mockReturnValue(new Promise<Response>(() => {}));
     expect(await readPluginContract(session, never, 20)).toBe('unknown');
+  });
+});
+
+describe('readPluginContractVersion', () => {
+  it.each([
+    ['a current plugin', () => fetchReturning(json({ contracts: {}, pluginContract: 2 })), 2],
+    ['a plugin before pluginContract', () => fetchReturning(json({ contracts: {} })), 0],
+    ['a 500', () => fetchReturning(json({ contracts: {}, pluginContract: 2 }, 500)), null],
+    ['a rejected fetch', () => vi.fn<typeof fetch>().mockRejectedValue(new TypeError('Failed to fetch')), null],
+    ['a body without contracts', () => fetchReturning(json({ pluginContract: 2 })), null],
+  ])('reads %s', async (_label, makeFetch, expected) => {
+    expect(await readPluginContractVersion(session, makeFetch())).toBe(expected);
   });
 });

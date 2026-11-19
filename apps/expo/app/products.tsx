@@ -15,13 +15,14 @@ import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/ti
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
-  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaProducts,
+  filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaPlaceItems, productAreaProducts,
   productAreaRows, productAreaStockLine, productTypeIds, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
   PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE, PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL,
   PRODUCTS_SHOWING, PRODUCTS_VARIATIONS, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS,
   type ProductAreaItem, type ProductAreaRow,
 } from '../lib/products-area';
 import { DEFAULT_PRODUCTS_AREA_COLUMNS, useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
+import { useProductSettings } from '../lib/product-settings';
 import { useProductTypes } from '../lib/product-types';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -43,6 +44,8 @@ type ProductItem = Extract<ProductAreaItem, { kind: 'product' }>;
 type VariantItem = Extract<ProductAreaItem, { kind: 'variant' }>;
 // Opens or closes a product row's variation sub-rows; the screen provides it, the columns render outside the screen.
 const ToggleVariations = createContext<(productId: string) => void>(() => {});
+// v2's Open in place: the toggle opens the product in place instead, so it has no open state of its own.
+const OpensInPlace = createContext(false);
 
 // The Product sub-switches (SKU, Barcode, Attributes); the screen provides its settings, as ToggleVariations.
 const ProductLines = createContext<Record<'productSku' | 'productBarcode' | 'productAttributes', boolean>>(DEFAULT_PRODUCTS_AREA_COLUMNS);
@@ -60,13 +63,16 @@ function VariantProductCell({ row }: { row: VariantItem }) {
 }
 
 // v2's "15 variations ›": a plain text button under the product name; the chevron points right while closed, down while open.
+// Open in place: no open state, the chevron always points right.
 function VariationsToggle({ item }: { item: ProductItem }) {
   const toggle = useContext(ToggleVariations);
+  const inPlace = useContext(OpensInPlace);
+  const open = item.open && !inPlace;
   const text = PRODUCTS_VARIATIONS(item.shown, item.variants.length);
-  return <Pressable role="button" aria-expanded={item.open} testID={`product-variations-${item.id}`}
+  return <Pressable role="button" aria-expanded={inPlace ? undefined : open} testID={`product-variations-${item.id}`}
     accessibilityLabel={`${text}, ${item.name}`} onPress={() => toggle(item.id)} className="flex-row items-center gap-1 self-start py-1">
     <Text className="text-sm">{text}</Text>
-    <ChevronDownIcon size={14} style={item.open ? undefined : { transform: [{ rotate: '-90deg' }] }} />
+    <ChevronDownIcon size={14} style={open ? undefined : { transform: [{ rotate: '-90deg' }] }} />
   </Pressable>;
 }
 
@@ -208,18 +214,26 @@ export default function ProductsAreaScreen() {
   const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsOnSale(filterProductAreaRowsInStock(
     filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId), inStockOnly), onSaleOnly), search),
   [rows, activeId, activeTagId, inStockOnly, onSaleOnly, search]);
-  // A product row opens on an explicit choice, else while the search has text (a typed or scanned SKU shows its sub-row);
-  // otherwise it starts closed, as v2's. Kept for this visit only.
+  // v2's Variations choice is the Sale's own setting: 'list' opens a product in place, 'popover' is Expanded rows here.
+  const { settings: productSettings, save: saveProductSettings } = useProductSettings(defaultStorage(), session?.baseUrl ?? '');
+  const inPlace = productSettings.variations === 'list';
+  // The product open in place, for this visit only; one gone from the catalogue shows the list again.
+  const [placeId, setPlaceId] = useState<string | null>(null);
+  const place = useMemo(() => inPlace && placeId ? products.find((product) => product.id === placeId) ?? null : null,
+    [inPlace, placeId, products]);
+  // A product row opens on an explicit choice (Expanded rows only), else while the search has text (a typed or scanned SKU
+  // shows its sub-row); otherwise it starts closed, as v2's. Kept for this visit only.
   const [openChoices, setOpenChoices] = useState<Record<string, boolean>>({});
   const searching = search.trim() !== '';
-  const isOpen = useCallback((id: string) => openChoices[id] ?? searching, [openChoices, searching]);
-  const toggleVariations = useCallback((id: string) => setOpenChoices((choices) => ({ ...choices, [id]: !isOpen(id) })), [isOpen]);
+  const isOpen = useCallback((id: string) => (inPlace ? undefined : openChoices[id]) ?? searching, [inPlace, openChoices, searching]);
+  const toggleVariations = useCallback((id: string) => inPlace ? setPlaceId(id)
+    : setOpenChoices((choices) => ({ ...choices, [id]: !isOpen(id) })), [inPlace, isOpen]);
   const [sort, setSort] = useState<ProductSort | null>(NAME_SORT);
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
-  const phoneItems = useMemo(() => phone ? productAreaItems(items, products, NAME_SORT, isOpen, valueOf) : [],
-    [phone, items, products, isOpen]);
-  const tableItems = useMemo(() => phone ? [] : productAreaItems(items, products, sort, isOpen, valueOf),
-    [phone, items, products, sort, isOpen]);
+  const phoneItems = useMemo(() => !phone ? [] : place ? productAreaPlaceItems(items, place, NAME_SORT, valueOf)
+    : productAreaItems(items, products, NAME_SORT, isOpen, valueOf), [phone, place, items, products, isOpen]);
+  const tableItems = useMemo(() => phone ? [] : place ? productAreaPlaceItems(items, place, sort, valueOf)
+    : productAreaItems(items, products, sort, isOpen, valueOf), [phone, place, items, products, sort, isOpen]);
   // v2's Products has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
   const openMenu = useFrameMenu();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
@@ -237,13 +251,16 @@ export default function ProductsAreaScreen() {
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
     : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
       : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
-  return <ToggleVariations.Provider value={toggleVariations}><ProductLines.Provider value={columns.settings}>
+  return <ToggleVariations.Provider value={toggleVariations}><OpensInPlace.Provider value={inPlace}><ProductLines.Provider value={columns.settings}>
   <View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} onKeyPress={onSearchKeyPress} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
-      {!phone && <ProductsAreaColumnsButton {...columns} />}
+      {!phone && <ProductsAreaColumnsButton {...columns} variations={productSettings.variations} onVariationsChange={(variations) => {
+        setPlaceId(null);
+        saveProductSettings({ ...productSettings, variations });
+      }} />}
       {!openMenu && <AreaAccountButton />}
     </View>
     {/* In stock and On sale lead, as in v2's chip row, Tags last; the category and tag are kept per store, neither chip is. */}
@@ -279,6 +296,14 @@ export default function ProductsAreaScreen() {
     <View className="px-4 pb-2">
       <Text className="text-sm text-muted-foreground" testID="products-admin-note">{PRODUCTS_ADMIN_NOTE}</Text>
     </View>
+    {/* v2's Open in place: a Products back link, then the product's name; the search, chips and sort stay as they were. */}
+    {ready && place ? <View className="flex-row items-center gap-1 px-4 pb-2" testID="products-place">
+      <Pressable role="button" testID="products-place-back" onPress={() => setPlaceId(null)} className="py-1">
+        <Text className="text-primary">Products</Text>
+      </Pressable>
+      <ChevronDownIcon size={14} style={{ transform: [{ rotate: '-90deg' }] }} />
+      <Text className="font-semibold" testID="products-place-name">{place.name}</Text>
+    </View> : null}
     {saleHolds ? null : <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
       onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
     {ready && phone ? <ProductList testID="products-list" items={phoneItems} emptyState={emptyState}
@@ -290,9 +315,11 @@ export default function ProductsAreaScreen() {
         sort={sort} onSortChange={setSort} sortItems={false} emptyState={emptyState} />
     </Card> : null}
     {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue; its sync arrow after it.
-      n and m count variants (a product row and its sub-rows count as the sub-rows' variants), as v2 counts rows. */}
+      n and m count variants (a product row and its sub-rows count as the sub-rows' variants), as v2 counts rows.
+      In place: the product's variants left, of all its variants. */}
     {ready ? <View className="flex-row items-center justify-end gap-1 px-4 py-2" testID="products-footer">
-      <Text className="text-sm text-muted-foreground tabular-nums">{PRODUCTS_SHOWING(items.length, rows.length)}</Text>
+      <Text className="text-sm text-muted-foreground tabular-nums">{place ? PRODUCTS_SHOWING((phone ? phoneItems : tableItems).length, place.variants.length)
+        : PRODUCTS_SHOWING(items.length, rows.length)}</Text>
       {ready.sync && ready.clearAndRefresh
         ? <CatalogueSyncButton onSync={ready.sync} onClearAndRefresh={clearAndRefresh} syncing={!!ready.syncing} /> : null}
     </View> : null}
@@ -304,5 +331,5 @@ export default function ProductsAreaScreen() {
       <Text className="text-center text-destructive" testID="products-error">{loaded.error ?? PRODUCTS_LOAD_FAILED}</Text>
       {loaded.retry ? <Button variant="outline" testID="products-retry" onPress={loaded.retry}><Text>Retry</Text></Button> : null}
     </View> : null}
-  </View></ProductLines.Provider></ToggleVariations.Provider>;
+  </View></ProductLines.Provider></OpensInPlace.Provider></ToggleVariations.Provider>;
 }
