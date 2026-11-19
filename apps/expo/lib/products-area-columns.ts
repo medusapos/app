@@ -2,18 +2,24 @@ import { useCallback, useEffect, useState } from 'react';
 import type { SessionStorage } from './session';
 
 // The Products table's optional columns, in v2's order (Image first); the Product (name) column always shows.
-export type ProductsAreaColumn = 'image' | 'id' | 'sku' | 'barcode' | 'stock' | 'stockStatus' | 'category' | 'price'
+export type ProductsAreaColumn = 'image' | 'id' | 'type' | 'sku' | 'barcode' | 'stock' | 'stockStatus' | 'category' | 'price'
   | 'regularPrice' | 'salePrice';
 export const PRODUCTS_AREA_COLUMNS: { id: ProductsAreaColumn; label: string }[] = [
-  { id: 'image', label: 'Image' }, { id: 'id', label: 'ID' }, { id: 'sku', label: 'SKU' }, { id: 'barcode', label: 'Barcode' }, { id: 'stock', label: 'Stock' },
+  { id: 'image', label: 'Image' }, { id: 'id', label: 'ID' }, { id: 'type', label: 'Type' }, { id: 'sku', label: 'SKU' },
+  { id: 'barcode', label: 'Barcode' }, { id: 'stock', label: 'Stock' },
   { id: 'stockStatus', label: 'Stock status' }, { id: 'category', label: 'Category' }, { id: 'price', label: 'Price' },
   { id: 'regularPrice', label: 'Regular price' }, { id: 'salePrice', label: 'Sale price' },
 ];
-export type ProductsAreaColumnSettings = Record<ProductsAreaColumn, boolean>;
-// v2's Products table starts with Image on, ID, Barcode, Regular price and Sale price off and the rest on.
+// v2's sub-switches under Product: extra lines in a variant row's Product cell, apart from the SKU and Barcode columns.
+export type ProductsAreaProductLine = 'productSku' | 'productBarcode' | 'productAttributes';
+export const PRODUCTS_AREA_PRODUCT_LINES: { id: ProductsAreaProductLine; label: string }[] = [
+  { id: 'productSku', label: 'SKU' }, { id: 'productBarcode', label: 'Barcode' }, { id: 'productAttributes', label: 'Attributes' },
+];
+export type ProductsAreaColumnSettings = Record<ProductsAreaColumn | ProductsAreaProductLine, boolean>;
+// v2's Products table starts with Image on, ID, Type, Barcode, Regular price, Sale price and the Product lines off, the rest on.
 export const DEFAULT_PRODUCTS_AREA_COLUMNS: ProductsAreaColumnSettings = {
-  image: true, id: false, sku: true, barcode: false, stock: true, stockStatus: true, category: true, price: true,
-  regularPrice: false, salePrice: false,
+  image: true, id: false, type: false, sku: true, barcode: false, stock: true, stockStatus: true, category: true, price: true,
+  regularPrice: false, salePrice: false, productSku: false, productBarcode: false, productAttributes: false,
 };
 const PREFIX = 'medusapos.products-area-columns.';
 
@@ -22,7 +28,7 @@ export function loadProductsAreaColumns(storage: SessionStorage | null, baseUrl:
     const value: unknown = JSON.parse(storage?.getItem(PREFIX + baseUrl) ?? 'null');
     if (typeof value !== 'object' || value === null || Array.isArray(value)) return DEFAULT_PRODUCTS_AREA_COLUMNS;
     const valid = Object.entries(value).every(([id, on]) =>
-      PRODUCTS_AREA_COLUMNS.some((column) => column.id === id) && typeof on === 'boolean');
+      [...PRODUCTS_AREA_COLUMNS, ...PRODUCTS_AREA_PRODUCT_LINES].some((column) => column.id === id) && typeof on === 'boolean');
     return valid ? { ...DEFAULT_PRODUCTS_AREA_COLUMNS, ...(value as Partial<ProductsAreaColumnSettings>) } : DEFAULT_PRODUCTS_AREA_COLUMNS;
   } catch { return DEFAULT_PRODUCTS_AREA_COLUMNS; }
 }

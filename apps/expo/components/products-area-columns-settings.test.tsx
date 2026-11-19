@@ -25,11 +25,11 @@ vi.mock('../lib/catalogue-snapshot', async (importOriginal) => ({
 const tea: ProductAreaRow = {
   id: 'p1', name: 'Tea', sku: 'TEA-1', barcode: '4006381333931', price: '€3.00', stock: '12', stockStatus: 'in_stock',
   categories: 'Drinks', categoryIds: ['c1'], tagIds: [], imageUrl: 'https://img.test/tea.png',
-  regularPrice: '€3.00', salePrice: '', onSale: false,
+  regularPrice: '€3.00', salePrice: '', onSale: false, type: 'Hot drinks', attributes: 'Size: Large, Leaf: Green',
 };
 // A product with no image (the placeholder tile), on sale.
 const coffee: ProductAreaRow = { ...tea, id: 'p2', name: 'Coffee', sku: 'COF-1', imageUrl: undefined,
-  price: '€2.00', regularPrice: '€2.50', salePrice: '€2.00', onSale: true };
+  price: '€2.00', regularPrice: '€2.50', salePrice: '€2.00', onSale: true, type: '', attributes: '' };
 vi.mock('../lib/products-area', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/products-area')>(),
   productAreaRows: () => [tea, coffee],
@@ -40,8 +40,10 @@ vi.mock('@tallyui/pos', async (importOriginal) => ({
 }));
 
 const KEY = 'medusapos.products-area-columns.https://store.test';
-const IDS = ['image', 'id', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price', 'regularPrice', 'salePrice'] as const;
+const IDS = ['image', 'id', 'type', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price', 'regularPrice', 'salePrice'] as const;
 const column = (id: string) => screen.getByTestId(`products-settings-column-${id}`);
+const LINES = [['sku', 'SKU'], ['barcode', 'Barcode'], ['attributes', 'Attributes']] as const;
+const subSwitch = (line: string) => screen.getByTestId(`products-settings-product-${line}`);
 // A head's text without the sort arrow the sorted column carries ("Product ▲").
 const heads = () => screen.getAllByRole('columnheader').map((head) => head.textContent?.replace(/ [▲▼]$/, ''));
 
@@ -62,15 +64,64 @@ function openSheet() {
   fireEvent.click(screen.getByTestId('products-settings-button'));
 }
 
-it('opens a Product Settings sheet with a switch for each optional column, Image first, ID, Barcode, Regular price and Sale price off and the rest on', () => {
+it('opens a Product Settings sheet with a switch for each optional column, Image first, ID, Type, Barcode, Regular price and Sale price off and the rest on', () => {
   openSheet();
   const sheet = screen.getByTestId('products-settings-sheet');
   expect(sheet.textContent).toContain('Product Settings');
-  expect(sheet.querySelectorAll('[role="switch"]')).toHaveLength(10);
+  expect(sheet.querySelectorAll('[role="switch"]')).toHaveLength(14);
   const labels = IDS.map((id) => document.getElementById(`products-settings-column-${id}-label`)?.textContent);
-  expect(labels).toEqual(['Image', 'ID', 'SKU', 'Barcode', 'Stock', 'Stock status', 'Category', 'Price', 'Regular price', 'Sale price']);
-  const off = ['id', 'barcode', 'regularPrice', 'salePrice'];
+  expect(labels).toEqual(['Image', 'ID', 'Type', 'SKU', 'Barcode', 'Stock', 'Stock status', 'Category', 'Price', 'Regular price', 'Sale price']);
+  const off = ['id', 'type', 'barcode', 'regularPrice', 'salePrice'];
   for (const id of IDS) expect(column(id).getAttribute('aria-checked')).toBe(off.includes(id) ? 'false' : 'true');
+  // v2's order: ID, then the Product label with its SKU, Barcode and Attributes sub-switches (all off), then Type.
+  expect(screen.getByTestId('products-settings-product').textContent).toBe('Product');
+  expect(screen.getByTestId('products-settings-product').querySelector('[role="switch"]')).toBeNull();
+  for (const [line, label] of LINES) {
+    expect(document.getElementById(`products-settings-product-${line}-label`)?.textContent).toBe(label);
+    expect(subSwitch(line).getAttribute('aria-checked')).toBe('false');
+  }
+  const order = Array.from(sheet.querySelectorAll('[data-testid^="products-settings-column-"], [data-testid^="products-settings-product"]'))
+    .map((node) => node.getAttribute('data-testid')!.replace('products-settings-', ''));
+  expect(order.slice(0, 7)).toEqual(['column-image', 'column-id', 'product', 'product-sku', 'product-barcode', 'product-attributes', 'column-type']);
+});
+
+it("shows v2's Type column right after Product when its switch goes on, each row's type, and saves the choice", () => {
+  openSheet();
+  expect(heads()).not.toContain('Type');
+  fireEvent.click(column('type'));
+  expect(column('type').getAttribute('aria-checked')).toBe('true');
+  expect(heads()).toEqual(['', 'Product', 'Type', 'SKU', 'Stock', 'Stock status', 'Category', 'Price']);
+  expect(screen.getByTestId('product-type-p1').textContent).toBe('Hot drinks');
+  expect(screen.getByTestId('product-type-p2').textContent).toBe('');
+  expect(JSON.parse(localStorage.getItem(KEY) ?? 'null')).toMatchObject({ type: true });
+});
+
+it("adds each Product sub-switch's line under the variant row's name, apart from the SKU and Barcode columns", () => {
+  openSheet();
+  const values = { sku: 'TEA-1', barcode: '4006381333931', attributes: 'Size: Large, Leaf: Green' };
+  for (const [line] of LINES) {
+    expect(screen.queryByTestId(`product-line-${line}-p1`)).toBeNull();
+    fireEvent.click(subSwitch(line));
+    expect(subSwitch(line).getAttribute('aria-checked')).toBe('true');
+    const shown = screen.getByTestId(`product-line-${line}-p1`);
+    expect(shown.textContent).toBe(values[line]);
+    expect(shown.parentElement?.firstChild?.textContent).toBe('Tea');
+  }
+  // Coffee has no attributes: no empty line.
+  expect(screen.getByTestId('product-line-sku-p2').textContent).toBe('COF-1');
+  expect(screen.queryByTestId('product-line-attributes-p2')).toBeNull();
+  // The standalone columns stay as they were: SKU on, Barcode off.
+  expect(heads()).toEqual(['', 'Product', 'SKU', 'Stock', 'Stock status', 'Category', 'Price']);
+  expect(JSON.parse(localStorage.getItem(KEY) ?? 'null'))
+    .toMatchObject({ productSku: true, productBarcode: true, productAttributes: true, sku: true, barcode: false });
+  fireEvent.click(subSwitch('barcode'));
+  expect(screen.queryByTestId('product-line-barcode-p1')).toBeNull();
+  expect(screen.getByTestId('product-line-sku-p1')).toBeTruthy();
+  fireEvent.click(screen.getByTestId('products-settings-restore'));
+  for (const [line] of LINES) {
+    expect(subSwitch(line).getAttribute('aria-checked')).toBe('false');
+    expect(screen.queryByTestId(`product-line-${line}-p1`)).toBeNull();
+  }
 });
 
 // jsdom's react-native-web drops className, so the greying is checked in the browser (e2e/products-area.spec.ts).

@@ -3,7 +3,8 @@ import type { ProductTraits, VariantSummary } from '@tallyui/core';
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
   filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaProducts, productAreaRows,
-  productAreaStockLine, productTags, PRODUCTS_VARIATIONS, saveProductsAreaCategory,
+  productAreaStockLine, productOptionLines, productTags, productTypeIds, productTypeValue, PRODUCTS_VARIATIONS, saveProductsAreaCategory,
+  variantAttributes,
   saveProductsAreaTag, STOCK_STATUS_DOTS, type ProductAreaItem, type ProductAreaRow,
 } from './products-area';
 import type { SessionStorage } from './session';
@@ -32,11 +33,12 @@ describe('productAreaRows', () => {
     ] };
     expect(productAreaRows([shirt, mug], traits, 'EUR')).toEqual([
       { id: 'shirt-one', name: 'Shirt', sku: 'SHIRT', barcode: '5012345678900', price: '€12.50', stock: '7', stockStatus: 'in_stock',
-        categories: '', categoryIds: [], tagIds: [], regularPrice: '€12.50', salePrice: '', onSale: false },
+        categories: '', categoryIds: [], tagIds: [], regularPrice: '€12.50', salePrice: '', onSale: false,
+        type: '', attributes: '' },
       { id: 'mug-a', name: 'Mug · A', sku: 'MUG-A', barcode: '', price: '€5.00', stock: '3', stockStatus: 'in_stock', categories: '',
-        categoryIds: [], tagIds: [], regularPrice: '€5.00', salePrice: '', onSale: false },
+        categoryIds: [], tagIds: [], regularPrice: '€5.00', salePrice: '', onSale: false, type: '', attributes: '' },
       { id: 'mug-b', name: 'Mug · B', sku: 'MUG-B', barcode: '', price: '€6.00', stock: '0', stockStatus: 'out_of_stock', categories: '',
-        categoryIds: [], tagIds: [], regularPrice: '€6.00', salePrice: '', onSale: false },
+        categoryIds: [], tagIds: [], regularPrice: '€6.00', salePrice: '', onSale: false, type: '', attributes: '' },
     ]);
   });
 
@@ -51,7 +53,8 @@ describe('productAreaRows', () => {
   it('shows a missing SKU as empty and a missing price as a dash', () => {
     const doc: Doc = { id: 'p', title: 'Plain', variants: [{ id: 'v', prices: [], stock: { status: 'unknown' } }] };
     expect(productAreaRows([doc], traits, 'EUR')).toEqual([{ id: 'v', name: 'Plain', sku: '', barcode: '', price: '—',
-      stock: '—', stockStatus: 'unknown', categories: '', categoryIds: [], tagIds: [], regularPrice: '—', salePrice: '', onSale: false }]);
+      stock: '—', stockStatus: 'unknown', categories: '', categoryIds: [], tagIds: [], regularPrice: '—', salePrice: '', onSale: false,
+      type: '', attributes: '' }]);
   });
 
   it("gives each row its stock status and its product's categories", () => {
@@ -110,7 +113,8 @@ describe('productAreaRows', () => {
 
 describe('productAreaStockLine', () => {
   const row = (stock: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id: 'v', name: 'P', sku: 'P', barcode: '',
-    price: '€1.00', stock, stockStatus, categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
+    price: '€1.00', stock, stockStatus, categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false,
+    type: '', attributes: '' });
 
   it('puts the quantity before the status when the variant has one', () => {
     expect(productAreaStockLine(row('5', 'in_stock'))).toBe('5 · In stock');
@@ -125,7 +129,8 @@ describe('productAreaStockLine', () => {
 
 describe('filterProductAreaRows', () => {
   const row = (id: string, name: string, sku: string): ProductAreaRow => ({ id, name, sku, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
+    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false,
+    type: '', attributes: '' });
   const rows = [row('1', 'E2E product 1', 'E2E-1'), row('4a', 'E2E product 4 · A', 'E2E-4'), row('4b', 'E2E product 4 · B', 'E2E-4B')];
 
   it('returns the same array for a blank query', () => {
@@ -159,7 +164,8 @@ describe('filterProductAreaRows', () => {
 
 describe('filterProductAreaRowsByCategory', () => {
   const row = (id: string, categoryIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds, tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
+    stockStatus: 'in_stock', categories: '', categoryIds, tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false,
+    type: '', attributes: '' });
   const rows = [row('1', ['drinks']), row('2', ['drinks', 'food']), row('3', ['food']), row('4', [])];
 
   it('keeps only rows in the category', () => {
@@ -183,7 +189,8 @@ describe('STOCK_STATUS_DOTS', () => {
 
 describe('filterProductAreaRowsInStock', () => {
   const row = (id: string, stockStatus: ProductAreaRow['stockStatus']): ProductAreaRow => ({ id, name: id, sku: id, barcode: '',
-    price: '€1.00', stock: '1', stockStatus, categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false });
+    price: '€1.00', stock: '1', stockStatus, categories: '', categoryIds: [], tagIds: [], regularPrice: '€1.00', salePrice: '', onSale: false,
+    type: '', attributes: '' });
   const rows = [row('in', 'in_stock'), row('back', 'backorder'), row('out', 'out_of_stock'), row('unknown', 'unknown')];
 
   it('returns the same array when off', () => {
@@ -309,7 +316,8 @@ describe('listProductTags', () => {
 
 describe('filterProductAreaRowsByTag', () => {
   const row = (id: string, tagIds: string[]): ProductAreaRow => ({ id, name: id, sku: id, barcode: '', price: '€1.00', stock: '1',
-    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds, regularPrice: '€1.00', salePrice: '', onSale: false });
+    stockStatus: 'in_stock', categories: '', categoryIds: [], tagIds, regularPrice: '€1.00', salePrice: '', onSale: false,
+    type: '', attributes: '' });
   const rows = [row('1', ['organic']), row('2', ['organic', 'seasonal']), row('3', ['seasonal']), row('4', [])];
 
   it('returns the same array for no tag', () => {
@@ -388,7 +396,8 @@ describe('productAreaProducts', () => {
     expect(productAreaProducts([shirt], traits, 'EUR')).toEqual([]);
     expect(productAreaProducts([shirt, mug], traits, 'EUR')).toEqual([{ id: 'mug', name: 'Mug', options: [],
       variants: [{ id: 'mug-a', title: 'A' }, { id: 'mug-b', title: 'B' }], sku: '', barcode: '', price: '€20.00 – €25.00',
-      regularPrice: '€20.00 – €25.00', salePrice: '', onSale: false, stock: '3', stockStatus: 'in_stock', categories: 'Kitchen',
+      regularPrice: '€20.00 – €25.00', salePrice: '', onSale: false,
+      type: '', attributes: '', stock: '3', stockStatus: 'in_stock', categories: 'Kitchen',
       categoryIds: ['c1'], tagIds: ['tag_a'], imageUrl: 'https://img.test/mug.png' }]);
   });
 
@@ -484,5 +493,95 @@ describe('PRODUCTS_VARIATIONS', () => {
     expect(PRODUCTS_VARIATIONS(2, 2)).toBe('2 variations');
     expect(PRODUCTS_VARIATIONS(1, 2)).toBe('1 of 2 variations');
     expect(PRODUCTS_VARIATIONS(1, 1)).toBe('1 variation');
+  });
+});
+
+// v2's Type column: the Medusa product type's value, from the document or looked up by its type_id.
+describe('product types', () => {
+  type Typed = Doc & { type?: unknown; type_id?: string | null };
+  const mug: Typed = { id: 'mug', title: 'Mug', type_id: 'ptyp_kitchen', variants: [
+    { id: 'mug-a', title: 'A', prices: eur(500), stock: { status: 'in_stock' } },
+    { id: 'mug-b', title: 'B', prices: eur(600), stock: { status: 'in_stock' } }] };
+  const types = new Map([['ptyp_kitchen', 'Kitchen'], ['ptyp_apparel', 'Apparel']]);
+
+  it("takes the document's own type value first, else the map's value for its type_id, else ''", () => {
+    expect(productTypeValue({ type: { value: 'Apparel' }, type_id: 'ptyp_kitchen' }, types)).toBe('Apparel');
+    expect(productTypeValue({ type: null, type_id: 'ptyp_kitchen' }, types)).toBe('Kitchen');
+    expect(productTypeValue({ type: { value: '' }, type_id: 'ptyp_kitchen' }, types)).toBe('Kitchen');
+    expect(productTypeValue({ type_id: 'ptyp_kitchen' })).toBe('');
+    expect(productTypeValue({ type_id: 'ptyp_gone' }, types)).toBe('');
+    for (const doc of [{}, null, undefined, 'x', { type: 'Apparel', type_id: 7 }]) expect(productTypeValue(doc, types)).toBe('');
+  });
+
+  it('gives every variant row of a product and its grouped product row the same type, and an untyped product none', () => {
+    const plain: Typed = { id: 'p', title: 'Plain', variants: [{ id: 'p-1', prices: eur(100), stock: { status: 'in_stock' } }] };
+    const own: Typed = { id: 'o', title: 'Own', type: { id: 'ptyp_apparel', value: 'Apparel' }, type_id: 'ptyp_apparel',
+      variants: [{ id: 'o-1', prices: eur(100), stock: { status: 'in_stock' } }] };
+    expect(productAreaRows([mug, plain, own], traits, 'EUR', types).map(({ id, type }) => ({ id, type }))).toEqual([
+      { id: 'mug-a', type: 'Kitchen' }, { id: 'mug-b', type: 'Kitchen' }, { id: 'p-1', type: '' }, { id: 'o-1', type: 'Apparel' },
+    ]);
+    expect(productAreaProducts([mug, plain], traits, 'EUR', types).map(({ id, type, attributes }) => ({ id, type, attributes })))
+      .toEqual([{ id: 'mug', type: 'Kitchen', attributes: '' }]);
+    expect(productAreaRows([mug], traits, 'EUR').map(({ type }) => type)).toEqual(['', '']);
+  });
+
+  it('lists the type ids once each, sorted, skipping null, empty and missing ones', () => {
+    expect(productTypeIds([{ type_id: 'ptyp_b' }, { type_id: null }, { type_id: '' }, {}, null, { type_id: 'ptyp_a' },
+      { type_id: 'ptyp_b' }, { type_id: 3 }])).toEqual(['ptyp_a', 'ptyp_b']);
+    expect(productTypeIds([])).toEqual([]);
+  });
+});
+
+// v2's Product › Attributes line, and the grouped row's option lines, from the cached Medusa document.
+describe('variant attributes and option lines', () => {
+  const options = [
+    { id: 'opt_size', title: 'Size', values: [{ id: 'optval_s', value: 'S' }, { id: 'optval_m', value: 'M' }] },
+    { id: 'opt_color', title: 'Color', values: [{ id: 'optval_blue', value: 'Blue' }, { id: 'optval_red', value: 'Red' }] },
+  ];
+  const variant = (id: string, title: string, values?: unknown) =>
+    ({ id, title, prices: eur(500), stock: { status: 'in_stock' }, options: values }) as VariantSummary;
+  const shirt = { id: 'shirt', title: 'Shirt', options, variants: [
+    variant('m-blue', 'M / Blue', [
+      { id: 'optval_blue', value: 'Blue', option_id: 'opt_color' }, { id: 'optval_m', value: 'M', option_id: 'opt_size' }]),
+    variant('s-red', 'S / Red', [{ id: 'optval_red', value: 'Red' }, { id: 'optval_s', value: 'S' }]),
+    variant('bare', 'Bare'),
+    variant('odd', 'Odd', [{ id: 'optval_x', value: 'X', option_id: 'opt_gone' }, null, { value: 7 }, { id: 'optval_m', value: 'M' }]),
+  ] };
+
+  it("joins the variant's option values in the product's option order, resolved by option_id", () => {
+    expect(variantAttributes(shirt, 'm-blue')).toBe('Size: M, Color: Blue');
+  });
+
+  it('resolves a value with no option_id by its id among the options\' values', () => {
+    expect(variantAttributes(shirt, 's-red')).toBe('Size: S, Color: Red');
+  });
+
+  it("gives '' for a variant with no options, an unknown variant or a malformed document, and skips unresolved values", () => {
+    expect(variantAttributes(shirt, 'bare')).toBe('');
+    expect(variantAttributes(shirt, 'missing')).toBe('');
+    expect(variantAttributes(shirt, 'odd')).toBe('Size: M');
+    for (const doc of [null, {}, { variants: 'x' }, { options: 'x', variants: shirt.variants }])
+      expect(variantAttributes(doc, 'm-blue')).toBe('');
+  });
+
+  it("gives each variant row its attributes", () => {
+    expect(productAreaRows([shirt], traits, 'EUR').map(({ id, attributes }) => ({ id, attributes }))).toEqual([
+      { id: 'm-blue', attributes: 'Size: M, Color: Blue' }, { id: 's-red', attributes: 'Size: S, Color: Red' },
+      { id: 'bare', attributes: '' }, { id: 'odd', attributes: 'Size: M' },
+    ]);
+  });
+
+  it("builds one line per option from the document's options, values in its order", () => {
+    expect(productOptionLines(shirt)).toEqual(['Size: S, M', 'Color: Blue, Red']);
+    expect(productOptionLines({ options: [{ id: 'o', title: 'Empty', values: [] }, { id: 7, title: 'Bad', values: [] }] })).toEqual([]);
+    for (const doc of [null, {}, { options: 'x' }]) expect(productOptionLines(doc)).toEqual([]);
+  });
+
+  it("gives a grouped product row the document's option lines without getVariantOptions; getVariantOptions still wins", () => {
+    expect(productAreaProducts([shirt], traits, 'EUR')[0].options).toEqual(['Size: S, M', 'Color: Blue, Red']);
+    const withOptions = { ...traits, getVariantOptions: () => [{ name: 'Fit', values: ['Slim'] }] } as ProductTraits;
+    expect(productAreaProducts([shirt], withOptions, 'EUR')[0].options).toEqual(['Fit: Slim']);
+    const noGroups = { ...traits, getVariantOptions: () => [] } as unknown as ProductTraits;
+    expect(productAreaProducts([shirt], noGroups, 'EUR')[0].options).toEqual(['Size: S, M', 'Color: Blue, Red']);
   });
 });

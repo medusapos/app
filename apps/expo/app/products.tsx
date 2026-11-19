@@ -16,12 +16,13 @@ import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnaps
 import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
   filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaProducts,
-  productAreaRows, productAreaStockLine, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
+  productAreaRows, productAreaStockLine, productTypeIds, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
   PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE, PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL,
   PRODUCTS_SHOWING, PRODUCTS_VARIATIONS, saveProductsAreaCategory, saveProductsAreaTag, STOCK_STATUS_DOTS, STOCK_STATUS_LABELS,
   type ProductAreaItem, type ProductAreaRow,
 } from '../lib/products-area';
-import { useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
+import { DEFAULT_PRODUCTS_AREA_COLUMNS, useProductsAreaColumns, type ProductsAreaColumn } from '../lib/products-area-columns';
+import { useProductTypes } from '../lib/product-types';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
@@ -42,6 +43,21 @@ type ProductItem = Extract<ProductAreaItem, { kind: 'product' }>;
 type VariantItem = Extract<ProductAreaItem, { kind: 'variant' }>;
 // Opens or closes a product row's variation sub-rows; the screen provides it, the columns render outside the screen.
 const ToggleVariations = createContext<(productId: string) => void>(() => {});
+
+// The Product sub-switches (SKU, Barcode, Attributes); the screen provides its settings, as ToggleVariations.
+const ProductLines = createContext<Record<'productSku' | 'productBarcode' | 'productAttributes', boolean>>(DEFAULT_PRODUCTS_AREA_COLUMNS);
+
+// A variant row's Product cell: its label, then a muted line per sub-switch that is on and has a value.
+function VariantProductCell({ row }: { row: VariantItem }) {
+  const on = useContext(ProductLines);
+  const lines = [['sku', on.productSku, row.sku], ['barcode', on.productBarcode, row.barcode],
+    ['attributes', on.productAttributes, row.attributes]] as const;
+  return <View className={row.sub ? 'pl-6' : undefined}>
+    <Text>{row.label}</Text>
+    {lines.map(([line, shown, value]) => shown && value
+      ? <Text key={line} className="text-sm text-muted-foreground" testID={`product-line-${line}-${row.id}`}>{value}</Text> : null)}
+  </View>;
+}
 
 // v2's "15 variations ›": a plain text button under the product name; the chevron points right while closed, down while open.
 function VariationsToggle({ item }: { item: ProductItem }) {
@@ -65,7 +81,10 @@ const COLUMNS: ProductTableColumn<ProductAreaItem>[] = [
       <Text className="font-semibold">{row.name}</Text>
       {row.options.map((line) => <Text key={line} className="text-sm text-muted-foreground">{line}</Text>)}
       <VariationsToggle item={row} />
-    </View> : <Text className={row.sub ? 'pl-6' : undefined}>{row.label}</Text> },
+    </View> : <VariantProductCell row={row} /> },
+  // The product's Medusa product type, on its product row and every variant row.
+  { id: 'type', header: 'Type', flex: 1.5, sortValue: (row) => row.type,
+    render: (row) => <Text numberOfLines={1} testID={`product-type-${row.id}`}>{row.type}</Text> },
   { id: 'sku', header: 'SKU', flex: 1.5, sortValue: (row) => row.sku, render: (row) => <Text>{row.sku}</Text> },
   { id: 'barcode', header: 'Barcode', flex: 1.5, sortValue: (row) => row.barcode, render: (row) => <Text>{row.barcode}</Text> },
   { id: 'stock', header: 'Stock', align: 'right', flex: 1, render: (row) => <Text className="tabular-nums">{row.stock}</Text> },
@@ -174,8 +193,11 @@ export default function ProductsAreaScreen() {
   const Leaf = useMemo(() => (props: TillCatalogueLeafProps) => <ProductsCatalogue key={read} {...props} retry={retry} />, [read, retry]);
   const loaded = snapshot && session && snapshot.baseUrl === session.baseUrl ? snapshot : null;
   const ready = loaded?.status === 'ready' ? loaded : null;
-  const rows = useMemo(() => ready ? productAreaRows(ready.products, ready.traits, ready.currency) : [], [ready]);
-  const products = useMemo(() => ready ? productAreaProducts(ready.products, ready.traits, ready.currency) : [], [ready]);
+  // The product types are read from Medusa only while the Type column shows; the hook reads again only when the ids change.
+  const typeIds = useMemo(() => ready ? productTypeIds(ready.products) : [], [ready]);
+  const types = useProductTypes(session, typeIds, columns.settings.type);
+  const rows = useMemo(() => ready ? productAreaRows(ready.products, ready.traits, ready.currency, types) : [], [ready, types]);
+  const products = useMemo(() => ready ? productAreaProducts(ready.products, ready.traits, ready.currency, types) : [], [ready, types]);
   const categories = useMemo(() => ready ? listCategories(ready.products, ready.traits) : [], [ready]);
   // A chosen category no longer in the catalogue counts as All, as the Sale's chips do.
   const activeId = categoryId !== null && categories.some((category) => category.id === categoryId) ? categoryId : null;
@@ -215,7 +237,8 @@ export default function ProductsAreaScreen() {
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
     : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
       : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
-  return <ToggleVariations.Provider value={toggleVariations}><View className="flex-1 bg-background" role="main" aria-label="Products">
+  return <ToggleVariations.Provider value={toggleVariations}><ProductLines.Provider value={columns.settings}>
+  <View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} onKeyPress={onSearchKeyPress} placeholder="Search Products"
@@ -281,5 +304,5 @@ export default function ProductsAreaScreen() {
       <Text className="text-center text-destructive" testID="products-error">{loaded.error ?? PRODUCTS_LOAD_FAILED}</Text>
       {loaded.retry ? <Button variant="outline" testID="products-retry" onPress={loaded.retry}><Text>Retry</Text></Button> : null}
     </View> : null}
-  </View></ToggleVariations.Provider>;
+  </View></ProductLines.Provider></ToggleVariations.Provider>;
 }

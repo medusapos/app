@@ -999,3 +999,48 @@ describe('variation sub-rows', () => {
     expect(listRowIds()).toEqual(['v1', 'p4', 'v4a', 'v4b']);
   });
 });
+
+// v2's Type column: the till reads the product types from Medusa only while the column shows.
+describe('the Type column', () => {
+  const typed = [products[0], { ...products[1], type_id: 'ptyp_apparel' }];
+  const stub = () => {
+    const data = new Map<string, string>();
+    vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
+      setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
+    const fetchMock = vi.fn(async (input: string | URL | Request) => String(input).includes('/admin/product-types')
+      ? new Response(JSON.stringify({ product_types: [{ id: 'ptyp_apparel', value: 'Apparel' }] }), { status: 200 })
+      : new Response('{}', { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  };
+  const typeReads = (fetchMock: ReturnType<typeof stub>) =>
+    fetchMock.mock.calls.map(([input]) => String(input)).filter((url) => url.includes('/admin/product-types'));
+
+  it('reads no product types while Type is off', async () => {
+    const fetchMock = stub();
+    sessionState.session = session;
+    publishCatalogue(sale({ products: typed }));
+    await mountRead();
+    expect(screen.queryByTestId('product-type-p4')).toBeNull();
+    expect(typeReads(fetchMock)).toEqual([]);
+  });
+
+  it("with Type on reads the catalogue's type ids and shows the value on the product row and its sub-rows", async () => {
+    const fetchMock = stub();
+    localStorage.setItem('medusapos.products-area-columns.https://store.test', JSON.stringify({ type: true }));
+    sessionState.session = session;
+    publishCatalogue(sale({ products: typed }));
+    await mountRead();
+    expect(await screen.findByText('Apparel')).toBeTruthy();
+    const reads = typeReads(fetchMock);
+    expect(reads).toHaveLength(1);
+    expect(new URL(reads[0]).searchParams.getAll('id[]')).toEqual(['ptyp_apparel']);
+    expect(reads[0].startsWith('https://store.test/admin/product-types?')).toBe(true);
+    expect(screen.getByTestId('product-type-p4').textContent).toBe('Apparel');
+    expect(screen.getByTestId('product-type-v1').textContent).toBe('');
+    fireEvent.click(screen.getByTestId('product-variations-p4'));
+    expect(screen.getByTestId('product-type-v4a').textContent).toBe('Apparel');
+    expect(screen.getByTestId('product-type-v4b').textContent).toBe('Apparel');
+    expect(typeReads(fetchMock)).toHaveLength(1);
+  });
+});
