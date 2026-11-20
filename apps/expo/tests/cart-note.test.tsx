@@ -71,31 +71,47 @@ async function mount({ shirt = true } = {}) {
   await screen.findByTestId('product-tile-Shirt');
   if (shirt) fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 }
-/** The link opens the sheet; the note is typed and Close closes it. */
+/** v2's ⋮ beside Checkout, then its Order details item, opens the note sheet. */
+function openOrderDetails() {
+  const footer = within(screen.getByTestId('cart-footer'));
+  fireEvent.click(footer.getByRole('button', { name: 'More actions' }));
+  fireEvent.click(within(footer.getByTestId('cart-foot-menu')).getByRole('menuitem', { name: 'Order details' }));
+}
+/** Order details opens the sheet; the note is typed and Close closes it. */
 function addNote(note: string) {
-  fireEvent.click(screen.getByTestId('cart-note-add'));
+  openOrderDetails();
   expect(screen.getByTestId('cart-note-sheet')).toBeTruthy();
   fireEvent.change(field(), { target: { value: note } });
   fireEvent.click(screen.getByTestId('cart-note-close'));
 }
 const rowText = () => screen.getByTestId('cart-note-text').textContent;
 
-it('the link opens the note sheet, and Close shows the note as its own row in place of the link', async () => {
+it('the cart has no "Add order note" link; the ⋮ beside Checkout holds Order details, then Void', async () => {
   await mount();
-  expect(screen.getByText('Add order note')).toBeTruthy();
+  expect(screen.queryByText('Add order note')).toBeNull();
+  expect(screen.queryByTestId('cart-note-add')).toBeNull();
+  const footer = within(screen.getByTestId('cart-footer'));
+  fireEvent.click(footer.getByRole('button', { name: 'More actions' }));
+  expect(within(footer.getByTestId('cart-foot-menu')).getAllByRole('menuitem').map((item) => item.textContent))
+    .toEqual(['Order details', 'Void']);
+});
+
+it('Order details in the ⋮ menu opens the note sheet, and Close shows the note as its own row', async () => {
+  await mount();
   expect(screen.queryByTestId('cart-note-row')).toBeNull();
-  addNote('Gift wrap, please');
+  openOrderDetails();
+  expect(screen.getByTestId('cart-note-sheet')).toBeTruthy();
+  fireEvent.change(field(), { target: { value: 'Gift wrap, please' } });
+  fireEvent.click(screen.getByTestId('cart-note-close'));
   expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
   expect(screen.getByTestId('cart-note-row')).toBeTruthy();
   expect(rowText()).toBe('Gift wrap, please');
-  expect(screen.queryByTestId('cart-note-add')).toBeNull();
-  expect(screen.queryByText('Add order note')).toBeNull();
-  expect(observed.sale!.order.note).toBe('Gift wrap, please');
+  expect(observed.sale!.order.note).toBe('Gift wrap, please'); // the note order.create sends
 });
 
 it("the sheet is v2's Order details: title, ✕, the note field and a Close footer, over the products", async () => {
   await mount();
-  fireEvent.click(screen.getByTestId('cart-note-add'));
+  openOrderDetails();
   expect(within(screen.getByTestId('cart-note-sheet')).getByText('Order details')).toBeTruthy();
   expect(screen.getByTestId('cart-note-x')).toBeTruthy();
   expect(screen.getByTestId('cart-note-field')).toBeTruthy();
@@ -107,7 +123,7 @@ it("the sheet is v2's Order details: title, ✕, the note field and a Close foot
 
 it('✕ closes the sheet and keeps the note', async () => {
   await mount();
-  fireEvent.click(screen.getByTestId('cart-note-add'));
+  openOrderDetails();
   fireEvent.change(field(), { target: { value: 'Gift wrap, please' } });
   fireEvent.click(screen.getByTestId('cart-note-x'));
   expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
@@ -125,24 +141,26 @@ it('pressing the row opens the sheet holding the note, to edit it', async () => 
   expect(rowText()).toBe('Ring the bell');
 });
 
-it('emptying the field and Close removes the row and brings the link back', async () => {
+it('emptying the field and Close removes the row, and no link comes back', async () => {
   await mount(); addNote('Gift wrap, please');
   fireEvent.click(screen.getByTestId('cart-note-row'));
   fireEvent.change(field(), { target: { value: '' } });
   fireEvent.click(screen.getByTestId('cart-note-close'));
   expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
   expect(screen.queryByTestId('cart-note-row')).toBeNull();
-  expect(screen.getByTestId('cart-note-add')).toBeTruthy();
+  expect(screen.queryByText('Add order note')).toBeNull();
   expect(observed.sale!.order.note ?? '').toBe('');
 });
 
 it('an empty cart shows the note row too', async () => {
-  await mount({ shirt: false });
+  await mount(); addNote('Gift wrap, please');
+  // The line's quantity popover holds its Remove (TallyUI 3.19.0's popover editor).
+  fireEvent.click(screen.getByRole('button', { name: 'Edit quantity of Shirt' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Shirt' }));
   expect(screen.getByTestId('cart-empty')).toBeTruthy();
-  addNote('Gift wrap, please');
   expect(observed.sale!.order.lineItems).toHaveLength(0);
   expect(rowText()).toBe('Gift wrap, please');
-  expect(screen.queryByTestId('cart-note-add')).toBeNull();
+  expect(screen.queryByText('Add order note')).toBeNull();
 });
 
 it('starting a tender closes the sheet, and a cancelled tender does not reopen it', async () => {
@@ -158,7 +176,7 @@ it('starting a tender closes the sheet, and a cancelled tender does not reopen i
   expect(rowText()).toBe('Gift wrap, please');
 });
 
-it('on a phone, the Cart tab shows the link, and the note row opens the sheet', async () => {
+it("on a phone, the Cart tab's ⋮ adds the note, and the note row opens the sheet", async () => {
   setWindowWidth(360, 780);
   await mount();
   fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));

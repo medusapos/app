@@ -18,7 +18,7 @@ import {
 import { AccountButton } from '../components/account-button';
 import { FrameMenuButton, useFrameAccountPublisher, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
-import { CartNoteLink, CartNoteRow, CartNoteSheet } from '../components/cart-note';
+import { CartNoteRow, CartNoteSheet } from '../components/cart-note';
 import { CartSettingsButton } from '../components/cart-settings';
 import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
@@ -187,12 +187,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     } });
   const { sale: cartSale, refused } = useGatedSale(sale);
   // v2's cart foot: one "Checkout {total}" opens the tender on Cash through the register gate, where the cashier picks
-  // the method (Card terminal included), and a ⋮ menu holds Void, which asks first: the open sale has no copy to restore.
+  // the method (Card terminal included), and a ⋮ menu holds Order details (v2's sheet, holding the note) and Void,
+  // which asks first: the open sale has no copy to restore.
   const [voidOpen, setVoidOpen] = useState(false);
   const voidOffered = sale.order.lineItems.length > 0 && sale.order.payments.length === 0;
   const checkout = {
     onCheckout: () => cartSale.startTender('cash'),
-    actions: voidOffered ? [{ label: 'Void', destructive: true, onPress: () => setVoidOpen(true) }] : [],
+    actions: [{ label: 'Order details', onPress: () => setNoteOpen(true) },
+      ...voidOffered ? [{ label: 'Void', destructive: true, onPress: () => setVoidOpen(true) }] : []],
   };
   // Sign out unmounts this screen and closes the outbox, so it waits while `saving`: from complete()'s entry until the
   // save lands, or, after a failed one, until Retry stores it or Continue starts the next sale (the #150 review). It also
@@ -362,7 +364,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const tillSales = openSales(sale.order, parked);
   const openOrdersRow = <OpenOrdersStrip sales={tillSales} currency={pricing.currency} listOpen={ordersListOpen}
     onListOpenChange={setOrdersListOpen} onSelect={(id) => switchTo(id)} onNew={() => { setOrdersListOpen(false); switchTo(null); }} />;
-  // v2's note row sits in the totals, nearest Checkout; an empty cart draws no totals, so it takes the link's place.
+  // v2's note row sits in the totals, nearest Checkout; an empty cart draws no totals, so it shows above the lines.
   const noteSet = (sale.order.note ?? '').trim() !== '';
   const hasLines = sale.order.lineItems.length > 0;
   const noteInTotals = noteSet && hasLines;
@@ -382,7 +384,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
-    {!noteSet ? <CartNoteLink onPress={() => setNoteOpen(true)} /> : !hasLines && <View className="px-3">{noteRow}</View>}
+    {noteSet && !hasLines && <View className="px-3">{noteRow}</View>}
     {/* v2's cart has no Total row: the total is on the Checkout button. */}
     <Cart sale={sortedCartSale} orderActions={false} showTotal={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       quickDiscounts={cartSettings.settings.quickDiscounts} columns={cartSettings.settings.columns}
