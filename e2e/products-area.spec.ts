@@ -500,3 +500,50 @@ test('the Products area\'s Type column and Product SKU and Attributes lines show
     expect(removed.ok, await removed.clone().text()).toBeTruthy();
   }
 });
+
+// v2's Columns rows start with a drag handle: dragging Price above SKU moves its column, kept across a load until Restore.
+test('the Products area\'s settings sheet drags the Price row above SKU, moving its column, and Restore puts it back', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await signIn(page);
+  await openArea(page, 'Products');
+  const table = page.getByTestId('products-table');
+  // The visible heads in table order, past the sort arrow the sorted column carries ("Product ▲").
+  const heads = async () => (await table.getByRole('columnheader').allTextContents()).map((text) => text.replace(/ [▲▼]$/, ''));
+  const before = (first: string, second: string) => async () => {
+    const order = await heads();
+    return order.includes(first) && order.includes(second) && order.indexOf(first) < order.indexOf(second);
+  };
+  await expect.poll(before('SKU', 'Price')).toBe(true);
+  await page.getByTestId('products-settings-button').click();
+  const price = page.getByTestId('products-settings-drag-price');
+  const sku = page.getByTestId('products-settings-drag-sku');
+  // A touch drag on a handle moves the row, not the sheet.
+  await expect(price).toHaveCSS('touch-action', 'none');
+  await price.scrollIntoViewIfNeeded();
+  const from = await price.boundingBox();
+  const to = await sku.boundingBox();
+  if (!from || !to) throw new Error('drag handles not laid out');
+  // Price's centre to just inside SKU's top: above SKU's centre, below Type's.
+  const x = from.x + from.width / 2;
+  await page.mouse.move(x, from.y + from.height / 2);
+  await page.mouse.down();
+  const targetY = to.y + to.height / 4;
+  for (let step = 1; step <= 10; step += 1) await page.mouse.move(x, from.y + from.height / 2 + (targetY - from.y - from.height / 2) * step / 10);
+  await page.mouse.up();
+  const rows = page.getByTestId('products-settings-sheet').locator('[data-testid^="products-settings-drag-"]');
+  const ids = async () => (await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-testid'))))
+    .map((id) => id?.replace('products-settings-drag-', ''));
+  await expect.poll(ids).toEqual(['image', 'id', 'name', 'type', 'price', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'regularPrice',
+    'salePrice']);
+  await page.getByTestId('products-settings-close').click();
+  await expect(page.getByTestId('products-settings-sheet')).not.toBeVisible();
+  await expect.poll(before('Price', 'SKU')).toBe(true);
+  // A fresh page load: the order is read back from this device's storage.
+  await page.reload();
+  await expect(table).toBeVisible();
+  await expect.poll(before('Price', 'SKU')).toBe(true);
+  await page.getByTestId('products-settings-button').click();
+  await page.getByTestId('products-settings-restore').click();
+  await page.getByTestId('products-settings-close').click();
+  await expect.poll(before('SKU', 'Price')).toBe(true);
+});

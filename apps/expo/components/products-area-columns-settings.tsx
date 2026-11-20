@@ -1,7 +1,10 @@
-import { Fragment, useState } from 'react';
-import { Pressable, ScrollView, View } from 'react-native';
-import { Button, Dialog, DialogContent, DialogTitle, IconButton, Label, Switch, Text, XIcon } from '@tallyui/components';
-import { PRODUCTS_AREA_COLUMNS, PRODUCTS_AREA_PRODUCT_LINES, type useProductsAreaColumns } from '../lib/products-area-columns';
+import { useEffect, useRef, useState } from 'react';
+import { Platform, Pressable, ScrollView, View } from 'react-native';
+import { Button, Dialog, DialogContent, DialogTitle, GripIcon, IconButton, Label, Switch, Text, XIcon } from '@tallyui/components';
+import {
+  moveProductsAreaColumn, PRODUCTS_AREA_COLUMNS, PRODUCTS_AREA_PRODUCT_LINES, productsAreaDropIndex, type ProductsAreaOrderedColumn,
+  type useProductsAreaColumns,
+} from '../lib/products-area-columns';
 import { SlidersIcon } from './product-settings';
 
 function SwitchRow({ testID, label, checked, onCheckedChange, className }: {
@@ -17,10 +20,39 @@ function SwitchRow({ testID, label, checked, onCheckedChange, className }: {
 
 // v2's Products › Product Settings sheet: the Variations choice (the Sale's own setting, 'list' being Open in place and
 // 'popover' Expanded rows here), then which columns the table shows. The Product column always shows; its indented
-// sub-switches add lines under a variant row's name.
-export function ProductsAreaColumnsButton({ settings, save, reset, variations, onVariationsChange }: ReturnType<typeof useProductsAreaColumns>
-  & { variations: 'list' | 'popover'; onVariationsChange: (variations: 'list' | 'popover') => void }) {
+// sub-switches add lines under a variant row's name. Each Columns row's grip drags it to a new place (v2's order handles).
+export function ProductsAreaColumnsButton({ settings, save, reset, order, saveOrder, variations, onVariationsChange }:
+  ReturnType<typeof useProductsAreaColumns> & { variations: 'list' | 'popover'; onVariationsChange: (variations: 'list' | 'popover') => void }) {
   const [open, setOpen] = useState(false);
+  // Web pointer drag, as TallyUI's camera resize handle: the row follows the pointer and the order is saved on release,
+  // from the rows' laid-out boxes (transforms leave layout alone). Closing the sheet or unmounting ends a drag.
+  const boxes = useRef<Partial<Record<ProductsAreaOrderedColumn, { y: number; height: number }>>>({});
+  const [drag, setDrag] = useState<{ id: ProductsAreaOrderedColumn; dy: number } | null>(null);
+  const dragCleanup = useRef<(() => void) | undefined>(undefined);
+  useEffect(() => () => dragCleanup.current?.(), [open]);
+  const startDrag = (id: ProductsAreaOrderedColumn, startY: number) => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    dragCleanup.current?.();
+    let dy = 0;
+    setDrag({ id, dy });
+    const move = (event: PointerEvent) => { dy = event.clientY - startY; setDrag({ id, dy }); };
+    const end = () => {
+      dragCleanup.current?.();
+      const from = order.indexOf(id);
+      const target = productsAreaDropIndex(order.map((other) => boxes.current[other] ?? { y: 0, height: 0 }), from, dy);
+      if (target !== from) saveOrder(moveProductsAreaColumn(order, id, target));
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', end);
+    window.addEventListener('pointercancel', end);
+    dragCleanup.current = () => {
+      dragCleanup.current = undefined;
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', end);
+      window.removeEventListener('pointercancel', end);
+      setDrag(null);
+    };
+  };
   return <>
     <IconButton testID="products-settings-button" accessibilityLabel="Product settings" onPress={() => setOpen(true)}><SlidersIcon /></IconButton>
     <Dialog open={open} onOpenChange={setOpen}>
@@ -44,17 +76,29 @@ export function ProductsAreaColumnsButton({ settings, save, reset, variations, o
             })}
           </View>
           <Text>Columns</Text>
-          {PRODUCTS_AREA_COLUMNS.map(({ id, label }) => <Fragment key={id}>
-            <SwitchRow testID={`products-settings-column-${id}`} label={label} checked={settings[id]}
-              onCheckedChange={(on) => save({ ...settings, [id]: on })} />
-            {/* v2 lists Product after ID: a label with no switch, then its sub-switches indented. */}
-            {id === 'id' ? <>
-              <View testID="products-settings-product"><Label>Product</Label></View>
-              {PRODUCTS_AREA_PRODUCT_LINES.map((line) => <SwitchRow key={line.id} className="pl-6" label={line.label}
+          {order.map((id) => {
+            const label = id === 'name' ? 'Product' : PRODUCTS_AREA_COLUMNS.find((column) => column.id === id)?.label ?? id;
+            const moving = drag?.id === id;
+            // One draggable unit per column; v2's Product is a label with no switch, its sub-switches indented under it.
+            return <View key={id} className={`gap-4${moving ? ' bg-card' : ''}`}
+              style={moving ? { transform: [{ translateY: drag.dy }], zIndex: 1 } : undefined}
+              onLayout={({ nativeEvent }) => { boxes.current[id] = nativeEvent.layout; }}>
+              <View className="flex-row items-center gap-2">
+                {/* touch-none: a touch drag on the grip moves the row, not the sheet. */}
+                <View testID={`products-settings-drag-${id}`} accessibilityLabel={`Drag to move ${label}`}
+                  className={`self-stretch justify-center text-muted-foreground web:touch-none ${moving ? 'web:cursor-grabbing' : 'web:cursor-grab'}`}
+                  onPointerDown={(event) => { event.preventDefault(); startDrag(id, event.nativeEvent.clientY); }}>
+                  <GripIcon size={16} />
+                </View>
+                {id === 'name' ? <View testID="products-settings-product" className="flex-1"><Label>Product</Label></View>
+                  : <SwitchRow className="flex-1" testID={`products-settings-column-${id}`} label={label} checked={settings[id]}
+                    onCheckedChange={(on) => save({ ...settings, [id]: on })} />}
+              </View>
+              {id === 'name' ? PRODUCTS_AREA_PRODUCT_LINES.map((line) => <SwitchRow key={line.id} className="pl-12" label={line.label}
                 testID={`products-settings-product-${line.id.slice('product'.length).toLowerCase()}`} checked={settings[line.id]}
-                onCheckedChange={(on) => save({ ...settings, [line.id]: on })} />)}
-            </> : null}
-          </Fragment>)}
+                onCheckedChange={(on) => save({ ...settings, [line.id]: on })} />) : null}
+            </View>;
+          })}
         </ScrollView>
         <View className="flex-row justify-between gap-2">
           {/* v2: Restore puts the columns back; Variations stays as chosen. */}

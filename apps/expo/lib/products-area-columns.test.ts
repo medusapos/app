@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
-  DEFAULT_PRODUCTS_AREA_COLUMNS, loadProductsAreaColumns, PRODUCTS_AREA_COLUMNS, PRODUCTS_AREA_PRODUCT_LINES, saveProductsAreaColumns,
+  DEFAULT_PRODUCTS_AREA_COLUMN_ORDER, DEFAULT_PRODUCTS_AREA_COLUMNS, loadProductsAreaColumnOrder, loadProductsAreaColumns,
+  moveProductsAreaColumn, PRODUCTS_AREA_COLUMNS, PRODUCTS_AREA_PRODUCT_LINES, productsAreaDropIndex, saveProductsAreaColumns,
 } from './products-area-columns';
 
 function fakeStorage(initial: Record<string, string> = {}) {
@@ -101,5 +102,78 @@ describe('products-area-columns', () => {
     saveProductsAreaColumns(storage, 'https://a.test', { ...DEFAULT_PRODUCTS_AREA_COLUMNS, sku: false });
     expect(loadProductsAreaColumns(storage, 'https://b.test')).toEqual(DEFAULT_PRODUCTS_AREA_COLUMNS);
     expect(loadProductsAreaColumns(storage, 'https://a.test')).toEqual({ ...DEFAULT_PRODUCTS_AREA_COLUMNS, sku: false });
+  });
+});
+
+const ORDER_KEY = 'medusapos.products-area-column-order.https://a.test';
+
+describe('products-area column order', () => {
+  it("starts in v2's order, Product after ID", () => {
+    expect(DEFAULT_PRODUCTS_AREA_COLUMN_ORDER)
+      .toEqual(['image', 'id', 'name', 'type', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price', 'regularPrice', 'salePrice']);
+  });
+
+  it('reads a saved order back for its store and not for another store', () => {
+    const order = ['price', 'image', 'id', 'name', 'type', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'regularPrice', 'salePrice'];
+    const storage = fakeStorage({ [ORDER_KEY]: JSON.stringify(order) });
+    expect(loadProductsAreaColumnOrder(storage, 'https://a.test')).toEqual(order);
+    expect(loadProductsAreaColumnOrder(storage, 'https://b.test')).toEqual(DEFAULT_PRODUCTS_AREA_COLUMN_ORDER);
+  });
+
+  it('drops unknown ids and duplicates, and puts a missing id back at its default place', () => {
+    // Stock first, Price before Product; 'variations' is unknown, SKU repeats, Barcode is missing.
+    const stored = ['stock', 'variations', 'image', 'id', 'price', 'name', 'sku', 'type', 'sku', 'stockStatus', 'category', 'regularPrice', 'salePrice'];
+    expect(loadProductsAreaColumnOrder(fakeStorage({ [ORDER_KEY]: JSON.stringify(stored) }), 'https://a.test'))
+      .toEqual(['stock', 'image', 'id', 'price', 'name', 'barcode', 'sku', 'type', 'stockStatus', 'category', 'regularPrice', 'salePrice']);
+    // An order saved before Regular price and Sale price existed: both come back at their default places, the end.
+    const older = ['price', 'image', 'id', 'name', 'type', 'sku', 'barcode', 'stock', 'stockStatus', 'category'];
+    expect(loadProductsAreaColumnOrder(fakeStorage({ [ORDER_KEY]: JSON.stringify(older) }), 'https://a.test'))
+      .toEqual([...older, 'regularPrice', 'salePrice']);
+  });
+
+  it.each([
+    ['nothing stored', undefined],
+    ['unparsable JSON', '[not json'],
+    ['an object', JSON.stringify({ 0: 'price' })],
+    ['a string', JSON.stringify('price')],
+  ])('gives the default order on %s', (_, raw) => {
+    const storage = fakeStorage(raw === undefined ? {} : { [ORDER_KEY]: raw });
+    expect(loadProductsAreaColumnOrder(storage, 'https://a.test')).toEqual(DEFAULT_PRODUCTS_AREA_COLUMN_ORDER);
+  });
+
+  it('moves a column up, down, and clamps the target to the list', () => {
+    const order = DEFAULT_PRODUCTS_AREA_COLUMN_ORDER;
+    expect(moveProductsAreaColumn(order, 'price', 3))
+      .toEqual(['image', 'id', 'name', 'price', 'type', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'regularPrice', 'salePrice']);
+    expect(moveProductsAreaColumn(order, 'image', 2))
+      .toEqual(['id', 'name', 'image', 'type', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price', 'regularPrice', 'salePrice']);
+    expect(moveProductsAreaColumn(order, 'sku', -4)[0]).toBe('sku');
+    expect(moveProductsAreaColumn(order, 'sku', 99)[order.length - 1]).toBe('sku');
+    expect(moveProductsAreaColumn(order, 'sku', 99)).toHaveLength(order.length);
+    expect(order).toEqual(DEFAULT_PRODUCTS_AREA_COLUMN_ORDER);
+  });
+
+  it('returns the order unchanged for an unknown id', () => {
+    const order = ['image', 'name', 'sku'] as const;
+    expect(moveProductsAreaColumn([...order], 'price', 0)).toEqual([...order]);
+  });
+
+  // Five 40-high rows from y 0; centres at 20, 60, 100, 140, 180.
+  const rows = [0, 40, 80, 120, 160].map((y) => ({ y, height: 40 }));
+  it('lands a dragged row past every centre its own moved centre has passed', () => {
+    // Row 1 (centre 60) dragged down 85 to 145: past rows 2 and 3, it lands at index 3.
+    expect(productsAreaDropIndex(rows, 1, 85)).toBe(3);
+    // Row 3 (centre 140) dragged up 45 to 95: past row 2, it lands at index 2.
+    expect(productsAreaDropIndex(rows, 3, -45)).toBe(2);
+    // Row 2 (centre 100) nudged 15 either way passes no centre: it stays at index 2.
+    expect(productsAreaDropIndex(rows, 2, 15)).toBe(2);
+    expect(productsAreaDropIndex(rows, 2, -15)).toBe(2);
+  });
+
+  it('measures a taller row (Product with its sub-switches) by its own centre', () => {
+    const mixed = [{ y: 0, height: 40 }, { y: 40, height: 160 }, { y: 200, height: 40 }];
+    // Row 2 (centre 220) dragged up 110 to 110: past Product's centre (120), so it lands at index 1.
+    expect(productsAreaDropIndex(mixed, 2, -110)).toBe(1);
+    expect(productsAreaDropIndex(mixed, 2, -90)).toBe(2);
   });
 });
