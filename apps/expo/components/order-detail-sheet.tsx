@@ -21,7 +21,7 @@ const RECEIPT_PRINT_CSS = `@media print {
   :has(${RECEIPT}) { visibility: hidden; position: static !important; overflow: visible !important; transform: none !important }
   ${RECEIPT} { visibility: visible; position: absolute !important; top: 0; left: 0; width: 100%; height: auto !important; overflow: visible !important }
 }`;
-function injectReceiptPrintStyle() {
+export function injectReceiptPrintStyle() {
   if (Platform.OS !== 'web' || typeof document === 'undefined' || document.getElementById('order-receipt-print-style')) return;
   const style = document.createElement('style');
   style.id = 'order-receipt-print-style';

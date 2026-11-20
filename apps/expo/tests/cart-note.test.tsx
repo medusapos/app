@@ -109,7 +109,7 @@ it('Order details in the ⋮ menu opens the note sheet, and Close shows the note
   expect(observed.sale!.order.note).toBe('Gift wrap, please'); // the note order.create sends
 });
 
-it("the sheet is v2's Order details: title, ✕, the note field and a Close footer, over the products", async () => {
+it("the sheet is v2's Order details: title, ✕, Form | JSON tabs, the note field and a Print, Close, Void footer, over the products", async () => {
   await mount();
   openOrderDetails();
   expect(within(screen.getByTestId('cart-note-sheet')).getByText('Order details')).toBeTruthy();
@@ -119,6 +119,60 @@ it("the sheet is v2's Order details: title, ✕, the note field and a Close foot
   expect(screen.queryByRole('button', { name: 'Clear' })).toBeNull();
   expect(screen.queryByRole('button', { name: 'Done' })).toBeNull();
   expect(side()).toBe('left');
+  // v2's Form | JSON tabs, and its stacked footer: Print, Close, Void, one per row.
+  expect(screen.getByTestId('cart-order-tab-form')).toBeTruthy();
+  expect(screen.getByTestId('cart-order-tab-json')).toBeTruthy();
+  const footer = screen.getByTestId('cart-note-footer');
+  expect(within(footer).getAllByRole('button').map((button) => button.textContent)).toEqual(['Print', 'Close', 'Void']);
+  expect(footer.getAttribute('data-layout')).toBe('stacked'); // a column, not a row
+  // An empty cart has no ⋮, but its note row opens the sheet, and there is nothing to void.
+  fireEvent.change(field(), { target: { value: 'Gift wrap, please' } });
+  fireEvent.click(screen.getByTestId('cart-note-close'));
+  fireEvent.click(screen.getByRole('button', { name: 'Edit quantity of Shirt' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Remove Shirt' }));
+  fireEvent.click(screen.getByTestId('cart-note-row'));
+  expect(screen.getByTestId('cart-note-close')).toBeTruthy();
+  expect(screen.queryByTestId('cart-note-void')).toBeNull();
+});
+
+it('the JSON tab shows the open sale as JSON, read-only', async () => {
+  await mount();
+  openOrderDetails();
+  fireEvent.change(field(), { target: { value: 'table 12' } });
+  fireEvent.click(screen.getByTestId('cart-order-tab-json'));
+  const sale = JSON.parse(screen.getByTestId('cart-order-json').textContent!);
+  expect(sale.note).toBe('table 12');
+  expect(sale.lineItems).toHaveLength(1);
+  expect(screen.queryByTestId('cart-note-field')).toBeNull();
+});
+
+it("Print shows the sale's draft receipt, and Back returns to the tabs", async () => {
+  vi.stubGlobal('print', vi.fn());
+  await mount();
+  openOrderDetails();
+  fireEvent.click(screen.getByTestId('cart-note-print'));
+  const receipt = screen.getByTestId('cart-note-receipt-view');
+  expect(receipt.textContent).toContain('(draft)');
+  expect(receipt.textContent).toContain('Shirt');
+  fireEvent.click(within(receipt).getByRole('button', { name: 'Back' }));
+  expect(screen.queryByTestId('cart-note-receipt-view')).toBeNull();
+  expect(field()).toBeTruthy();
+  fireEvent.click(screen.getByTestId('cart-note-print'));
+  fireEvent.click(screen.getByTestId('cart-note-close'));
+  openOrderDetails();
+  expect(screen.queryByTestId('cart-note-receipt-view')).toBeNull();
+  expect(screen.getByTestId('cart-order-tab-form').getAttribute('aria-selected')).toBe('true');
+  expect(field()).toBeTruthy();
+});
+
+it('Void in the sheet closes it and asks first', async () => {
+  await mount();
+  openOrderDetails();
+  fireEvent.click(screen.getByTestId('cart-note-void'));
+  expect(screen.queryByTestId('cart-note-sheet')).toBeNull();
+  expect(screen.getByTestId('cart-void-dialog')).toBeTruthy();
+  fireEvent.click(screen.getByTestId('cart-void-confirm'));
+  expect(observed.sale!.order.lineItems).toHaveLength(0);
 });
 
 it('✕ closes the sheet and keeps the note', async () => {
