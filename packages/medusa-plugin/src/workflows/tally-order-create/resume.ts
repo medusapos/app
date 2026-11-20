@@ -9,7 +9,7 @@ import { fulfillmentGroups } from './plan'
 import { couponResumeWorkflow, takeBackStockWorkflow } from './workflow'
 
 // The provider markPaymentCollectionAsPaid uses (core-flows systemPaymentProviderId).
-const SYSTEM_PROVIDER_ID = 'pp_system_default'
+export const SYSTEM_PROVIDER_ID = 'pp_system_default'
 
 export async function resumeOrderCreate(container: MedusaContainer, orderId: string,
   paymentAmount: number, locationId: string, shippingOptionId: string) {
