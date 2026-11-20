@@ -190,9 +190,9 @@ export default function ProductsAreaScreen() {
   const [inStockOnly, setInStockOnly] = useState(false);
   const [onSaleOnly, setOnSaleOnly] = useState(false);
   const columns = useProductsAreaColumns(defaultStorage(), session?.baseUrl ?? '');
-  // The Product column always shows; the rest follow the settings sheet, in table order.
-  const tableColumns = useMemo(() => COLUMNS.filter(({ id }) =>
-    id === 'name' || columns.settings[id as ProductsAreaColumn]), [columns.settings]);
+  // The Product column always shows; the rest follow the settings sheet, in the order its drag handles set.
+  const tableColumns = useMemo(() => columns.order.flatMap((orderId) => COLUMNS.filter(({ id }) => id === orderId)).filter(({ id }) =>
+    id === 'name' || columns.settings[id as ProductsAreaColumn]), [columns.order, columns.settings]);
   // Retry remounts the read (a fresh useReplicatedProducts); the gate and its store settings stay.
   const [read, setRead] = useState(0);
   const retry = useCallback(() => setRead((count) => count + 1), []);

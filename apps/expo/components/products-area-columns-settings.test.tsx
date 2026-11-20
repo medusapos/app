@@ -4,7 +4,7 @@ import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProductsAreaScreen from '../app/products';
 import type { ProductAreaRow } from '../lib/products-area';
-import { DEFAULT_PRODUCTS_AREA_COLUMNS } from '../lib/products-area-columns';
+import { DEFAULT_PRODUCTS_AREA_COLUMN_ORDER, DEFAULT_PRODUCTS_AREA_COLUMNS } from '../lib/products-area-columns';
 
 // jsdom gives react-native-web no window width; a tablet's, so the table (not the phone list) renders.
 vi.mock('react-native', async (importOriginal) => ({
@@ -230,4 +230,36 @@ it('closes the sheet on Close', () => {
   expect(screen.getByTestId('products-settings-sheet')).toBeTruthy();
   fireEvent.click(screen.getByTestId('products-settings-close'));
   expect(screen.queryByTestId('products-settings-sheet')).toBeNull();
+});
+
+// The column order sits apart from the switches, under its own key; each Columns row starts with its drag handle.
+const ORDER_KEY = 'medusapos.products-area-column-order.https://store.test';
+const handles = () => Array.from(screen.getByTestId('products-settings-sheet').querySelectorAll('[data-testid^="products-settings-drag-"]'))
+  .map((node) => node.getAttribute('data-testid')!.replace('products-settings-drag-', ''));
+
+it('draws a stored order in the table heads and in the sheet\'s Columns rows, each row with its drag handle', () => {
+  // Stock first, Price before Product.
+  const order = ['stock', 'image', 'id', 'price', 'name', 'type', 'sku', 'barcode', 'stockStatus', 'category', 'regularPrice', 'salePrice'];
+  localStorage.setItem(ORDER_KEY, JSON.stringify(order));
+  openSheet();
+  expect(heads()).toEqual(['Stock', '', 'Price', 'Product', 'SKU', 'Stock status', 'Category']);
+  expect(handles()).toEqual(order);
+  expect(screen.getByTestId('products-settings-drag-name').getAttribute('aria-label')).toBe('Drag to move Product');
+  expect(screen.getByTestId('products-settings-drag-price').getAttribute('aria-label')).toBe('Drag to move Price');
+  // Product's block moves as one unit: its sub-switches still follow its label.
+  expect(screen.getByTestId('products-settings-product').compareDocumentPosition(subSwitch('sku')) & Node.DOCUMENT_POSITION_FOLLOWING)
+    .toBeTruthy();
+  expect(subSwitch('attributes').compareDocumentPosition(column('type')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+});
+
+it('Restore Default Settings brings back the default head order and the default row order', () => {
+  localStorage.setItem(ORDER_KEY, JSON.stringify(['price', 'stock', 'image', 'id', 'name', 'type', 'sku', 'barcode', 'stockStatus', 'category',
+    'regularPrice', 'salePrice']));
+  openSheet();
+  expect(heads()).toEqual(['Price', 'Stock', '', 'Product', 'SKU', 'Stock status', 'Category']);
+  fireEvent.click(screen.getByTestId('products-settings-restore'));
+  expect(heads()).toEqual(['', 'Product', 'SKU', 'Stock', 'Stock status', 'Category', 'Price']);
+  expect(handles()).toEqual(['image', 'id', 'name', 'type', 'sku', 'barcode', 'stock', 'stockStatus', 'category', 'price', 'regularPrice',
+    'salePrice']);
+  expect(JSON.parse(localStorage.getItem(ORDER_KEY) ?? 'null')).toEqual(DEFAULT_PRODUCTS_AREA_COLUMN_ORDER);
 });
