@@ -141,6 +141,27 @@ test('the Products area narrows by the Tags chip, keeps the tag across a page lo
   await expect(rows.filter({ hasText: 'E2E product 2' }).first()).toBeVisible();
 });
 
+// The seed puts E2E product 2 alone in the Featured collection; its title comes from the store API.
+test('the Products area narrows by the Collections chip, and its cross takes it off', async ({ page }) => {
+  await signIn(page);
+  await openArea(page, 'Products');
+  const rows = page.locator('[data-testid^="product-row-"]');
+  const collections = page.getByTestId('products-collections');
+  await expect(collections).toHaveText('Collections');
+  await collections.click();
+  const menu = page.getByTestId('products-collections-menu');
+  await expect(menu.getByRole('radio', { name: 'Featured', exact: true })).toBeVisible();
+  await menu.getByRole('radio', { name: 'Featured', exact: true }).click();
+  await expect(menu).toHaveCount(0);
+  await expect(collections).toHaveText('Featured');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.filter({ hasText: 'E2E product 2' })).toHaveCount(1);
+  await expect(page.getByTestId('products-footer')).toHaveText(/^Showing 1 of \d+$/);
+  await page.getByTestId('products-collections-remove').click();
+  await expect(collections).toHaveText('Collections');
+  await expect(rows.filter({ hasText: 'E2E product 1' }).first()).toBeVisible();
+});
+
 test('on a phone the Products area lists two-line rows, not the table, and finds a variant by SKU', async ({ page }) => {
   await page.setViewportSize({ width: 360, height: 800 });
   await signIn(page);

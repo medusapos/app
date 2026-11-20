@@ -1,7 +1,7 @@
 import type { ExecArgs } from "@medusajs/framework/types"
 import { ContainerRegistrationKeys, Modules, ProductStatus } from "@medusajs/framework/utils"
 import {
-  createAndLinkProductOptionsToProductWorkflow, createApiKeysWorkflow, createProductCategoriesWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
+  createAndLinkProductOptionsToProductWorkflow, createApiKeysWorkflow, createCollectionsWorkflow, createProductCategoriesWorkflow, createInventoryLevelsWorkflow, createProductsWorkflow,
   createProductTagsWorkflow, createProductVariantsWorkflow, createRegionsWorkflow,
   createSalesChannelsWorkflow, createShippingOptionsWorkflow, createShippingProfilesWorkflow,
   createStockLocationsWorkflow, createStoresWorkflow, createTaxRegionsWorkflow,
@@ -116,6 +116,7 @@ export default async function seedE2e({ container }: ExecArgs) {
   const productService = container.resolve(Modules.PRODUCT)
   // Two categories for the catalogue's category nav: E2E products 1 and 2 are Drinks, 3 is Food, the rest have none.
   // Two product tags for the Products area's Tags chip: E2E products 1 and 3 are Organic, 2 is Seasonal, 4 and 5 have none.
+  // One product collection for the Products area's Collections chip: E2E product 2 is in Featured, the rest have none.
   let categories = await productService.listProductCategories({ name: ["Drinks", "Food"] })
   const missingCategories = ["Drinks", "Food"].filter(name => !categories.some(category => category.name === name))
   if (missingCategories.length) {
@@ -166,6 +167,12 @@ export default async function seedE2e({ container }: ExecArgs) {
       selector: { id: existing.id }, update: { tag_ids: tagIds(i) },
     } })
   }
+  let [featured] = await productService.listProductCollections({ title: ["Featured"] })
+  if (!featured) [featured] = (await createCollectionsWorkflow(container).run({ input: { collections: [{ title: "Featured" }] } })).result
+  const [product2] = await productService.listProducts({ handle: "e2e-2" })
+  if (product2 && !product2.collection_id) await updateProductsWorkflow(container).run({ input: {
+    selector: { id: product2.id }, update: { collection_id: featured.id },
+  } })
   // Priced and stocked, but only in another sales channel: the store API doesn't list it for the
   // E2E key, so the till replicates it unlisted and hides it (the catalogue still shows 5 products).
   // Medusa 2.21.0 skips the store API's channel filter only when the store has at most one sales

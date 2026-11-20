@@ -24,7 +24,7 @@ vi.mock('../lib/catalogue-snapshot', async (importOriginal) => ({
 }));
 const tea: ProductAreaRow = {
   id: 'p1', name: 'Tea', sku: 'TEA-1', barcode: '4006381333931', price: '€3.00', stock: '12', stockStatus: 'in_stock',
-  categories: 'Drinks', categoryIds: ['c1'], tagIds: [], imageUrl: 'https://img.test/tea.png',
+  categories: 'Drinks', categoryIds: ['c1'], tagIds: [], collectionId: null, imageUrl: 'https://img.test/tea.png',
   regularPrice: '€3.00', salePrice: '', onSale: false, type: 'Hot drinks', attributes: 'Size: Large, Leaf: Green',
 };
 // A product with no image (the placeholder tile), on sale.
