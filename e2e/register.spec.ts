@@ -404,7 +404,7 @@ test('Register 1 taken over by another till: this till\'s paid in is refused sup
   await signIn(page);
   const sessionId = opens[0].payload.sessionId;
   const counterSessionId = await openStoreRegister('Counter till', 'register-1', sessionId);
-  await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+  await openRegisterPanel(page);
   await page.getByTestId('register-panel').getByTestId('register-panel-paid-in').click();
   const sheet = page.getByTestId('movement-sheet');
   await sheet.getByTestId('movement-amount').fill('5.00');

@@ -1,5 +1,5 @@
 import { expect } from '@playwright/test';
-import { openRegister, test } from './helpers';
+import { openRegister, openRegisterPanel, test } from './helpers';
 
 const products = /Up to date · \d[\d,.  ]* products/;
 const timeout = process.env.E2E_BACKEND_URL !== undefined ? 5 * 60_000 : undefined;
@@ -53,7 +53,7 @@ test('signed in as the demo cashier, each What to try action has its control', a
   await page.getByTestId(/^product-tile-/).first().click();
   await expect(page.getByTestId('cart-footer')).toBeVisible();
   await expect(page.getByTestId('register-bar-open-panel')).toBeVisible();
-  await page.getByTestId('register-bar-open-panel').click();
+  await openRegisterPanel(page);
   await expect(page.getByTestId('register-panel-close')).toBeVisible();
   // A single-register till's bar does not name its register, so its name shows first in the panel's title.
   await expect(page.getByTestId('register-panel-title')).toHaveText('Demo register');
