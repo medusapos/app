@@ -87,6 +87,29 @@ medusaIntegrationTestRunner({
       })
     })
 
+    it('lists and searches all channels with the same full order rows when requested', async () => {
+      const response = await list('?allChannels=true')
+      expect(response.status).toBe(200)
+      expect(response.data).toMatchObject({ hasMore: false, total: 3 })
+      expect(response.data.orders.map(order => order.id).sort()).toEqual([hidden[0], ...sales.map(sale => sale.orderId)].sort())
+      const webRow = response.data.orders.find(order => order.id === hidden[0])
+      const tillRow = response.data.orders.find(order => order.id === sales[0].orderId)
+      const defaultList = await list()
+      expect(tillRow).toEqual(defaultList.data.orders.find(order => order.id === sales[0].orderId))
+      expect(tillRow).toHaveProperty('clientOrderId', sales[0].clientOrderId)
+      expect(Object.keys(webRow).sort()).toEqual(Object.keys(tillRow).filter(key => key !== 'clientOrderId').sort())
+      const found = await list(`?allChannels=true&search=${webRow.reference}`)
+      expect(found.status).toBe(200)
+      expect(found.data.orders.map(order => order.id)).toEqual([webRow.id])
+      expect(found.data.total).toBe(1)
+      const scoped = await list(`?search=${webRow.reference}`)
+      expect([scoped.status, scoped.data]).toEqual([200, { orders: [], hasMore: false, total: 0 }])
+      const invalid = await list('?allChannels=yes')
+      expect([invalid.status, invalid.data]).toEqual([400, {
+        code: 'invalid_query', message: 'allChannels must be true or false',
+      }])
+    })
+
     it('pages with hasMore', async () => {
       const first = await list('?perPage=1')
       expect(first.data).toMatchObject({ hasMore: true, total: 2 })

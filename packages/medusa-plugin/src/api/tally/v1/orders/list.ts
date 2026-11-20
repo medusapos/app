@@ -10,12 +10,12 @@ export const ORDERS_MAX_PER_PAGE = 100
 // display_id is a Postgres integer: a longer run of digits matches no order rather than failing the query.
 const MAX_DISPLAY_ID = 2147483647
 
-export type OrdersQuery = ListOrdersQuery & { page: number; perPage: number }
+export type OrdersQuery = ListOrdersQuery & { page: number; perPage: number; allChannels: boolean }
 export type OrdersQueryError =
   | { code: 'unsupported_order_filter'; fields: OrderFilterField[] }
   | { code: 'invalid_query'; message: string }
 
-const PARAMS = ['page', 'perPage', 'search', 'status', 'customerId', 'registerId', 'after', 'before']
+const PARAMS = ['page', 'perPage', 'search', 'status', 'customerId', 'registerId', 'after', 'before', 'allChannels']
 // Core's ORDER_FILTER_FIELDS order (the plugin imports core as types only); this route has no cashier, payment-method,
 // store or created-via filter.
 const UNSUPPORTED: readonly OrderFilterField[] = ['cashierId', 'paymentMethod', 'storeId', 'createdVia']
@@ -35,7 +35,10 @@ export function parseOrdersQuery(raw: Record<string, unknown>): { ok: true; quer
   // A repeated or bracketed parameter arrives as an array or object, never as a filter.
   const notString = PARAMS.filter(key => raw[key] !== undefined && typeof raw[key] !== 'string')
   if (notString.length) return invalid(`expected one string value for: ${notString.join(', ')}`)
-  const query: OrdersQuery = { page: 1, perPage: ORDERS_DEFAULT_PER_PAGE }
+  if (raw.allChannels !== undefined && raw.allChannels !== 'true' && raw.allChannels !== 'false') {
+    return invalid('allChannels must be true or false')
+  }
+  const query: OrdersQuery = { page: 1, perPage: ORDERS_DEFAULT_PER_PAGE, allChannels: raw.allChannels === 'true' }
   if (raw.page !== undefined) {
     const page = wholeNumber(raw.page)
     if (page === undefined || page < 1) return invalid('page must be an integer >= 1')
@@ -64,10 +67,11 @@ export function parseOrdersQuery(raw: Record<string, unknown>): { ok: true; quer
 }
 
 /** The query.graph filters for the till's sales channel, or null when the query can match no order. */
-export function orderFilters(query: OrdersQuery, salesChannelId: string): Record<string, unknown> | null {
+export function orderFilters(query: OrdersQuery, scope: { salesChannelId: string } | 'all'): Record<string, unknown> | null {
   // An empty filter value is set, and no order has an empty status, customer or register.
   if (query.status === '' || query.customerId === '' || query.registerId === '') return null
-  const filters: Record<string, unknown> = { sales_channel_id: salesChannelId, is_draft_order: false }
+  const filters: Record<string, unknown> = { is_draft_order: false }
+  if (scope !== 'all') filters.sales_channel_id = scope.salesChannelId
   if (query.status !== undefined) filters.status = query.status
   if (query.customerId !== undefined) filters.customer_id = query.customerId
   if (query.registerId !== undefined) filters.metadata = { tally_register_id: query.registerId }

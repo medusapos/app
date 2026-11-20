@@ -6,14 +6,19 @@ import type TallyLedgerModuleService from '../../../../modules/tally-ledger/serv
 import { saleChannelId } from '../../../../workflows/tally-order-create/sale-region'
 import { ORDER_FIELDS, orderFilters, orderPage, parseOrdersQuery, type OrderRow } from './list'
 
-/** The store's orders on the till's sales channel, newest first, as TallyUI's StoreOrderPage (read-only). */
+/** The till's channel orders (allChannels=true lists every channel), newest first, as TallyUI's StoreOrderPage (read-only). */
 export async function GET(req: MedusaRequest, res: MedusaResponse) {
   const parsed = parseOrdersQuery(req.query)
   if (!parsed.ok) return res.status(400).json(parsed.error)
   const query = req.scope.resolve(ContainerRegistrationKeys.QUERY)
-  const options = req.scope.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE).getPluginOptions()
-  const channelId = await saleChannelId(query, options)
-  const filters = channelId ? orderFilters(parsed.query, channelId) : null
+  let filters: Record<string, unknown> | null
+  if (parsed.query.allChannels) {
+    filters = orderFilters(parsed.query, 'all')
+  } else {
+    const options = req.scope.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE).getPluginOptions()
+    const channelId = await saleChannelId(query, options)
+    filters = channelId ? orderFilters(parsed.query, { salesChannelId: channelId }) : null
+  }
   if (!filters) return res.json({ orders: [], hasMore: false, total: 0 } satisfies StoreOrderPage)
   const { page, perPage } = parsed.query
   const { data, metadata } = await query.graph({

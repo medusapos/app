@@ -6,8 +6,19 @@ const vat19 = { rate: 19, code: 'VAT19', description: 'VAT' }
 const grossCents = (row: { raw_total: { value: string | number } }) => Math.round(Number(row.raw_total.value) * 100)
 
 describe('parseOrdersQuery', () => {
-  it('defaults to page 1 of 25', () => {
-    expect(parseOrdersQuery({})).toEqual({ ok: true, query: { page: 1, perPage: 25 } })
+  it('defaults to page 1 of 25 with allChannels false', () => {
+    expect(parseOrdersQuery({})).toEqual({ ok: true, query: { page: 1, perPage: 25, allChannels: false } })
+  })
+
+  it('accepts allChannels true and false', () => {
+    expect(parseOrdersQuery({ allChannels: 'true' })).toMatchObject({ ok: true, query: { allChannels: true } })
+    expect(parseOrdersQuery({ allChannels: 'false' })).toMatchObject({ ok: true, query: { allChannels: false } })
+  })
+
+  it.each(['1', ''])('refuses allChannels=%j', allChannels => {
+    expect(parseOrdersQuery({ allChannels })).toEqual({
+      ok: false, error: { code: 'invalid_query', message: 'allChannels must be true or false' },
+    })
   })
 
   it('clamps perPage to 1..100', () => {
@@ -29,7 +40,7 @@ describe('parseOrdersQuery', () => {
   it('keeps a valid date range and the plain filters', () => {
     expect(parseOrdersQuery({ page: '2', perPage: '10', search: 'ann', status: 'pending', customerId: 'cus_1',
       registerId: 'reg_1', after: '2026-11-11T00:00:00Z', before: '2026-11-12T00:00:00.000Z' })).toEqual({ ok: true, query: {
-      page: 2, perPage: 10, search: 'ann', status: 'pending', customerId: 'cus_1', registerId: 'reg_1',
+      page: 2, perPage: 10, allChannels: false, search: 'ann', status: 'pending', customerId: 'cus_1', registerId: 'reg_1',
       dateRange: { after: '2026-11-11T00:00:00Z', before: '2026-11-12T00:00:00.000Z' },
     } })
   })
@@ -45,30 +56,36 @@ describe('parseOrdersQuery', () => {
 })
 
 describe('orderFilters', () => {
-  const query = (extra: object) => ({ page: 1, perPage: 25, ...extra })
+  const query = (extra: object) => ({ page: 1, perPage: 25, allChannels: false, ...extra })
 
   it('scopes to the channel and leaves drafts out', () => {
-    expect(orderFilters(query({}), 'sc_1')).toEqual({ sales_channel_id: 'sc_1', is_draft_order: false })
+    expect(orderFilters(query({}), { salesChannelId: 'sc_1' })).toEqual({ sales_channel_id: 'sc_1', is_draft_order: false })
+  })
+
+  it('lists all channels while leaving drafts out and keeping the register filter', () => {
+    expect(orderFilters(query({ allChannels: true, registerId: 'reg_1' }), 'all')).toEqual({
+      is_draft_order: false, metadata: { tally_register_id: 'reg_1' },
+    })
   })
 
   it('maps the filters to order fields', () => {
     expect(orderFilters(query({ status: 'pending', customerId: 'cus_1', registerId: 'reg_1',
-      dateRange: { after: '2026-11-11T00:00:00Z', before: '2026-11-12T00:00:00Z' } }), 'sc_1')).toEqual({
+      dateRange: { after: '2026-11-11T00:00:00Z', before: '2026-11-12T00:00:00Z' } }), { salesChannelId: 'sc_1' })).toEqual({
       sales_channel_id: 'sc_1', is_draft_order: false, status: 'pending', customer_id: 'cus_1',
       metadata: { tally_register_id: 'reg_1' }, created_at: { $gte: '2026-11-11T00:00:00Z', $lt: '2026-11-12T00:00:00Z' },
     })
   })
 
   it('searches a number as the display id and anything else with the order search', () => {
-    expect(orderFilters(query({ search: ' 42 ' }), 'sc_1')).toMatchObject({ display_id: 42 })
-    expect(orderFilters(query({ search: 'ann@example.com' }), 'sc_1')).toMatchObject({ q: 'ann@example.com' })
-    expect(orderFilters(query({ search: '99999999999' }), 'sc_1')).toBeNull()
-    expect(orderFilters(query({ search: '  ' }), 'sc_1')).toEqual({ sales_channel_id: 'sc_1', is_draft_order: false })
+    expect(orderFilters(query({ search: ' 42 ' }), { salesChannelId: 'sc_1' })).toMatchObject({ display_id: 42 })
+    expect(orderFilters(query({ search: 'ann@example.com' }), { salesChannelId: 'sc_1' })).toMatchObject({ q: 'ann@example.com' })
+    expect(orderFilters(query({ search: '99999999999' }), { salesChannelId: 'sc_1' })).toBeNull()
+    expect(orderFilters(query({ search: '  ' }), { salesChannelId: 'sc_1' })).toEqual({ sales_channel_id: 'sc_1', is_draft_order: false })
   })
 
   it('matches nothing for an empty filter value', () => {
-    expect(orderFilters(query({ status: '' }), 'sc_1')).toBeNull()
-    expect(orderFilters(query({ registerId: '' }), 'sc_1')).toBeNull()
+    expect(orderFilters(query({ status: '' }), { salesChannelId: 'sc_1' })).toBeNull()
+    expect(orderFilters(query({ registerId: '' }), { salesChannelId: 'sc_1' })).toBeNull()
   })
 })
 
@@ -210,8 +227,8 @@ describe('toStoreOrder', () => {
 
 describe('orderPage', () => {
   it('says whether more orders follow the page', () => {
-    expect(orderPage([tillOrder], 2, { page: 1, perPage: 1 })).toMatchObject({ hasMore: true, total: 2 })
-    expect(orderPage([tillOrder], 2, { page: 2, perPage: 1 })).toMatchObject({ hasMore: false, total: 2 })
-    expect(orderPage([], 0, { page: 1, perPage: 25 })).toEqual({ orders: [], hasMore: false, total: 0 })
+    expect(orderPage([tillOrder], 2, { page: 1, perPage: 1, allChannels: false })).toMatchObject({ hasMore: true, total: 2 })
+    expect(orderPage([tillOrder], 2, { page: 2, perPage: 1, allChannels: false })).toMatchObject({ hasMore: false, total: 2 })
+    expect(orderPage([], 0, { page: 1, perPage: 25, allChannels: false })).toEqual({ orders: [], hasMore: false, total: 0 })
   })
 })
