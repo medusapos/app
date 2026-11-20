@@ -58,6 +58,10 @@ export default defineMiddlewares({
     { matcher: '/tally/v1/registers/:id/closures', middlewares: [tallyCors('GET')] },
     { matcher: '/tally/v1/registers/:id/closures', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
     { matcher: '/tally/v1/registers/:id/closures', methods: ['GET'], policies: [TALLY_POS_USE] },
+    // A matcher without methods is a prefix, so this CORS entry names its methods to stay off /orders/:id/receipt-email.
+    { matcher: '/tally/v1/orders', methods: ['GET', 'OPTIONS'], middlewares: [tallyCors('GET')] },
+    { matcher: '/tally/v1/orders', methods: ['GET'], middlewares: [authenticate('user', ['bearer', 'session'])] },
+    { matcher: '/tally/v1/orders', methods: ['GET'], policies: [TALLY_POS_USE] },
     { matcher: '/tally/v1/orders/:id/receipt-email', middlewares: [tallyCors('POST')] },
     { matcher: '/tally/v1/orders/:id/receipt-email', methods: ['POST'], middlewares: [authenticate('user', ['bearer', 'session'])] },
     { matcher: '/tally/v1/orders/:id/receipt-email', methods: ['POST'], policies: [TALLY_POS_USE] },

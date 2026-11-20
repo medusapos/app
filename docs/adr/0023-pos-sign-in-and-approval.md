@@ -173,6 +173,7 @@ Nothing here reads or depends on vendurepos code. Its worker takes this section 
   - an MFA step in the approval dialog;
   - a per-store threshold UI (the threshold is a plugin option);
   - recording the sending user on every command (`openedBy`, `closedBy` and `createdBy` stay till data).
+- **Known limit:** a large burst of approvals queues on the advisory locks and holds a pool connection for each one while it waits.
 
 ## Questions for the front desk (with recommendations)
 

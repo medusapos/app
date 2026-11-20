@@ -34,6 +34,8 @@ export default class TallyRegisterModuleService extends MedusaService({
   TallyRegister, TallyRegisterSession, TallyRegisterSessionAlias, TallyRegisterMovement, TallyRegisterClosure,
   TallyRegisterApproval,
 }) {
+  // Assumes READ COMMITTED: the failure counts are read after the advisory locks are taken, so each statement sees
+  // the rows a writer committed while this one waited on the locks.
   @InjectManager()
   async admitApproval(p: { sessionId: string; variance: Record<string, number>; requestedBy: string; email: string;
     otherFailures?: () => { actor: number; email: number } }, @MedusaContext() sharedContext: Context = {}): Promise<AdmitApprovalResult> {
@@ -57,6 +59,7 @@ export default class TallyRegisterModuleService extends MedusaService({
   }
 
   // Device-clear approvals decide, against the stored register-approval failures, under admitApproval's locks (ADR 0023).
+  // Assumes READ COMMITTED, as admitApproval does: the counts are read after the advisory locks are taken.
   @InjectManager()
   async withApprovalBudget<T>(requestedBy: string, email: string, decide: (stored: { actor: number; email: number }) => T,
     @MedusaContext() sharedContext: Context = {}): Promise<T> {
