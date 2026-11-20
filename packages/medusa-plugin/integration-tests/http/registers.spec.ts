@@ -260,7 +260,7 @@ medusaIntegrationTestRunner({
         registerApproval: { thresholdMinor: 500 },
         lineTax: { none: false, classes: false },
         coupons: true,
-        pluginContract: 2,
+        pluginContract: 3,
       })
     })
 

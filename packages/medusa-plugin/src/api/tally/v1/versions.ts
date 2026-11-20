@@ -15,7 +15,8 @@ export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
 // TallyUI's per-command negotiation; this one is the app's.
 // Contract 1 includes GET /tally/v1/registers/{id}/closures' `cashier` filter (#446); an older plugin ignores the key.
 // Contract 2 adds POST /tally/v1/device-clear-approvals (#280).
-export const PLUGIN_CONTRACT = 2
+// Contract 3 adds GET /tally/v1/orders
+export const PLUGIN_CONTRACT = 3
 
 export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
   const value = options.approvalThresholdMinor

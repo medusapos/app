@@ -13,6 +13,8 @@ describe('pluginContractStatus', () => {
     [{ contracts: {} }, 'too_old'], [{ contracts: {}, pluginContract: 0 }, 'too_old'], [{ contracts: {}, pluginContract: '1' }, 'too_old'],
     [{ contracts: {}, pluginContract: 1.5 }, 'too_old'], [{ contracts: {}, pluginContract: MIN_PLUGIN_CONTRACT - 1 }, 'too_old'],
     [{ contracts: {}, pluginContract: MIN_PLUGIN_CONTRACT }, 'ok'], [{ contracts: {}, pluginContract: MIN_PLUGIN_CONTRACT + 1 }, 'ok'],
+    // A newer plugin (contract 3 adds GET /tally/v1/orders) must not latch "Update required".
+    [{ contracts: {}, pluginContract: 3 }, 'ok'],
   ])('%j is %s', (body, expected) => {
     expect(pluginContractStatus(body)).toBe(expected);
   });

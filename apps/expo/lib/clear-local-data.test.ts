@@ -234,6 +234,7 @@ describe('clearGate', () => {
   it('a plugin without the route needs an update; an unknown contract tries it', () => {
     const risk = { ...none, parked: 2 };
     expect(clearGate(risk, { ...current, pluginContract: 1 })).toBe('update');
+    expect(clearGate(risk, { ...current, pluginContract: 3 })).toBe('approve');
     expect(clearGate(risk, { ...current, pluginContract: 0 })).toBe('update');
     expect(clearGate(risk, { ...current, pluginContract: null, routeMissing: true })).toBe('update');
     expect(clearGate(risk, { ...current, pluginContract: null })).toBe('approve');
