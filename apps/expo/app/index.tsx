@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, usePathname } from 'expo-router';
 import { getCalendars } from 'expo-localization';
@@ -38,6 +38,7 @@ import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../lib/store-register-title';
 import { HeaderRegisterState, WideHeaderRegister, wideRegisterState } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
+import { ReceiptPickers, ThermalPaidReceipt } from '../components/receipt-pickers';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
   GETTING_READY, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, useGatedSale,
@@ -61,7 +62,9 @@ import { draftsCollection } from '../lib/order-store';
 import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
 import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
+import { usePrinterProfiles } from '../lib/printers';
 import { useProductSettings } from '../lib/product-settings';
+import { RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { playScanBeep } from '../lib/scan-beep';
@@ -123,6 +126,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
   const { record, isStored, state: outboxState, recent, savesInFlight, orders } = useOutboxContext();
+  // v2's paid-screen Template and Printer: the choice lasts until the app reloads, across sales; never saved.
+  const [receiptTemplateId, setReceiptTemplateId] = useState<ReceiptTemplateId>('standard');
+  const printers = usePrinterProfiles(orders);
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {
     const fresh = recent.filter((order) => order.syncStatus === 'applied' && !stockWarned.current.has(order.id)
@@ -414,21 +420,29 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
   const wide = width >= ROW_BREAKPOINT;
   const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || sale.stage.order.changeDueMinor > 0);
+  // Settings shows printers only in a browser, so the paid screen's pickers are there alone (and a thermal choice with them).
+  const pickers = Platform.OS === 'web';
+  const paper = pickers ? RECEIPT_TEMPLATES.find((t) => t.id === receiptTemplateId)?.paper : undefined;
+  const emailReceipt = connector.emailReceipt ? <EmailReceipt
+    orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
+    online={online} defaultEmail={paid?.customer?.email
+      ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
+    send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined;
   const paidReceipt = sale.stage.kind === 'receipt' ? <>
     {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
     {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
       {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
         : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
     </View>}
-    <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
+    {pickers && <ReceiptPickers templateId={receiptTemplateId} onTemplateChange={setReceiptTemplateId} printers={printers}
+      topInset={paidHeadline ? 0 : topInset} />}
+    {paper ? <ThermalPaidReceipt paper={paper} order={sale.stage.order} store={receiptStore} footerSlot={emailReceipt}
+      cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
+      : <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
     store={receiptStore}
-    footerSlot={connector.emailReceipt ? <EmailReceipt
-      orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
-      online={online} defaultEmail={paid?.customer?.email
-        ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
-      send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined}
-    topInset={paidHeadline ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
-    cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
+    footerSlot={emailReceipt}
+    topInset={paidHeadline || pickers ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
+    cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />}
   </> : null;
   const phoneTender = phone && sale.stage.kind === 'tender';
   const offlineShown = offline.kind !== null && sale.stage.kind === 'cart' && (!phone || !cartOpen);

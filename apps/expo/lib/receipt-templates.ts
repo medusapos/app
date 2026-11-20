@@ -60,3 +60,10 @@ export function printReceiptPage(html: string, transport?: PrintTransport): Prom
   if (transport) jobTransports.set(id, transport);
   return queue.print(SYSTEM_PRINTER_ID, { id, kind: 'test', html }).finally(() => jobTransports.delete(id));
 }
+
+// A finished sale's thermal receipt, from the paid screen: the same print dialog queue, as a receipt job.
+export function printSalePage(html: string, transport?: PrintTransport): Promise<void> {
+  const id = `receipt-sale-${++jobCount}`;
+  if (transport) jobTransports.set(id, transport);
+  return queue.print(SYSTEM_PRINTER_ID, { id, kind: 'receipt', html }).finally(() => jobTransports.delete(id));
+}
