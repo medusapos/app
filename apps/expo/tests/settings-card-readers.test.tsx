@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { saveSession } from '../lib/session';
@@ -29,8 +29,12 @@ vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 
 const baseUrl = 'https://store.test';
+const providersResponse = (providers: unknown[]) => vi.fn(async () => new Response(JSON.stringify({ providers }), {
+  status: 200, headers: { 'Content-Type': 'application/json' },
+}));
 
 beforeEach(() => {
+  vi.stubGlobal('fetch', providersResponse([]));
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -80,5 +84,31 @@ describe('Settings › Card readers', () => {
     expect(cardReaders.textContent).toBe('Card readers');
     expect(follows(screen.getByTestId('settings-list-printing'), cardReaders)).toBe(true);
     expect(follows(cardReaders, screen.getByTestId('settings-list-scanner'))).toBe(true);
+  });
+
+  it("lists the store's payment providers and whether this till can take each", async () => {
+    vi.stubGlobal('fetch', providersResponse([
+      { id: 'pp_system_default', name: 'Manual payment', tillCanTake: true },
+      { id: 'pp_stripe_stripe', name: 'Stripe', tillCanTake: false },
+    ]));
+    setWindowWidth(1280, 800);
+    await mount();
+    fireEvent.click(screen.getByTestId('settings-nav-card-readers'));
+    await screen.findByTestId('settings-payment-providers');
+    expect(screen.getByTestId('settings-payment-provider-pp_system_default').textContent).toContain('Manual payment');
+    expect(screen.getByTestId('settings-payment-provider-pp_system_default-state').textContent).toBe('Taken at this till');
+    expect(screen.getByTestId('settings-payment-provider-pp_stripe_stripe').textContent).toContain('Stripe');
+    expect(screen.getByTestId('settings-payment-provider-pp_stripe_stripe-state').textContent).toBe('Not at this till');
+    expect(screen.getByTestId('settings-card-readers-how')).toBeTruthy();
+  });
+
+  it('with no payment providers shows the card note only', async () => {
+    setWindowWidth(1280, 800);
+    await mount();
+    fireEvent.click(screen.getByTestId('settings-nav-card-readers'));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(`${baseUrl}/tally/v1/payment-providers`, expect.anything()));
+    await act(async () => {});
+    expect(screen.getByTestId('settings-card-readers-how')).toBeTruthy();
+    expect(screen.queryByTestId('settings-payment-providers')).toBeNull();
   });
 });
