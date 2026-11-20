@@ -108,12 +108,11 @@ async function mount() {
   });
 }
 const sessions = () => registerCollections(store.orders).sessions;
-/** Wide, the header's "Register ›"; a phone has none, so the user sheet's "Pay in · Pay out · Close register" row. */
-async function openPanel(phone = false) {
-  if (phone) {
-    fireEvent.click(await screen.findByTestId('user-menu'));
-    fireEvent.click(await screen.findByTestId('user-sheet-register'));
-  } else fireEvent.click(await screen.findByRole('button', { name: 'Open register panel' }));
+/** With a session open, v2's one sheet (row 09c.5): the header entry (wide "Register ›", a phone the avatar, or the given
+ * entry) opens the user sheet, whose "Pay in · Pay out · Close register" row opens the panel. */
+async function openPanel(phone = false, entry?: HTMLElement) {
+  fireEvent.click(entry ?? await (phone ? screen.findByTestId('user-menu') : screen.findByRole('button', { name: 'Open register panel' })));
+  fireEvent.click(await screen.findByTestId('user-sheet-register'));
   return within(await screen.findByTestId('register-panel'));
 }
 /** The panel's Close register: RegisterCount replaces the cart. */
@@ -900,7 +899,22 @@ describe('the register control', () => {
     await openTestRegister(store.orders, baseUrl);
     await mount();
     await waitFor(() => expect(headerState()).toBe('Offline'));
-    fireEvent.click(button('Register: Offline'));
+    expect(await openPanel(width === 360, button('Register: Offline'))).toBeTruthy();
+  });
+
+  // Row 09c.5: v2 has one sheet, so the header's entry shows the user sheet and its drawer card, never the panel first.
+  it.each([1280, 360])('at %i, with a session open, the header entry shows the user sheet with the drawer card, whose row opens the panel', async (width) => {
+    setWindowWidth(width);
+    vi.mocked(useReplicatedProducts).mockReturnValue({ products: [shirt], state: 'offline', error: null, lastSyncedAt: null,
+      stockOverlay: undefined, lastStockCheckAt: null, reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn(), unlisted: undefined });
+    await openTestRegister(store.orders, baseUrl);
+    await mount();
+    await waitFor(() => expect(headerState()).toBe('Offline'));
+    fireEvent.click(width === 360 ? screen.getByTestId('header-register-state') : button('Open register panel'));
+    const sheet = within(await screen.findByTestId('user-sheet'));
+    expect(sheet.getByTestId('user-sheet-drawer')).toBeTruthy();
+    expect(screen.queryByTestId('register-panel')).toBeNull();
+    fireEvent.click(sheet.getByTestId('user-sheet-register'));
     expect(await screen.findByTestId('register-panel')).toBeTruthy();
   });
 
@@ -931,8 +945,7 @@ describe('the register control', () => {
     expect(screen.queryByTestId('register-bar')).toBeNull();
     expect(screen.queryByTestId('header-register-state')).toBeNull();
     expect(screen.getByTestId('wide-header-register').contains(open)).toBe(true);
-    fireEvent.click(open);
-    expect(await screen.findByTestId('register-panel')).toBeTruthy();
+    expect(await openPanel(false, open)).toBeTruthy();
   });
 
   it('at 360, with a register open, there is no register row on Products or in the Cart view, and the user sheet opens the panel', async () => {

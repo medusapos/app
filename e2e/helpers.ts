@@ -117,13 +117,12 @@ export async function openRegister(page: Page, float = '100.00', synced = true, 
   return applied;
 }
 
-// The register panel: wide, the header's "Register ›"; a phone has no register row (row 17a), so the user sheet's
-// "Pay in · Pay out · Close register" row.
+// The register panel while a session is open: v2's one sheet (row 09c.5). Wide, the header's "Register ›", a phone (no
+// register row, row 17a) the avatar, opens the user sheet; its "Pay in · Pay out · Close register" row opens the panel.
 export async function openRegisterPanel(page: Page) {
-  if ((page.viewportSize()?.width ?? 1280) < 600) {
-    await page.getByTestId('user-menu').click();
-    await page.getByTestId('user-sheet-register').click();
-  } else await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+  if ((page.viewportSize()?.width ?? 1280) < 600) await page.getByTestId('user-menu').click();
+  else await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+  await page.getByTestId('user-sheet-register').click();
   await expect(page.getByTestId('register-panel')).toBeVisible();
 }
 

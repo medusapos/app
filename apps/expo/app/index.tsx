@@ -316,7 +316,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     ? <Text accessibilityRole="alert" className="p-4 text-center text-muted-foreground">{GETTING_READY}</Text>
     : <Tender sale={sale} methods={TILL_PAYMENT_METHODS} />;
   // The register control (ADR 0017): the header state brings up the gate (on a phone, the cart view, even with an empty
-  // cart), or the panel while the session is open.
+  // cart), or the user sheet, the way to the panel, while the session is open.
   const [panelOpen, setPanelOpen] = useState(false);
   const [userSheetOpen, setUserSheetOpen] = useState(false);
   const displayName = session.name || session.email;
@@ -333,6 +333,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [gateFocus, setGateFocus] = useState(0);
   const gateFocusHandled = useRef(0);
   const openGate = () => { if (phone) setCartOpen(true); setGateFocus((count) => count + 1); };
+  // v2 has one sheet (row 09c.5): while the session is open the header's register entries open the user sheet, as the
+  // avatar does, and its drawer card drills into the panel; a last closure with no session still opens the panel.
+  const openUserSheet = () => { setSheetFromArea(false); setUserSheetOpen(true); };
+  const openRegister = () => { if (registerStatus === 'open') openUserSheet(); else setPanelOpen(true); };
   // v2's phone has no register row (row 17a): every state the wide header names shows in the phone header instead.
   const headerRegisterState = phone && sale.stage.kind !== 'tender' ? wideRegisterState(boundRegisterId, online, register) : null;
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
@@ -447,11 +451,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         headerLeft: () => phoneTender ? null : <FrameMenuButton />, headerRight: () => (
         // pr-4 mirrors the title's own left inset (Header.js's marginHorizontal: 16); min-h-11 keeps each a 44 px target.
         <View dataSet={{ print: 'hide' }} className={phone ? 'flex-row items-center gap-4 pr-4' : 'flex-1 flex-row items-center gap-4 pr-4'}>
-        {!phone && <WideHeaderRegister online={online} salesToSend={outboxState.pending} onOpenPanel={() => setPanelOpen(true)} onGate={openGate} />}
+        {!phone && <WideHeaderRegister online={online} salesToSend={outboxState.pending} onOpenPanel={openRegister} onGate={openGate} />}
         {headerRegisterState && <HeaderRegisterState label={headerRegisterState} salesToSend={outboxState.pending}
-          onPress={registerStatus === 'open' ? () => setPanelOpen(true) : openGate} />}
+          onPress={registerStatus === 'open' ? openUserSheet : openGate} />}
         {!phoneTender && <AccountButton testID="user-menu" displayName={displayName} initials={initials}
-          onPress={() => { setSheetFromArea(false); setUserSheetOpen(true); }} />}
+          onPress={openUserSheet} />}
         {phoneTender && <IconButton testID="tender-close" accessibilityLabel="Close" className="h-11 w-11"
           disabled={sale.saving} onPress={() => { sale.cancelTender(); setCartOpen(true); }}>
           <View className="text-foreground"><XIcon size={24} /></View>
