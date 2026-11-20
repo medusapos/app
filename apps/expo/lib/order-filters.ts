@@ -10,7 +10,8 @@ export type MedusaOrderStatus = 'completed' | 'pending' | 'canceled';
 export const MEDUSA_ORDER_STATUS_OPTIONS: OrderFilterOption[] = [
   { value: 'completed', label: 'Completed' },
   { value: 'pending', label: 'Pending' },
-  { value: 'canceled', label: 'Canceled' },
+  // Label is British spelling to match TallyUI's badge; the value stays Medusa's `canceled`.
+  { value: 'canceled', label: 'Cancelled' },
 ];
 
 export function medusaOrderStatus(order: PosOrder): MedusaOrderStatus {

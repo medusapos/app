@@ -89,7 +89,7 @@ describe('order filters', () => {
     const status = [
       { value: 'completed', label: 'Completed' },
       { value: 'pending', label: 'Pending' },
-      { value: 'canceled', label: 'Canceled' },
+      { value: 'canceled', label: 'Cancelled' },
     ];
     expect(orderFilterOptions([emailed, named, idOnly, named, noId, order()])).toEqual({
       status,
