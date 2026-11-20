@@ -487,7 +487,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         onSaved={(c) => sale.setCustomer({ id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) })}
         onUnauthorized={onUnauthorized} cartSide={cartSettings.settings.cartSide} phone={phone} />}
       <CartNoteSheet open={noteOpen && sale.stage.kind === 'cart'} onOpenChange={setNoteOpen} value={sale.order.note ?? ''}
-        onChangeText={(text) => sale.setNote(clampNote(text))} cartSide={cartSettings.settings.cartSide} phone={phone} />
+        onChangeText={(text) => sale.setNote(clampNote(text))} cartSide={cartSettings.settings.cartSide} phone={phone}
+        order={sale.order} store={receiptStore} cashier={session.name || session.email} registerId={registerId}
+        onVoid={voidOffered ? () => setVoidOpen(true) : undefined} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
       {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row items-start">
         <View className="flex-1">{paidReceipt}</View>
