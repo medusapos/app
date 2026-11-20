@@ -16,6 +16,7 @@ npx medusa db:migrate
 npx medusa db:migrate:search
 npx medusa exec ./src/scripts/seed-dev-store.ts
 npx medusa exec ./src/scripts/seed-tax-rates.ts
+npx medusa exec ./src/scripts/seed-tax-rules.ts
 npx medusa user -e "$ADMIN_EMAIL" -p "$ADMIN_PASSWORD"
 POS_API_KEY_FILE="$MEDUSA_DEV_HOME/.pos-api-key" npx medusa exec ./src/scripts/create-pos-api-key.ts
 

@@ -1,4 +1,4 @@
-import { missingDefaultTaxRates } from '../tax-rates'
+import { missingDefaultTaxRates, planTaxRules } from '../tax-rates'
 
 describe('missingDefaultTaxRates', () => {
   it('creates standard VAT defaults in input order for regions without rates', () => {
@@ -63,5 +63,47 @@ describe('missingDefaultTaxRates', () => {
     expect(missingDefaultTaxRates(regions.map((region, index) => ({
       ...region, tax_rates: [{ id: 'vat', is_default: defaults[index].is_default }],
     })))).toEqual([])
+  })
+})
+
+describe('planTaxRules', () => {
+  const de = { id: 'de', country_code: 'de', tax_rates: [] }
+
+  it('plans the reduced rate and the province region on a fresh store', () => {
+    // A province region takes its parent's provider (CK_tax_region_provider_top_level).
+    expect(planTaxRules([de], 'ptyp_food').provinceRegion).not.toHaveProperty('provider_id')
+    expect(planTaxRules([de], 'ptyp_food')).toEqual({
+      reducedRate: {
+        tax_region_id: 'de', rate: 7, code: 'vat-de-reduced', name: 'DE reduced VAT (Food)',
+        is_default: false, rules: [{ reference: 'product_type', reference_id: 'ptyp_food' }],
+      },
+      provinceRegion: {
+        country_code: 'de', province_code: 'de-by', parent_id: 'de',
+        default_tax_rate: { rate: 18, code: 'vat-de-by', name: 'DE-BY VAT' },
+      },
+      provinceRate: null,
+    })
+  })
+
+  it('plans nothing on a second run', () => {
+    expect(planTaxRules([
+      { ...de, tax_rates: [{ id: 'r', code: 'vat-de-reduced', is_default: false }] },
+      { id: 'by', country_code: 'de', province_code: 'de-by', parent_id: 'de',
+        tax_rates: [{ id: 'b', code: 'vat-de-by', is_default: true }] },
+    ], 'ptyp_food')).toEqual({ reducedRate: null, provinceRegion: null, provinceRate: null })
+  })
+
+  it('plans a default rate for a de-by region without one', () => {
+    const plan = planTaxRules([
+      de, { id: 'by', country_code: 'de', province_code: 'de-by', parent_id: 'de', tax_rates: [] },
+    ], 'ptyp_food')
+    expect(plan.provinceRegion).toBeNull()
+    expect(plan.provinceRate).toEqual({
+      tax_region_id: 'by', rate: 18, code: 'vat-de-by', name: 'DE-BY VAT', is_default: true,
+    })
+  })
+
+  it('throws when there is no de country region', () => {
+    expect(() => planTaxRules([{ id: 'gb', country_code: 'gb' }], 'ptyp_food')).toThrow(/de/)
   })
 })
