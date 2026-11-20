@@ -28,7 +28,7 @@ it('accepts supported register versions, subject to the optional minimum', () =>
   expect(registerVersionAccepted(4, { minRegisterContract: 3 })).toBe(false)
 })
 
-// The app's MIN_PLUGIN_CONTRACT (apps/expo/lib/plugin-contract.ts) latches "Update required" below this.
-it('advertises plugin contract 3', () => {
-  expect(PLUGIN_CONTRACT).toBe(3)
+// The connector gates allChannels=true on plugin contract 4 or later.
+it('advertises plugin contract 4', () => {
+  expect(PLUGIN_CONTRACT).toBe(4)
 })

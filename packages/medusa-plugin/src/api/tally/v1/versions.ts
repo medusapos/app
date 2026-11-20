@@ -16,7 +16,8 @@ export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
 // Contract 1 includes GET /tally/v1/registers/{id}/closures' `cashier` filter (#446); an older plugin ignores the key.
 // Contract 2 adds POST /tally/v1/device-clear-approvals (#280).
 // Contract 3 adds GET /tally/v1/orders
-export const PLUGIN_CONTRACT = 3
+// Contract 4 adds allChannels=true on GET /tally/v1/orders
+export const PLUGIN_CONTRACT = 4
 
 export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
   const value = options.approvalThresholdMinor
