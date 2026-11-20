@@ -11,7 +11,7 @@ import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
 import {
   PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH, PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE,
-  PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL, PRODUCTS_TAGS_NONE, PRODUCTS_TAGS_SEARCH, saveProductsAreaCategory, saveProductsAreaTag,
+  PRODUCTS_NONE_IN_COLLECTION, PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL, PRODUCTS_TAGS_NONE, PRODUCTS_TAGS_SEARCH, saveProductsAreaCategory, saveProductsAreaTag,
 } from '../lib/products-area';
 import { fetchStoreSettings, loadSettingsChoice, type StoreSettings } from '../lib/store-settings';
 import { playScanBeep } from '../lib/scan-beep';
@@ -613,6 +613,167 @@ describe('ProductsAreaScreen', () => {
       expect(clearAndRefresh).toHaveBeenCalledTimes(1);
       expect(chip().textContent).toBe('Organic');
       expect(rowIds()).toEqual(['v1', 'v5']);
+    });
+  });
+
+  // v2's Collections pill, by Medusa product collections: titles read from the store API, one at a time, not kept.
+  describe('the Collections chip', () => {
+    const organic = { id: 'tag_organic', value: 'Organic' };
+    const seasonal = { id: 'tag_seasonal', value: 'Seasonal' };
+    const inStockVariant = (id: string, sku: string) => [{ id, title: 'Default', sku, prices: eur(700), stock: { status: 'in_stock' as const, quantity: 1 } }];
+    // Featured: p1 (in stock, Drinks) and p5 (out of stock, Food); Summer: p4; p6 has none; p7's collection has no title.
+    const collected: (Doc & { collection_id?: string })[] = [
+      { ...categorized[0], tags: [organic], collection_id: 'pcol_featured' },
+      { ...categorized[1], tags: [seasonal], collection_id: 'pcol_summer' },
+      { id: 'p5', title: 'E2E product 5', categories: [{ id: 'cat_food', name: 'Food' }], tags: [seasonal, organic],
+        collection_id: 'pcol_featured', variants: [
+          { id: 'v5', title: 'Default', sku: 'E2E-5', prices: eur(500), stock: { status: 'out_of_stock', quantity: 0 } }] },
+      { id: 'p6', title: 'E2E product 6', variants: inStockVariant('v6', 'E2E-6') },
+      { id: 'p7', title: 'E2E product 7', collection_id: 'pcol_untitled', variants: inStockVariant('v7', 'E2E-7') },
+    ];
+    // Storage on Expanded rows with the store's cached pricing (its publishable key) unless `cached` is false, and a
+    // fetch answering the store's collections with `status`.
+    const stub = ({ cached = true, status = 200 } = {}) => {
+      const data = new Map<string, string>([EXPANDED_ROWS]);
+      if (cached) data.set(`medusapos.pricing.${session.baseUrl}`, JSON.stringify(pricing));
+      vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
+        setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
+      const fetchMock = vi.fn(async (input: string | URL | Request, _init?: RequestInit) => !String(input).includes('/store/collections')
+        ? new Response('{}', { status: 404 })
+        : status === 200 ? new Response(JSON.stringify({ collections: [{ id: 'pcol_featured', title: 'Featured' },
+          { id: 'pcol_summer', title: 'Summer' }] }), { status: 200 }) : new Response('{}', { status }));
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    };
+    const collectionReads = (fetchMock: ReturnType<typeof stub>) =>
+      fetchMock.mock.calls.filter(([input]) => String(input).includes('/store/collections'));
+    // The collection list renders in a portal; the chip shows once the titles are read.
+    const mountCollections = async () => {
+      await act(async () => { render(<><ProductsAreaScreen /><PortalHost /></>); });
+    };
+    const chip = () => screen.getByTestId('products-collections');
+    const footer = () => screen.getByTestId('products-footer').textContent;
+    const menuIds = () => Array.from(within(screen.getByTestId('products-collections-menu')).queryAllByRole('radio'))
+      .map((item) => item.getAttribute('data-testid'));
+    const pick = (id: string) => {
+      press('products-collections');
+      press(`products-collection-${id}`);
+    };
+    const search = (value: string) => fireEvent.change(screen.getByTestId('products-search'), { target: { value } });
+
+    it("reads the catalogue's collection titles with the cached key, lists the titled ones, and a pick narrows the rows", async () => {
+      const fetchMock = stub();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: collected }));
+      await mountCollections();
+      expect((await screen.findByTestId('products-collections')).textContent).toBe('Collections');
+      expect(chip().getAttribute('aria-label')).toBe('Collections');
+      const reads = collectionReads(fetchMock);
+      expect(reads).toHaveLength(1);
+      const [input, init] = reads[0];
+      expect(String(input).startsWith('https://store.test/store/collections?')).toBe(true);
+      expect(new URL(String(input)).searchParams.getAll('id[]')).toEqual(['pcol_featured', 'pcol_summer', 'pcol_untitled']);
+      expect(new Headers(init?.headers).get('x-publishable-api-key')).toBe('pk_1');
+      press('products-collections');
+      expect(menuIds()).toEqual(['products-collection-pcol_featured', 'products-collection-pcol_summer']);
+      press('products-collection-pcol_featured');
+      expect(screen.queryByTestId('products-collections-menu')).toBeNull();
+      expect(rowIds()).toEqual(['v1', 'v5']);
+      expect(chip().textContent).toBe('Featured');
+      expect(chip().getAttribute('aria-label')).toBe('Collection: Featured');
+      expect(footer()).toBe('Showing 2 of 6');
+    });
+
+    it('narrows together with In stock and the search, and the Tags chip still narrows alone', async () => {
+      stub();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: collected }));
+      await mountCollections();
+      await screen.findByTestId('products-collections');
+      pick('pcol_featured');
+      expect(rowIds()).toEqual(['v1', 'v5']);
+      expect(footer()).toBe('Showing 2 of 6');
+      search('E2E-5');
+      expect(rowIds()).toEqual(['v5']);
+      expect(footer()).toBe('Showing 1 of 6');
+      search('');
+      press('products-in-stock');
+      expect(rowIds()).toEqual(['v1']);
+      expect(footer()).toBe('Showing 1 of 6');
+      press('products-in-stock');
+      press('products-collections-remove');
+      press('products-tags');
+      press('products-tag-tag_seasonal');
+      expect(rowIds()).toEqual(['p4', 'v5']);
+      expect(screen.getByTestId('products-tags').getAttribute('aria-label')).toBe('Tag: Seasonal');
+      expect(chip().textContent).toBe('Collections');
+      expect(footer()).toBe('Showing 3 of 6');
+    });
+
+    it('says no product matches the search, else none in the collection when In stock empties it', async () => {
+      stub();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: collected }));
+      await mountCollections();
+      await screen.findByTestId('products-collections');
+      pick('pcol_featured');
+      search('E2E-4');
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NO_MATCH('E2E-4'))).toBeTruthy();
+      expect(screen.queryByText(PRODUCTS_NONE_IN_COLLECTION('Featured'))).toBeNull();
+      search('');
+      press('category-nav-cat_food');
+      expect(rowIds()).toEqual(['v5']);
+      press('products-in-stock');
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NONE_IN_COLLECTION('Featured'))).toBeTruthy();
+    });
+
+    it('the cross takes the collection off, and a new mount starts with none', async () => {
+      stub();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: collected }));
+      await mountCollections();
+      await screen.findByTestId('products-collections');
+      expect(screen.queryByTestId('products-collections-remove')).toBeNull();
+      pick('pcol_featured');
+      expect(rowIds()).toEqual(['v1', 'v5']);
+      expect(screen.getByTestId('products-collections-remove').getAttribute('aria-label')).toBe('Remove collection');
+      press('products-collections-remove');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v5', 'v6', 'v7']);
+      expect(chip().textContent).toBe('Collections');
+      expect(screen.queryByTestId('products-collections-remove')).toBeNull();
+      expect(screen.queryByTestId('products-collections-menu')).toBeNull();
+      pick('pcol_featured');
+      cleanup();
+      await mountCollections();
+      expect((await screen.findByTestId('products-collections')).textContent).toBe('Collections');
+      expect(rowIds()).toEqual(['p4', 'v1', 'v5', 'v6', 'v7']);
+      expect(footer()).toBe('Showing 6 of 6');
+    });
+
+    it('no chip and no read when no product has a collection or no key is cached, and no chip when the read is refused', async () => {
+      let fetchMock = stub();
+      sessionState.session = session;
+      publishCatalogue(sale({ products: collected.map((doc) => ({ ...doc, collection_id: undefined })) }));
+      await mountCollections();
+      expect(screen.getByTestId('products-tags')).toBeTruthy();
+      expect(screen.queryByTestId('products-collections')).toBeNull();
+      expect(collectionReads(fetchMock)).toEqual([]);
+      cleanup();
+      fetchMock = stub({ cached: false });
+      publishCatalogue(sale({ products: collected }));
+      await mountCollections();
+      expect(screen.getByTestId('products-tags')).toBeTruthy();
+      expect(screen.queryByTestId('products-collections')).toBeNull();
+      expect(collectionReads(fetchMock)).toEqual([]);
+      cleanup();
+      fetchMock = stub({ status: 403 });
+      await mountCollections();
+      await vi.waitFor(() => expect(collectionReads(fetchMock)).toHaveLength(1));
+      await act(async () => {});
+      expect(screen.getByTestId('products-tags')).toBeTruthy();
+      expect(screen.queryByTestId('products-collections')).toBeNull();
     });
   });
 

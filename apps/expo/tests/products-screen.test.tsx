@@ -329,7 +329,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'catalogue-sync', 'cart-settings-button', 'cart-add-menu', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'In Stock', 'Sync products', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings', 'Add order note']);
+      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'In Stock', 'Sync products', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -1227,9 +1227,9 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     const footer = within(screen.getByTestId('cart-footer'));
     expect(footer.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
     expect(footer.queryByText('Total')).toBeNull(); // v2's cart: the total is on Checkout, no Total row
-    // The ⋮ beside Checkout holds Void while the sale has lines and no payments.
+    // The ⋮ beside Checkout holds Order details, then Void while the sale has lines and no payments.
     fireEvent.click(footer.getByRole('button', { name: 'More actions' }));
-    expect(within(footer.getByTestId('cart-foot-menu')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Void']);
+    expect(within(footer.getByTestId('cart-foot-menu')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Order details', 'Void']);
   });
 
   // v2 (pos/checkout/payment-methods.mdx#close): in a browser Esc goes back one step, as the ✕ does, unless you are

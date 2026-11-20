@@ -15,8 +15,13 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
     // On a phone the cart, and so the note, shows in the cart view, which the Cart tab opens.
     const openCart = async (page: Page) => { if (phone) await cartTab(page).click(); };
     const noteField = (page: Page) => page.getByPlaceholder('Order note', { exact: true });
+    // v2's ⋮ beside Checkout, then its Order details item, opens the note sheet.
+    const openOrderDetails = async (page: Page) => {
+      await page.getByTestId('cart-foot-more').click();
+      await page.getByTestId('cart-foot-menu').getByRole('menuitem', { name: 'Order details', exact: true }).click();
+    };
     const addNote = async (page: Page, note: string) => {
-      await page.getByText('Add order note', { exact: true }).click();
+      await openOrderDetails(page);
       await noteField(page).fill(note);
       await page.getByTestId('cart-note-close').click();
     };
@@ -66,7 +71,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       // A phone's cart bar shows only with items, so the new sale takes one to open its cart view.
       if (phone) await addE2E1(page);
       await openCart(page);
-      await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
+      await expect(page.getByText('Add order note', { exact: true })).toHaveCount(0);
       await expect(noteRow(page)).toHaveCount(0);
       await expect.poll(async () => (await ordersByClientId(token))
         .find((order) => order.metadata.tally_client_id === payload.clientOrderId)?.metadata.tally_note, { timeout: 30_000 })
@@ -81,7 +86,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await page.getByTestId('new-sale-tab').click();
       await expect(page.getByTestId(/^open-sale-tab-.*-who$/)).toBeVisible();
       await expect(page.getByTestId('cart-empty')).toBeVisible();
-      await expect(page.getByText('Add order note', { exact: true })).toBeVisible();
+      await expect(page.getByText('Add order note', { exact: true })).toHaveCount(0);
       await expect(noteRow(page)).toHaveCount(0);
       await page.getByTestId(/^open-sale-tab-.*-who$/).click();
       await expect(noteRow(page)).toContainText('Park me');
@@ -97,7 +102,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await signIn(page);
       await addE2E1(page);
       await openCart(page);
-      await page.getByText('Add order note', { exact: true }).click();
+      await openOrderDetails(page);
       await noteField(page).fill('x'.repeat(1001));
       await expect(noteField(page)).toHaveValue('x'.repeat(1000));
     });

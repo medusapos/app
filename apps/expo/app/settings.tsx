@@ -10,6 +10,7 @@ import { DirectScannerConnection } from '../components/device-scanner';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
 import { PrintersGroup } from '../components/printers-group';
+import { PaymentProvidersGroup } from '../components/payment-providers-group';
 import { ReceiptTemplatesGroup } from '../components/receipt-templates';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { StripHeightContext } from '../components/store-refused';
@@ -65,7 +66,7 @@ export default function SettingsScreen() {
     { id: 'store', label: 'General', element: <StoreSection session={session} /> },
     { id: 'tax', label: 'Tax', element: <TaxSection session={session} /> },
     { id: 'printing', label: 'Printing', element: <PrintingSection session={session} /> },
-    { id: 'card-readers', label: 'Card readers', element: <CardReadersSection /> },
+    { id: 'card-readers', label: 'Card readers', element: <CardReadersSection session={session} /> },
     { id: 'scanner', label: 'Barcode Scanning', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
@@ -320,9 +321,9 @@ function PrintingSection({ session }: { session: Session }) {
   <ReceiptTemplatesGroup session={session} />
   </>;
 }
-function CardReadersSection() {
+function CardReadersSection({ session }: { session: Session }) {
   const mode = cardPaymentMode(TILL_PAYMENT_METHODS);
-  return <SettingsGroup title="Card readers" testID="settings-card-readers" description="How this till takes card payments. Read-only.">
+  return <><SettingsGroup title="Card readers" testID="settings-card-readers" description="How this till takes card payments. Read-only.">
     {mode ? <>
       <SettingsRow label="Card method" action={
         <Text testID="settings-card-readers-method" className="max-w-40 text-right text-sm text-foreground">{mode.method}</Text>
@@ -339,7 +340,9 @@ function CardReadersSection() {
     </> : <View className="px-4 pb-4">
       <Text testID="settings-card-readers-none" className="text-sm text-muted-foreground">This till takes no card payments.</Text>
     </View>}
-  </SettingsGroup>;
+  </SettingsGroup>
+  <PaymentProvidersGroup session={session} />
+  </>;
 }
 function ScannerSection({ session }: { session: Session }) {
   const { settings, save, reset } = useScannerSettings(defaultStorage(), session.baseUrl);
