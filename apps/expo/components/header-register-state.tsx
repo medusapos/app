@@ -1,9 +1,9 @@
 import { Pressable, View } from 'react-native';
-import { Button, describeRegisterBarPill, Text } from '@tallyui/components';
+import { Button, describeRegisterBarPill, Text, type RegisterBarPill } from '@tallyui/components';
 import type { useRegisterSession } from '@tallyui/pos';
 import { useRegister } from '../lib/register-context';
 
-export type WideRegisterState = 'Choose register' | 'Closed' | 'Counting' | 'Close not finished' | 'Offline' | 'Approval needed' | 'Overdue';
+export type WideRegisterState = Exclude<RegisterBarPill, 'Choose a register' | 'Register closed'> | 'Choose register' | 'Closed';
 
 // v2's header state: an amber dot and the register's state, wide beside the store and register (row 09a.3), on a phone
 // before the avatar (row 17a.2). Plain dot and text, no pill. A phone has no other register row, so this is its way to

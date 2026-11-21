@@ -176,9 +176,12 @@ describe('discounts in the cart', { timeout: 20_000 }, () => {
     for (const text of [`10% −${money(250)}`, `Order discount −${money(50)}`]) expect(screen.getByText(text)).toBeTruthy();
     const footer = within(screen.getByTestId('cart-footer'));
     for (const [label, amount] of [['Subtotal', money(2500)], ['Discount', `−${money(300)}`],
-      [taxName, money(display.taxMinor)], ['Total', money(display.totalMinor)]] as const) {
+      ['Total', money(display.totalMinor)]] as const) {
       expect(footer.getByText(label).parentElement!.textContent).toBe(`${label}${amount}`);
     }
+    // TallyUI 4.0.0's cart tax row: the label and an Including/Excluding tax tag, then the amount (the receipt keeps "incl. ").
+    expect(footer.getByTestId('cart-total-tax-0').textContent)
+      .toBe(`VAT 25%${inclusive ? 'Including' : 'Excluding'} tax${money(display.taxMinor)}`);
     const order = sale.order;
     cleanup();
     render(<Receipt order={order} store={receiptStore} taxLabel={taxLabel} cashier="cashier" registerId="register-1" newSale={() => {}} />);

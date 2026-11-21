@@ -60,7 +60,7 @@ beforeEach(async () => {
   vi.mocked(useOutboxContext).mockReturnValue({
     orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
     record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined),
-    requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false),
+    requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), isStored: vi.fn().mockResolvedValue(false),
   });
   vi.mocked(useRegister).mockReturnValue({ boundRegisterId: 'register-1',
     registers: [{ id: 'register-1', name: 'Register 1' }],

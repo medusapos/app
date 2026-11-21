@@ -139,6 +139,8 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(count).toBeVisible();
       const counted = 100 + total;
       let rest = Math.round(counted * 100);
+      // TallyUI 4.0.0 folds the tiles under "Count by notes and coins".
+      await count.getByTestId('count-denominations').click();
       for (const face of EUR_FACES) {
         for (; rest >= face; rest -= face) await count.getByTestId(`den-tile-${face}`).click();
       }
@@ -152,7 +154,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(page.frameLocator('#closure-print-frame').locator('h2')).toHaveText(`Z report · ${closure}`);
       await expect(closureSheet.getByTestId('closure-print')).toHaveText('Print the Z report');
       await expect(closureSheet.getByTestId('closure-print-error')).toHaveCount(0);
-      await expect(closureSheet.getByTestId('closure-counted-cash')).toHaveText(new RegExp(`^Counted ${money(counted).source.slice(1, -1)}$`));
+      await expect(closureSheet.getByTestId('closure-counted-cash')).toHaveText(money(counted));
       await expect(page.getByTestId('approval-dialog')).toHaveCount(0);
       await expect(page.getByTestId('closure-approved-by')).toHaveCount(0);
       await expect(closureSheet.getByTestId('closure-check')).toHaveCSS('opacity', '1');
@@ -202,7 +204,7 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await finish.getByTestId('register-column-finish-close-button').click();
       const sheet = page.getByTestId('closure-sheet');
       await expect(sheet.getByTestId('closure-number')).toHaveText(closure);
-      await expect(sheet.getByTestId('closure-counted-cash')).toHaveText(/^Counted €?\s?100[.,]00\s?€?$/);
+      await expect(sheet.getByTestId('closure-counted-cash')).toHaveText(/^€?\s?100[.,]00\s?€?$/);
       await sheet.getByTestId('closure-done').click();
       await expect(page.getByTestId('open-register-amount')).toHaveValue('100.00');
       await expect(finish).toHaveCount(0);
@@ -485,7 +487,8 @@ test('with Register 1 open, Checkout opens the tender, and ⋮ Void asks first a
   await expect(checkout).toHaveText(/^Checkout \D*5\.00$/);
   await checkout.click();
   await expect(page.getByTestId('tender-pane')).toBeVisible();
-  await expect(page.getByTestId('tender-balance')).toHaveText(/5\.00$/);
+  // TallyUI 4.0.0: an unpaid sale's balance is the large entry figure ("To pay" above it).
+  await expect(page.getByTestId('tender-entry-amount')).toHaveText(/5\.00$/);
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await expect(page.getByTestId('tender-pane')).toHaveCount(0);
   const voidSale = async () => {

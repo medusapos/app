@@ -109,7 +109,7 @@ beforeEach(() => {
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null by default: the order store is open unless a test says otherwise (#86 review, item 5).
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -328,8 +328,8 @@ describe('ProductsScreen catalogue', () => {
     await mount();
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
-      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'product-settings-button', 'catalogue-sync', 'cart-settings-button', 'cart-add-menu', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'In Stock', 'Sync products', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings']);
+      ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'view-toggle-table', 'product-settings-button', 'catalogue-sync', 'cart-settings-button', 'cart-add-menu', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
+      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'Switch to table view', 'In Stock', 'Sync products', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -1586,7 +1586,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       const [savesInFlight, setSavesInFlight] = useState(0);
       // Not null: these tests are about the hung-save mechanics, not the order-store-open gate (#86 review, item 5).
       return { orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight, stuckCommandIds: [], isStored,
-        flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0),
+        flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(),
         async record(order: PosOrder) {
           setSavesInFlight((count) => count + 1);
           try { await record(order); } finally { setSavesInFlight((count) => count - 1); }

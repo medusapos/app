@@ -1,5 +1,5 @@
-import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartLineRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
+import { expect, type Locator, type Page } from '@playwright/test';
+import { addE2E1, adminToken, backend, captureCommands, cartLineRow, cartTaxRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
 import { appliedResponse, saleResults } from './helpers';
 
 // Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5, 6, 7] at GET /tally/v1/info,
@@ -15,7 +15,8 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   // The plugin advertises order.create [1, 2, 3, 4, 5, 6, 7] (ADR 0021), register 1, 2 and 3 (ADR 0022, ADR 0023) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0)
   // and its registerApproval, the plugin's default approvalThresholdMinor of 500 (ADR 0023; parsed since TallyUI 3.13.0, ADR-082).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
-  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3,
+  // The plugin's contract 4 (#516) is read into the capabilities since @tallyui/core 4.0.0 (TallyUI #1114).
+  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 4,
     coupons: true,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
     registerApproval: { thresholdMinor: 500 } });
@@ -32,11 +33,14 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   await expect(cartLineRow(page, 'E2E product 1')).toHaveText(/^2E2E product 1\D*2\.00\D*4\.00$/);
   await expect(page.getByText(/^10% −\D*0\.40$/)).toBeVisible();
   await expect(page.getByText(/^Order discount −.*0\.50$/)).toBeVisible();
-  // The last "Discount" is the totals row; the first is the line's action.
-  const row = async (label: string) => Number((await page.getByText(label, { exact: true }).last().locator('..').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
+  // The last "Discount" is the totals row; the first is the line's action. The VAT row is read by its testID (TallyUI
+  // 4.0.0 sets its label and Excluding tax tag apart from the amount).
+  const amountOf = async (locator: Locator) => Number((await locator.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
+  const row = (label: string) => amountOf(page.getByText(label, { exact: true }).last().locator('..'));
   // v2's cart has no Total row: the total is on the Checkout button.
   const total = Number((await page.getByTestId('cart-checkout').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
-  expect([await row('Subtotal'), await row('Discount'), await row('VAT 25%'), total]).toEqual([4, 0.9, 0.78, 3.88]);
+  await expect(cartTaxRow(page)).toHaveText(/^VAT 25%Excluding tax/);
+  expect([await row('Subtotal'), await row('Discount'), await amountOf(cartTaxRow(page)), total]).toEqual([4, 0.9, 0.78, 3.88]);
   const applied = appliedResponse(page);
   // Exact cash, as sellBySku pays it, stopping on the receipt to read its rows.
   await page.getByTestId('cart-checkout').click();

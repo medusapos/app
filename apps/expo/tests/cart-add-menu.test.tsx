@@ -63,7 +63,7 @@ beforeEach(async () => {
     reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn(), unlisted: undefined });
   store = await openOrderStore(session.baseUrl);
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, record: vi.fn(async () => {}), state: { pending: 0, sending: false },
-    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn(async () => true) });
+    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), isStored: vi.fn(async () => true) });
 });
 afterEach(async () => {
   cleanup();
@@ -173,7 +173,7 @@ it.each([
   expect(form.getAttribute('aria-label')).toBe(title);
   fireEvent.change(within(form).getByLabelText('Name'), { target: { value: name } });
   fireEvent.change(within(form).getByLabelText('Amount'), { target: { value: '2.00' } });
-  click('Apply');
+  click('Add to Cart');
   expect((item === 'Add Fee' ? screen.getByTestId('cart-fee-0') : cartLine(name)).textContent).toContain(name);
   expect(screen.queryByTestId('cart-add-dialog')).toBeNull();
 });

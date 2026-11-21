@@ -78,7 +78,7 @@ beforeEach(async () => {
     reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn(), unlisted: undefined });
   store = await openOrderStore(session.baseUrl);
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, record: vi.fn(), state: { pending: 0, sending: false },
-    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn() });
+    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), isStored: vi.fn() });
   searchCustomers.mockResolvedValue([customer]);
   createCustomer.mockResolvedValue(customer);
   getCustomer.mockResolvedValue(stored);
