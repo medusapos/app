@@ -19,6 +19,7 @@ medusaIntegrationTestRunner({
     let headers: Record<string, string>
     const sales: Array<{ clientOrderId: string; orderId: string; displayId: string }> = []
     const hidden: string[] = []
+    let webOrderId: string
 
     async function loginWithRoles(roleIds: string[]) {
       const email = `pos-${randomUUID()}@example.com`
@@ -65,7 +66,9 @@ medusaIntegrationTestRunner({
       const orders = await container.resolve(Modules.ORDER).createOrders([
         { currency_code: 'eur', sales_channel_id: web.id, email: 'web@example.com' }, draft,
       ])
-      hidden.push(...orders.map(order => order.id))
+      // createOrders re-lists the new rows by id, not in input order, so each is named by what it is.
+      webOrderId = orders.find(order => order.sales_channel_id === web.id)!.id
+      hidden.push(webOrderId, orders.find(order => order.is_draft_order)!.id)
     })
 
     function list(query = '', requestHeaders: Record<string, string> = headers) {
@@ -91,8 +94,8 @@ medusaIntegrationTestRunner({
       const response = await list('?allChannels=true')
       expect(response.status).toBe(200)
       expect(response.data).toMatchObject({ hasMore: false, total: 3 })
-      expect(response.data.orders.map(order => order.id).sort()).toEqual([hidden[0], ...sales.map(sale => sale.orderId)].sort())
-      const webRow = response.data.orders.find(order => order.id === hidden[0])
+      expect(response.data.orders.map(order => order.id).sort()).toEqual([webOrderId, ...sales.map(sale => sale.orderId)].sort())
+      const webRow = response.data.orders.find(order => order.id === webOrderId)
       const tillRow = response.data.orders.find(order => order.id === sales[0].orderId)
       const defaultList = await list()
       expect(tillRow).toEqual(defaultList.data.orders.find(order => order.id === sales[0].orderId))
