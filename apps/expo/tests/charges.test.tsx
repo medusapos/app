@@ -13,6 +13,7 @@ import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
+import { tenderBalance } from './tender-pane';
 import { setWindowWidth } from './window-width';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
@@ -61,7 +62,7 @@ beforeEach(async () => {
   store = await openOrderStore(session.baseUrl);
   record.mockReset().mockResolvedValue(undefined);
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, record, state: { pending: 0, sending: false },
-    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn(async () => true) });
+    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), isStored: vi.fn(async () => true) });
 });
 afterEach(async () => {
   cleanup();
@@ -75,10 +76,9 @@ async function start() {
 }
 async function totalMinor() {
   await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
-  // TallyUI 3.14.0's tender pane heads an unpaid sale with its Total.
-  expect(screen.getByTestId('tender-headline').textContent).toMatch(/^Total/);
-  const total = screen.getByTestId('tender-balance');
-  const amount = Math.round(Number(total.textContent!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
+  // TallyUI 4.0.0's tender pane heads an unpaid sale "To pay", its balance the large entry figure.
+  expect(screen.getByTestId('tender-headline').textContent).toBe('To paySplit');
+  const amount = Math.round(Number(tenderBalance()!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);
   click('Back');
   return amount;
 }
@@ -108,9 +108,11 @@ it('a fee added at the till shows in the cart and raises the total', async () =>
   const form = within(screen.getByTestId('charge-form'));
   fireEvent.change(form.getByLabelText('Name'), { target: { value: 'Gift wrap' } });
   fireEvent.change(form.getByLabelText('Amount'), { target: { value: '2.00' } });
-  fireEvent.click(form.getByRole('button', { name: 'Apply' }));
+  fireEvent.click(form.getByRole('button', { name: 'Add to Cart' }));
   expect(screen.getByTestId('cart-fee-0').textContent).toContain('Gift wrap');
   expect(await totalMinor()).toBe(before + 200);
+  // TallyUI 4.0.0's CartLineStrip (v2's line strip): pressing the fee's total opens its Edit and Remove.
+  click('Edit total of Gift wrap');
   click('Remove Gift wrap');
   expect(screen.queryByTestId('cart-fee-0')).toBeNull();
   expect(await totalMinor()).toBe(before);

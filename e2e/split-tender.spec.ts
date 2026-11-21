@@ -24,7 +24,11 @@ test('a split card-and-cash sale reaches Medusa once at the till\'s total, with 
   await page.getByTestId('tender-method-external').click();
   await key('2.00');
   await page.getByTestId('tender-take').click();
-  await expect(page.getByTestId('tender-headline')).toHaveText(/^Remaining€3\.00/);
+  // TallyUI 4.0.0's headline captions "Remaining" (with its Split chip and "€2.00 of €5.00 paid"); the balance is the
+  // large entry figure, pre-typed with it, so no separate tender-balance is drawn.
+  await expect(page.getByTestId('tender-headline')).toHaveText(/^Remaining/);
+  await expect(page.getByTestId('tender-balance')).toHaveCount(0);
+  await expect(page.getByTestId('tender-entry-amount')).toHaveText('€3.00');
   await page.getByTestId('tender-method-cash').click();
   await key('5.00');
   await page.getByTestId('tender-take').click();

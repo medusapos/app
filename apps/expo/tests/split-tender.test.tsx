@@ -59,7 +59,7 @@ beforeEach(async () => {
   store = await openOrderStore(session.baseUrl);
   record.mockReset().mockResolvedValue(undefined);
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, record, state: { pending: 0, sending: false },
-    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn(async () => true) });
+    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), isStored: vi.fn(async () => true) });
 });
 afterEach(async () => {
   cleanup();
@@ -73,7 +73,7 @@ async function startSplit() {
   add();
   // v2's cart foot: Checkout opens the one tender pane, which takes split legs itself.
   await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
-  expect(headline()).toBe('Total€24.00');
+  expect(headline()).toBe('To paySplit');
   expect(tenderBalance()).toBe('€24.00');
 }
 function tender(method: 'card' | 'cash', amount: string) {
@@ -91,7 +91,7 @@ async function complete() {
 it('takes a card part and a cash remainder, shows change from cash only, and records both payments', async () => {
   await startSplit();
   tender('card', '10.00');
-  expect(headline()).toBe('Remaining€14.00€10.00 of €24.00 paid');
+  expect([headline(), tenderBalance()]).toEqual(['RemainingSplit€10.00 of €24.00 paid', '€14.00']);
   expect(screen.queryByTestId('tender-change')).toBeNull();
   expect(tenderEntry()).toBe('€14.00');
   tender('cash', '20.00');
@@ -148,7 +148,7 @@ it('removing a tender restores the balance due', async () => {
   // The pane's Cancel payment voids the leg: it stays on the ledger, struck through, and counts nothing.
   fireEvent.click(screen.getByTestId(/^tender-leg-.*-void$/));
   expect(screen.queryByTestId('tender-paid')).toBeNull();
-  expect(headline()).toBe('Total€24.00');
+  expect([headline(), tenderBalance()]).toEqual(['To paySplit', '€24.00']);
   expect(tenderEntry()).toBe('€24.00');
   expect(screen.queryByTestId(/^tender-leg-.*-void$/)).toBeNull();
   expect(screen.getByTestId(/^tender-leg-.*-status$/).textContent).toBe('Cancelled');
@@ -160,7 +160,7 @@ it('removing a tender restores the balance due', async () => {
 it('takes a cash part and the rest on the card terminal, and records both payments against the order total', async () => {
   await startSplit();
   tender('cash', '5.00');
-  expect(headline()).toBe('Remaining€19.00€5.00 of €24.00 paid');
+  expect([headline(), tenderBalance()]).toEqual(['RemainingSplit€5.00 of €24.00 paid', '€19.00']);
   // The Card terminal tile prefills the balance due, so Take settles the rest.
   pickMethod('external');
   expect(tenderEntry()).toBe('€19.00');

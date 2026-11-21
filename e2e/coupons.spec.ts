@@ -1,5 +1,5 @@
 import { expect, type Page, type Response } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartTotalRow, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartTaxRow, cartTotalRow, inventoryLevel, ordersByClientId, setInventoryLevel, signIn, tenderCash, test } from './helpers';
 import { appliedResponse, saleResults } from './helpers';
 
 // Till coupons (ADR 0025, parity row 7): the till prices a Medusa promotion code through POST /tally/v1/promotions/preview
@@ -45,7 +45,7 @@ test('a €1.00 coupon typed in lower case prices the cart at €3.75, and Medus
     // 2 × €2.00 less the €1.00 coupon is €3.00 net, plus 25% VAT (€0.75) = €3.75.
     await expect(page.getByTestId('cart-checkout')).toHaveText(/^Checkout\D*3\.75$/);
     await expect(cartTotalRow(page, 'Subtotal')).toHaveText(/^Subtotal\D*4\.00$/);
-    await expect(cartTotalRow(page, 'VAT 25%')).toHaveText(/^VAT 25%\D*0\.75$/);
+    await expect(cartTaxRow(page)).toHaveText(/^VAT 25%Excluding tax\D*0\.75$/);
     // The coupon reads on its own row, never again as a cart Discount.
     await expect(cartTotalRow(page, 'Discount').filter({ hasText: /1\.00/ })).toHaveCount(0);
     const applied = saleApplied = appliedResponse(page);

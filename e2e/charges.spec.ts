@@ -21,7 +21,7 @@ test('a sale with a fee, shipping and a custom item reaches Medusa once at the t
     const form = page.getByTestId('charge-form');
     await form.getByLabel('Name', { exact: true }).fill(name);
     await form.getByLabel('Amount', { exact: true }).fill(amount);
-    await form.getByRole('button', { name: 'Apply', exact: true }).click();
+    await form.getByRole('button', { name: 'Add to Cart', exact: true }).click();
   }
   const tillTotal = page.getByTestId('cart-checkout');
   const totalMinor = Math.round(Number((await tillTotal.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]) * 100);

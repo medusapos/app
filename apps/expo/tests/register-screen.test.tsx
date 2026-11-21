@@ -87,7 +87,7 @@ beforeEach(async () => {
   store = await openOrderStore(baseUrl);
   record = vi.fn(async (order: PosOrder) => { await store.orders.insert(order); });
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
-    record, flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), isStored: vi.fn().mockResolvedValue(false) });
+    record, flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
 });
 afterEach(async () => {
   cleanup();
@@ -546,7 +546,7 @@ describe('closing the register', () => {
     await act(async () => { fireEvent.click(finish.getByTestId('register-column-finish-close-button')); });
     const sheet = within(await screen.findByTestId('closure-sheet'));
     expect(sheet.getByTestId('closure-approved-by').textContent).toBe('Approved by Mia Manager');
-    expect(sheet.getByTestId('closure-counted-cash').textContent).toBe('Counted €90.00');
+    expect(sheet.getByTestId('closure-counted-cash').textContent).toBe('€90.00');
     const [closure] = await closures();
     expect(closure).toMatchObject({ counted: { cash: 9000 }, variance: { cash: -1000 } });
     expect(closure.breakdowns).toMatchObject({ approved_by: 'user_mgr', approved_by_name: 'Mia Manager' });

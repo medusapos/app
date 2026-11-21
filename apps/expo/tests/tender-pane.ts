@@ -3,8 +3,11 @@
 import { fireEvent, screen, within } from '@testing-library/react';
 
 export const tenderPane = () => within(screen.getByTestId('tender-pane'));
-/** The balance headline: "Total" before any payment, "Remaining" after. */
-export const tenderBalance = () => screen.getByTestId('tender-balance').textContent;
+/**
+ * The balance due. TallyUI 4.0.0's headline captions it "To pay" (or "Remaining") and writes it beside the caption
+ * (`tender-balance`) only when it is 0 or differs from the entry; otherwise the large entry figure is the balance.
+ */
+export const tenderBalance = () => screen.queryByTestId('tender-balance')?.textContent ?? screen.getByTestId('tender-entry-amount').textContent;
 /** The amount the next Take records (the keypad entry, pre-typed with the balance). */
 export const tenderEntry = () => screen.getByTestId('tender-entry-amount').textContent;
 
