@@ -1,0 +1,146 @@
+# Till refunds are Medusa returns plus one payment refund, priced and split by the store
+
+Status: Proposed (front desk rulings A–F, 2026-11-22; the front desk approves this ADR)
+Date: 2026-11-22
+Supersedes: none. It implements TallyUI ADR-080 (order.refund v1) for Medusa.
+
+## Context
+
+v2 parity row 10.3 / 13.1 is the refund a cashier starts from the Orders sheet. TallyUI 4.1.0 (pinned in #517) ships every client piece:
+- `OrderDetail.onRefund`, `RefundModal` and `RefundForm`;
+- pos `submitOrderRefund`, `posRefundCollection` and `priceRefund`;
+- `ServerCapabilities.orderRefund`.
+
+ADR-080 (TallyUI `docs/DECISIONS.md`) fixes the `order.refund` v1 command:
+- its payload (`clientRefundId`, `orderId`, `lines: [{ orderLineId, quantity, restock }]`, `shippingMinor`, `adjustmentMinor`, `totalMinor`, `destination`, `reason`, `registerId`, `sessionId`);
+- the shared shape check `refundPayloadErrors`;
+- the applied result `refund: { totalMinor, byMethod, refunds: [{ id, paymentId, totalMinor, state }] }`;
+- the refusal codes: `nothing_to_refund`, `quantity_exceeds`, `amount_mismatch`, `order_state`, `not_till_order`, `forbidden` and `no_open_session`;
+- decision 6, the register figures;
+- Amendment 3: a new command id carrying an already-applied `clientRefundId` is answered `invalid_payload` with "clientRefundId: <id> is already refund <refundId>".
+
+The Medusa side has nothing yet:
+- `commands/process.ts` accepts only `order.create` and `register.*`, and refuses the batch on any other type.
+- `tally-ledger/command-result.ts` refuses an applied result that carries neither server refs nor register figures.
+
+Medusa 2.21 facts this design rests on:
+- **One payment per till order.** A till order has one Medusa payment (`pp_system_default`). The till's tenders exist only in `order.metadata.tally_payments`. A sale discounted to 0 has no payment collection (ADR-062).
+- **Money moves alone.** `refundPaymentWorkflow({ payment_id, amount, note })` refunds money and restocks nothing.
+- **Stock comes back only through a return.** Medusa restocks only through the return order-change chain: begin return, request items, confirm request, begin receive, receive items, confirm receive. Each is its own workflow and transaction. `createAndCompleteReturnOrderWorkflow` does not restock. A damaged receive records the item without restocking it.
+- **Where the sale happened.** The till's stock location is the `locationId` the sale was created with (`tally-order-create`).
+- **The connector's line split.** connector-medusa splits a line as `net = round(gross − tax)`. The plugin's own `orders/list.ts` uses `round(gross) − round(tax)`, and the two differ by one minor unit on some lines.
+
+## Decisions
+
+### 1. v1 is a full-order refund in the app; the plugin takes the general payload (ruling A)
+The app offers only "Refund all": every line, every unit, the shipping, and no adjustment.
+
+The plugin still accepts and prices ADR-080's general payload: any line quantities, shipping and an adjustment. It answers `quantity_exceeds` against what earlier refunds already took back. So partial refunds need only app work and the per-line read (decision 3). They are the next queue item.
+
+### 2. One plugin workflow runs Medusa's own return chain, then one payment refund (ruling B)
+`order.refund` runs one plugin workflow, serialised per order:
+
+1. **Return.** Begin a return on the order, request the refunded lines and quantities, and confirm the request.
+2. **Receive.** Receive at the till's stock location, the sale's `locationId`, and confirm the receive.
+   - A line with `restock: true` is received normally, so its items go back into stock.
+   - A line with `restock: false` is received as damaged: recorded on the return, not restocked.
+   - A refund with no lines (shipping or adjustment only) skips steps 1 and 2.
+3. **Money.** One `refundPaymentWorkflow` on the order's payment, for the refund's total, with `note` set to the reason.
+   - A sale with no payment collection (discounted to 0) has no money to refund, so its refund is refused `nothing_to_refund` before step 1.
+4. **Record.** Mark the `tally_refund` row applied (decision 3), and the ledger command applied, with the result.
+
+**A failure before step 1 confirms** rolls back with the step's own compensation. Nothing has changed in Medusa, and the command is refused with the error's code.
+
+**A failure after the return request confirms goes to `needs_admin`.** A retry with the same `clientRefundId` resumes from the recorded step, or answers the same result. It never refunds twice:
+- **How it resumes.** Each step writes its outcome to the `tally_refund` row before the next step starts: `return_id`, then `received_at`, then `medusa_refund_id`. A retry reads the row and runs only the steps that are missing.
+- **A crash or timeout.** The ledger claim stays `in_progress`. After the stale-claim window, the till's retry takes the claim over, as order.create's does, and resumes.
+- **A failure that will not clear on retry.** The workflow parks the command as `needs_admin`, with the failing step in `needs_admin_reason`. Until an admin resolves it, the till's retry is answered `in_progress`, as for order.create. The admin uses `tally-ledger-resolve` with one of two actions:
+  - `resume` runs the missing steps;
+  - `apply` records a refund the admin made by hand, with its Medusa refund id.
+
+  There is no `reject` once stock has moved.
+- **Never refund twice.** Before step 3, the workflow compares the payment's refunded amount in Medusa with the sum of the `medusa_refund_id` amounts that `tally_refund` already records for it. If Medusa shows more, a refund happened without being recorded. Step 3 then does not run, and the command goes to `needs_admin` with the reason `refund_unrecorded`.
+
+**Required tests.** The plugin PR tests these rows explicitly:
+- Fail after the receive confirms and before the money moves, then retry with the same command and `clientRefundId`: exactly one Medusa refund, and stock received once.
+- Fail after `refundPaymentWorkflow` returns and before the row records it, then retry: no second Medusa refund, and the command is in `needs_admin` with `refund_unrecorded`.
+- A new command id with the `clientRefundId` of an applied refund: `invalid_payload` per Amendment 3.
+- A new command id with the `clientRefundId` of a refund still in progress or in `needs_admin`: answered `in_progress`, with no second workflow.
+
+**Why the return chain.** The alternative was money only, with stock fixed through inventory levels. It would skip Medusa's returns, and Admin would show no return on the order.
+
+### 3. A `tally_refund` table keyed by `clientRefundId` (ruling C)
+A new model in the plugin's ledger module.
+
+**Columns:**
+- `id`, the refund id returned to the till;
+- `client_refund_id`, with a unique index;
+- `command_id`, `order_id` and `session_id`;
+- `status` (`in_progress`, `applied`, `needs_admin`);
+- `lines` as `[{ orderLineId, quantity, restock, netMinor, taxMinor }]`;
+- `shipping_minor`, `adjustment_minor`, `total_minor` and `reason`;
+- `by_method` and `refunds`, the result's split (decision 4);
+- `return_id`, `received_at` and `medusa_refund_id`, the resume points (decision 2);
+- `created_at` and `updated_at`.
+
+**Readers:**
+- `GET /tally/v1/orders` fills each order's `refunds` from the applied rows. Their per-line quantities are what partial refunds will need for `RefundForm`'s earlier refunds.
+- The register figures read it too (decision 6).
+
+This is a migration: one-way storage. The desk accepted it (ruling C).
+
+### 4. With `original_method`, non-cash tenders are refunded first, the rest goes on cash (ruling D)
+**`destination: cash`** puts the whole refund on cash.
+
+**`destination: original_method`** splits the refund over the sale's tenders in `tally_payments`, in the order they were taken:
+1. Each non-cash tender is refunded first, up to the amount it took less what earlier refunds already gave back to it.
+2. Whatever is left goes on cash.
+
+Each `refunds[]` entry names the till's own payment id (`paymentId`) and its amount. `byMethod` sums them by method.
+
+Medusa sees one `refundPaymentWorkflow` for the total, on the order's single payment. The split is the till's view, and `tally_refund` keeps it.
+
+**Where the order comes from.** Neither ADR-080 nor pos `priceRefund` states an order across tenders:
+- ADR-080 decision 4 says only that `byMethod` is "cash for a cash destination, else the original payment's method".
+- `priceRefund` prices lines and has no tender logic.
+
+So this order is ours (ruling D). If a later TallyUI ADR states one, it wins, and this decision follows it.
+
+**Required tests:**
+- A card + cash sale, refunded in full: the card gets back what it took, and cash takes the rest.
+- A second refund attempt after a full one: `quantity_exceeds`, and no Medusa write.
+
+### 5. The store re-prices with the connector's split (must be right: money)
+The plugin prices the refund with ADR-080's cumulative-share rule, net and tax separately, the way pos `priceRefund` does. It compares the result with the till's `totalMinor` and answers `amount_mismatch` on any difference, or when it exceeds the order's refundable money. An order without `tally_client_id` metadata is refused `not_till_order`, and one that is a draft or canceled is refused `order_state`.
+
+Each line's net is `round(gross − tax)`, the connector's split, never `round(gross) − round(tax)`. The till prices from the connector's figures, so any other split would refuse a correct refund by one minor unit.
+
+**Required test.** A line where `round(gross) − round(tax)` and `round(gross − tax)` differ by one minor unit: the refund is accepted, and its amounts are the connector's.
+
+### 6. Register figures follow ADR-080 decision 6
+- **The session.** A refund counts in its own `sessionId`, which must be open, not counting. Anything else is refused `no_open_session`. The check holds the session row lock, as the register commands do (`lockSession`), so a close cannot interleave with a refund.
+- **Expected per tender.** `deriveSessionFigures` takes the session's applied refunds, `[{ byMethod }]`, and each tender's expected figure falls by that refund's `byMethod`.
+- **Closure totals.**
+  - `periodRefundsTotalMinor` is the sum of the session's applied refunds.
+  - `perpetualRefundsTotalMinor` accumulates across sessions.
+- **Contract.** The register contract version does not change.
+
+### 7. Who may refund: the closure-approval manager check (ruling E)
+Under ADR 0023, a refund needs a user whose roles grant `tally_pos:approve_variance`, read live with `hasPermission`, as for closure approval. With RBAC off, every admin counts.
+
+Anyone else is refused `forbidden`, and the app shows TallyUI's own text for that refusal.
+
+### 8. Contract and capability
+- `/info` advertises `contracts['order.refund'] = [1]`, and `PLUGIN_CONTRACT` goes from 4 to 5.
+- The app sets `REFUND_PLUGIN_CONTRACT = 5` and turns on `ServerCapabilities.orderRefund` only against a plugin at 5 or above.
+- Against an older plugin, Refund stays hidden.
+
+## Consequences
+- **Three PRs** (ruling F), none of them needs-paul:
+  1. this ADR, which the desk approves;
+  2. the plugin: intake, `tally_refund`, the workflow, figures and contract 5. It is must-be-right money: an independent Opus reviewer re-derives the refund amounts and reruns the tests, then the desk reads it;
+  3. the app, last.
+- **One-way storage.** The `tally_refund` migration cannot be undone without losing refund records.
+- **Admin sees the real thing.** Each till refund appears in Admin as a Medusa return plus a refund on the order's payment. The till's per-tender split is visible only through the plugin.
+- **Repair is by hand.** A `needs_admin` refund waits for an admin with `tally-ledger-resolve`, and the till shows it as in progress meanwhile.
+- **Partial refunds** are app work plus the per-line read, on this plugin. They are the next queue item.
