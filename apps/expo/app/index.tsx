@@ -304,7 +304,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2: on web, Escape in the tender does what its ✕ / Back does (not while saving, as the ✕ is disabled).
   useEscapeBack(sale.stage.kind === 'tender', () => { if (sale.saving) return; sale.cancelTender(); if (phone) setCartOpen(true); });
   const sellableCount = sorted.length;
-  // On a phone the status line shares one line with the product settings button, so it drops the store name and
+  // On a phone the status line shares one line with the sync arrow, so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
   const productCount = `${sellableCount.toLocaleString()} ${sellableCount === 1 ? 'product' : 'products'}`;
   const storeName = settings.storeName.trim() ? settings.storeName : connector.name;
@@ -348,11 +348,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
     showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
-  // v2's sync arrow sits right after the count, before the product settings.
-  const statusAccessory = <View className="flex-row items-center">
-    <CatalogueSyncButton onSync={syncNow} onClearAndRefresh={clearCatalogue} syncing={pullState === 'syncing' || pullState === 'connecting'} />
-    {productSettingsButton}
-  </View>;
+  // v2's sync arrow sits right after the count; its product settings end the search row, after the view icon.
+  const statusAccessory = <CatalogueSyncButton onSync={syncNow} onClearAndRefresh={clearCatalogue} syncing={pullState === 'syncing' || pullState === 'connecting'} />;
   const catalogue = <View className="flex-1">
     <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
@@ -363,7 +360,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <Catalogue key={catalogueKey} products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
       onSelect={add} statusText={statusText} statusAccessory={statusAccessory}
-      showViewToggle={!phone} showCategoryNav
+      searchAccessory={productSettingsButton} showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
       onViewStateError={onViewStateError} />
