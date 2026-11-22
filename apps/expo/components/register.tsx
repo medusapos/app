@@ -6,6 +6,7 @@ import {
 } from '@tallyui/components';
 import { RegisterSessionRequiredError, type ApprovalNeeded, type useRegisterSession, type useSale } from '@tallyui/pos';
 import { printXReport } from '../lib/closure-print';
+import { openerName } from '../lib/open-session';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
 import { closureContext, LastClosureSheet, printClosure, storeApproval, useApprove } from './register-close';
@@ -89,9 +90,12 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
       ? storeApproval(signedIn.baseUrl, signedIn.token, needed.sessionId, async () => needed.variance) : undefined, needed.liveAtStore);
     return result?.approval ? { approvedBy: result.approvedBy, approval: result.approval } : null;
   };
+  // v2's opener in the header and the "opened … by" line: the session's own opener, named as the user sheet names it
+  // (the signed-in cashier by the sale screen's display name). None without one: the header then reads "Cashier".
+  const opener = signedIn ? openerName(register.session?.opened_by, signedIn.email, signedIn.name || signedIn.email) : null;
   return <>
     <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
-      presentation="side" storeName={store.name}
+      presentation="side" storeName={store.name} openedBy={opener ? { name: opener } : undefined}
       onPrintXReport={Platform.OS === 'web' && register.session?.status === 'open'
         ? () => printXReport({ session: register.session!, expected: register.expected,
           salesCount: register.salesCount, registerName, context: closureContext(currency, store) }) : undefined}
