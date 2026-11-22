@@ -243,7 +243,7 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await page.reload();
       await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
-      await expect(page.getByText('· Synced', { exact: false })).toHaveCount(4);
+      await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toHaveCount(4);
       const settled = await ordersByClientId(token);
       expect(OLD.docs.pos_orders.map(order => settled.filter(sent => sent.metadata.tally_client_id === order.id).length))
         .toStrictEqual([1, 1, 1, 1]);
