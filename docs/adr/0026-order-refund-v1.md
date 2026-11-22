@@ -1,6 +1,6 @@
 # Till refunds are Medusa returns plus one payment refund, priced and split by the store
 
-Status: Proposed (front desk rulings A–F, 2026-11-22; the front desk approves this ADR)
+Status: Accepted (front desk rulings A–F, 2026-11-22; approved by the front desk 2026-11-22 at 0204c3d7)
 Date: 2026-11-22
 Supersedes: none. It implements TallyUI ADR-080 (order.refund v1) for Medusa.
 
@@ -93,7 +93,7 @@ This is a migration: one-way storage. The desk accepted it (ruling C).
 **`destination: cash`** puts the whole refund on cash.
 
 **`destination: original_method`** splits the refund over the sale's tenders in `tally_payments`, in the order they were taken:
-1. Each non-cash tender is refunded first, up to the amount it took less what earlier refunds already gave back to it.
+1. Each non-cash tender is refunded first, up to the amount it took less what earlier refunds already gave back to it. The amount a tender took is its `amountMinor`, never `tenderedMinor`, so change given on a cash tender is never refundable.
 2. Whatever is left goes on cash.
 
 Each `refunds[]` entry names the till's own payment id (`paymentId`) and its amount. `byMethod` sums them by method.
@@ -108,6 +108,7 @@ So this order is ours (ruling D). If a later TallyUI ADR states one, it wins, an
 
 **Required tests:**
 - A card + cash sale, refunded in full: the card gets back what it took, and cash takes the rest.
+- A cash tender that gave change: the refund on cash is at most its `amountMinor`, never its `tenderedMinor`.
 - A second refund attempt after a full one: `quantity_exceeds`, and no Medusa write.
 
 ### 5. The store re-prices with the connector's split (must be right: money)
