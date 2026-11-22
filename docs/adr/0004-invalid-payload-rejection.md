@@ -89,3 +89,12 @@ row in flight across the deploy, and the till already bounds these fields.
 - `unknown_variant` (a variant that doesn't exist or is soft-deleted, a product that is soft-deleted, not `published`, or outside the sale's channel), `invalid_quantity`, and `underpaid`: per-sale facts, decided after the claim and stored. Soft-deleted variants and products were already `unknown_variant` before this amendment, because Medusa's query leaves them out (a product's soft delete cascades to its variants); the explicit `deleted_at` check is defensive. The new cases are unpublished products and products outside the channel. A stored `unknown_variant` is permanent: publishing the product later doesn't revive the sale.
 
 A stored `unsupported_currency` rejected the sale forever even after the region was fixed, so it is now unstored. Rows stored before this change still replay as recorded, because the replay read answers any recorded result. The demo database is rebuilt nightly from a golden copy taken right after seeding, so it holds none. Any other store can find them with `select id from tally_command where result->'error'->>'code' = 'unsupported_currency'`, and remove them once the store is fixed, so that the till's resend applies.
+
+## Amendment: tender arithmetic and overpayment (2026-11-22)
+
+`order.create` refuses a sale whose payments do not add up, with two new per-sale codes, stored and answered like `underpaid`:
+- `tender_mismatch`: a payment with `changeMinor > 0` and no `tenderedMinor`, or one whose `tenderedMinor - changeMinor` differs from its `amountMinor`.
+- `overpaid`: the payments' `amountMinor` sum exceeds `totalMinor`. This supersedes A-TRACK's "accept overpayment".
+
+Order: field checks, then the per-payment tender checks, then `underpaid`, then `overpaid`. Why: the raw payment rows are kept as `tally_payments` and summed into the server's expected cash, while the Medusa payment is capped at `totalMinor`, so a non-net or overpaid row made expected cash disagree with the order (desk ruling 22 Nov: the server decides on its own figures).
+Cash rounding (TallyUI ADR-094): a till rounds a cash leg only when the connector declares `cashRounding`, which Medusa does not today; the order's `cashRoundings` are already in `totalMinor`, so the legs must sum to `totalMinor` as sent, never to an unrounded total.
