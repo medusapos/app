@@ -80,6 +80,13 @@ describe('historyTableRow', () => {
     const closedAt = new Date(2026, 10, 8, 23, 30).toISOString();
     expect(historyTableRow({ ...entry, closedAt }, '', {}).day).toBe('2026-11-08');
   });
+  it('historyTableRow: an uncounted tender is not a shortage', () => {
+    expect(historyTableRow({ ...entry, counted: { cash: 1000 }, tillExpected: { cash: 1000, external: 50000 } }, '', {}))
+      .toMatchObject({ countedMinor: 1000, varianceMinor: 0 });
+    // The server's figure for the same count (integration-tests/http/register-approval-close.spec.ts:75).
+    expect(historyTableRow({ ...entry, counted: { cash: 1601 }, tillExpected: { cash: 1100, external: 20 } }, '', {}))
+      .toMatchObject({ countedMinor: 1601, varianceMinor: 501 });
+  });
 });
 
 describe('closureDays', () => {
