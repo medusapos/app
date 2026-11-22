@@ -79,7 +79,7 @@ function addSaleLines() { act(() => { sale.add(entries[0], traits); sale.add(ent
 
 beforeEach(() => {
   setWindowWidth(1280, 0);
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: null, record: vi.fn(), state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -137,7 +137,7 @@ describe('sale', () => {
     }
     const footer = within(screen.getByTestId('cart-footer'));
     expect(footer.getByText('Subtotal').parentElement!.textContent).toBe(`Subtotal${money(order.subtotalMinor)}`);
-    expect(footer.getByText('VAT 25%').parentElement!.textContent).toBe(`VAT 25%${money(order.taxMinor)}`);
+    expect(footer.getByTestId('cart-total-tax-0').textContent).toBe(`VAT 25%Excluding tax${money(order.taxMinor)}`);
     expect(footer.getByText('Total').parentElement!.textContent).toBe(`Total${money(order.totalMinor)}`);
     click('Increase Shirt · Red');
     expect(sale.order.lineItems[1].quantity).toBe(2);

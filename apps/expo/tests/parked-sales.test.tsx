@@ -36,6 +36,8 @@ const button = (name: string | RegExp) => screen.getByRole('button', { name });
 const add = () => fireEvent.click(screen.getByTestId('product-tile-Shirt'));
 const drafts = () => draftsCollection(store.orders)!;
 const row = (label: string) => within(screen.getByTestId('cart-footer')).getByText(label).parentElement!.textContent;
+// TallyUI 4.0.0's cart tax row: the label, its Including/Excluding tax tag, then the amount.
+const taxRow = () => within(screen.getByTestId('cart-footer')).getByTestId('cart-total-tax-0').textContent;
 // TallyUI 3.19.0's popover editor: a line's Remove is in its quantity popover, its Discount (at 1280) in its price popover.
 const lineAction = (popover: 'quantity' | 'price', action: string, name = 'Shirt') => {
   fireEvent.click(button(`Edit ${popover} of ${name}`)); fireEvent.click(button(`${action} ${name}`));
@@ -63,7 +65,7 @@ beforeEach(async () => {
     reconcileStock: vi.fn(async () => {}), pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn(), unlisted: undefined });
   store = await openOrderStore(session.baseUrl);
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, record, state: { pending: 0, sending: false },
-    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), isStored: vi.fn() });
+    recent: [], savesInFlight: 0, stuckCommandIds: [], flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), isStored: vi.fn() });
   logged.length = 0;
   saleLogger.addSink({ id: 'parked-price-test', levels: ['info'], write: (entry) => { logged.push(entry); } });
 });
@@ -138,7 +140,7 @@ it('a parked sale resumed after a catalogue price change is re-priced to today\'
   view.rerender(<><ProductsScreen /><PortalHost /></>);
   await resume();
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€15.00', '€15.00']);
-  expect([row('Subtotal'), row('VAT 25%')]).toEqual(['Subtotal€15.00', 'VAT 25%€3.75']);
+  expect([row('Subtotal'), taxRow()]).toEqual(['Subtotal€15.00', 'VAT 25%Excluding tax€3.75']);
   expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €18.75');
   expect(screen.getByText("Prices changed since this sale was parked: 1 line updated to today's price.")).toBeTruthy();
 });
@@ -184,8 +186,8 @@ it('the Price action on a line changes its unit price, and the line and total fo
   // TallyUI 3.14.0's Price cell strikes the regular price through ahead of the new unit price.
   expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00€10.00', '€20.00']);
   expect(within(cartLine('Shirt')).getByLabelText('Regular price €12.00')).toBeTruthy();
-  expect([row('Subtotal'), row('Discount'), row('VAT 25%')])
-    .toEqual(['Subtotal€20.00', 'Discount−€2.00', 'VAT 25%€4.50']);
+  expect([row('Subtotal'), row('Discount'), taxRow()])
+    .toEqual(['Subtotal€20.00', 'Discount−€2.00', 'VAT 25%Excluding tax€4.50']);
   expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €22.50');
 });
 

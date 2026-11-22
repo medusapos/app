@@ -20,14 +20,16 @@ test.describe('at 1280 × 800', () => {
     await categories(page).getByRole('radio', { name: 'All products', exact: true }).click();
     await expect(page.getByTestId(/^product-tile-/)).toHaveCount(5);
 
-    const view = page.getByRole('radiogroup', { name: 'View' });
-    await expect(view.getByTestId('view-toggle-grid')).toBeChecked();
+    // TallyUI 4.0.0's view toggle: one icon button, named for the view a press switches to.
+    const view = page.getByTestId('view-toggle');
+    await expect(view.getByTestId('view-toggle-table')).toHaveAttribute('aria-label', 'Switch to table view');
     await view.getByTestId('view-toggle-table').click();
     await expect(page.getByTestId('product-table-sort-name')).toBeVisible();
     await expect(page.getByTestId(/^product-tile-/)).toHaveCount(0);
+    await expect(view.getByTestId('view-toggle-grid')).toHaveAttribute('aria-label', 'Switch to grid view');
     await page.reload();
     await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
-    await expect(view.getByTestId('view-toggle-table')).toBeChecked();
+    await expect(view.getByTestId('view-toggle-grid')).toHaveAttribute('aria-label', 'Switch to grid view');
     await expect(page.getByTestId('product-table-sort-name')).toBeVisible();
   });
 

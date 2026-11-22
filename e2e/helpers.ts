@@ -49,7 +49,9 @@ export async function resetCspViolations(context: BrowserContext) {
 // `as` signs in as another user than E2E_EMAIL (e2e/rbac).
 export async function signIn(page: Page, region: string | null = 'Europe', register: boolean | 'unsynced' = true, as = credentials): Promise<boolean> {
   await submitSignIn(page, as);
-  const setUp = page.getByRole('heading', { name: 'Set up this till', exact: true });
+  // The header heading since #361; a released build (e2e/carryover) shows the title only as TallyUI's body text.
+  const setUp = page.getByRole('heading', { name: 'Set up this till', exact: true })
+    .or(page.getByText('Set up this till', { exact: true })).first();
   const hosted = process.env.E2E_BACKEND_URL !== undefined;
   await expect(setUp.or(page.getByText(/Up to date · /))).toBeVisible({ timeout: hosted ? 5 * 60_000 : undefined });
   const chose = await setUp.isVisible();
@@ -255,6 +257,12 @@ export async function tenderCash(page: Page, cash: 'exact' | number) {
 // its columns Qty, Item, Price and Total.
 export function cartTotalRow(page: Page, label: string) {
   return page.getByTestId('cart-footer').getByText(label, { exact: true }).locator('..');
+}
+
+// The cart's tax row `index` (label, its Including/Excluding tax tag, amount) by its testID: TallyUI 4.0.0 sets the
+// label and its tag in a row of their own, so cartTotalRow's parent of the label holds no amount.
+export function cartTaxRow(page: Page, index = 0) {
+  return page.getByTestId('cart-footer').getByTestId(`cart-total-tax-${index}`);
 }
 
 // The cart's item for the line named `name`: its CartLine row and discount chips. Found from the line's own quantity
@@ -495,6 +503,8 @@ async function openLineDiscount(page: Page) {
   const price = page.getByTestId('price-popover-trigger');
   await (await price.isVisible() ? price : quantity).click();
   await page.getByTestId(/^(price|quantity)-popover-action-discount$/).click();
+  // TallyUI 4.0.0's popover stays mounted (its own Apply too) while it animates out.
+  await expect(page.getByRole('dialog')).toHaveCount(0);
 }
 
 // Applies a discount from the cart's one line (its Discount action) or the cart's + menu.

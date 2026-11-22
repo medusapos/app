@@ -39,6 +39,30 @@
     --color-tile-tint-3: oklch(0.32 0.05 300);
     --color-tile-tint-4: oklch(0.34 0.05 90);
     --color-tile-tint-5: oklch(0.31 0.03 200);
+    /* @tallyui/theme 4.0.0's status, scrim, chart and rail tokens, with WCPOS v2's ocean values (monorepo apps/main/global.css). */
+    --color-ok: oklch(0.72 0.15 155);
+    --color-ok-bg: oklch(0.28 0.04 155);
+    --color-bad: oklch(0.67 0.2 25);
+    --color-bad-bg: oklch(0.30 0.05 25);
+    --color-warning-text: oklch(0.78 0.15 75);
+    --color-warning-bg: oklch(0.30 0.05 80);
+    --color-scrim: oklch(0.05 0.03 230 / .5);
+    --color-c1: oklch(0.50 0.18 240);
+    --color-c2: oklch(0.62 0.15 160);
+    --color-c3: oklch(0.72 0.15 70);
+    --color-c4: oklch(0.58 0.16 320);
+    --color-c5: oklch(0.70 0.02 250);
+    --color-chart-1: oklch(0.50 0.18 240);
+    --color-chart-2: oklch(0.62 0.15 160);
+    --color-chart-3: oklch(0.72 0.15 70);
+    --color-chart-4: oklch(0.58 0.16 320);
+    --color-chart-5: oklch(0.70 0.02 250);
+    --color-sidebar: oklch(0.14 0.045 235);
+    --color-sidebar-foreground: oklch(0.75 0.04 200);
+    --color-sidebar-border: oklch(0.24 0.04 230);
+    --color-rail-accent: oklch(0.23 0.03 228);
+    --color-rail-selected: oklch(0.30 0.06 200);
+    --color-rail-selected-foreground: oklch(0.84 0.12 195);
   }
 
   @variant sunset {
@@ -75,6 +99,30 @@
     --color-tile-tint-3: oklch(0.32 0.05 300);
     --color-tile-tint-4: oklch(0.34 0.05 90);
     --color-tile-tint-5: oklch(0.31 0.03 200);
+    /* @tallyui/theme 4.0.0's status, scrim, chart and rail tokens, with WCPOS v2's sunset values (monorepo apps/main/global.css). */
+    --color-ok: oklch(0.72 0.15 155);
+    --color-ok-bg: oklch(0.28 0.04 155);
+    --color-bad: oklch(0.68 0.2 20);
+    --color-bad-bg: oklch(0.30 0.05 25);
+    --color-warning-text: oklch(0.78 0.15 75);
+    --color-warning-bg: oklch(0.30 0.05 80);
+    --color-scrim: oklch(0.05 0.03 318 / .5);
+    --color-c1: oklch(0.50 0.18 240);
+    --color-c2: oklch(0.62 0.15 160);
+    --color-c3: oklch(0.72 0.15 70);
+    --color-c4: oklch(0.58 0.16 320);
+    --color-c5: oklch(0.70 0.02 250);
+    --color-chart-1: oklch(0.50 0.18 240);
+    --color-chart-2: oklch(0.62 0.15 160);
+    --color-chart-3: oklch(0.72 0.15 70);
+    --color-chart-4: oklch(0.58 0.16 320);
+    --color-chart-5: oklch(0.70 0.02 250);
+    --color-sidebar: oklch(0.15 0.05 320);
+    --color-sidebar-foreground: oklch(0.78 0.05 40);
+    --color-sidebar-border: oklch(0.25 0.05 318);
+    --color-rail-accent: oklch(0.245 0.04 318);
+    --color-rail-selected: oklch(0.32 0.07 45);
+    --color-rail-selected-foreground: oklch(0.84 0.14 45);
   }
 
   @variant monochrome {
@@ -111,6 +159,30 @@
     --color-tile-tint-3: oklch(0.32 0.05 300);
     --color-tile-tint-4: oklch(0.34 0.05 90);
     --color-tile-tint-5: oklch(0.31 0.03 200);
+    /* @tallyui/theme 4.0.0's status, scrim, chart and rail tokens, with WCPOS v2's monochrome values (monorepo apps/main/global.css). */
+    --color-ok: oklch(0.72 0.15 155);
+    --color-ok-bg: oklch(0.28 0.04 155);
+    --color-bad: oklch(0.66 0.2 25);
+    --color-bad-bg: oklch(0.30 0.05 25);
+    --color-warning-text: oklch(0.78 0.15 75);
+    --color-warning-bg: oklch(0.30 0.05 80);
+    --color-scrim: oklch(0 0 0 / .55);
+    --color-c1: oklch(0.50 0.18 240);
+    --color-c2: oklch(0.62 0.15 160);
+    --color-c3: oklch(0.72 0.15 70);
+    --color-c4: oklch(0.58 0.16 320);
+    --color-c5: oklch(0.70 0.02 250);
+    --color-chart-1: oklch(0.50 0.18 240);
+    --color-chart-2: oklch(0.62 0.15 160);
+    --color-chart-3: oklch(0.72 0.15 70);
+    --color-chart-4: oklch(0.58 0.16 320);
+    --color-chart-5: oklch(0.70 0.02 250);
+    --color-sidebar: oklch(0.08 0 0);
+    --color-sidebar-foreground: oklch(0.78 0 0);
+    --color-sidebar-border: oklch(0.22 0 0);
+    --color-rail-accent: oklch(0.21 0 0);
+    --color-rail-selected: oklch(0.32 0 0);
+    --color-rail-selected-foreground: oklch(0.95 0 0);
   }
 
   @variant paper {
@@ -147,6 +219,30 @@
     --color-tile-tint-3: oklch(0.89 0.04 300);
     --color-tile-tint-4: oklch(0.90 0.06 40);
     --color-tile-tint-5: oklch(0.90 0.04 200);
+    /* @tallyui/theme 4.0.0's status, scrim, chart and rail tokens, with WCPOS v2's paper values (monorepo apps/main/global.css). */
+    --color-ok: oklch(0.50 0.16 155);
+    --color-ok-bg: oklch(0.96 0.03 155);
+    --color-bad: oklch(0.50 0.15 34);
+    --color-bad-bg: oklch(0.96 0.02 34);
+    --color-warning-text: oklch(0.50 0.13 70);
+    --color-warning-bg: oklch(0.97 0.04 85);
+    --color-scrim: oklch(0.25 0.02 70 / .3);
+    --color-c1: oklch(0.52 0.12 45);
+    --color-c2: oklch(0.55 0.10 150);
+    --color-c3: oklch(0.70 0.13 80);
+    --color-c4: oklch(0.50 0.10 320);
+    --color-c5: oklch(0.65 0.03 84);
+    --color-chart-1: oklch(0.52 0.12 45);
+    --color-chart-2: oklch(0.55 0.10 150);
+    --color-chart-3: oklch(0.70 0.13 80);
+    --color-chart-4: oklch(0.50 0.10 320);
+    --color-chart-5: oklch(0.65 0.03 84);
+    --color-sidebar: oklch(0.912 0.023 85);
+    --color-sidebar-foreground: oklch(0.437 0.027 78);
+    --color-sidebar-border: oklch(0.852 0.031 84);
+    --color-rail-accent: oklch(0.87 0.035 84);
+    --color-rail-selected: oklch(0.977 0.011 85);
+    --color-rail-selected-foreground: oklch(0.227 0.016 71);
   }
 
   @variant warm {
@@ -183,6 +279,30 @@
     --color-tile-tint-3: oklch(0.87 0.06 330);
     --color-tile-tint-4: oklch(0.90 0.09 85);
     --color-tile-tint-5: oklch(0.88 0.05 200);
+    /* @tallyui/theme 4.0.0's status, scrim, chart and rail tokens, with WCPOS v2's warm values (monorepo apps/main/global.css). */
+    --color-ok: oklch(0.50 0.16 155);
+    --color-ok-bg: oklch(0.96 0.03 155);
+    --color-bad: oklch(0.52 0.135 35);
+    --color-bad-bg: oklch(0.96 0.02 35);
+    --color-warning-text: oklch(0.50 0.13 70);
+    --color-warning-bg: oklch(0.97 0.04 85);
+    --color-scrim: oklch(0.25 0.02 50 / .3);
+    --color-c1: oklch(0.484 0.092 41);
+    --color-c2: oklch(0.60 0.07 131);
+    --color-c3: oklch(0.72 0.12 80);
+    --color-c4: oklch(0.55 0.12 330);
+    --color-c5: oklch(0.70 0.02 76);
+    --color-chart-1: oklch(0.484 0.092 41);
+    --color-chart-2: oklch(0.60 0.07 131);
+    --color-chart-3: oklch(0.72 0.12 80);
+    --color-chart-4: oklch(0.55 0.12 330);
+    --color-chart-5: oklch(0.70 0.02 76);
+    --color-sidebar: oklch(0.925 0.015 77);
+    --color-sidebar-foreground: oklch(0.456 0.021 67);
+    --color-sidebar-border: oklch(0.895 0.017 76);
+    --color-rail-accent: oklch(0.88 0.03 41);
+    --color-rail-selected: oklch(0.995 0.005 78);
+    --color-rail-selected-foreground: oklch(0.42 0.10 41);
   }
 
   @variant bold {
@@ -219,6 +339,30 @@
     --color-tile-tint-3: oklch(0.90 0 0);
     --color-tile-tint-4: oklch(0.94 0.10 123);
     --color-tile-tint-5: oklch(0.87 0 0);
+    /* @tallyui/theme 4.0.0's status, scrim, chart and rail tokens, with WCPOS v2's bold values (monorepo apps/main/global.css). */
+    --color-ok: oklch(0.52 0.16 155);
+    --color-ok-bg: oklch(0.96 0.03 155);
+    --color-bad: oklch(0.52 0.22 11);
+    --color-bad-bg: oklch(0.97 0.02 11);
+    --color-warning-text: oklch(0.50 0.13 70);
+    --color-warning-bg: oklch(0.97 0.04 85);
+    --color-scrim: oklch(0 0 0 / .35);
+    --color-c1: oklch(0.145 0 0);
+    --color-c2: oklch(0.82 0.18 123);
+    --color-c3: oklch(0.72 0.15 70);
+    --color-c4: oklch(0.58 0.16 320);
+    --color-c5: oklch(0.70 0 0);
+    --color-chart-1: oklch(0.145 0 0);
+    --color-chart-2: oklch(0.82 0.18 123);
+    --color-chart-3: oklch(0.72 0.15 70);
+    --color-chart-4: oklch(0.58 0.16 320);
+    --color-chart-5: oklch(0.70 0 0);
+    --color-sidebar: oklch(0.145 0 0);
+    --color-sidebar-foreground: oklch(0.836 0 0);
+    --color-sidebar-border: oklch(0.252 0 0);
+    --color-rail-accent: oklch(0.25 0 0);
+    --color-rail-selected: oklch(0.908 0.201 123);
+    --color-rail-selected-foreground: oklch(0.145 0 0);
   }
 
   @variant market {
@@ -255,5 +399,29 @@
     --color-tile-tint-3: oklch(0.89 0.09 301);
     --color-tile-tint-4: oklch(0.90 0.10 34);
     --color-tile-tint-5: oklch(0.90 0.08 220);
+    /* @tallyui/theme 4.0.0's status, scrim, chart and rail tokens, with WCPOS v2's market values (monorepo apps/main/global.css). */
+    --color-ok: oklch(0.52 0.16 155);
+    --color-ok-bg: oklch(0.96 0.03 155);
+    --color-bad: oklch(0.52 0.21 5);
+    --color-bad-bg: oklch(0.97 0.02 5);
+    --color-warning-text: oklch(0.50 0.13 70);
+    --color-warning-bg: oklch(0.97 0.04 85);
+    --color-scrim: oklch(0.23 0.04 290 / .35);
+    --color-c1: oklch(0.52 0.20 34);
+    --color-c2: oklch(0.62 0.15 160);
+    --color-c3: oklch(0.80 0.15 98);
+    --color-c4: oklch(0.58 0.16 300);
+    --color-c5: oklch(0.70 0.02 290);
+    --color-chart-1: oklch(0.52 0.20 34);
+    --color-chart-2: oklch(0.62 0.15 160);
+    --color-chart-3: oklch(0.80 0.15 98);
+    --color-chart-4: oklch(0.58 0.16 300);
+    --color-chart-5: oklch(0.70 0.02 290);
+    --color-sidebar: oklch(0.232 0.038 290);
+    --color-sidebar-foreground: oklch(0.881 0.023 297);
+    --color-sidebar-border: oklch(0.298 0.040 290);
+    --color-rail-accent: oklch(0.30 0.045 290);
+    --color-rail-selected: oklch(0.686 0.205 34);
+    --color-rail-selected-foreground: oklch(0.232 0.038 290);
   }
 }

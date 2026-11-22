@@ -63,7 +63,8 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
   await addE2E1(page);
   const cart = cartTab(page);
   await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
-  await expect(page.getByTestId('phone-tab-cart-count')).toHaveText('2');
+  // TallyUI 4.0.0's count beat keeps the last count in an aria-hidden -was layer, so the badge's text is "12".
+  await expect(page.getByTestId('phone-tab-cart-count')).toHaveAttribute('aria-label', '2 in cart');
   const box = (await page.getByTestId('phone-tab-bar').boundingBox())!;
   expect([box.x, box.width]).toEqual([0, 360]);
   expect((await cart.boundingBox())!.height).toBeGreaterThanOrEqual(56);
@@ -91,7 +92,7 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
   await productsTab(page).click();
   await page.getByTestId('product-tile-E2E product 2').click();
   await expect(cart).toHaveAccessibleName(/^Cart, 3 items$/);
-  await expect(page.getByTestId('phone-tab-cart-count')).toHaveText('3');
+  await expect(page.getByTestId('phone-tab-cart-count')).toHaveAttribute('aria-label', '3 in cart');
   await cart.click();
   // The order discount dialog's Cancel fits; closing it restores the pinned Checkout, which carries the total.
   await page.getByTestId('cart-add-menu').click();

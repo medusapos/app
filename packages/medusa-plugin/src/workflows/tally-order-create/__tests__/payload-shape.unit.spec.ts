@@ -313,6 +313,16 @@ describe('versions 6 and 7 (ADR 0024)', () => {
     expect(payloadShapeErrors({ ...payload, taxAddress: 'billing' }, 7)).toEqual(['payload.taxAddress: requires version 8'])
   })
 
+  it('refuses the @tallyui/core 4.0.0 fields at version 7 as requiring versions 10 and 12', () => {
+    expect(payloadShapeErrors({ ...payload, payments: [{ ...payload.payments[0], methodId: 'cash' }] }, 7))
+      .toEqual(['payload.payments[0].methodId: requires version 10'])
+    expect(payloadShapeErrors({ ...payload, lines: [{ ...payload.lines[0], sku: 'COF-1' }] }, 7))
+      .toEqual(['payload.lines[0].sku: requires version 12'])
+    expect(payloadShapeErrors({ ...payload, customer: { email: 'buyer@example.com', taxIds: [{ type: 'eu_vat', value: 'DE123456789' }] } }, 7))
+      .toEqual(['payload.customer.taxIds: requires version 12'])
+    expect(payloadShapeErrors({ ...payload, meta: [{ key: 'table', value: '4' }] }, 7)).toEqual(['payload.meta: requires version 12'])
+  })
+
   it('refuses customer addresses at version 7 as requiring version 8', () => {
     expect(payloadShapeErrors({ ...payload, customer: { email: 'buyer@example.com', billing: { country: 'DE' }, shipping: { country: 'DE' } } }, 7))
       .toEqual(['payload.customer.billing: requires version 8', 'payload.customer.shipping: requires version 8'])
