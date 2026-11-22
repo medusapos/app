@@ -73,8 +73,10 @@ test('at 360 × 740 the lines scroll under pinned totals and pay, and the Cart t
   await expectAccountInViewport(page);
   await discount(page, 'line', 'Percent', '10');
   await discount(page, 'order', 'Amount', '0.50');
-  const orderChip = page.getByRole('button', { name: /^Remove discount .*0\.50/ });
+  // The order discount's ✕ on its "Discount −€0.50" row in the totals (DEMO 05c).
+  const orderChip = page.getByTestId('order-discount-remove-0');
   await expect(orderChip).toBeVisible();
+  await expect(orderChip).toHaveAccessibleName(/^Remove discount .*0\.50$/);
   await productsTab(page).click();
   await expect(productsTab(page)).toHaveAttribute('aria-selected', 'true');
   await expect(cart).toHaveAccessibleName(/^Cart, 2 items$/);
