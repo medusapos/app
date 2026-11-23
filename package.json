@@ -12,6 +12,7 @@
     "e2e": "playwright test -c e2e/playwright.config.ts",
     "e2e:carryover": "playwright test -c e2e/carryover/playwright.config.ts",
     "e2e:rbac": "playwright test -c e2e/rbac/playwright.config.ts",
+    "capture": "playwright test -c e2e/capture/playwright.config.ts --workers=1",
     "lint": "turbo lint",
     "typecheck": "turbo typecheck",
     "clean": "turbo clean"
