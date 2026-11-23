@@ -5,7 +5,7 @@ import { InjectManager, MedusaContext, MedusaService } from '@medusajs/framework
 import {
   TallyDisplay, TallyDisplayAdoption, TallyDisplayClaimFailure, TallyDisplayCode, TallyDisplayDevice, TallyDisplayPending,
   TallyDisplaySignal, TallyDisplaySnapshot,
-} from './models'
+} from './models/tally-display'
 import { displayAdvertisement, type DisplayAdvertisementWire } from './ice-servers'
 import { rateLimitSource } from './rate-limit-source'
 import { DisplayRefusal, type DisplayRefusalCode } from './refusal'
@@ -38,7 +38,7 @@ export default class TallyDisplayModuleService extends MedusaService({
   TallyDisplayDevice, TallyDisplayCode, TallyDisplayPending, TallyDisplay, TallyDisplaySignal, TallyDisplaySnapshot,
   TallyDisplayClaimFailure, TallyDisplayAdoption,
 }) {
-  private clockOffsetMs = 0
+  private frozenAt: number | undefined
   private readonly advertisement: DisplayAdvertisementWire
 
   constructor(container: Record<string, unknown>, options: { customerDisplay?: { iceServers?: unknown } } = {}) {
@@ -53,10 +53,13 @@ export default class TallyDisplayModuleService extends MedusaService({
   /** `/info`'s `customerDisplay`. */
   customerDisplay(): DisplayAdvertisementWire { return this.advertisement }
 
-  /** The module's one clock. A test moves it by resolving this service from the container; no route reaches it. */
-  now(): number { return Date.now() + this.clockOffsetMs }
-  advanceClock(ms: number): void { this.clockOffsetMs += ms }
-  resetClock(): void { this.clockOffsetMs = 0 }
+  /**
+   * The module's one clock. A test moves it by resolving this service from the container; no route reaches it. Once
+   * moved it stands still, as the reference harness's clock does, so a "30 days later" boundary is exact.
+   */
+  now(): number { return this.frozenAt ?? Date.now() }
+  advanceClock(ms: number): void { this.frozenAt = (this.frozenAt ?? Date.now()) + ms }
+  resetClock(): void { this.frozenAt = undefined }
 
   /**
    * Every call: one transaction under one store-wide advisory lock, which prunes first and then acts. A refusal is

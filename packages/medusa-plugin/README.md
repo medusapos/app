@@ -338,7 +338,7 @@ These routes implement TallyUI's customer-display signalling seam (`DisplaySigna
 
 **Advertisement.** `GET /tally/v1/info` carries `customerDisplay: { v: 1, iceServers, snapshot: 1 }`, the shape TallyUI's `parseDisplayAdvertisement` reads. `iceServers` is the plugin option `customerDisplay.iceServers` when it is a valid list (only `stun:`, `stuns:`, `turn:`, `turns:` URLs; a TURN entry needs `username` and `credential`; `[]` means LAN only), else the two default STUN servers, with one warning at start when the option is invalid.
 
-**Admin reset.** `npx medusa exec <built path>/tally-display-reset.js <deviceId>` deletes that till device with every display, token, snapshot, code, pending pairing and signal it owns, so the id registers as a new device. Use it for a lost or replaced till; its displays pair again.
+**Admin reset.** From the store's directory, `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-display-reset.js <deviceId>` deletes that till device with every display, token, snapshot, code, pending pairing and signal it owns, so the id registers as a new device. Use it for a lost or replaced till; its displays pair again.
 
 ## Experimental sync (G4)
 

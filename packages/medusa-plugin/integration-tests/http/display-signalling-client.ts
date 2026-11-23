@@ -6,7 +6,7 @@ import type {
  * The plugin's `DisplaySignalling` over HTTP: the reference for the connector-medusa client. Till calls send the
  * session's headers and the device in `X-Tally-Device-Id` / `X-Tally-Device-Key`; display calls send the token only in
  * `X-Tally-Display-Token`. A refusal is an error whose `code` is `too_large` for any 400 or 413, else the body's code when
- * the seam names it, else `server`.
+ * the seam names it, else `forbidden` for a codeless 401 or 403 (Medusa's session and policy refusals), else `server`.
  */
 const SEAM_CODES: DisplaySignallingErrorCode[] = ['forbidden', 'limit', 'claim_refused', 'collect_refused', 'not_found',
   'device_refused', 'token_refused', 'too_large', 'network', 'server']
@@ -36,7 +36,11 @@ async function call<T>(ctx: Context, method: string, path: string, headers: Reco
   const answer = await response.json().catch(() => ({})) as { code?: unknown; message?: unknown }
   if (response.ok) return answer as T
   // Every 400 and 413 (a malformed body, or the parser's own limit) is too_large, which pos does not retry (ADR-085).
-  const code = response.status === 400 || response.status === 413 ? 'too_large' : SEAM_CODES.find(known => known === answer.code) ?? 'server'
+  // Medusa's own refusals carry no seam code: its 401 (no or expired session) and its policy 403 (no tally_pos:use)
+  // are both `forbidden`. Every refusal the plugin gives itself names its code.
+  const seamCode = SEAM_CODES.find(known => known === answer.code)
+  const code = response.status === 400 || response.status === 413 ? 'too_large'
+    : seamCode ?? (response.status === 401 || response.status === 403 ? 'forbidden' : 'server')
   throw new DisplaySignallingClientError(code, typeof answer.message === 'string' ? answer.message : undefined)
 }
 
