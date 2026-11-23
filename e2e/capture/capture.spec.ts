@@ -51,7 +51,9 @@ async function reset(page: Page, size: Size) {
   const newSale = page.getByRole('button', { name: 'New sale', exact: true });
   await expect(signInHeading.or(page.getByTestId('user-menu')).or(pane).or(newSale).first()).toBeVisible({ timeout: 60_000 });
   if (await signInHeading.isVisible()) await signIn(page, 'Europe', false);
-  await expect(page.getByText(/Up to date · \d+ products/).or(pane).or(newSale).first()).toBeVisible({ timeout: 60_000 });
+  // A phone shows a count in progress (row 09e) in place of the products.
+  const count = page.getByTestId('register-count');
+  await expect(page.getByText(/Up to date · \d+ products/).or(pane).or(newSale).or(count).first()).toBeVisible({ timeout: 60_000 });
   if (await page.getByTestId('closure-done').isVisible()) await page.getByTestId('closure-done').click();
   if (await visibleText(page) === 'Counting') await finishClose(page);
   if (await page.getByTestId('view-toggle-grid').isVisible()) await page.getByTestId('view-toggle-grid').click();

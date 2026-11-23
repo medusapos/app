@@ -39,6 +39,16 @@ async function sell(page: Page, size: Size, ...skus: string[]) {
   if (phone(size)) await productsTab(page).click();
 }
 
+// Signs out from the user sheet, past "Sign out anyway" while the register is open; ends on the Sign in screen.
+async function signOut(page: Page) {
+  await page.getByTestId('user-menu').click();
+  await page.getByTestId('user-sheet-sign-out').click();
+  const confirm = page.getByTestId('switch-confirm-confirm');
+  await expect(confirm.or(page.getByLabel('Email', { exact: true }))).toBeVisible();
+  if (await confirm.isVisible()) await confirm.click();
+  await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
+}
+
 async function keypad(page: Page, amount: string) {
   const keys = page.getByTestId('tender-keypad');
   await keys.getByRole('button', { name: 'Clear', exact: true }).click();
@@ -252,15 +262,24 @@ export const rows: CaptureRow[] = [
     await expect(page.getByTestId('paid-awaiting-status')).toHaveText('Awaiting store · Cash');
   } },
   { id: '08', title: 'Open orders / parked', state: 'Two open sales as tabs, a third in the cart', reach: async (page, size) => {
-    for (const sku of ['E2E-1', 'E2E-2']) {
+    // Every sale holding items has a tab, the one in the cart too.
+    const tabs = page.getByTestId(/^open-sale-tab-.*-who$/);
+    const empty = page.getByTestId('cart-empty');
+    const again = page.getByText(/park it again/);
+    for (const [parked, sku] of ['E2E-1', 'E2E-2'].entries()) {
       await add(page, sku);
       await cart(page, size);
+      await expect(tabs).toHaveCount(parked + 1);
+      // A park that lands while the line still saves is refused ("park it again"); it is parked again then.
       await page.getByTestId('new-sale-tab').click();
+      await expect(empty.or(again).first()).toBeVisible();
+      if (await again.isVisible()) await page.getByTestId('new-sale-tab').click();
+      await expect(empty).toBeVisible();
       if (phone(size)) await productsTab(page).click();
     }
     await add(page, 'E2E-3');
     await cart(page, size);
-    await expect(page.getByTestId(/^open-sale-tab-.*-who$/)).toHaveCount(2);
+    await expect(tabs).toHaveCount(3);
   } },
   // Switch register is locked while a session exists, even a closed one; Clear all local data unbinds the till.
   { id: '09a', title: 'Choose register', state: 'Register picker on a till with no register bound', reach: async (page, size) => {
@@ -348,14 +367,7 @@ export const rows: CaptureRow[] = [
   skip('15e', 'Settings, customer display', 'gap, no section: no customer-facing display'),
   { id: '15f', title: 'Settings, barcode scanning', state: 'Settings › Barcode Scanning', reach: (page, size) => settings(page, size, 'scanner') },
   { id: '15g', title: 'Settings, theme', state: 'Settings › Theme', reach: (page, size) => settings(page, size, 'theme') },
-  { id: '16', title: 'Sign-in / connect', state: 'Sign-in screen after Sign out', reach: async (page) => {
-    await page.getByTestId('user-menu').click();
-    await page.getByTestId('user-sheet-sign-out').click();
-    const confirm = page.getByTestId('switch-confirm-confirm');
-    await expect(confirm.or(page.getByLabel('Email', { exact: true }))).toBeVisible();
-    if (await confirm.isVisible()) await confirm.click();
-    await expect(page.getByRole('heading', { name: 'Sign in', exact: true })).toBeVisible();
-  } },
+  { id: '16', title: 'Sign-in / connect', state: 'Sign-in screen after Sign out', reach: signOut },
   { id: '17a', title: 'Phone, POS', state: 'The Sale with a line in the cart', only: ['phone'], reach: async (page) => {
     await addE2E1(page);
     await expect(page.getByTestId('phone-tab-cart-count')).toBeVisible();
@@ -377,6 +389,9 @@ export const rows: CaptureRow[] = [
       body: JSON.stringify({ code, type: 'standard', status: 'active', is_automatic: false, is_tax_inclusive: false,
         application_method: { type: 'fixed', target_type: 'items', allocation: 'across', value: 1, currency_code: 'eur' } }) });
     if (!response.ok) throw new Error(`promotion: ${response.status}`);
+    // The stored session keeps no coupons capability, so after a reload the till offers no coupon field until a sign-in.
+    await signOut(page);
+    await signIn(page, 'Europe', false);
     await add(page, 'E2E-1', 'E2E-1');
     await cart(page, size);
     await page.getByLabel('Coupon code', { exact: true }).fill(code);
