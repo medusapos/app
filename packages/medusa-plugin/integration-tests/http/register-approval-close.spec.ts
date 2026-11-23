@@ -171,8 +171,95 @@ medusaIntegrationTestRunner({
 
     it('with unsyncedCount above 0 the till\'s figures decide', async () => {
       const closing = closure(opening.payload, { tillExpected: { cash: 100 }, counted: { cash: 100 },
-        unsyncedCount: 1, unsyncedTotalMinor: 1000 })
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [randomUUID()] })
       expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
+    })
+
+    // Desk ruling 2026-11-23: an unsynced claim is checked against the closure's own orderIds.
+    async function syncedSession(seeded?: Awaited<ReturnType<typeof seed>>) {
+      const data = seeded ?? await seed(container)
+      const session = open()
+      const placed = sale(data.variantB, session.payload.sessionId)
+      expect((await post([session, placed, close(session.payload.sessionId)])).map(result => result.status))
+        .toEqual(['applied', 'applied', 'applied'])
+      return { session, placed, data }
+    }
+
+    it('with unsyncedCount above 0 but every orderIds sale held by the server, the server\'s figures decide', async () => {
+      const { session, placed } = await syncedSession()
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId] })
+      expect((await post([closing]))[0]).toEqual({ id: closing.id, status: 'rejected', error: {
+        code: 'register_approval_required', message: 'A manager approval is needed for this variance.',
+        data: { sessionId: session.payload.sessionId, thresholdMinor: 500, variance: { cash: -1000 } },
+      } })
+    })
+
+    it('with unsyncedCount above 0 and an orderIds sale the server lacks, the till\'s figures still decide', async () => {
+      const { session, placed } = await syncedSession()
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId, randomUUID()] })
+      expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
+    })
+
+    // The till holds the sale's 1000 cash and counts it in its own expected; the server counts no placed sale.
+    function placedRow(placed: ReturnType<typeof sale>) {
+      return container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('order')
+        .whereRaw("metadata->>'tally_client_id' = ?", [placed.payload.clientOrderId])
+    }
+
+    it('with unsyncedCount above 0 and an orderIds sale the server holds only as a draft, the till\'s figures decide', async () => {
+      const { session, placed } = await syncedSession()
+      await placedRow(placed).update({ status: 'draft', is_draft_order: true })
+      const closing = closure(session.payload, { tillExpected: { cash: 2100 }, counted: { cash: 2100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId] })
+      expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
+    })
+
+    it('with unsyncedCount above 0 and an orderIds sale the server refused, the server\'s figures decide', async () => {
+      const { session, placed } = await syncedSession()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      await placedRow(placed).update({ status: 'canceled', metadata: knex.raw("metadata || '{\"tally_rejected\": true}'::jsonb") })
+      const closing = closure(session.payload, { tillExpected: { cash: 2100 }, counted: { cash: 2100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId] })
+      // A refused sale was never placed, so the server expects only the 1100 float and the drawer's extra 1000 is its variance.
+      expect((await post([closing]))[0]).toEqual({ id: closing.id, status: 'rejected', error: {
+        code: 'register_approval_required', message: 'A manager approval is needed for this variance.',
+        data: { sessionId: session.payload.sessionId, thresholdMinor: 500, variance: { cash: 1000 } },
+      } })
+    })
+
+    // Review of #536: the refused branch stays inside the orderIds filter, so a refused order elsewhere holds nothing.
+    it('with unsyncedCount above 0, an unrelated refused order does not hold an orderIds sale the server lacks', async () => {
+      const unrelated = await syncedSession()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      await placedRow(unrelated.placed).update({ status: 'canceled', metadata: knex.raw("metadata || '{\"tally_rejected\": true}'::jsonb") })
+      const { session, placed } = await syncedSession(unrelated.data)
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId, randomUUID()] })
+      expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
+    })
+
+    // Review of #536: a sale refused and later placed has two accounted rows, and its id still counts once.
+    it('with unsyncedCount above 0, an orderIds sale with a refused and a placed row does not hold a missing sale', async () => {
+      const { session, placed } = await syncedSession()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const { display_id: _displayId, ...row } = await placedRow(placed).first()
+      await knex('order').insert({ ...row, id: `order_${randomUUID()}`, status: 'canceled',
+        metadata: { ...row.metadata, tally_rejected: true } })
+      expect(await placedRow(placed)).toHaveLength(2)
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId, randomUUID()] })
+      expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
+    })
+
+    it('with unsyncedCount above 0 and an empty orderIds, the server\'s figures decide', async () => {
+      const closing = closure(opening.payload, { tillExpected: { cash: 100 }, counted: { cash: 100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [] })
+      expect((await post([closing]))[0]).toEqual({ id: closing.id, status: 'rejected', error: {
+        code: 'register_approval_required', message: 'A manager approval is needed for this variance.',
+        data: { sessionId: opening.payload.sessionId, thresholdMinor: 500, variance: { cash: -1000 } },
+      } })
     })
 
     it('an approval for the server variance closes it', async () => {
