@@ -1,6 +1,6 @@
 # MedusaPOS capture
 
-Taken 2026-11-23 at `4e52e2c7` with TallyUI 4.1.0, by `pnpm capture` against the throwaway e2e store (e2e/README.md). 140 shots.
+Taken 2026-11-23 at `e52496f8` with TallyUI 4.1.0, by `pnpm capture` against the throwaway e2e store (e2e/README.md). 140 shots.
 
 | Row | Screen | State | Desktop 1280×800 | Tablet 1024×768 | Phone 390×844 |
 |---|---|---|---|---|---|
