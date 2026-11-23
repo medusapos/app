@@ -119,7 +119,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
   if (paid < BigInt(payload.totalMinor)) {
     return { ok: false, rejection: { code: 'underpaid', message: 'Payment amounts are less than totalMinor' } }
   }
-  // totalMinor already includes any cash roundings (TallyUI ADR-094), so the legs must sum to it as sent.
+  // If a later TallyUI adds cash roundings (its ADR-094), they are in totalMinor, so the legs must sum to it as sent.
   if (paid > BigInt(payload.totalMinor)) {
     return { ok: false, rejection: { code: 'overpaid', message: 'Payment amounts exceed totalMinor' } }
   }
