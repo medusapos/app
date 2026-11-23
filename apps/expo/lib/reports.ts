@@ -109,8 +109,9 @@ export function historyTableRow(entry: ClosureHistoryEntry, registerName: string
     registerName: registerName || entry.registerId?.slice(0, 8) || '—',
     cashierName: entry.closedBy ? cashierNames[entry.closedBy] ?? entry.closedBy : '—',
     salesMinor: entry.periodSalesTotalMinor, countedMinor,
-    varianceMinor: countedMinor !== null && entry.tillExpected
-      ? countedMinor - Object.values(entry.tillExpected).reduce((total, amount) => total + amount, 0) : null,
+    // Per counted method, as the server and the sheet this row opens: an uncounted tender is no shortage.
+    varianceMinor: entry.counted && entry.tillExpected
+      ? Object.values(closureVariance(entry.counted, entry.tillExpected)).reduce((total, amount) => total + amount, 0) : null,
   };
 }
 

@@ -211,16 +211,15 @@ it('does not treat inherited keys as known variant ids', () => {
   expect(planOrderCreate({ ...payload, lines }, ctx)).toMatchObject({ ok: false, rejection: { code: 'unknown_variant' } })
 })
 
-it.each([{ payments: [] }, { payments: [{ ...payload.payments[0], amountMinor: 1704, tenderedMinor: 2000 }] }])(
+it.each([{ payments: [] }, { payments: [{ ...payload.payments[0], amountMinor: 1704, tenderedMinor: 2000, changeMinor: 296 }] }])(
   'rejects underpayment using amountMinor, including empty payments', ({ payments }) => {
     expect(planOrderCreate({ ...payload, payments }, ctx)).toMatchObject({ ok: false, rejection: { code: 'underpaid' } })
   }
 )
 
-it('accepts overpayment but collects exactly totalMinor', () => {
-  const result = planOrderCreate({ ...payload, payments: [{ ...payload.payments[0], amountMinor: 2000 }] }, ctx)
-  if (!result.ok) throw new Error('Expected a plan')
-  expect(result.plan.paymentAmount).toBe('17.05')
+it('rejects overpayment', () => {
+  const payments = [{ ...payload.payments[0], amountMinor: 2000, tenderedMinor: 2000, changeMinor: 0 }]
+  expect(planOrderCreate({ ...payload, payments }, ctx)).toMatchObject({ ok: false, rejection: { code: 'overpaid' } })
 })
 
 it.each([704, 705, 800])('sums multiple payments (1000 + %s)', amountMinor => {
@@ -230,10 +229,45 @@ it.each([704, 705, 800])('sums multiple payments (1000 + %s)', amountMinor => {
   ]
   const result = planOrderCreate({ ...payload, payments }, ctx)
   if (amountMinor < 705) expect(result).toMatchObject({ ok: false, rejection: { code: 'underpaid' } })
+  else if (amountMinor > 705) expect(result).toMatchObject({ ok: false, rejection: { code: 'overpaid' } })
   else {
     if (!result.ok) throw new Error('Expected a plan')
     expect(result.plan.paymentAmount).toBe('17.05')
     expect(result.plan.draftOrder.metadata.tally_payments).toEqual(payments)
+  }
+})
+
+it('planOrderCreate rejects a payment whose tenderedMinor minus changeMinor differs from amountMinor', () => {
+  const payments: OrderCreatePayload['payments'] = [{ clientPaymentId: 'p1', method: 'cash', amountMinor: 3256, tenderedMinor: 4000, changeMinor: 700 }]
+  expect(planOrderCreate({ ...payload, totalMinor: 3256, payments }, ctx)).toEqual({ ok: false, rejection: {
+    code: 'tender_mismatch', message: 'Invalid payments[0]: tenderedMinor less changeMinor differs from amountMinor' } })
+})
+
+it('planOrderCreate rejects change without tenderedMinor', () => {
+  const payments: OrderCreatePayload['payments'] = [{ clientPaymentId: 'p1', method: 'cash', amountMinor: 1705, changeMinor: 295 }]
+  expect(planOrderCreate({ ...payload, payments }, ctx)).toEqual({ ok: false, rejection: {
+    code: 'tender_mismatch', message: 'Invalid payments[0].changeMinor: change without tenderedMinor' } })
+})
+
+it('planOrderCreate rejects payments that exceed totalMinor', () => {
+  const payments: OrderCreatePayload['payments'] = [
+    { clientPaymentId: 'p1', method: 'cash', amountMinor: 1000, tenderedMinor: 1000 },
+    { clientPaymentId: 'p2', method: 'external', amountMinor: 706, reference: 'card-1' },
+  ]
+  expect(planOrderCreate({ ...payload, payments }, ctx)).toEqual({ ok: false, rejection: {
+    code: 'overpaid', message: 'Payment amounts exceed totalMinor' } })
+})
+
+it('planOrderCreate accepts a cash payment net of change and a split that sums to the total', () => {
+  const payments: OrderCreatePayload['payments'] = [
+    { clientPaymentId: 'p1', method: 'cash', amountMinor: 1205, tenderedMinor: 1500, changeMinor: 295 },
+    { clientPaymentId: 'p2', method: 'external', amountMinor: 500, reference: 'card-1' },
+  ]
+  for (const sale of [payload, { ...payload, payments }]) {
+    const result = planOrderCreate(sale, ctx)
+    if (!result.ok) throw new Error('Expected a plan')
+    expect(result.plan.paymentAmount).toBe('17.05')
+    expect(result.plan.draftOrder.metadata.tally_payments).toEqual(sale.payments)
   }
 })
 
