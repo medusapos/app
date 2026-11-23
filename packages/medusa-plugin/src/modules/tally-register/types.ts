@@ -28,7 +28,9 @@ export type RegisterSessionOpenInput = RegisterSessionOpenV2Payload & { deviceId
 export type RegisterSessionTransitionInput = RegisterSessionTransitionPayload & { contract?: number }
 export type RegisterMovementRecordInput = RegisterMovementRecordPayload & { contract?: number }
 export type RegisterMovementVoidInput = RegisterMovementVoidPayload & { contract?: number }
-export type RegisterClosureSubmitInput = RegisterClosureSubmitV3Payload & { contract?: number; commandId?: string; thresholdMinor?: number }
+export type RegisterClosureSubmitInput = RegisterClosureSubmitV3Payload & { contract?: number; commandId?: string; thresholdMinor?: number
+  /** Contract 3 with unsyncedCount 0: the server's expected figures, which then decide the approval gate (ADR 0023). */
+  serverExpected?: Record<string, number> }
 
 export interface RegisterSessionTransitionPayload {
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;

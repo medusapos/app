@@ -117,3 +117,24 @@ it('allows an empty taxByRate only for zero tax and uses currency-specific decim
     expect(fiscalFiguresErrors({ ...input, display: { ...input.display, exponent: 2 } })).toEqual(['payload.display.exponent: expected the currency decimals'])
   }
 })
+
+// Tax-exclusive display whose subtotal + tax is 1200 but whose total claims 9900; TallyUI owns that identity (ADR-063).
+const untied = (): OrderCreatePayloadV3 => {
+  const input = structuredClone(payload)
+  Object.assign(input, { pricesIncludeTax: false, subtotalMinor: 1000, taxMinor: 200, totalMinor: 9900 })
+  input.payments[0].amountMinor = 9900
+  Object.assign(input.display!, { taxInclusive: false, subtotalMinor: 1000, discountMinor: 0, orderDiscountMinor: 0, taxMinor: 200, totalMinor: 9900 })
+  input.display!.lines[0].amountMinor = 1000
+  input.taxByRate = [{ ratePpm: 200000, code: 'VAT', netMinor: 1000, taxMinor: 200, grossMinor: 1200 }]
+  return input
+}
+
+it('accepts display figures that do not tie together today (pinned; see TallyUI/tallyui#1256)', () => {
+  expect(fiscalFiguresErrors(untied())).toEqual([])
+})
+
+// it.failing passes while the local copy wrongly accepts this; when the bump to a TallyUI with #1256 lands it fails: make it a plain it (or use the core check).
+it.failing('refuses display figures that do not tie together (expected-fail until TallyUI/tallyui#1256)', () => {
+  const inconsistent = untied()
+  expect(fiscalFiguresErrors(inconsistent)).not.toEqual([])
+})
