@@ -42,10 +42,11 @@
 
 /* v2's three surfaces and cobalt primary in the default Light theme (desk, 22 Nov), over @tallyui/theme's #e4eaf5
    rail, #f8f9fa canvas and #5b5ef0 primary. Each value is a 9x9 patch mean from v2's captures, at the point given:
-   01 = docs/v2-parity/demo-shots/01-pos-empty-cart-demo-desktop.jpg, 17 = 17-menu-demo-phone.jpg. Here, not in
-   themes.css: lib/themes-css.test.ts holds themes.css to the seven extra themes. The :root wrapper keeps this block
-   out of Uniwind's web rewrite, which takes only the first light block (tokens.css's) as `.light`; this one follows it
-   at the same specificity, so it wins. Light only: dark and the extra themes keep their own. */
+   01 = docs/v2-parity/demo-shots/01-pos-empty-cart-demo-desktop.jpg, 03 = 03-cart-items-demo-desktop.jpg (its
+   Checkout button), 17 = 17-menu-demo-phone.jpg. Here, not in themes.css: lib/themes-css.test.ts holds themes.css to
+   the seven extra themes. The :root wrapper keeps this block out of Uniwind's web rewrite, which takes only the first
+   light block (tokens.css's) as `.light`; this one follows it at the same specificity, so it wins. Light only: dark
+   and the extra themes keep their own. */
 @layer theme {
   :root {
     @variant light {
@@ -53,9 +54,9 @@
       --color-background: #f3f5fa; /* 01 canvas (700,680) #f3f5fa */
       --color-card: #ffffff; /* 01 cart (1040,600) #fefefe */
       --color-popover: #ffffff; /* as the card */
-      --color-primary: #0031cc; /* 01 "All products" tile (160,230) #0031cb: v2's c1, TallyUI's --color-c1 */
-      --color-primary-foreground: #ffffff;
-      --color-ring: #0031cc;
+      --color-primary: #0031cc; /* 03 Checkout (900,695) #0031cb; v2's c1, TallyUI's --color-c1 */
+      --color-primary-foreground: #ffffff; /* 03 Checkout label: white, 9.1:1 on the primary */
+      --color-ring: #0031cc; /* as the primary */
     }
   }
 }
