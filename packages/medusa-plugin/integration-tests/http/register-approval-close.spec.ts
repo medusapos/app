@@ -129,7 +129,7 @@ medusaIntegrationTestRunner({
       }
       const closing = closure(opening.payload, { approval })
       expect((await post([closing]))[0]).toEqual({ id: closing.id, status: 'rejected', error: {
-        code: 'register_approval_invalid', message: 'This manager approval cannot be used.', data: { reason },
+        code: 'register_approval_invalid', message: 'This manager approval cannot be used.', data: expect.objectContaining({ reason }),
       } })
       if (reason !== 'unknown' && reason !== 'used') expect(await approvalRow(approval).first())
         .toMatchObject({ used_at: null, used_by_command_id: null, closure_id: null })
@@ -146,8 +146,26 @@ medusaIntegrationTestRunner({
     it('an approval for the till\'s own variance is refused when the server\'s differs', async () => {
       const approval = await approve(opening.payload.sessionId, { cash: 0 })
       const closing = closure(opening.payload, { approval, tillExpected: { cash: 100 }, counted: { cash: 100 } })
+      const [refused] = await post([closing])
+      expect(refused).toMatchObject({ status: 'rejected', error: { code: 'register_approval_invalid' } })
+      expect(refused.error.data).toEqual({ reason: 'variance_mismatch', variance: { cash: -1000 } })
+    })
+
+    it('a used proof\'s refusal carries the server variance, so the till re-requests approval for it', async () => {
+      const other = open()
+      expect((await post([other, close(other.payload.sessionId)])).map(result => result.status)).toEqual(['applied', 'applied'])
+      const approval = await approve(other.payload.sessionId, { cash: 501 })
+      expect((await post([closure(other.payload, { approval })]))[0].status).toBe('applied')
+      const closing = closure(opening.payload, { approval, tillExpected: { cash: 100 }, counted: { cash: 100 } })
+      const [refused] = await post([closing])
+      expect(refused).toMatchObject({ status: 'rejected', error: { code: 'register_approval_invalid' } })
+      expect(refused.error.data).toEqual({ reason: 'used', variance: { cash: -1000 } })
+    })
+
+    it('a contract 3 closure with unsyncedCount 0 whose counted leaves out cash still needs approval for the server\'s expected cash', async () => {
+      const closing = closure(opening.payload, { tillExpected: { cash: 1100 }, counted: { external: 0 } })
       expect((await post([closing]))[0]).toMatchObject({ status: 'rejected', error: {
-        code: 'register_approval_invalid', data: { reason: 'variance_mismatch' },
+        code: 'register_approval_required', data: { sessionId: opening.payload.sessionId, thresholdMinor: 500 },
       } })
     })
 
