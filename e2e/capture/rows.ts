@@ -45,14 +45,29 @@ async function keypad(page: Page, amount: string) {
   for (const digit of amount.replace(/\D/g, '')) await keys.getByRole('button', { name: digit, exact: true }).click();
 }
 
-// Counts exactly the expected cash and closes (TallyUI's count screen reads "Expected €X · …"); `done` leaves the closure.
+// The count is blind (no expected figure on the count screen), so the cash in the drawer is read off the user sheet
+// first; its register row opens the panel, whose Close register opens the count.
+async function startClose(page: Page) {
+  if ((page.viewportSize()?.width ?? 1280) < 600) await page.getByTestId('user-menu').click();
+  else await page.getByRole('button', { name: 'Open register panel', exact: true }).click();
+  const drawer = await page.getByTestId('user-sheet-drawer').textContent();
+  const cash = drawer?.match(/([\d.,]+)\D*$/)?.[1];
+  if (!cash) throw new Error(`no cash in the drawer on the user sheet: ${drawer}`);
+  await page.getByTestId('user-sheet-register').click();
+  await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+  return cash.replace(/,/g, '');
+}
+
+// Counts exactly the drawer's cash and closes (a count already open goes back to selling first); `done` leaves the closure.
 export async function finishClose(page: Page, done = true) {
   const count = page.getByTestId('register-count');
-  if (!await count.isVisible()) await headerState(page).click();
+  if (await count.isVisible()) {
+    await page.getByRole('button', { name: 'Back to selling', exact: true }).click();
+    await expect(count).toHaveCount(0);
+  }
+  const cash = await startClose(page);
   await expect(count).toBeVisible();
-  const expected = (await count.getByTestId('count-variance').textContent())?.match(/Expected\D*([\d.,]+)/)?.[1];
-  if (!expected) throw new Error('no expected cash on the count screen');
-  await count.getByTestId('count-amount').fill(expected.replace(/,/g, ''));
+  await count.getByTestId('count-amount').fill(cash);
   await count.getByTestId('count-close').click();
   await expect(page.getByTestId('closure-sheet')).toBeVisible();
   if (done) {
@@ -61,11 +76,7 @@ export async function finishClose(page: Page, done = true) {
   }
 }
 
-async function closeRegister(page: Page, done = true) {
-  await openRegisterPanel(page);
-  await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
-  await finishClose(page, done);
-}
+const closeRegister = finishClose;
 
 async function settings(page: Page, size: Size, id: string) {
   await openArea(page, 'Settings');

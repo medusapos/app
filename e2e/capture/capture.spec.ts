@@ -26,7 +26,9 @@ let ranSize: Size | undefined;
 test.use({ actionTimeout: 30_000, navigationTimeout: 60_000 });
 
 const headerState = (page: Page) => page.getByTestId('header-register-state');
-const visibleText = async (page: Page) => await headerState(page).isVisible() ? headerState(page).textContent() : null;
+// The state can go between the two reads (a session loading), so the read does not wait.
+const visibleText = async (page: Page) => await headerState(page).isVisible()
+  ? headerState(page).textContent({ timeout: 1_000 }).catch(() => null) : null;
 
 // Pays what the open tender still owes, then starts a new sale.
 async function pay(page: Page) {
@@ -49,10 +51,17 @@ async function reset(page: Page, size: Size) {
   const newSale = page.getByRole('button', { name: 'New sale', exact: true });
   await expect(signInHeading.or(page.getByTestId('user-menu')).or(pane).or(newSale).first()).toBeVisible({ timeout: 60_000 });
   if (await signInHeading.isVisible()) await signIn(page, 'Europe', false);
-  await expect(page.getByText(/^Up to date · \d+ products$/).or(pane).or(newSale).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByText(/Up to date · \d+ products/).or(pane).or(newSale).first()).toBeVisible({ timeout: 60_000 });
   if (await page.getByTestId('closure-done').isVisible()) await page.getByTestId('closure-done').click();
   if (await visibleText(page) === 'Counting') await finishClose(page);
   if (await page.getByTestId('view-toggle-grid').isVisible()) await page.getByTestId('view-toggle-grid').click();
+  // Right after a reload the header reads "Closed" until the till has loaded its open session; only a state that
+  // lasts means the register is really closed. An unbound till (row 09a) shows the picker in place of the cart, so this
+  // comes before the cart is cleared.
+  const closed = async () => ['Closed', 'Choose register'].includes(await visibleText(page) ?? '');
+  if (await closed()) await page.waitForTimeout(5_000);
+  const state = await visibleText(page);
+  if (await closed()) await openRegister(page, '100.00', true, state === 'Choose register');
   const empty = page.getByTestId('cart-empty');
   const more = page.getByTestId('cart-foot-more');
   for (let i = 0; i < 8; i++) {
@@ -79,10 +88,8 @@ async function reset(page: Page, size: Size) {
       }
     }
   }
-  const state = await visibleText(page);
-  if (state === 'Closed' || state === 'Choose register') await openRegister(page, '100.00', true, state === 'Choose register');
   if (phone && await productsTab(page).isVisible()) await productsTab(page).click();
-  await expect(page.getByText(/^Up to date · \d+ products$/)).toBeVisible();
+  await expect(page.getByText(/Up to date · \d+ products/)).toBeVisible();
 }
 
 async function shoot(page: Page, row: CaptureRow, size: Size) {
@@ -124,6 +131,7 @@ function writeIndex() {
 
 test.afterAll(writeIndex);
 
+// Each project's grep (e2e/capture/playwright.config.ts) keeps only the test of its own size.
 for (const size of SIZES) {
   test(`capture ${size}`, async ({ page }) => {
     ranSize = size;

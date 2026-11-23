@@ -9,7 +9,9 @@ if (process.env.E2E_APP_URL || process.env.E2E_BACKEND_URL) throw new Error('cap
 // The main config's teardown and webServer cwd are relative to e2e/; Playwright resolves them against this file's folder.
 const root = path.resolve(__dirname, '../..');
 const servers = base.webServer === undefined ? undefined : [base.webServer].flat().map(server => ({ ...server, cwd: root }));
-const size = (width: number, height: number, hasTouch = false) => ({ viewport: { width, height }, deviceScaleFactor: 1, hasTouch });
+// One project per size, each running only the spec's test of that size ("capture <name>").
+const size = (name: string, width: number, height: number, hasTouch = false) =>
+  ({ name, grep: new RegExp(`capture ${name}$`), use: { viewport: { width, height }, deviceScaleFactor: 1, hasTouch } });
 
 export default defineConfig({
   ...base,
@@ -19,8 +21,8 @@ export default defineConfig({
   testIgnore: [],
   timeout: 30 * 60_000,
   projects: [
-    { name: 'desktop', use: size(1280, 800) },
-    { name: 'tablet', use: size(1024, 768) },
-    { name: 'phone', use: size(390, 844, true) },
+    size('desktop', 1280, 800),
+    size('tablet', 1024, 768),
+    size('phone', 390, 844, true),
   ],
 });
