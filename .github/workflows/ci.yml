@@ -252,7 +252,8 @@ jobs:
   medusa-plugin:
     name: Medusa plugin
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Takes ~12–12.5 minutes on main; a slow runner exceeded 15 in run 45277333807 (2026-11-23), cancelled in integration shard 2/2.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:17
