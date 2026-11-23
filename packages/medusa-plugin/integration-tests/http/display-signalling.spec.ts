@@ -210,10 +210,12 @@ medusaIntegrationTestRunner({
         ...Array.from({ length: 100 }, (_, i) => ({ type: 'ice', payload: String(i + 1), displayId })),
         { type: 'ice', payload: 'other', displayId: other.displayId },
       ])
+      await s.displaySendSignal(d, token, { type: 'ice', payload: 'late' })
       for (let i = 0; i <= 100; i++) await s.sendSignal(ctx, device, displayId, { type: 'ice', payload: String(i) })
       expect(await s.displayReceiveSignals(d, token)).toEqual(
         Array.from({ length: 100 }, (_, i) => ({ type: 'ice', payload: String(i + 1) })),
       )
+      expect(await s.receiveSignals(ctx, device)).toEqual([{ type: 'ice', payload: 'late', displayId }])
     })
   },
 })
