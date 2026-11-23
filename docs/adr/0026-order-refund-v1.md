@@ -157,7 +157,9 @@ So a refund that leaves every product line fully refunded prices its lines at th
   - A resume after the session closed parks `session_closed` with nothing moved.
 
 ### 6. Register figures follow ADR-080 decision 6
-- **The session.** A refund counts in its own `sessionId`, which must be open, not counting. Anything else is refused `no_open_session`. The check holds the session row lock, as the register commands do (`lockSession`), so a close cannot interleave with a refund.
+- **The session.** A refund counts in its own `sessionId`, which must be open, not counting, and have no filed closure. Anything else is refused `no_open_session`.
+  - A refund already started may finish (resume or `apply`) while its session is counting, as cash movements may, until a closure is filed (ruling F3, 2026-11-23).
+  - A till that counted before it finished shows the difference as a variance at the gate. The check holds the session row lock, as the register commands do (`lockSession`), so a close cannot interleave with a refund.
 - **Expected per tender.** `deriveSessionFigures` takes the session's applied refunds, `[{ byMethod }]`, and each tender's expected figure falls by that refund's `byMethod`.
 - **Closure totals.**
   - `periodRefundsTotalMinor` is the sum of the session's applied refunds.
