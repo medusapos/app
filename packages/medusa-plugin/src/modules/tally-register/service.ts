@@ -276,9 +276,12 @@ export default class TallyRegisterModuleService extends MedusaService({
         if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }
         let approval: { id: string; approved_by: string } | undefined
         if (v3) {
-          const variance = Object.fromEntries(Object.entries(p.counted).map(([k, v]) => [k, v - (p.tillExpected[k] ?? 0)]))
+          // ADR 0023 amendment (2026-11-22): with every sale synced the server's own expected figures decide; else the till's.
+          const expected = p.serverExpected ?? p.tillExpected
+          const variance = Object.fromEntries(Object.entries(p.counted).map(([k, v]) => [k, v - (expected[k] ?? 0)]))
           const thresholdMinor = p.thresholdMinor!
-          const over = Math.abs((p.counted.cash ?? 0) - (p.tillExpected.cash ?? 0)) > thresholdMinor
+          // A counted without cash counts as 0 cash, so leaving it out never skips the gate.
+          const over = Math.abs((p.counted.cash ?? 0) - (expected.cash ?? 0)) > thresholdMinor
           if (p.approval === undefined && over) return { kind: 'conflict', code: 'register_approval_required',
             data: { sessionId: sentSessionId, thresholdMinor, variance } }
           if (p.approval !== undefined) {
@@ -288,7 +291,7 @@ export default class TallyRegisterModuleService extends MedusaService({
               : row.session_id !== session.id ? 'session_mismatch'
               : Object.keys(row.variance).length !== Object.keys(variance).length
                 || Object.entries(variance).some(([k, v]) => row.variance[k] !== v) ? 'variance_mismatch' : undefined
-            if (reason) return { kind: 'conflict', code: 'register_approval_invalid', data: { reason } }
+            if (reason) return { kind: 'conflict', code: 'register_approval_invalid', data: { reason, variance } }
             approval = { id: row.id as string, approved_by: row.approved_by as string }
           }
         }

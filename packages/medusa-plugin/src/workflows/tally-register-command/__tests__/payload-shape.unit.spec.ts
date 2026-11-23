@@ -29,6 +29,13 @@ it('accepts an optional approval only on a v3 closure', () => {
   }
 })
 
+it('a v3 closure whose counted leaves out cash is refused; versions 1 and 2 accept it', () => {
+  const cashless = { ...closure, counted: { external: 0 } }
+  expect(registerPayloadErrors('register.closure.submit', cashless, 3))
+    .toEqual(['payload.counted.cash: expected a safe integer; a contract 3 closure counts the cash drawer'])
+  for (const version of [1, 2]) expect(registerPayloadErrors('register.closure.submit', cashless, version)).toEqual([])
+})
+
 it('a v2 open accepts deviceName and supersedes; a v1 open refuses them as unknown fields for version 1', () => {
   const payload = { ...open, deviceName: '  Till 1  ', supersedes: 'previous-session' }
   expect(registerPayloadErrors('register.session.open', payload, 2)).toEqual([])

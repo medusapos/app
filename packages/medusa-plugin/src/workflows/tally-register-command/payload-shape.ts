@@ -109,6 +109,9 @@ export function registerPayloadErrors(type: string, payload: unknown, version = 
       for (const field of ['number', 'unsyncedCount'])
         check((payload[field] as number) <= 2147483647, field, 'at most 2147483647')
       for (const field of ['tillExpected', 'counted']) record(field)
+      // Contract 3: the approved variance is built over counted's keys, so it must carry the cash line.
+      if (version >= 3 && object(payload.counted)) check(Object.prototype.hasOwnProperty.call(payload.counted, 'cash'),
+        'counted.cash', 'a safe integer; a contract 3 closure counts the cash drawer')
       for (const field of ['orderIds', 'movementIds']) {
         const value = payload[field]
         check(Array.isArray(value), field, 'an array of ids')

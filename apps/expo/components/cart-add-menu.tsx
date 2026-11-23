@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Circle, Line, Path } from 'react-native-svg';
 import type { useSale } from '@tallyui/pos';
+import { Portal } from '@tallyui/primitives';
 import {
   Button, ChargeForm, createSvgIcon, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DiscountForm, DropdownMenu,
   DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, IconButton, Text,
@@ -52,6 +53,14 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
           <View className={open ? 'text-primary' : 'text-foreground'}><PlusIcon size={20} /></View>
         </IconButton>
       </DropdownMenuTrigger>
+      {/* As in v2, a press anywhere else closes the menu and does nothing more. TU's DropdownMenuContent mounts no
+          overlay, and the primitive DropdownMenu.Overlay only gets the menu's context inside the menu's own portal,
+          which the content already holds. So this full-screen press catcher sits in its own root portal, added
+          before the content's so the menu stays above it. Hidden from the keyboard and screen readers. */}
+      {open && <Portal name="cart-add-menu-overlay">
+        <Pressable testID="cart-add-menu-overlay" style={styles.overlay} onPress={() => setOpen(false)} tabIndex={-1}
+          aria-hidden accessibilityElementsHidden importantForAccessibility="no-hide-descendants" />
+      </Portal>}
       <DropdownMenuContent align="end">
         {/* Greyed when customers can't be created here (no createCustomer, or offline). */}
         <DropdownMenuItem testID="cart-add-new-customer" disabled={!onAddCustomer} className={onAddCustomer ? 'gap-2' : 'gap-2 opacity-50'}
@@ -91,3 +100,6 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
     </Dialog>
   </>;
 }
+
+// zIndex matches the content's z-50; the content's portal comes later, so it draws on top.
+const styles = StyleSheet.create({ overlay: { ...StyleSheet.absoluteFillObject, zIndex: 50 } });

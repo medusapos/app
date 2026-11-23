@@ -125,7 +125,7 @@ medusaIntegrationTestRunner({
       Object.assign(sale.payload, { pricesIncludeTax: false, discountMinor: 100, subtotalMinor: 800, taxMinor: 152, totalMinor: 952 })
       Object.assign(sale.payload.lines[0], { unitPriceMinor: 1000, discountMinor: 100 })
       Object.assign(sale.payload.coupons[0], { discountMinor: 100, discountTaxMinor: 19 })
-      sale.payload.payments[0].amountMinor = 952
+      Object.assign(sale.payload.payments[0], { amountMinor: 952, tenderedMinor: 952 })
       const writes = await price(sale)
       const order = await applied(sale, await executeOrderCreate(container, sale, {}, writes))
       const adjustments = order.items[0].adjustments!
@@ -227,7 +227,7 @@ medusaIntegrationTestRunner({
       saleY.payload.coupons.push({ ...saleY.payload.coupons[0], code: second.code!, couponId: second.id })
       saleY.payload.display.coupons!.push({ ...saleY.payload.display.coupons![0], code: second.code! })
       Object.assign(saleY.payload, { totalMinor: 990, subtotalMinor: 832, taxMinor: 158 })
-      saleY.payload.payments[0].amountMinor = 990
+      Object.assign(saleY.payload.payments[0], { amountMinor: 990, tenderedMinor: 990 })
       const writesY = await price(saleY)
       expect(writesY).toHaveLength(2)
       expect(writesY.map(write => write.promotionId)).toEqual([first.id, second.id])

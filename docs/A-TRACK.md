@@ -154,7 +154,7 @@ until a discount contract exists.
 - **Insufficient stock:** record the sale. Items that can't be fulfilled
   stay unfulfilled, with an `insufficient_stock` warning per variant. Reject
   with `insufficient_stock` only if Medusa refuses the order itself.
-- **Overpayment:** accept it; the collection amount = `totalMinor`.
+- **Overpayment:** refused with `overpaid` since 2026-11-22 (ADR 0004 amendment); the collection amount = `totalMinor`.
 - **Rejection codes:** `unknown_variant`, `invalid_quantity`, `underpaid`,
   `unsupported_currency`, `unsupported_tax_mode`, `insufficient_stock`,
   `idempotency_mismatch`.
