@@ -3,7 +3,8 @@ import { connectorSplit, medusaSumMinor, priceRefund, type PriceRefundInput } fr
 const request = (overrides: Partial<PriceRefundInput['request']>): PriceRefundInput['request'] =>
   ({ lines: [], shippingMinor: 0, adjustmentMinor: 0, totalMinor: 0, ...overrides })
 const line = { id: 'ordli_1', quantity: 3, netMinor: 1000, taxMinor: 190 }
-const base: Omit<PriceRefundInput, 'request'> = { lines: [line], shippingMinor: 500, earlier: [], refundableMoneyMinor: 100_000 }
+// The order's payment: the line's 1190 gross and 500 shipping.
+const base: Omit<PriceRefundInput, 'request'> = { lines: [line], shippingMinor: 500, earlier: [], refundableMoneyMinor: 1690 }
 
 describe('priceRefund (pos priceRefund on the connector split, ADR 0026 decision 5)', () => {
   it("P1: prices from the connector's round(gross − tax), not round(gross) − round(tax)", () => {
@@ -33,10 +34,13 @@ describe('priceRefund (pos priceRefund on the connector split, ADR 0026 decision
   it('P2: three one-unit refunds of a 3-unit line add up to its net and tax exactly', () => {
     const earlier: PriceRefundInput['earlier'] = []
     const taken: { netMinor: number; taxMinor: number }[] = []
+    let refundableMoneyMinor = 1690
     for (const totalMinor of [396, 398, 396]) {
-      const result = priceRefund({ ...base, earlier, request: request({ lines: [{ orderLineId: 'ordli_1', quantity: 1, restock: true }], totalMinor }) })
+      const result = priceRefund({ ...base, earlier, refundableMoneyMinor,
+        request: request({ lines: [{ orderLineId: 'ordli_1', quantity: 1, restock: true }], totalMinor }) })
       if (!result.ok) throw new Error(JSON.stringify(result.error))
       taken.push(result.lines[0])
+      refundableMoneyMinor -= result.totalMinor
       earlier.push({ lines: [{ orderLineId: 'ordli_1', quantity: 1 }], shippingMinor: 0 })
     }
     expect(taken.map(({ netMinor, taxMinor }) => [netMinor, taxMinor])).toEqual([[333, 63], [334, 64], [333, 63]])
@@ -66,5 +70,59 @@ describe('priceRefund (pos priceRefund on the connector split, ADR 0026 decision
       { ...base, request: request({ adjustmentMinor: 0, shippingMinor: 0, lines: [], totalMinor: 0 }) }]) {
       expect(priceRefund(input)).toMatchObject({ ok: false, error: { code: 'nothing_to_refund' } })
     }
+  })
+})
+
+// The remainder rule (ADR 0026 decision 5, desk ruling 2026-11-23): three one-unit lines at 0.99 ex 19% (gross 1.1781 each),
+// paid 3.53. Each line prices at 1.18, so the per-line sum is 3.54, one more than was paid.
+describe('the last units take the remainder', () => {
+  const lines = ['ordli_a', 'ordli_b', 'ordli_c'].map(id => ({ id, quantity: 1, ...connectorSplit('1.1781', '0.1881', 2) }))
+  const order = { lines, shippingMinor: 0, earlier: [] as PriceRefundInput['earlier'], refundableMoneyMinor: 353 }
+  const take = (...ids: string[]) => ids.map(orderLineId => ({ orderLineId, quantity: 1, restock: true }))
+
+  it('R1: refunding all three lines prices at 353, the payment, not the per-line 354', () => {
+    expect(lines[0]).toMatchObject({ netMinor: 99, taxMinor: 19 })
+    const perLine = lines.reduce((sum, line) => sum + line.netMinor + line.taxMinor, 0)
+    expect(perLine).toBe(354)
+    const result = priceRefund({ ...order, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 353 }) })
+    // The one-unit difference goes on the net of the request's last line, so the lines still sum to the total.
+    expect(result).toEqual({ ok: true, totalMinor: 353, lines: [
+      { orderLineId: 'ordli_a', quantity: 1, restock: true, netMinor: 99, taxMinor: 19 },
+      { orderLineId: 'ordli_b', quantity: 1, restock: true, netMinor: 99, taxMinor: 19 },
+      { orderLineId: 'ordli_c', quantity: 1, restock: true, netMinor: 98, taxMinor: 19 },
+    ] })
+    // The till's per-line 354 is more than was paid: refused with the server's 353.
+    expect(priceRefund({ ...order, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 354 }) }))
+      .toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { expectedMinor: 354, serverMinor: 353 } } })
+  })
+
+  it('R2: two lines price at the per-line 236; the last line then takes the remainder, 117; together 353', () => {
+    const first = priceRefund({ ...order, request: request({ lines: take('ordli_a', 'ordli_b'), totalMinor: 236 }) })
+    expect(first).toMatchObject({ ok: true, totalMinor: 236 })
+    const earlier = [{ lines: [{ orderLineId: 'ordli_a', quantity: 1 }, { orderLineId: 'ordli_b', quantity: 1 }], shippingMinor: 0 }]
+    const last = priceRefund({ ...order, earlier, refundableMoneyMinor: 353 - 236,
+      request: request({ lines: take('ordli_c'), totalMinor: 117 }) })
+    expect(last).toEqual({ ok: true, totalMinor: 117,
+      lines: [{ orderLineId: 'ordli_c', quantity: 1, restock: true, netMinor: 98, taxMinor: 19 }] })
+    expect((first as { totalMinor: number }).totalMinor + (last as { totalMinor: number }).totalMinor).toBe(353)
+  })
+
+  it('R3: a remainder more than one minor unit per line from the per-line sum is amount_mismatch', () => {
+    // 3 lines allow 3 units: 351 (3 below 354) is rounding, 350 (4 below) is not.
+    expect(priceRefund({ ...order, refundableMoneyMinor: 351, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 351 }) }))
+      .toMatchObject({ ok: true, totalMinor: 351 })
+    expect(priceRefund({ ...order, refundableMoneyMinor: 350, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 350 }) }))
+      .toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { expectedMinor: 350, serverMinor: 354 } } })
+    expect(priceRefund({ ...order, refundableMoneyMinor: 358, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 358 }) }))
+      .toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { expectedMinor: 358, serverMinor: 354 } } })
+  })
+
+  it('a full refund that also takes the shipping prices the lines at the money left less the shipping left', () => {
+    const shipped = { ...order, shippingMinor: 500, refundableMoneyMinor: 853 }
+    expect(priceRefund({ ...shipped, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), shippingMinor: 500, totalMinor: 853 }) }))
+      .toMatchObject({ ok: true, totalMinor: 853 })
+    // Shipping kept for a later refund: the lines take 853 less the 500 still unrefunded.
+    expect(priceRefund({ ...shipped, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 353 }) }))
+      .toMatchObject({ ok: true, totalMinor: 353 })
   })
 })

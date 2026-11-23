@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
 import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/framework/http'
 import { Modules } from '@medusajs/framework/utils'
-import { mayApproveVariance } from '../../../../utils/manager-check'
+import { mayApproveVariance } from '../../../../policies/manager'
 import { TALLY_REGISTER_MODULE } from '../../../../modules/tally-register'
 import type TallyRegisterModuleService from '../../../../modules/tally-register/service'
 import { deviceClearAttempts } from '../device-clear-approvals/attempts'

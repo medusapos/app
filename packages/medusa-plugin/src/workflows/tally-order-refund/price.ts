@@ -81,15 +81,30 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
   }
   if (exceeded.length) return { ok: false, error: { code: 'quantity_exceeds',
     message: 'A line asks for more than its refundable quantity, or is not on the order.', data: { lines: exceeded } } }
-  const linesMinor = priced.reduce((sum, line) => sum + line.netMinor + line.taxMinor, 0)
+  let linesMinor = priced.reduce((sum, line) => sum + line.netMinor + line.taxMinor, 0)
   const shippingLeft = Math.max(0, input.shippingMinor - input.earlier.reduce((sum, earlier) => sum + earlier.shippingMinor, 0))
-  const totalMinor = linesMinor + request.shippingMinor + request.adjustmentMinor
   const mismatch = (serverMinor: number, message: string) => ({ ok: false as const, error: { code: 'amount_mismatch' as const,
     message, data: { expectedMinor: request.totalMinor, serverMinor } } })
   // serverMinor is what the store would refund: the shipping capped at what is left of it, the total at the money left.
   if (request.shippingMinor > shippingLeft) {
     return mismatch(linesMinor + shippingLeft + request.adjustmentMinor, 'The shipping refunded is more than the order has left to refund.')
   }
+  // The last units take the remainder (desk ruling 2026-11-23): when this refund leaves every line fully refunded, the lines
+  // are priced at the money left less the shipping not yet refunded, since per-line rounding can ask for more than was paid
+  // (3 × 0.99 ex 19%: 3 × 1.18 = 3.54, paid 3.53). The difference goes on the net of the request's last line. More than one
+  // minor unit per order line is not rounding: the payment and the order disagree, and that is never refunded silently.
+  const taken = new Map(request.lines.map(line => [line.orderLineId, line.quantity]))
+  if (priced.length && input.lines.every(line => (refunded.get(line.id) ?? 0) + (taken.get(line.id) ?? 0) >= line.quantity)) {
+    const remainderMinor = input.refundableMoneyMinor - shippingLeft
+    const difference = remainderMinor - linesMinor
+    if (Math.abs(difference) > input.lines.length) {
+      return mismatch(linesMinor + request.shippingMinor + request.adjustmentMinor,
+        "The order's money left differs from its lines by more than rounding.")
+    }
+    priced[priced.length - 1].netMinor += difference
+    linesMinor = remainderMinor
+  }
+  const totalMinor = linesMinor + request.shippingMinor + request.adjustmentMinor
   if (totalMinor !== request.totalMinor) return mismatch(totalMinor, "The refund total differs from the store's.")
   if (totalMinor === 0) return nothing
   if (totalMinor > input.refundableMoneyMinor) {

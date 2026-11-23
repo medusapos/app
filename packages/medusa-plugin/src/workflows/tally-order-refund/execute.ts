@@ -5,7 +5,7 @@ import type { CommandEnvelope, CommandResult, OrderRefundPayload } from '@tallyu
 import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'
-import { mayApproveVariance } from '../../utils/manager-check'
+import { mayApproveVariance } from '../../policies/manager'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
 import { currencyDecimals, minorToMajor } from '../tally-order-create/money'
@@ -119,11 +119,13 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       if (!session || session.status !== 'open' || session.register_id !== payload.registerId) {
         return { outcome: rejected(id, 'no_open_session', 'This refund needs an open session of its register.', { sessionId: payload.sessionId }), keepClaim: false }
       }
-      // Every refund of the order already started counts, so a refund still running or parked is never priced twice.
+      // Every refund of the order already started counts, so a refund still running or parked is never priced twice. The
+      // order is read again under the lock, so its refunded money includes a refund that finished while this one waited.
       const earlier = await trx('tally_refund').where({ order_id: order.id }).select('lines', 'shipping_minor', 'refunds') as RefundRow[]
-      const price = priceRefund({ lines: order.lines, shippingMinor: order.shippingMinor,
+      const current = await loadRefundOrder(container, order.id) ?? order
+      const price = priceRefund({ lines: current.lines, shippingMinor: current.shippingMinor,
         earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor) })),
-        refundableMoneyMinor: order.payment ? order.payment.amountMinor - order.payment.refundedMinor : null, request: payload })
+        refundableMoneyMinor: current.payment ? current.payment.amountMinor - current.payment.refundedMinor : null, request: payload })
       if (price.ok === false) return { outcome: rejected(id, price.error.code, price.error.message, price.error.data), keepClaim: false }
       const split = splitRefund({ orderId: order.id, tenders: order.tenders, earlier: earlier.flatMap(entry => entry.refunds),
         totalMinor: price.totalMinor, destination: payload.destination })
@@ -148,10 +150,10 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const write = (fields: Record<string, unknown>) => knex('tally_refund').where({ id: row.id }).update({ ...fields, updated_at: knex.fn.now() })
-  const park = async (step: string, message: string): Promise<Run> => {
+  const park = async (step: string, message: string, reason?: 'refund_unrecorded'): Promise<Run> => {
     await write({ status: 'needs_admin' })
     const parked = await ledger.markNeedsAdmin(id, claimToken, { orderId: row.order_id, clientRefundId: row.client_refund_id,
-      refundId: row.id, step, message })
+      refundId: row.id, step, message, ...(reason ? { reason } : {}) })
     if (parked) logger.error(`tally order.refund needs admin: command ${id}, refund ${row.id}, step ${step}: ${message}`)
     else logger.warn(`tally order.refund: claim lost while parking command ${id} (refund ${row.id}, step ${step}: ${message})`)
     return { outcome: { kind: 'in_progress', id }, keepClaim: true }
@@ -161,6 +163,16 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
   const undo = async (error: Error): Promise<Run> => {
     await knex('tally_refund').where({ id: row.id }).delete()
     return { outcome: failedOutcome(container, id, error), keepClaim: false }
+  }
+  // Never refund twice: Medusa must show no more refunded on the payment than the rows that recorded a refund. Checked before
+  // the receive, so stock never moves when the money won't, and again before the money, for a resume past the receive.
+  const unrecorded = async (): Promise<{ paymentId: string; message: string | null }> => {
+    const fresh = await loadRefundOrder(container, order.id)
+    if (!fresh?.payment) throw new Error(`Order ${order.id} has no payment to refund`)
+    const [{ sum }] = await knex('tally_refund').where({ order_id: order.id }).whereNotNull('medusa_refund_id').sum({ sum: 'total_minor' })
+    const recorded = Number(sum ?? 0)
+    return { paymentId: fresh.payment.id, message: fresh.payment.refundedMinor > recorded
+      ? `refund_unrecorded: payment ${fresh.payment.id} shows ${fresh.payment.refundedMinor} refunded, tally_refund records ${recorded}` : null }
   }
   let step = 'return'
   try {
@@ -194,20 +206,16 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
     }
     step = 'receive'
     if (lines.length && !row.received_at) {
+      const check = await unrecorded()
+      if (check.message) return await park(step, check.message, 'refund_unrecorded')
       await receiveStep(container, { returnId: row.return_id!, lines, actorId })
       await write({ received_at: new Date() })
     }
     step = 'refund'
     if (!row.medusa_refund_id) {
-      // Never refund twice: Medusa must show no more refunded on the payment than the rows that recorded a refund.
-      const fresh = await loadRefundOrder(container, order.id)
-      const [{ sum }] = await knex('tally_refund').where({ order_id: order.id }).whereNotNull('medusa_refund_id').sum({ sum: 'total_minor' })
-      const recorded = Number(sum ?? 0)
-      if (!fresh?.payment) throw new Error(`Order ${order.id} has no payment to refund`)
-      if (fresh.payment.refundedMinor > recorded) {
-        return await park(step, `refund_unrecorded: payment ${fresh.payment.id} shows ${fresh.payment.refundedMinor} refunded, tally_refund records ${recorded}`)
-      }
-      const medusaRefundId = await moneyStep(container, { paymentId: fresh.payment.id,
+      const check = await unrecorded()
+      if (check.message) return await park(step, check.message, 'refund_unrecorded')
+      const medusaRefundId = await moneyStep(container, { paymentId: check.paymentId,
         amount: minorToMajor(Number(row.total_minor), order.decimals), note: row.reason, actorId })
       await write({ medusa_refund_id: medusaRefundId })
     }
