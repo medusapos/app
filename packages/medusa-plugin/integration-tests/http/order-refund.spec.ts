@@ -400,7 +400,7 @@ medusaIntegrationTestRunner({
       await refundPaymentWorkflow(container).run({ input: { payment_id: paymentId, amount: Number(row.total_minor) / 100, note: 'by hand' } })
       const medusa = await knex('refund').where({ payment_id: paymentId }).whereNull('deleted_at').first('id')
       const figures = await loadSessionFigures(container, till.sessionId), stock = await stockA()
-      await expect(resolve(order.id, 'apply', medusa.id)).rejects.toThrow(/session is closed.*nothing written/)
+      await expect(resolve(order.id, 'apply', medusa.id)).rejects.toThrow(/session is closed.*stays parked/)
       expect(await knex('tally_refund').where({ id: row.id }).first()).toEqual(row)
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: {
         step: 'session', reason: 'session_closed',
@@ -494,6 +494,32 @@ medusaIntegrationTestRunner({
       expect(await returns(till.orderId)).toEqual(beforeReturns)
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 0.01 }])
       expect(await loadSessionFigures(container, till.sessionId)).toEqual(figures)
+    })
+
+    it('S1-apply-own-id: apply keeps a row\'s own Medusa refund and refuses a different one', async () => {
+      const till = await remainderSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+      const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'by hand' } })
+      const r1 = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      await knex('tally_refund').where({ command_id: order.id }).update({ medusa_refund_id: r1.id })
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'by hand' } })
+      const r2 = await knex('refund').where({ payment_id: till.paymentId }).whereNot({ id: r1.id }).whereNull('deleted_at').first('id')
+      const row = await knex('tally_refund').where({ command_id: order.id }).first(), parked = await commandRow(order.id)
+      expect(row).toMatchObject({ status: 'needs_admin', medusa_refund_id: r1.id })
+      expect(row.received_at).not.toBeNull()
+      expect(Number(row.total_minor)).toBe(118)
+      await expect(resolve(order.id, 'apply', r2.id)).rejects.toThrow(
+        `Refund ${row.id} already records Medusa refund ${r1.id}; use resume; nothing written`)
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toEqual(row)
+      expect(await commandRow(order.id)).toEqual(parked)
+      await expect(resolve(order.id, 'apply', r1.id)).resolves.toBeUndefined()
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'applied', medusa_refund_id: r1.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
     })
 
     it('I5b: a failure right after the return is begun parks with the return recorded; resume reuses it: one return, one refund', async () => {

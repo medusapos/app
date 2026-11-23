@@ -308,6 +308,9 @@ export async function resolveOrderRefund(container: MedusaContainer, commandId: 
   if (action === 'apply') {
     if (row.lines.length && row.received_at === null) throw new Error(`Refund ${row.id} has not been received; use resume`)
     if (!medusaRefundId || !order.payment) throw new Error('Usage: apply <medusaRefundId> (a refund on the order\'s payment)')
+    if (row.medusa_refund_id && row.medusa_refund_id !== medusaRefundId) {
+      throw new Error(`Refund ${row.id} already records Medusa refund ${row.medusa_refund_id}; use resume; nothing written`)
+    }
     const refund = await knex('refund').where({ id: medusaRefundId, payment_id: order.payment.id }).whereNull('deleted_at').first('id', 'raw_amount')
     if (!refund) throw new Error(`Refund ${medusaRefundId} is not a refund of order ${order.id}'s payment; nothing written`)
     const minor = medusaSumMinor(order.decimals, [refund.raw_amount.value])
@@ -334,7 +337,7 @@ export async function resolveOrderRefund(container: MedusaContainer, commandId: 
         result: JSON.stringify(parseCommandResult(result)), needs_admin_reason: null, updated_at: trx.fn.now() })
       if (rows !== 1 || commands !== 1) throw new Error(`Command ${commandId} changed while resolving; nothing written`)
     })
-    if (sessionClosed) throw new Error(`Refund ${row.id}'s register session is closed; nothing written`)
+    if (sessionClosed) throw new Error(`Refund ${row.id}'s register session is closed; moved no money and no stock; it stays parked (session_closed)`)
     return { kind: 'result', result }
   }
   const claimToken = randomUUID()
