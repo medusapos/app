@@ -201,3 +201,16 @@ it('greys Add Coupon when the till does not offer coupons', async () => {
   openMenu();
   expect(screen.getByRole('menuitem', { name: 'Add Coupon' }).getAttribute('aria-disabled')).toBe('true');
 });
+it('a press outside the menu closes it; the overlay sits under the menu, out of the tab order', async () => {
+  await start();
+  openMenu();
+  const overlay = screen.getByTestId('cart-add-menu-overlay');
+  expect(overlay.compareDocumentPosition(screen.getByRole('menu')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(overlay.getAttribute('aria-hidden')).toBe('true');
+  expect(overlay.getAttribute('tabindex')).toBe('-1');
+  fireEvent.click(overlay);
+  expect(screen.queryByRole('menu')).toBeNull();
+  expect(screen.queryByTestId('cart-add-menu-overlay')).toBeNull();
+  expect(screen.getByTestId('cart-add-menu').getAttribute('data-open')).toBe('false');
+  expect(screen.queryByTestId('cart-add-dialog')).toBeNull();
+});

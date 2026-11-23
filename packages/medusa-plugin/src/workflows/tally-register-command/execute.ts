@@ -16,7 +16,7 @@ import { commandFingerprint } from '../tally-order-create/fingerprint'
 import { envelopeErrors, MAX_PAYLOAD_ERRORS } from '../tally-order-create/payload-shape'
 import { clientTimeStageErrors } from '../client-time'
 import { registerPayloadErrors } from './payload-shape'
-import { loadSessionFigures } from './figures'
+import { holdsEveryOrder, loadSessionFigures } from './figures'
 
 type RegisterResult = CommandResult
 const conflictMessages = {
@@ -91,8 +91,16 @@ export async function executeRegisterCommand(container: MedusaContainer, command
         case 'register.session.transition': outcome = await service.transition({ ...(payload as RegisterSessionTransitionPayload), contract: command.version } satisfies RegisterSessionTransitionInput); break
         case 'register.movement.record': outcome = await service.recordMovement({ ...(payload as RegisterMovementRecordPayload), contract: command.version } satisfies RegisterMovementRecordInput); break
         case 'register.movement.void': outcome = await service.voidMovement({ ...(payload as RegisterMovementVoidPayload), contract: command.version } satisfies RegisterMovementVoidInput); break
-        case 'register.closure.submit': outcome = await service.submitClosure({ ...(payload as RegisterClosureSubmitV3Payload),
-          contract: command.version, commandId: command.id, thresholdMinor: approvalThresholdMinor(options) } satisfies RegisterClosureSubmitInput); break
+        case 'register.closure.submit': {
+          const closing = payload as RegisterClosureSubmitV3Payload
+          // ADR 0023 amendment: with every sale synced, the approval gate decides on the server's own expected figures.
+          // Desk ruling 2026-11-23: an unsynced claim is false when the server holds every orderIds sale.
+          const serverExpected = command.version >= 3
+            && (closing.unsyncedCount === 0 || await holdsEveryOrder(container, closing.orderIds))
+            ? (await loadSessionFigures(container, closing.sessionId))?.expected : undefined
+          outcome = await service.submitClosure({ ...closing, contract: command.version, commandId: command.id,
+            thresholdMinor: approvalThresholdMinor(options), serverExpected } satisfies RegisterClosureSubmitInput); break
+        }
         default: throw new Error('Unknown register command type')
       }
       if (outcome.kind === 'ok') {
