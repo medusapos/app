@@ -121,13 +121,34 @@ Each line's net is `round(gross − tax)`, the connector's split, never `round(g
 
 **The last units take the remainder** (amended 2026-11-23, desk ruling). Per-line rounding can ask for more than the till took. Take three one-unit lines at 0.99 ex 19%: each line is 1.18, which sums to 3.54, but the sale was paid 3.53.
 
-So a refund that leaves every line fully refunded is priced at the order's remaining refundable money. That is the payment's amount, less Medusa's refunds on it, less any shipping still unrefunded. The difference from the per-line sum goes on the net of the request's last line.
+So a refund that leaves every product line fully refunded prices its lines at the money left for the lines. The difference from the per-line sum goes on one of the request's lines. The till prices the same way. TallyUI 4.1.0's `priceRefund` does not, so the app sends the remainder for its full-order refund.
 
-A difference of more than one minor unit per line means the payment and the order disagree by more than rounding. It is refused `amount_mismatch`, never refunded silently. The till prices the same way. TallyUI 4.1.0's `priceRefund` does not, so the app sends the remainder for its full-order refund.
+**Desk rulings of 2026-11-23 on the money review of #540 (A to E).**
+- **A. The lines' money.** For the last units, the lines' money is: payment amount − the order's shipping (gross) − the order's till fees (gross) − Σ the line money (net + tax) of every earlier `tally_refund` row of the order. It is summed exactly and rounded once.
+  - **Earlier rows.** Rows count when they have moved money or still can: `in_progress`, `applied` and `needs_admin`. A refund that fails before its money moves deletes its row, so it never counts.
+  - **Fees.** Fee items (`metadata.tally_fee_uuid`) are not lines here. They are not in the "every line refunded" set, and they are not in the bound's line count. A fee goes back only as `adjustmentMinor`, under the overall cap.
+  - **Never in the remainder.** Adjustments and shipping refunds.
+- **B. Which line takes the difference.** The request's last line whose net covers the difference (net ≥ |difference|). If no line does, the line with the largest net, with ties going to the later line. A net is never negative. The till applies the same rule.
+- **C. A resume or takeover after the session has closed.** The refund parks again as `needs_admin`, reason `session_closed`, with no money and no stock moved. The closed session's figures never move.
+  - On the till, the refund reads as in progress, never as paid. TallyUI's wire has no message for a parked command; the plain "not paid" wording on the till is a TallyUI contract change, asked of the TallyUI lane.
+  - The admin path that finishes such a refund is medusapos/app#542, the next ticket after #540.
+- **D. Money drift.** A difference of more than one minor unit per product line means the payment and the order disagree by more than rounding. It is refused `order_state` with `{ state: 'money_drift' }`, for an admin. `amount_mismatch`, which carries `serverMinor`, is only for a till total that differs from the server's price.
+- **E. Shipping basis.** `shippingMinor` is gross: net + tax, the orders list's two shipping figures added.
+
+**The overall cap.** A refund's total may not exceed the payment's amount less Medusa's refunds, less the totals of earlier rows that have not yet reached Medusa.
+
+**Medusa credit lines.** Medusa 2.21's `refundPaymentWorkflow` records any refund above the order's pending difference as an order credit line. So a shipping-only refund, an adjustment, or a line priced up by rounding shows in Admin as a credit line on the order.
 
 **Required tests.**
 - **Per-line rounding.** A line where `round(gross) − round(tax)` and `round(gross − tax)` differ by one minor unit: the refund is accepted, and its amounts are the connector's.
 - **Per-order rounding.** Refunding all three lines of the 3.53 sale above gives 3.53. Refunding two of them gives 2.36, and the last line then gets 1.17.
+- **The rulings' cases** (2026-11-23):
+  - The 3.53 sale with a 1.19 fee, paid 4.72: refunding all three lines gives 3.53.
+  - +1 goodwill first: the last units still get 3.53. −3 withheld on the first line: the last two get 2.35.
+  - A parked earlier refund does not block the last units.
+  - A free last line keeps a net ≥ 0.
+  - Money drift answers `order_state` `money_drift`, with no `serverMinor`.
+  - A resume after the session closed parks `session_closed` with nothing moved.
 
 ### 6. Register figures follow ADR-080 decision 6
 - **The session.** A refund counts in its own `sessionId`, which must be open, not counting. Anything else is refused `no_open_session`. The check holds the session row lock, as the register commands do (`lockSession`), so a close cannot interleave with a refund.
