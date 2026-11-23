@@ -7,6 +7,8 @@ export const LINE_TAX = { none: false, classes: false }
 // Version 2 adds take-over fields to the open (ADR to follow).
 // Version 3 adds approval to the closure (ADR 0023); the other commands are unchanged at 3.
 export const SUPPORTED_REGISTER_VERSIONS: readonly number[] = [1, 2, 3]
+// The order.refund versions this plugin accepts (TallyUI ADR-080, ADR 0026).
+export const SUPPORTED_ORDER_REFUND_VERSIONS: readonly number[] = [1]
 // ADR 0023: the default when the option is unset.
 export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
 // The version of the contract between this plugin and the MedusaPOS app, advertised on /info as `pluginContract`.
@@ -17,7 +19,8 @@ export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
 // Contract 2 adds POST /tally/v1/device-clear-approvals (#280).
 // Contract 3 adds GET /tally/v1/orders
 // Contract 4 adds allChannels=true on GET /tally/v1/orders
-export const PLUGIN_CONTRACT = 4
+// Contract 5 adds order.refund v1 (ADR 0026)
+export const PLUGIN_CONTRACT = 5
 
 export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
   const value = options.approvalThresholdMinor

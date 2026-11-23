@@ -98,3 +98,17 @@ describe('session figures', () => {
     expect(deriveVariance({ cash: 500, other: 100 }, figures.expected)).toEqual({ cash: 0, other: 100 })
   })
 })
+
+describe('session figures with refunds (ADR-080 decision 6)', () => {
+  it('F1: refunds lower expected per method and return refundsTotalMinor; without refunds the result is unchanged', () => {
+    const without = deriveSessionFigures(workedExample)
+    expect(without).toStrictEqual({ expected: { cash: 14756 }, salesCount: 1 })
+    expect('refundsTotalMinor' in without).toBe(false)
+    const figures = deriveSessionFigures({ ...workedExample, refunds: [
+      { byMethod: { cash: 1000, external: 2000 } }, { byMethod: { cash: 256 } },
+    ] })
+    expect(figures).toStrictEqual({ expected: { cash: 13500, external: -2000 }, salesCount: 1, refundsTotalMinor: 3256 })
+    expect(deriveSessionFigures({ ...workedExample, refunds: [] }))
+      .toStrictEqual({ expected: { cash: 14756 }, salesCount: 1, refundsTotalMinor: 0 })
+  })
+})

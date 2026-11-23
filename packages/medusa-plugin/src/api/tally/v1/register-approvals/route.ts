@@ -1,8 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { hasPermission } from '@medusajs/framework'
-import type { IFlagRouter } from '@medusajs/framework/feature-flags'
 import type { AuthenticatedMedusaRequest, MedusaResponse } from '@medusajs/framework/http'
-import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
+import { Modules } from '@medusajs/framework/utils'
+import { mayApproveVariance } from '../../../../utils/manager-check'
 import { TALLY_REGISTER_MODULE } from '../../../../modules/tally-register'
 import type TallyRegisterModuleService from '../../../../modules/tally-register/service'
 import { deviceClearAttempts } from '../device-clear-approvals/attempts'
@@ -46,16 +45,7 @@ export async function POST(req: AuthenticatedMedusaRequest, res: MedusaResponse)
   if (!success || !authIdentity) return res.status(401).json({ code: 'approval_invalid_credentials',
     message: "The manager's email or password is not correct." })
   const userId = authIdentity.app_metadata?.user_id
-  let allowed = typeof userId === 'string' && userId.length > 0
-  if (allowed && req.scope.resolve<IFlagRouter>(ContainerRegistrationKeys.FEATURE_FLAG_ROUTER).isFeatureEnabled('rbac')) {
-    const { data } = await req.scope.resolve(ContainerRegistrationKeys.QUERY).graph({
-      entity: 'user', fields: ['rbac_roles.id'], filters: { id: userId },
-    })
-    const roles = data[0]?.rbac_roles?.map(role => role.id) ?? []
-    allowed = roles.length > 0 && await hasPermission({ roles,
-      actions: { resource: 'tally_pos', operation: 'approve_variance' }, container: req.scope })
-  }
-  if (!allowed) return res.status(403).json({ code: 'approval_forbidden', message: "This user can't approve register variances." })
+  if (!await mayApproveVariance(req.scope, userId)) return res.status(403).json({ code: 'approval_forbidden', message: "This user can't approve register variances." })
   const user = await req.scope.resolve(Modules.USER).retrieveUser(userId as string)
   const approvedByName = user.first_name || user.last_name
     ? `${user.first_name ?? ''} ${user.last_name ?? ''}`.trim() : user.email

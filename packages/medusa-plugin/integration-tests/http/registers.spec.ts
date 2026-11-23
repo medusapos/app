@@ -251,16 +251,16 @@ medusaIntegrationTestRunner({
       expect((await post([opening])).data.results).toEqual([{ ...retry.data.results[0], status: 'duplicate' }])
     })
 
-    it('/info lists order.create 1 to 7, register 1, 2, 3, the approval threshold and plugin contract 4', async () => {
+    it('/info lists order.create 1 to 7, register 1, 2, 3, order.refund 1, the approval threshold and plugin contract 5', async () => {
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], 'order.refund': [1], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         registerApproval: { thresholdMinor: 500 },
         lineTax: { none: false, classes: false },
         coupons: true,
-        pluginContract: 4,
+        pluginContract: 5,
       })
     })
 

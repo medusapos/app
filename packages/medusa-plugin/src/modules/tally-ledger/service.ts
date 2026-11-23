@@ -9,6 +9,7 @@ import {
   MedusaService,
 } from '@medusajs/framework/utils'
 import { TallyCommand } from './models/tally-command'
+import { TallyRefund } from './models/tally-refund'
 import { parseCommandResult } from './command-result'
 import type { StockTopUp } from '../../workflows/tally-order-create/stock'
 import type { TallyPluginOptions } from '../../workflows/tally-order-create'
@@ -21,7 +22,7 @@ export type TallyCommandRecord = InferTypeOf<typeof TallyCommand>
  *  staying far above a slow run. See docs/adr/0001-command-ledger-lease.md. */
 export const CLAIM_LEASE_SECONDS = 120
 
-export default class TallyLedgerModuleService extends MedusaService({ TallyCommand }) {
+export default class TallyLedgerModuleService extends MedusaService({ TallyCommand, TallyRefund }) {
   private readonly options: TallyPluginOptions
 
   constructor(container: Record<string, unknown>, options: TallyPluginOptions = {}) {
@@ -130,10 +131,13 @@ export default class TallyLedgerModuleService extends MedusaService({ TallyComma
     )
   }
 
-  /** Parks the command for an admin: claim() only reclaims in_progress rows, so the recipe never runs on it again. */
+  /** Parks the command for an admin: claim() only reclaims in_progress rows, so the recipe never runs on it again.
+   *  An order.refund names its refund and the step that failed (ADR 0026 decision 2). */
   @InjectManager()
   async markNeedsAdmin(
-    id: string, claimToken: string, reason: { orderId: string; clientOrderId: string; detail: string },
+    id: string, claimToken: string,
+    reason: { orderId: string; clientOrderId: string; detail: string }
+      | { orderId: string; clientRefundId: string; refundId: string; step: string; message: string },
     @MedusaContext() sharedContext: Context = {}
   ): Promise<boolean> {
     const rows = await (sharedContext.manager as EntityManager).execute(

@@ -233,6 +233,13 @@ uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `n
 run `reject` again, not `apply`: an `apply` would leave the cancelled order unmarked, and it would count next to the new one.
 Cancelling the order by hand is fine: `reject` still takes back the plugin's top-up. See the ADR 0003 amendment of 2026-09-29.
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
+**A parked `order.refund`** (ADR 0026) carries `needs_admin_reason` `{ orderId, clientRefundId, refundId, step, message }`, where
+`step` is the Medusa step that failed (`return`, `receive` or `refund`). Its `tally_refund` row records what already ran
+(`return_id`, `received_at`, `medusa_refund_id`). Two actions: `tally-ledger-resolve.js <commandId> resume` runs the missing
+steps and applies the command; before the money step it still checks that Medusa shows no more refunded on the payment than
+`tally_refund` records, and parks again with `refund_unrecorded` if it does. `tally-ledger-resolve.js <commandId> apply
+<medusaRefundId>` records a refund the admin made by hand on the order's payment and applies the command. There is no
+`reject` for a refund: once a return exists, stock has moved.
 **Backfill for rejects made before the marking.** A store needs it only if an admin ran `tally-ledger-resolve reject`
 before the release that added the `tally_rejected` marker (#121): those cancelled orders still count in register figures.
 The script is manual; nothing runs it automatically. On a real store, plan the run with the store's owner, because it changes
