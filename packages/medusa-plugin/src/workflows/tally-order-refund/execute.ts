@@ -5,6 +5,7 @@ import type { CommandEnvelope, CommandResult, OrderRefundPayload } from '@tallyu
 import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
 import { parseCommandResult } from '../../modules/tally-ledger/command-result'
+import { sessionTakesMoney } from '../../modules/tally-register/session-open'
 import { mayApproveVariance } from '../../policies/manager'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
@@ -24,6 +25,8 @@ type RefundRow = { id: string; client_refund_id: string; command_id: string; ord
 type Run = { outcome: ExecuteOutcome; keepClaim: boolean }
 // A refund that failed before its money left no row (undo deletes it), so it is never counted.
 const COUNTED_REFUND_STATUSES = ['in_progress', 'applied', 'needs_admin'] as const
+const sessionClosedMessage = (id: string) =>
+  `session_closed: refund ${id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.`
 
 /** What a refund needs of a Medusa order, in minor units. */
 export interface RefundOrder {
@@ -121,10 +124,10 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       await ledger.complete(id, claimToken, result)
       return { outcome: { kind: 'result', result }, keepClaim: true }
     }
-    if (row && session?.status !== 'open') return parkRefund(container, { id, claimToken, row }, 'session',
-      `session_closed: refund ${row.id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.`, 'session_closed')
+    const takesMoney = await sessionTakesMoney(session, async (sql, params) => (await trx.raw(sql, params)).rows)
+    if (row && !takesMoney) return parkRefund(container, { id, claimToken, row }, 'session', sessionClosedMessage(row.id), 'session_closed')
     if (!row && payload) {
-      if (!session || session.status !== 'open' || session.register_id !== payload.registerId) {
+      if (!takesMoney || session.status !== 'open' || session.register_id !== payload.registerId) {
         return { outcome: rejected(id, 'no_open_session', 'This refund needs an open session of its register.', { sessionId: payload.sessionId }), keepClaim: false }
       }
       // Every refund of the order already started counts, so a refund still running or parked is never priced twice. The
@@ -310,15 +313,28 @@ export async function resolveOrderRefund(container: MedusaContainer, commandId: 
     const minor = medusaSumMinor(order.decimals, [refund.raw_amount.value])
     if (minor !== Number(row.total_minor)) throw new Error(`Refund ${medusaRefundId} is ${minor}, refund ${row.id} is ${row.total_minor}; nothing written`)
     const result = refundResult(commandId, row)
-    await knex.transaction(async trx => {
+    const sessionClosed = await knex.transaction(async trx => {
       const { rows: [{ locked }] } = await trx.raw("select pg_try_advisory_xact_lock(hashtext('tally_refund'), hashtext(?)) as locked", [order.id])
       if (!locked) throw new Error(`A refund of order ${order.id} is in progress; try again`)
+      const { rows: [session] } = await trx.raw(`select id, register_id, status from tally_register_session where id = coalesce(
+        (select id from tally_register_session where id = ?), (select session_id from tally_register_session_alias where id = ?)) for update`,
+      [row.session_id, row.session_id])
+      const other = await trx('tally_refund').where({ medusa_refund_id: medusaRefundId }).whereNot({ id: row.id }).first('id')
+      if (other) throw new Error(`Refund ${medusaRefundId} is already recorded by refund ${other.id}; nothing written`)
+      if (!await sessionTakesMoney(session, async (sql, params) => (await trx.raw(sql, params)).rows)) {
+        await trx('tally_command').where({ id: commandId, status: 'needs_admin' }).update({ needs_admin_reason: JSON.stringify({
+          orderId: row.order_id, clientRefundId: row.client_refund_id, refundId: row.id,
+          step: 'session', reason: 'session_closed', message: sessionClosedMessage(row.id),
+        }), updated_at: trx.fn.now() })
+        return true
+      }
       const rows = await trx('tally_refund').where({ id: row.id, status: 'needs_admin' })
         .update({ status: 'applied', medusa_refund_id: medusaRefundId, updated_at: trx.fn.now() })
       const commands = await trx('tally_command').where({ id: commandId, status: 'needs_admin' }).update({ status: 'applied',
         result: JSON.stringify(parseCommandResult(result)), needs_admin_reason: null, updated_at: trx.fn.now() })
       if (rows !== 1 || commands !== 1) throw new Error(`Command ${commandId} changed while resolving; nothing written`)
     })
+    if (sessionClosed) throw new Error(`Refund ${row.id}'s register session is closed; nothing written`)
     return { kind: 'result', result }
   }
   const claimToken = randomUUID()

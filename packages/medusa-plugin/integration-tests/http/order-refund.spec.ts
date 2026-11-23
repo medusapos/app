@@ -378,6 +378,96 @@ medusaIntegrationTestRunner({
       expect(await loadSessionFigures(container, till.sessionId)).toEqual(figures)
     })
 
+    it.each([true, false])('F1-apply-closed: apply refuses a filed closure without moving figures (closed=%s)', async closed => {
+      const till = await tillSale(true)
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const row = await knex('tally_refund').where({ command_id: order.id }).first()
+      expect(row.received_at).not.toBeNull()
+      await applied([command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId,
+        registerId: till.registerId, number: 1, openedAt, closedAt, tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        periodSalesTotalMinor: 1000, periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 1000,
+        perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0',
+        orderIds: [till.sale.payload.clientOrderId], movementIds: [] }, 3)])
+      if (closed) await applied([command('register.session.transition', { sessionId: till.sessionId, status: 'closed',
+        at: closedAt, counted: { cash: 1100 } })])
+      const { loadRefundOrder } = require(`${built}/workflows/tally-order-refund/execute`) as typeof import('../../src/workflows/tally-order-refund/execute')
+      const paymentId = (await loadRefundOrder(container, till.orderId))!.payment!.id
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: paymentId, amount: Number(row.total_minor) / 100, note: 'by hand' } })
+      const medusa = await knex('refund').where({ payment_id: paymentId }).whereNull('deleted_at').first('id')
+      const figures = await loadSessionFigures(container, till.sessionId), stock = await stockA()
+      await expect(resolve(order.id, 'apply', medusa.id)).rejects.toThrow(/session is closed.*nothing written/)
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toEqual(row)
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: {
+        step: 'session', reason: 'session_closed',
+        message: `session_closed: refund ${row.id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.` } })
+      expect(await loadSessionFigures(container, till.sessionId)).toEqual(figures)
+      expect(await stockA()).toBe(stock)
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId, amount: Number(row.total_minor) / 100 }])
+    })
+
+    it('F2-apply-twice: one Medusa refund can be recorded by only one till refund', async () => {
+      const till = await remainderSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const orders = till.full.payload.lines.slice(0, 2).map(line => command('order.refund', {
+        ...till.full.payload, clientRefundId: randomUUID(), lines: [line], totalMinor: 118 }))
+      for (const order of orders) {
+        jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      }
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const first = await knex('tally_refund').where({ command_id: orders[0].id }).first()
+      const second = await knex('tally_refund').where({ command_id: orders[1].id }).first(), parked = await commandRow(orders[1].id)
+      expect(first.received_at).not.toBeNull()
+      expect(second.received_at).not.toBeNull()
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'by hand' } })
+      const medusa = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      await resolve(orders[0].id, 'apply', medusa.id)
+      expect(await knex('tally_refund').where({ id: first.id }).first()).toMatchObject({ status: 'applied', medusa_refund_id: medusa.id })
+      expect(await commandRow(orders[0].id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 118 } } })
+      await expect(resolve(orders[1].id, 'apply', medusa.id)).rejects.toThrow(`Refund ${medusa.id} is already recorded by refund ${first.id}; nothing written`)
+      expect(await knex('tally_refund').where({ id: second.id }).first()).toEqual(second)
+      expect(await commandRow(orders[1].id)).toEqual(parked)
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
+    })
+
+    it('F3-filed-closure: a filed closure refuses new refunds and movements before the session transitions', async () => {
+      const till = await tillSale(true)
+      await applied([command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId,
+        registerId: till.registerId, number: 1, openedAt, closedAt, tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        periodSalesTotalMinor: 1000, periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 1000,
+        perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0',
+        orderIds: [till.sale.payload.clientOrderId], movementIds: [] }, 3)])
+      const order = refund(till)
+      expect((await post([order])).data.results).toEqual([{ id: order.id, status: 'rejected', error: {
+        code: 'no_open_session', message: expect.any(String), data: { sessionId: till.sessionId } } }])
+      const movement = command('register.movement.record', { movementId: randomUUID(), sessionId: till.sessionId,
+        type: 'paid_out', amountMinor: 5, reason: 'payout', createdAt: closedAt })
+      expect((await post([movement])).data.results[0]).toMatchObject({ id: movement.id, status: 'rejected', error: { code: 'register_session_closed' } })
+    })
+
+    it('F3-counting-resume: a counting session without a closure finishes a received refund and counts it', async () => {
+      const till = await tillSale(true)
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const row = await knex('tally_refund').where({ command_id: order.id }).first()
+      expect(row.received_at).not.toBeNull()
+      await applied([command('register.session.transition', { sessionId: till.sessionId, status: 'counting', at: closedAt })])
+      await resolve(order.id, 'resume')
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'applied' })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: Number(row.total_minor) / 100 }])
+      expect(await loadSessionFigures(container, till.sessionId)).toEqual({ expected: { cash: 100 }, salesCount: 1, refundsTotalMinor: 1000 })
+    })
+
     it.each([false, true])('F5-apply: an unreceived row or a different Medusa amount writes nothing (received=%s)', async received => {
       const till = await remainderSale()
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)

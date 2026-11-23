@@ -161,10 +161,51 @@ describe('the last units take the remainder', () => {
       ] })
   })
 
-  it('B-negative: a rounding difference that no net can cover is money_drift', () => {
+  it('N1-tax: a negative difference no net covers goes on the largest gross tax, ties later', () => {
     expect(priceRefund({ ...order, lines: lines.map(line => ({ ...line, netMinor: 0, taxMinor: 1 })), linesMoneyMinor: 2,
       request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 2 }) }))
-      .toEqual({ ok: false, error: { code: 'order_state', message: expect.any(String), data: { state: 'money_drift' } } })
+      .toEqual({ ok: true, totalMinor: 2, lines: [
+        { ...take('ordli_a')[0], netMinor: 0, taxMinor: 1 }, { ...take('ordli_b')[0], netMinor: 0, taxMinor: 1 },
+        { ...take('ordli_c')[0], netMinor: 0, taxMinor: 0 },
+      ] })
+  })
+
+  it('N1-largest-gross: the later of the largest gross lines takes the negative difference on tax', () => {
+    expect(priceRefund({ ...order, lines: lines.map((line, index) => ({ ...line, netMinor: 0, taxMinor: index === 1 ? 1 : 2 })),
+      linesMoneyMinor: 4, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 4 }) }))
+      .toEqual({ ok: true, totalMinor: 4, lines: [
+        { ...take('ordli_a')[0], netMinor: 0, taxMinor: 2 }, { ...take('ordli_b')[0], netMinor: 0, taxMinor: 1 },
+        { ...take('ordli_c')[0], netMinor: 0, taxMinor: 1 },
+      ] })
+  })
+
+  it('N1-948-free-line: three single refunds take 354 within the payment cap; the free last line is nothing_to_refund', () => {
+    const shipped = { ...order, lines: [...lines, { id: 'ordli_z', quantity: 1, netMinor: 0, taxMinor: 0 }], shippingMinor: 595 }
+    const earlier: PriceRefundInput['earlier'] = []
+    const totals: number[] = []
+    for (const id of ['ordli_a', 'ordli_b', 'ordli_c']) {
+      const result = priceRefund({ ...shipped, earlier, refundableMoneyMinor: 948 - totals.reduce((sum, total) => sum + total, 0),
+        request: request({ lines: take(id), totalMinor: 118 }) })
+      expect(result).toEqual({ ok: true, totalMinor: 118, lines: [{ ...take(id)[0], netMinor: 99, taxMinor: 19 }] })
+      if (!result.ok) throw new Error(JSON.stringify(result.error))
+      earlier.push({ lines: result.lines, shippingMinor: 0 })
+      totals.push(result.totalMinor)
+    }
+    const total = totals.reduce((sum, amount) => sum + amount, 0)
+    expect(total).toBe(354)
+    expect(total).toBeLessThanOrEqual(948)
+    expect(priceRefund({ ...shipped, earlier, refundableMoneyMinor: 948 - total,
+      request: request({ lines: take('ordli_z'), totalMinor: 0 }) }))
+      .toMatchObject({ ok: false, error: { code: 'nothing_to_refund' } })
+  })
+
+  it('N1-dropped: a difference within the bound that neither net nor target tax covers is dropped', () => {
+    expect(priceRefund({ ...order, lines: lines.map(line => ({ ...line, netMinor: 1, taxMinor: 0 })), linesMoneyMinor: 1,
+      request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 3 }) }))
+      .toEqual({ ok: true, totalMinor: 3, lines: [
+        { ...take('ordli_a')[0], netMinor: 1, taxMinor: 0 }, { ...take('ordli_b')[0], netMinor: 1, taxMinor: 0 },
+        { ...take('ordli_c')[0], netMinor: 1, taxMinor: 0 },
+      ] })
   })
 
   it('a full refund that also takes the shipping prices the lines at the money left less the shipping left', () => {

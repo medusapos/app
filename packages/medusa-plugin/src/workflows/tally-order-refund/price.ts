@@ -91,20 +91,28 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
     return mismatch(linesMinor + shippingLeft + request.adjustmentMinor, 'The shipping refunded is more than the order has left to refund.')
   }
   // Desk rulings A/B (2026-11-23): the last units take payment less gross shipping, fees and earlier line money only.
-  // The difference goes on the request's last net that covers it, else its largest net (ties later); never below zero.
+  // B/N1: the last covering net, else the largest net for a positive difference or covering largest gross's tax for a negative one.
   const taken = new Map(request.lines.map(line => [line.orderLineId, line.quantity]))
   if (priced.length && input.lines.every(line => (refunded.get(line.id) ?? 0) + (taken.get(line.id) ?? 0) >= line.quantity)) {
     const remainderMinor = input.linesMoneyMinor - input.earlier.reduce((sum, earlier) =>
       sum + earlier.lines.reduce((total, line) => total + line.netMinor + line.taxMinor, 0), 0)
     const difference = remainderMinor - linesMinor
-    const target = [...priced].reverse().find(line => line.netMinor >= Math.abs(difference))
-      ?? priced.reduce((largest, line) => line.netMinor >= largest.netMinor ? line : largest)
-    if (Math.abs(difference) > input.lines.length || target.netMinor + difference < 0) {
+    if (Math.abs(difference) > input.lines.length) {
       return { ok: false, error: { code: 'order_state',
         message: "The order's money and its lines differ by more than rounding; an admin must look at this order.", data: { state: 'money_drift' } } }
     }
-    target.netMinor += difference
-    linesMinor = remainderMinor
+    const covering = [...priced].reverse().find(line => line.netMinor >= Math.abs(difference))
+    if (covering || difference >= 0) {
+      const target = covering ?? priced.reduce((largest, line) => line.netMinor >= largest.netMinor ? line : largest)
+      target.netMinor += difference
+      linesMinor = remainderMinor
+    } else {
+      const target = priced.reduce((largest, line) => line.netMinor + line.taxMinor >= largest.netMinor + largest.taxMinor ? line : largest)
+      if (target.taxMinor + difference >= 0) {
+        target.taxMinor += difference
+        linesMinor = remainderMinor
+      }
+    }
   }
   const totalMinor = linesMinor + request.shippingMinor + request.adjustmentMinor
   if (totalMinor !== request.totalMinor) return mismatch(totalMinor, "The refund total differs from the store's.")
