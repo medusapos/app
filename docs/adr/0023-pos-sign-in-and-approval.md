@@ -181,3 +181,12 @@ Nothing here reads or depends on vendurepos code. Its worker takes this section 
 2. **The proof rides on `register.closure.submit`, not the closing transition.** *Recommend yes.* It is the only command whose variance the plugin can check exactly.
 3. **TTL of 15 minutes, with an expired proof refused and the till re-approving.** *Recommend yes,* with the recovery above. The alternative is a long TTL, which isn't short-lived. The binding to one session, one variance and one use already makes a leaked proof worth nothing beyond that close.
 4. **Managers with MFA are refused until an MFA step lands.** *Recommend yes.* MFA in 2.21 is enrolled per identity (factors and challenges in the auth module), so this refuses only managers who enrolled a factor. The MFA step is the first follow-up.
+
+## Amendment: the gate decides on the server's figures (2026-11-22)
+
+Desk ruling, 22 Nov: the approval gate decides on the server's own figures (as TallyUI arch 1b). This supersedes decision 1's "computes the variance from the payload" for the case below.
+
+- At register contract 3 with `unsyncedCount === 0`, the variance is `counted − serverExpected` per counted tender. `serverExpected` is the register read's own expected figures for the session (its synced, counted orders and non-voided movements plus the counted float), computed before the close. The gate is `|variance.cash| > thresholdMinor`.
+- `register_approval_required`'s `data.variance` carries that server variance, and a proof's `variance_mismatch` check compares against it, so a manager approves the drawer's real shortfall, not the till's own arithmetic.
+- With `unsyncedCount > 0` the server lacks those sales and its figures are incomplete, so the till's `counted − tillExpected` and its gate decide, exactly as before. The limit: the till's own count of unsynced sales is trusted.
+- The wire shape is unchanged: no new error code or field. TallyUI 4.1.0 requests approval for the `data.variance` it is refused with. Contracts 1 and 2 still have no gate.
