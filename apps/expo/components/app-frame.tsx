@@ -115,6 +115,14 @@ export function FrameMenuButton() {
   </IconButton>;
 }
 
+// v2's version line at the foot of the rail and the drawer. Sidebar ink, not muted: muted-foreground on the rail's
+// tint is 4.3:1, under AA.
+function VersionLine({ testID, className }: { testID: string; className: string }) {
+  return <Text testID={testID} className={`text-xs text-sidebar-foreground ${className}`} numberOfLines={1}>
+    {`v ${appVersion}`}
+  </Text>;
+}
+
 export function AppFrame({ signedIn, children }: { signedIn: boolean; children: ReactNode }) {
   const pathname = usePathname();
   const { width, height } = useWindowDimensions();
@@ -141,18 +149,15 @@ export function AppFrame({ signedIn, children }: { signedIn: boolean; children: 
   return <FrameContext.Provider value={state}>
     <View testID={active ? 'app-frame' : undefined} className="flex-1 flex-row bg-background">
       {active && wide ? (
-        // The version sits under the rail because TallyUI's NavRail has no footer slot (v2 shows it at the rail's foot).
-        <View testID="frame-rail" className="z-10 w-16 border-r border-border bg-card">
-          <NavRail items={items} activeId={active} onNavigate={navigate} className="flex-1 border-r-0 bg-transparent" />
-          <Text testID="frame-version" className="text-xs text-muted-foreground text-center pb-3" numberOfLines={1}>
-            {`v ${appVersion}`}
-          </Text>
+        <View testID="frame-rail" className="z-10">
+          <NavRail items={items} activeId={active} onNavigate={navigate} className="flex-1"
+            footer={<VersionLine testID="frame-version" className="pb-2 text-center" />} />
         </View>
       ) : null}
       <View className="min-w-0 flex-1">{children}</View>
       {/* v2's phone drawer starts on its POS row; the phone header names the store and register (DEMO-PARITY row 17b). */}
       {active && !wide ? <NavDrawer open={menuOpen} onOpenChange={setMenuOpen} items={items} activeId={active}
-        onNavigate={navigate} /> : null}
+        onNavigate={navigate} footer={<VersionLine testID="frame-drawer-version" className="px-5 pb-4" />} /> : null}
     </View>
   </FrameContext.Provider>;
 }
