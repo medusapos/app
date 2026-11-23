@@ -1,14 +1,18 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform, View } from 'react-native';
 import { AppText as Text } from './app-text';
 import {
-  ClosureSheet, OpenRegisterCard, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
+  ClosureSheet, OpenRegisterCard, orderReference, RegisterColumn, RegisterCount, RegisterPanel, RegisterPicker,
 } from '@tallyui/components';
-import { RegisterSessionRequiredError, type ApprovalNeeded, type useRegisterSession, type useSale } from '@tallyui/pos';
+import { formatMoney } from '@tallyui/core';
+import {
+  RegisterSessionRequiredError, replacedOrderIds, watchFresh, type ApprovalNeeded, type PosOrder, type useRegisterSession, type useSale,
+} from '@tallyui/pos';
 import { printXReport } from '../lib/closure-print';
+import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
-import { closureContext, LastClosureSheet, printClosure, storeApproval, useApprove } from './register-close';
+import { closureContext, LastClosureSheet, printClosure, storeApproval, useApprove, type RefusedSale } from './register-close';
 import { RegisterConflictCard } from './register-conflict';
 import { WarningIcon } from './warning-icon';
 
@@ -71,6 +75,31 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
 }
 
 /**
+ * The session's sales the store refused, read from the till's pos_orders: TallyUI's drawer rule (`replacedOrderIds` over
+ * the session's sales), so a sale a successor replaced is left out, and the rest still count their cash in the drawer.
+ */
+function useRefusedSales(sessionId: string | undefined): RefusedSale[] {
+  const { orders } = useOutboxContext();
+  const [sales, setSales] = useState<PosOrder[]>([]);
+  useEffect(() => {
+    setSales([]);
+    if (!orders || !sessionId) return;
+    const subscription = watchFresh(orders, { selector: { sessionId }, sort: [{ createdAt: 'asc' }] }).subscribe(setSales);
+    return () => subscription.unsubscribe();
+  }, [orders, sessionId]);
+  return useMemo(() => {
+    const replaced = replacedOrderIds(sales);
+    return sales.filter((order) => order.syncStatus === 'rejected' && !replaced.has(order.id)).map((order) => ({
+      id: order.id, reference: orderReference(order), code: order.error?.code ?? 'no code',
+      // The cash this till took; a payment already on the store (storePaymentId) never reached this drawer.
+      amount: formatMoney({ currency: order.currency, amount: order.payments
+        .filter((payment) => payment.method === 'cash' && payment.storePaymentId === undefined)
+        .reduce((total, payment) => total + payment.amountMinor, 0) }) ?? '',
+    }));
+  }, [sales]);
+}
+
+/**
  * The register panel (movements with Undo, Close register), opened from the control as v2's side sheet; between sessions, the last
  * closure's figures, unless the store refused a closure's approval: then the panel, whose card asks a manager again.
  */
@@ -79,7 +108,9 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
 }) {
   const { register, registerName } = useRegister();
   const { session: signedIn } = useSession();
-  const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online);
+  // Desk, 2026-11-23: the re-approval lists the refused sales behind the store's variance.
+  const refused = useRefusedSales(register.approvalNeeded?.sessionId);
+  const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online, refused);
   if (!register.session && register.lastClosure && !register.approvalNeeded) {
     return <LastClosureSheet register={register} currency={currency} store={store} open={open} onOpenChange={onOpenChange} />;
   }
