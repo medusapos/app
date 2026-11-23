@@ -33,12 +33,14 @@ afterEach(() => {
 });
 
 describe('AppFrame on a wide window', () => {
-  it('shows the package version at the foot of the rail', () => {
+  it('shows the package version through the rail\'s own footer, under its bottom items', () => {
     mount('/');
     const version = screen.getByTestId('frame-version');
     expect(version.textContent).toBe(`v ${appVersion}`);
-    expect(screen.getByTestId('frame-rail').contains(version)).toBe(true);
-    expect(screen.getByTestId('nav-rail').compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByTestId('nav-rail-footer').contains(version)).toBe(true);
+    expect(screen.getByTestId('nav-rail').contains(version)).toBe(true);
+    expect(screen.getByTestId('frame-rail').contains(screen.getByTestId('nav-rail'))).toBe(true);
+    expect(screen.getByTestId('nav-item-settings').compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('shows no version on /login or when signed out', () => {
@@ -123,12 +125,17 @@ describe('frameStep', () => {
 });
 
 describe('AppFrame on a phone', () => {
-  it('shows no version with the drawer closed or open', () => {
+  it('shows the package version at the drawer\'s foot through its footer, and none with the drawer closed', () => {
     setWindowWidth(390, 844);
     mount('/');
     expect(screen.queryByTestId('frame-version')).toBeNull();
-    fireEvent.click(screen.getByTestId('frame-menu'));
-    expect(screen.getByTestId('nav-drawer')).toBeTruthy();
+    expect(screen.queryByTestId('frame-drawer-version')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Menu' }));
+    const version = screen.getByTestId('frame-drawer-version');
+    expect(version.textContent).toBe(`v ${appVersion}`);
+    expect(screen.getByTestId('nav-drawer-footer').contains(version)).toBe(true);
+    expect(screen.getByTestId('nav-drawer-panel').contains(version)).toBe(true);
+    expect(screen.getByTestId('nav-item-settings').compareDocumentPosition(version) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByTestId('frame-version')).toBeNull();
   });
 

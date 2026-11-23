@@ -40,6 +40,26 @@
   --color-destructive-foreground: oklch(0.99 0.01 25);
 }
 
+/* v2's three surfaces and cobalt primary in the default Light theme (desk, 22 Nov), over @tallyui/theme's #e4eaf5
+   rail, #f8f9fa canvas and #5b5ef0 primary. Each value is a 9x9 patch mean from v2's captures, at the point given:
+   01 = docs/v2-parity/demo-shots/01-pos-empty-cart-demo-desktop.jpg, 17 = 17-menu-demo-phone.jpg. Here, not in
+   themes.css: lib/themes-css.test.ts holds themes.css to the seven extra themes. The :root wrapper keeps this block
+   out of Uniwind's web rewrite, which takes only the first light block (tokens.css's) as `.light`; this one follows it
+   at the same specificity, so it wins. Light only: dark and the extra themes keep their own. */
+@layer theme {
+  :root {
+    @variant light {
+      --color-sidebar: #e2e8f6; /* 01 rail (30,450) #e2e8f6; 17 drawer (100,400) #e3e9f7 */
+      --color-background: #f3f5fa; /* 01 canvas (700,680) #f3f5fa */
+      --color-card: #ffffff; /* 01 cart (1040,600) #fefefe */
+      --color-popover: #ffffff; /* as the card */
+      --color-primary: #0031cc; /* 01 "All products" tile (160,230) #0031cb: v2's c1, TallyUI's --color-c1 */
+      --color-primary-foreground: #ffffff;
+      --color-ring: #0031cc;
+    }
+  }
+}
+
 /* v2's six Poster tile tints (monorepo apps/main/global.css), for tiles without a picture. */
 @theme {
   --color-tile-tint-0: oklch(0.86 0.09 262);
