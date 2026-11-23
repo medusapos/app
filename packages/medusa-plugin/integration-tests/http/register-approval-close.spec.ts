@@ -176,13 +176,13 @@ medusaIntegrationTestRunner({
     })
 
     // Desk ruling 2026-11-23: an unsynced claim is checked against the closure's own orderIds.
-    async function syncedSession() {
-      const data = await seed(container)
+    async function syncedSession(seeded?: Awaited<ReturnType<typeof seed>>) {
+      const data = seeded ?? await seed(container)
       const session = open()
       const placed = sale(data.variantB, session.payload.sessionId)
       expect((await post([session, placed, close(session.payload.sessionId)])).map(result => result.status))
         .toEqual(['applied', 'applied', 'applied'])
-      return { session, placed }
+      return { session, placed, data }
     }
 
     it('with unsyncedCount above 0 but every orderIds sale held by the server, the server\'s figures decide', async () => {
@@ -227,6 +227,30 @@ medusaIntegrationTestRunner({
         code: 'register_approval_required', message: 'A manager approval is needed for this variance.',
         data: { sessionId: session.payload.sessionId, thresholdMinor: 500, variance: { cash: 1000 } },
       } })
+    })
+
+    // Review of #536: the refused branch stays inside the orderIds filter, so a refused order elsewhere holds nothing.
+    it('with unsyncedCount above 0, an unrelated refused order does not hold an orderIds sale the server lacks', async () => {
+      const unrelated = await syncedSession()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      await placedRow(unrelated.placed).update({ status: 'canceled', metadata: knex.raw("metadata || '{\"tally_rejected\": true}'::jsonb") })
+      const { session, placed } = await syncedSession(unrelated.data)
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId, randomUUID()] })
+      expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
+    })
+
+    // Review of #536: a sale refused and later placed has two accounted rows, and its id still counts once.
+    it('with unsyncedCount above 0, an orderIds sale with a refused and a placed row does not hold a missing sale', async () => {
+      const { session, placed } = await syncedSession()
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const { display_id: _displayId, ...row } = await placedRow(placed).first()
+      await knex('order').insert({ ...row, id: `order_${randomUUID()}`, status: 'canceled',
+        metadata: { ...row.metadata, tally_rejected: true } })
+      expect(await placedRow(placed)).toHaveLength(2)
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId, randomUUID()] })
+      expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
     })
 
     it('with unsyncedCount above 0 and an empty orderIds, the server\'s figures decide', async () => {
