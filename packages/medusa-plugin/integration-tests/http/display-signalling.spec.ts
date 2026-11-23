@@ -197,5 +197,23 @@ medusaIntegrationTestRunner({
       expect(await s.list(ctx, again)).toEqual([])
       expect(await h.adoptionLog()).toEqual([])
     })
+
+    it("H6: each signal inbox keeps its newest 100 messages, in order, and never another inbox's", async () => {
+      const { s, ctx, d, device, displayId, token } = await pairedDisplay(await makeHarness())
+      const claim = await s.claim(d, { code: (await s.mint(ctx, device)).code, displayName: 'Other' })
+      await s.confirm(ctx, device, (await s.pending(ctx, device))[0].claimId)
+      const other = await s.collect(d, claim.claimSecret)
+      if (other.status !== 'paired') throw new Error('not paired')
+      for (let i = 0; i <= 100; i++) await s.displaySendSignal(d, token, { type: 'ice', payload: String(i) })
+      await s.displaySendSignal(d, other.token, { type: 'ice', payload: 'other' })
+      expect(await s.receiveSignals(ctx, device)).toEqual([
+        ...Array.from({ length: 100 }, (_, i) => ({ type: 'ice', payload: String(i + 1), displayId })),
+        { type: 'ice', payload: 'other', displayId: other.displayId },
+      ])
+      for (let i = 0; i <= 100; i++) await s.sendSignal(ctx, device, displayId, { type: 'ice', payload: String(i) })
+      expect(await s.displayReceiveSignals(d, token)).toEqual(
+        Array.from({ length: 100 }, (_, i) => ({ type: 'ice', payload: String(i + 1) })),
+      )
+    })
   },
 })

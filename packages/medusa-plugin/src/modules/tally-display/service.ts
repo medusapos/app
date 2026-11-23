@@ -13,6 +13,8 @@ import { DisplayRefusal, type DisplayRefusalCode } from './refusal'
 // The limits of TallyUI's reference server (core 4.1.0 memory-server.ts, ADR-085 d4, d6, d8).
 const MINUTE = 60_000, DAY = 24 * 60 * MINUTE
 export const CODE_TTL_MS = 10 * MINUTE, MAX_UNSPENT_CODES = 5, SNAPSHOT_TTL_MS = MINUTE, SNAPSHOT_MAX_BYTES = 204_800
+// Bound the storage used by an inbox that is never drained.
+export const SIGNAL_INBOX_MAX = 100
 const SOURCE_WINDOW_MS = MINUTE, SOURCE_MAX = 10, STORE_WINDOW_MS = 10 * MINUTE, STORE_MAX = 100
 const CONNECTED_MS = 30_000, ROW_TTL_MS = 30 * DAY
 const STORE_KEY = 'store'
@@ -209,7 +211,14 @@ export default class TallyDisplayModuleService extends MedusaService({
       if (!(await this.owned(em, 'tally_display', displayId, deviceId))) return refusal('not_found')
       await em.execute(`insert into tally_display_signal (display_id, device_id, direction, type, payload) values (?, ?, 'to_display', ?, ?)`,
         [displayId, deviceId, message.type, message.payload])
+      await this.capSignalInbox(em, 'to_display', displayId)
     })
+  }
+
+  private async capSignalInbox(em: EntityManager, direction: 'to_display' | 'to_till', displayId: string): Promise<void> {
+    await em.execute(`delete from tally_display_signal where direction = ? and display_id = ?
+      and seq not in (select seq from tally_display_signal where direction = ? and display_id = ?
+        order by seq desc limit ?)`, [direction, displayId, direction, displayId, SIGNAL_INBOX_MAX])
   }
 
   /** Drains this device's inbox: each message once, in send order, only from displays it owns now. */
@@ -281,6 +290,7 @@ export default class TallyDisplayModuleService extends MedusaService({
       if (display instanceof DisplayRefusal) return display
       await em.execute(`insert into tally_display_signal (display_id, device_id, direction, type, payload) values (?, ?, 'to_till', ?, ?)`,
         [display.id, display.device_id, message.type, message.payload])
+      await this.capSignalInbox(em, 'to_till', display.id)
     })
   }
 

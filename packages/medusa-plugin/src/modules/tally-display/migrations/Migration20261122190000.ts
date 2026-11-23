@@ -20,7 +20,8 @@ export class Migration20261122190000 extends Migration {
     create unique index "IDX_tally_display_secret" on tally_display (secret_hash) where secret_hash is not null;
     create table tally_display_signal (seq bigserial primary key, display_id text not null, device_id text not null,
       direction text not null check (direction in ('to_display', 'to_till')), type text not null, payload text not null, ${STAMPS});
-    create index "IDX_tally_display_signal_inbox" on tally_display_signal (direction, display_id, device_id);
+    create index "IDX_tally_display_signal_display" on tally_display_signal (display_id, direction);
+    create index "IDX_tally_display_signal_device" on tally_display_signal (device_id, direction);
     create table tally_display_snapshot (id text primary key, body text not null, posted_at timestamptz not null, ${STAMPS});
     create table tally_display_claim_failure (id text primary key, opened_at timestamptz not null, failures integer not null, ${STAMPS});
     create table tally_display_adoption (id text primary key, device_id text not null, cashier_id text not null,
