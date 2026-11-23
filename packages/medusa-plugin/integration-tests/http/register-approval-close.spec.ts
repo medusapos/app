@@ -162,10 +162,10 @@ medusaIntegrationTestRunner({
       expect(refused.error.data).toEqual({ reason: 'used', variance: { cash: -1000 } })
     })
 
-    it('a contract 3 closure with unsyncedCount 0 whose counted leaves out cash still needs approval for the server\'s expected cash', async () => {
+    it('refuses a contract 3 closure whose counted leaves out cash as invalid_payload', async () => {
       const closing = closure(opening.payload, { tillExpected: { cash: 1100 }, counted: { external: 0 } })
       expect((await post([closing]))[0]).toMatchObject({ status: 'rejected', error: {
-        code: 'register_approval_required', data: { sessionId: opening.payload.sessionId, thresholdMinor: 500 },
+        code: 'invalid_payload', message: 'payload.counted.cash: expected a safe integer; a contract 3 closure counts the cash drawer',
       } })
     })
 
