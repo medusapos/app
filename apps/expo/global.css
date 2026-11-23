@@ -44,9 +44,9 @@
    rail, #f8f9fa canvas and #5b5ef0 primary. Each value is a 9x9 patch mean from v2's captures, at the point given:
    01 = docs/v2-parity/demo-shots/01-pos-empty-cart-demo-desktop.jpg, 03 = 03-cart-items-demo-desktop.jpg (its
    Checkout button), 17 = 17-menu-demo-phone.jpg. Here, not in themes.css: lib/themes-css.test.ts holds themes.css to
-   the seven extra themes. The :root wrapper keeps this block out of Uniwind's web rewrite, which takes only the first
-   light block (tokens.css's) as `.light`; this one follows it at the same specificity, so it wins. Light only: dark
-   and the extra themes keep their own. */
+   the seven extra themes. Uniwind's web rewrite turns only the first light block (tokens.css's) into `.light`; this
+   one compiles to :root:where(.light, .light *), the same specificity, and follows it in the layer, so it wins.
+   Light only: dark and the extra themes keep their own. */
 @layer theme {
   :root {
     @variant light {
