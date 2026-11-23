@@ -138,6 +138,8 @@ function AdminLink({ session, label, page, testID }: { session: Session; label: 
 function StoreSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
   const [format] = useState(() => currencyFormat(held.pricing?.currency));
+  // In the wide card's value column a two-line value reads from the left, as v2's do; a phone's keeps it at the right edge.
+  const flat = useContext(SettingsFlatContext);
   return <>
   <SettingsGroup title="Store" description="Read-only. Set in Medusa Admin." testID="settings-store">
     <SettingsRow label="Store name" action={<View className="flex-row items-center gap-3">
@@ -150,9 +152,9 @@ function StoreSection({ session }: { session: Session }) {
       <AdminLink session={session} label="Currency" page="regions" testID="settings-store-currency-admin" />
     </View>} />
     <SettingsRow label="Stock location" divider action={<View className="flex-row items-center gap-3">
-      <View className="max-w-40 items-end">
-        <Text testID="settings-store-location" className="max-w-40 text-right text-sm text-foreground">{held.settings?.location.name || UNKNOWN}</Text>
-        {held.settings?.location.addressLine ? <Text testID="settings-store-location-address" className="text-right text-xs text-muted-foreground">{held.settings.location.addressLine}</Text> : null}
+      <View className={`max-w-40 ${flat ? 'items-start' : 'items-end'}`}>
+        <Text testID="settings-store-location" className={`max-w-40 ${flat ? '' : 'text-right '}text-sm text-foreground`}>{held.settings?.location.name || UNKNOWN}</Text>
+        {held.settings?.location.addressLine ? <Text testID="settings-store-location-address" className={`${flat ? '' : 'text-right '}text-xs text-muted-foreground`}>{held.settings.location.addressLine}</Text> : null}
       </View>
       <AdminLink session={session} label="Stock location" page="locations" testID="settings-store-location-admin" />
     </View>} />
