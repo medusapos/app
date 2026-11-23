@@ -277,7 +277,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         let approval: { id: string; approved_by: string } | undefined
         if (v3) {
           // ADR 0023 amendment (2026-11-22): with every sale synced the server's own expected figures decide; else the till's.
-          const expected = p.serverExpected ?? p.tillExpected
+          const expected = (await p.serverExpected?.()) ?? p.tillExpected
           const variance = Object.fromEntries(Object.entries(p.counted).map(([k, v]) => [k, v - (expected[k] ?? 0)]))
           const thresholdMinor = p.thresholdMinor!
           // A counted without cash counts as 0 cash, so leaving it out never skips the gate.

@@ -95,7 +95,7 @@ export async function executeRegisterCommand(container: MedusaContainer, command
           const closing = payload as RegisterClosureSubmitV3Payload
           // ADR 0023 amendment: with every sale synced, the approval gate decides on the server's own expected figures.
           // Desk ruling 2026-11-23: an unsynced claim is false when the server holds every orderIds sale.
-          const serverExpected = command.version >= 3
+          const serverExpected = async () => command.version >= 3
             && (closing.unsyncedCount === 0 || await holdsEveryOrder(container, closing.orderIds))
             ? (await loadSessionFigures(container, closing.sessionId))?.expected : undefined
           outcome = await service.submitClosure({ ...closing, contract: command.version, commandId: command.id,

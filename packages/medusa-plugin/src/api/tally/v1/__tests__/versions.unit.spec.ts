@@ -33,7 +33,7 @@ it('accepts supported register versions, subject to the optional minimum', () =>
 it('V1: advertises plugin contract 5 and order.refund [1] on /info', async () => {
   expect(PLUGIN_CONTRACT).toBe(5)
   expect(SUPPORTED_ORDER_REFUND_VERSIONS).toEqual([1])
-  const req = { scope: { resolve: () => ({ getPluginOptions: () => ({}) }) } }
+  const req = { scope: { resolve: () => ({ getPluginOptions: () => ({}), customerDisplay: () => undefined }) } }
   const res = { json: jest.fn() }
   await GET(req as unknown as Parameters<typeof GET>[0], res as unknown as Parameters<typeof GET>[1])
   expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pluginContract: 5,

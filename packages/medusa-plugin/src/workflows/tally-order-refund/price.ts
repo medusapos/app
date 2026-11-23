@@ -43,15 +43,16 @@ export function shareMinor(total: number, quantity: number, refunded: number, no
 
 export interface RefundableLine { id: string; quantity: number; netMinor: number; taxMinor: number }
 export interface PricedLine { orderLineId: string; quantity: number; restock: boolean; netMinor: number; taxMinor: number }
-export interface RefundRefusal { code: 'nothing_to_refund' | 'quantity_exceeds' | 'amount_mismatch'; message: string; data?: Record<string, unknown> }
+export interface RefundRefusal { code: 'nothing_to_refund' | 'quantity_exceeds' | 'amount_mismatch' | 'order_state'; message: string; data?: Record<string, unknown> }
 
 export interface PriceRefundInput {
   lines: RefundableLine[]
+  linesMoneyMinor: number | null
   /** The order's shipping, gross, in minor units. */
   shippingMinor: number
   /** What earlier refunds of this order took back. */
-  earlier: { lines: { orderLineId: string; quantity: number }[]; shippingMinor: number }[]
-  /** The payment's amount less Medusa's refunds on it; null when the order has no payment (a sale discounted to 0). */
+  earlier: { lines: PricedLine[]; shippingMinor: number }[]
+  /** The payment less Medusa's refunds and earlier refunds not yet sent; null when the order has no payment. */
   refundableMoneyMinor: number | null
   request: Pick<OrderRefundPayload, 'lines' | 'shippingMinor' | 'adjustmentMinor' | 'totalMinor'>
 }
@@ -60,7 +61,7 @@ export interface PriceRefundInput {
 export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedLine[]; totalMinor: number } | { ok: false; error: RefundRefusal } {
   const { request } = input
   const nothing = { ok: false as const, error: { code: 'nothing_to_refund' as const, message: 'There is nothing to refund on this order.' } }
-  if (input.refundableMoneyMinor === null) return nothing
+  if (input.refundableMoneyMinor === null || input.linesMoneyMinor === null) return nothing
   if (request.lines.length === 0 && request.shippingMinor === 0 && request.adjustmentMinor === 0) return nothing
   const refunded = new Map<string, number>()
   for (const earlier of input.earlier) for (const line of earlier.lines) {
@@ -89,19 +90,20 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
   if (request.shippingMinor > shippingLeft) {
     return mismatch(linesMinor + shippingLeft + request.adjustmentMinor, 'The shipping refunded is more than the order has left to refund.')
   }
-  // The last units take the remainder (desk ruling 2026-11-23): when this refund leaves every line fully refunded, the lines
-  // are priced at the money left less the shipping not yet refunded, since per-line rounding can ask for more than was paid
-  // (3 × 0.99 ex 19%: 3 × 1.18 = 3.54, paid 3.53). The difference goes on the net of the request's last line. More than one
-  // minor unit per order line is not rounding: the payment and the order disagree, and that is never refunded silently.
+  // Desk rulings A/B (2026-11-23): the last units take payment less gross shipping, fees and earlier line money only.
+  // The difference goes on the request's last net that covers it, else its largest net (ties later); never below zero.
   const taken = new Map(request.lines.map(line => [line.orderLineId, line.quantity]))
   if (priced.length && input.lines.every(line => (refunded.get(line.id) ?? 0) + (taken.get(line.id) ?? 0) >= line.quantity)) {
-    const remainderMinor = input.refundableMoneyMinor - shippingLeft
+    const remainderMinor = input.linesMoneyMinor - input.earlier.reduce((sum, earlier) =>
+      sum + earlier.lines.reduce((total, line) => total + line.netMinor + line.taxMinor, 0), 0)
     const difference = remainderMinor - linesMinor
-    if (Math.abs(difference) > input.lines.length) {
-      return mismatch(linesMinor + request.shippingMinor + request.adjustmentMinor,
-        "The order's money left differs from its lines by more than rounding.")
+    const target = [...priced].reverse().find(line => line.netMinor >= Math.abs(difference))
+      ?? priced.reduce((largest, line) => line.netMinor >= largest.netMinor ? line : largest)
+    if (Math.abs(difference) > input.lines.length || target.netMinor + difference < 0) {
+      return { ok: false, error: { code: 'order_state',
+        message: "The order's money and its lines differ by more than rounding; an admin must look at this order.", data: { state: 'money_drift' } } }
     }
-    priced[priced.length - 1].netMinor += difference
+    target.netMinor += difference
     linesMinor = remainderMinor
   }
   const totalMinor = linesMinor + request.shippingMinor + request.adjustmentMinor

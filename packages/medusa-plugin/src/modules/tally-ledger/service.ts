@@ -137,7 +137,7 @@ export default class TallyLedgerModuleService extends MedusaService({ TallyComma
   async markNeedsAdmin(
     id: string, claimToken: string,
     reason: { orderId: string; clientOrderId: string; detail: string }
-      | { orderId: string; clientRefundId: string; refundId: string; step: string; message: string; reason?: 'refund_unrecorded' },
+      | { orderId: string; clientRefundId: string; refundId: string; step: string; message: string; reason?: 'refund_unrecorded' | 'session_closed' },
     @MedusaContext() sharedContext: Context = {}
   ): Promise<boolean> {
     const rows = await (sharedContext.manager as EntityManager).execute(

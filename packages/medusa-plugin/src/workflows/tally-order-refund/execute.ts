@@ -22,11 +22,13 @@ type RefundRow = { id: string; client_refund_id: string; command_id: string; ord
   total_minor: string | number; reason: string; by_method: Record<string, number>; refunds: SplitEntry[]
   return_id: string | null; received_at: Date | null; medusa_refund_id: string | null }
 type Run = { outcome: ExecuteOutcome; keepClaim: boolean }
+// A refund that failed before its money left no row (undo deletes it), so it is never counted.
+const COUNTED_REFUND_STATUSES = ['in_progress', 'applied', 'needs_admin'] as const
 
 /** What a refund needs of a Medusa order, in minor units. */
 export interface RefundOrder {
   id: string; state?: string; tillId?: string; decimals: number; locationId?: string; tenders: TillTender[]
-  lines: RefundableLine[]; shippingMinor: number; payment: { id: string; amountMinor: number; refundedMinor: number } | null
+  lines: RefundableLine[]; linesMoneyMinor: number | null; shippingMinor: number; payment: { id: string; amountMinor: number; refundedMinor: number } | null
 }
 
 const rejected = (id: string, code: string, message: string, data?: Record<string, unknown>): ExecuteOutcome =>
@@ -35,7 +37,7 @@ const rejected = (id: string, code: string, message: string, data?: Record<strin
 export async function loadRefundOrder(container: MedusaContainer, orderId: string): Promise<RefundOrder | null> {
   const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order', fields: [
     'id', 'status', 'is_draft_order', 'currency_code', 'metadata', 'total', 'items.id', 'items.quantity', 'items.raw_total',
-    'items.raw_tax_total', 'shipping_methods.raw_total', 'fulfillments.location_id', 'fulfillments.canceled_at',
+    'items.raw_tax_total', 'items.metadata', 'shipping_methods.raw_total', 'fulfillments.location_id', 'fulfillments.canceled_at',
     'payment_collections.payments.id', 'payment_collections.payments.raw_amount', 'payment_collections.payments.canceled_at',
     'payment_collections.payments.refunds.raw_amount',
   ], filters: { id: orderId } })
@@ -53,8 +55,12 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     locationId: fulfillment?.location_id ?? undefined,
     // The till's own payment id is clientPaymentId (order.create's payload).
     tenders: tenders.map(tender => ({ ...tender, id: tender.clientPaymentId ?? tender.id }) as TillTender),
-    lines: (order.items ?? []).filter(item => item !== null).map(item => ({ id: item.id, quantity: Number(item.quantity),
+    lines: (order.items ?? []).filter(item => item !== null).filter(item => !item.metadata?.tally_fee_uuid).map(item => ({ id: item.id, quantity: Number(item.quantity),
       ...connectorSplit((item.raw_total as unknown as Raw).value, (item.raw_tax_total as unknown as Raw).value, decimals) })),
+    linesMoneyMinor: payment ? medusaSumMinor(decimals, [(payment.raw_amount as unknown as Raw).value], [
+      ...(order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value),
+      ...(order.items ?? []).filter(item => item?.metadata?.tally_fee_uuid).map(item => (item!.raw_total as unknown as Raw).value),
+    ]) : null,
     shippingMinor: medusaSumMinor(decimals, (order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value)),
     payment: payment ? { id: payment.id, amountMinor: medusaSumMinor(decimals, [(payment.raw_amount as unknown as Raw).value]),
       refundedMinor: medusaSumMinor(decimals, (payment.refunds ?? []).map(refund => (refund?.raw_amount as unknown as Raw).value)) } : null,
@@ -99,11 +105,11 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       if (MedusaError.isMedusaError(error) && error.type === MedusaError.Types.CONFLICT) return busy
       throw error
     }
-    const sessionId = payload?.sessionId ?? ctx.row!.session_id
+    let row: RefundRow | undefined = await trx('tally_refund').where(payload ? { client_refund_id: payload.clientRefundId } : { command_id: id }).first()
+    const sessionId = row ? row.session_id : payload!.sessionId
     const { rows: [session] } = await trx.raw(`select id, register_id, status from tally_register_session where id = coalesce(
       (select id from tally_register_session where id = ?), (select session_id from tally_register_session_alias where id = ?)) for update`,
     [sessionId, sessionId])
-    let row: RefundRow | undefined = await trx('tally_refund').where(payload ? { client_refund_id: payload.clientRefundId } : { command_id: id }).first()
     if (payload && row && row.command_id !== id) {
       // Amendment 3: an applied clientRefundId under a new command is reconciled by the till; one still running is in progress.
       if (row.status !== 'applied') return busy
@@ -115,17 +121,21 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       await ledger.complete(id, claimToken, result)
       return { outcome: { kind: 'result', result }, keepClaim: true }
     }
+    if (row && session?.status !== 'open') return parkRefund(container, { id, claimToken, row }, 'session',
+      `session_closed: refund ${row.id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.`, 'session_closed')
     if (!row && payload) {
       if (!session || session.status !== 'open' || session.register_id !== payload.registerId) {
         return { outcome: rejected(id, 'no_open_session', 'This refund needs an open session of its register.', { sessionId: payload.sessionId }), keepClaim: false }
       }
       // Every refund of the order already started counts, so a refund still running or parked is never priced twice. The
       // order is read again under the lock, so its refunded money includes a refund that finished while this one waited.
-      const earlier = await trx('tally_refund').where({ order_id: order.id }).select('lines', 'shipping_minor', 'refunds') as RefundRow[]
+      const earlier = await trx('tally_refund').where({ order_id: order.id }).whereIn('status', COUNTED_REFUND_STATUSES)
+        .select('lines', 'shipping_minor', 'refunds', 'total_minor', 'medusa_refund_id') as RefundRow[]
       const current = await loadRefundOrder(container, order.id) ?? order
-      const price = priceRefund({ lines: current.lines, shippingMinor: current.shippingMinor,
+      const price = priceRefund({ lines: current.lines, linesMoneyMinor: current.linesMoneyMinor, shippingMinor: current.shippingMinor,
         earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor) })),
-        refundableMoneyMinor: current.payment ? current.payment.amountMinor - current.payment.refundedMinor : null, request: payload })
+        refundableMoneyMinor: current.payment ? current.payment.amountMinor - current.payment.refundedMinor
+          - earlier.filter(entry => entry.medusa_refund_id === null).reduce((sum, entry) => sum + Number(entry.total_minor), 0) : null, request: payload })
       if (price.ok === false) return { outcome: rejected(id, price.error.code, price.error.message, price.error.data), keepClaim: false }
       const split = splitRefund({ orderId: order.id, tenders: order.tenders, earlier: earlier.flatMap(entry => entry.refunds),
         totalMinor: price.totalMinor, destination: payload.destination })
@@ -143,21 +153,26 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
   })
 }
 
+async function parkRefund(container: MedusaContainer, { id, claimToken, row }: { id: string; claimToken: string; row: RefundRow },
+  step: string, message: string, reason?: 'refund_unrecorded' | 'session_closed'): Promise<Run> {
+  const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+  const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
+  const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
+  await knex('tally_refund').where({ id: row.id }).update({ status: 'needs_admin', updated_at: knex.fn.now() })
+  const parked = await ledger.markNeedsAdmin(id, claimToken, { orderId: row.order_id, clientRefundId: row.client_refund_id,
+    refundId: row.id, step, message, ...(reason ? { reason } : {}) })
+  if (parked) logger.error(`tally order.refund needs admin: command ${id}, refund ${row.id}, step ${step}: ${message}`)
+  else logger.warn(`tally order.refund: claim lost while parking command ${id} (refund ${row.id}, step ${step}: ${message})`)
+  return { outcome: { kind: 'in_progress', id }, keepClaim: true }
+}
+
 async function runSteps(container: MedusaContainer, ctx: { id: string; claimToken: string; actorId?: string; order: RefundOrder
   row: RefundRow }): Promise<Run> {
   const { id, claimToken, actorId, order, row } = ctx
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
-  const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const write = (fields: Record<string, unknown>) => knex('tally_refund').where({ id: row.id }).update({ ...fields, updated_at: knex.fn.now() })
-  const park = async (step: string, message: string, reason?: 'refund_unrecorded'): Promise<Run> => {
-    await write({ status: 'needs_admin' })
-    const parked = await ledger.markNeedsAdmin(id, claimToken, { orderId: row.order_id, clientRefundId: row.client_refund_id,
-      refundId: row.id, step, message, ...(reason ? { reason } : {}) })
-    if (parked) logger.error(`tally order.refund needs admin: command ${id}, refund ${row.id}, step ${step}: ${message}`)
-    else logger.warn(`tally order.refund: claim lost while parking command ${id} (refund ${row.id}, step ${step}: ${message})`)
-    return { outcome: { kind: 'in_progress', id }, keepClaim: true }
-  }
+  const park = (step: string, message: string, reason?: 'refund_unrecorded') => parkRefund(container, ctx, step, message, reason)
   const lines = row.lines.map(({ orderLineId, quantity, restock }) => ({ orderLineId, quantity, restock }))
   // A failure before anything is in Medusa (or after the begun return was cancelled) leaves no row and no claim.
   const undo = async (error: Error): Promise<Run> => {
@@ -288,9 +303,12 @@ export async function resolveOrderRefund(container: MedusaContainer, commandId: 
   const order = await loadRefundOrder(container, row.order_id)
   if (!order) throw new Error(`Order ${row.order_id} of refund ${row.id} is missing`)
   if (action === 'apply') {
+    if (row.lines.length && row.received_at === null) throw new Error(`Refund ${row.id} has not been received; use resume`)
     if (!medusaRefundId || !order.payment) throw new Error('Usage: apply <medusaRefundId> (a refund on the order\'s payment)')
-    const refund = await knex('refund').where({ id: medusaRefundId, payment_id: order.payment.id }).whereNull('deleted_at').first('id')
+    const refund = await knex('refund').where({ id: medusaRefundId, payment_id: order.payment.id }).whereNull('deleted_at').first('id', 'raw_amount')
     if (!refund) throw new Error(`Refund ${medusaRefundId} is not a refund of order ${order.id}'s payment; nothing written`)
+    const minor = medusaSumMinor(order.decimals, [refund.raw_amount.value])
+    if (minor !== Number(row.total_minor)) throw new Error(`Refund ${medusaRefundId} is ${minor}, refund ${row.id} is ${row.total_minor}; nothing written`)
     const result = refundResult(commandId, row)
     await knex.transaction(async trx => {
       const { rows: [{ locked }] } = await trx.raw("select pg_try_advisory_xact_lock(hashtext('tally_refund'), hashtext(?)) as locked", [order.id])
