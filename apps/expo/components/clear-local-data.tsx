@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Platform, View } from 'react-native';
 import type { MangoQuerySelector, RxCollection } from 'rxdb';
-import { Button, Dialog, DialogContent, DialogTitle, Input, Label, SettingsGroup, Text } from '@tallyui/components';
+import { Button, Dialog, DialogContent, DialogTitle, Input, Label, Text } from '@tallyui/components';
 import { APPROVAL_TIMEOUT_MS, ApprovalError, requestDeviceClearApproval } from '../lib/approval';
 import {
   CLEAR_APPROVE_CONTEXT, CLEAR_APPROVE_OFFLINE, CLEAR_BODY, CLEAR_CONFIRM_WORD, CLEAR_FLAG_KEY, CLEAR_OFFLINE, CLEAR_UPDATE_NEEDED,
@@ -14,6 +14,7 @@ import { useRegister } from '../lib/register-context';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { useNetworkOnline } from '../lib/use-network-online';
+import { SettingsGroup } from '../lib/settings-layout';
 import { ApprovalDialog } from './register-close';
 
 /** Above SessionProvider: with the clear flag set (web), wipes local data before the app renders, then reloads. */

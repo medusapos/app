@@ -1,6 +1,7 @@
 import { Fragment, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
-import { Badge, Button, SettingsGroup, SettingsRow, Text } from '@tallyui/components';
+import { Badge, Button, Text } from '@tallyui/components';
+import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
 import type { PrinterProfile } from '@tallyui/pos';
 import { useOutboxOrders } from '../lib/outbox-context';
 import { printerTestPage, printTestPage, usePrinterProfiles } from '../lib/printers';
@@ -32,7 +33,7 @@ export function PrintersGroup({ session }: { session: Session }) {
       const id = `settings-printer-${profile.id}`;
       const printable = web && profile.connectionType === 'system';
       return <Fragment key={profile.id}>
-        <SettingsRow label={profile.name} testID={id} className={index > 0 ? 'border-t border-border' : undefined} action={
+        <SettingsRow label={profile.name} testID={id} divider={index > 0} action={
           <View className="flex-row flex-wrap items-center justify-end gap-3">
             {profile.isBuiltIn ? <Badge variant="secondary" label="Built-in" /> : null}
             {printable ? <Button variant="outline" size="sm" testID={`${id}-test-print`} accessibilityLabel={`Test print ${profile.name}`}

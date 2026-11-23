@@ -7,6 +7,7 @@ import { ContainerRegistrationKeys, Modules } from '@medusajs/framework/utils'
 // /admin/users/me, and /admin/customers (read and create).
 export const POS_CASHIER_POLICIES = [
   'tally_pos:use',
+  'tally_pos:pair_display',
   'product:read',
   'product_variant:read',
   'product_type:read',
