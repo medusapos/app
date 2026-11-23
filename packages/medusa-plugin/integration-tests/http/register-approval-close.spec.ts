@@ -171,7 +171,34 @@ medusaIntegrationTestRunner({
 
     it('with unsyncedCount above 0 the till\'s figures decide', async () => {
       const closing = closure(opening.payload, { tillExpected: { cash: 100 }, counted: { cash: 100 },
-        unsyncedCount: 1, unsyncedTotalMinor: 1000 })
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [randomUUID()] })
+      expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
+    })
+
+    // Desk ruling 2026-11-23: an unsynced claim is checked against the closure's own orderIds.
+    async function syncedSession() {
+      const data = await seed(container)
+      const session = open()
+      const placed = sale(data.variantB, session.payload.sessionId)
+      expect((await post([session, placed, close(session.payload.sessionId)])).map(result => result.status))
+        .toEqual(['applied', 'applied', 'applied'])
+      return { session, placed }
+    }
+
+    it('with unsyncedCount above 0 but every orderIds sale held by the server, the server\'s figures decide', async () => {
+      const { session, placed } = await syncedSession()
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId] })
+      expect((await post([closing]))[0]).toEqual({ id: closing.id, status: 'rejected', error: {
+        code: 'register_approval_required', message: 'A manager approval is needed for this variance.',
+        data: { sessionId: session.payload.sessionId, thresholdMinor: 500, variance: { cash: -1000 } },
+      } })
+    })
+
+    it('with unsyncedCount above 0 and an orderIds sale the server lacks, the till\'s figures still decide', async () => {
+      const { session, placed } = await syncedSession()
+      const closing = closure(session.payload, { tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        unsyncedCount: 1, unsyncedTotalMinor: 1000, orderIds: [placed.payload.clientOrderId, randomUUID()] })
       expect((await post([closing]))[0]).toMatchObject({ status: 'applied', register: { closure: { approvalVerified: false } } })
     })
 

@@ -55,6 +55,16 @@ export async function loadSessionFigures(container: MedusaContainer, sessionId: 
   return { ...figures, ...(input.closure ? { variance: deriveVariance(input.closure.counted, figures.expected) } : {}) }
 }
 
+/** Whether an order row exists for every client id. A refused sale was still received, so status, draft and tally_rejected don't matter. */
+export async function holdsEveryOrder(container: MedusaContainer, clientIds: string[]): Promise<boolean> {
+  const ids = [...new Set(clientIds)]
+  if (!ids.length) return true
+  const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+  const [row] = await knex('order').select(knex.raw("count(distinct metadata->>'tally_client_id')::int as held"))
+    .whereNull('deleted_at').whereRaw("metadata->>'tally_client_id' = any(?)", [ids])
+  return Number(row?.held) === ids.length
+}
+
 export function deriveRejected(orders: { payments: { method: string; amountMinor: number }[] }[]): { count: number; byMethod: Record<string, number> } {
   const byMethod: Record<string, number> = Object.create(null)
   for (const order of orders) {
