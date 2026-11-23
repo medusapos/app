@@ -79,7 +79,7 @@ medusaIntegrationTestRunner({
       const sale = command({
         lines: [{ clientLineId: randomUUID(), variantId: data.variantA, quantity: 2, unitPriceMinor: 850 }],
         subtotalMinor: 1429, taxMinor: 271, totalMinor: 1700,
-        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 1700 }],
       })
       expect(await stockA()).toBe(10)
       const result = await runOrderCreate(container, sale)
@@ -196,7 +196,7 @@ medusaIntegrationTestRunner({
           { clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, taxInclusive: false, discountMinor: 100 },
         ],
         subtotalMinor: 1656, taxMinor: 315, totalMinor: 1971,
-        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 1971 }],
       })
       const result = await runOrderCreate(container, { ...sale, version: 2 })
       const { order, items } = await discountedItems(result)
@@ -658,7 +658,7 @@ medusaIntegrationTestRunner({
           { clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, taxInclusive: false, discountMinor: 100 },
         ],
         subtotalMinor: 1656, taxMinor: 315, totalMinor: 1971,
-        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 1971 }],
       })
       const result = await runOrderCreate(container, { ...sale, version: 3 })
       await readOrder(result)
@@ -674,7 +674,7 @@ medusaIntegrationTestRunner({
           { clientLineId: randomUUID(), variantId: data.variantB, quantity: 1, unitPriceMinor: 1000, taxInclusive: false, discountMinor: 100 },
         ],
         subtotalMinor: 1656, taxMinor: 315, totalMinor: 1971,
-        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 2000 }],
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 1971 }],
       })
       const result = await runOrderCreate(container, { ...sale, version: 4 })
       const { order, items } = await discountedItems(result)

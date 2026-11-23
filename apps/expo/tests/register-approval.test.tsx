@@ -3,11 +3,13 @@
 // store's proof at register contract 3 while the store holds the session, and a closure the store refused gets the
 // panel's card, which asks again. Otherwise the count keeps ADR 0018's second login, with no proof.
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { ApprovalNeeded } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, type ApprovalNeeded, type PosOrder } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RegisterGate, RegisterPanelSheet } from '../components/register';
 import { APPROVE_OFFLINE } from '../components/register-close';
+import { closeOrderStores, openOrderStore } from '../lib/order-store';
+import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister, type RegisterContextValue } from '../lib/register-context';
 import type { Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -18,6 +20,8 @@ vi.mock('../lib/register-context', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
 vi.mock('../lib/session-context', () => ({ useSession: vi.fn() }));
+// Only the order collection the panel reads; none until a test opens one.
+vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn(() => ({ orders: null })) }));
 
 const baseUrl = 'https://store-approval.test';
 const CASHIER_TOKEN = 'cashier-token-abc';
@@ -130,6 +134,74 @@ describe('the count over the threshold', () => {
 describe('a closure the store refused', () => {
   const needed = (liveAtStore: boolean): ApprovalNeeded => ({ closureId: 'closure-9', sessionId: 'session-9', variance: { cash: -1500 },
     code: 'register_approval_invalid', liveAtStore });
+  // The till's own pos_orders (memory storage), as the outbox holds them.
+  let store: Awaited<ReturnType<typeof openOrderStore>>;
+  beforeEach(async () => {
+    store = await openOrderStore(`https://refused-${crypto.randomUUID()}.test`);
+    vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders } as ReturnType<typeof useOutboxContext>);
+  });
+  afterEach(async () => { await closeOrderStores(); });
+  let minute = 0;
+  /** A sale of the payments' total, taken in `sessionId`; refused with `code` unless `syncStatus` says otherwise. */
+  function sale(id: string, payments: { method: 'cash' | 'external'; amountMinor: number }[], code: string | null,
+    overrides: Partial<PosOrder> = {}): PosOrder {
+    const total = payments.reduce((sum, payment) => sum + payment.amountMinor, 0);
+    const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+    builder.addLine({ productId: 'shirt', name: 'Shirt', unitPrice: { amount: total, currency: 'EUR' } });
+    // Paid in full to finalize; the stored payments are this test's own, below.
+    builder.addPayment({ method: 'cash', amountMinor: total });
+    const order = finalizeOrder(builder.getSnapshot());
+    return { ...order, id, saleId: id, sessionId: 'session-9', createdAt: new Date(2026, 10, 23, 9, minute++).toISOString(),
+      payments: payments.map((payment) => ({ id: crypto.randomUUID(), ...payment })),
+      ...(code ? { syncStatus: 'rejected', error: { code, message: 'Refused' } } : { syncStatus: 'applied' }), ...overrides };
+  }
+  const refusedRows = (dialog: ReturnType<typeof within>) => within(dialog.getByTestId('approval-refused-sales'))
+    .getAllByTestId(/^approval-refused-sale-/).map((row) => row.getAttribute('data-testid'));
+  /** Lets the dialog's read of the till's sales land. */
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+  it('lists the refused sales behind the variance, each with its reference, cash and code; not one a successor replaced', async () => {
+    const replaced = sale('0190aaaa-0000-7000-8000-00000000c003', [{ method: 'cash', amountMinor: 300 }], 'total_mismatch');
+    await store.orders.bulkInsert([
+      sale('0190aaaa-0000-7000-8000-00000000a001', [{ method: 'cash', amountMinor: 1000 }], 'insufficient_stock'),
+      sale('0190aaaa-0000-7000-8000-00000000b002', [{ method: 'external', amountMinor: 500 }, { method: 'cash', amountMinor: 200 }], 'figures_mismatch'),
+      replaced,
+      sale('0190aaaa-0000-7000-8000-00000000d004', [{ method: 'cash', amountMinor: 300 }], null, { saleId: replaced.id }),
+    ]);
+    stubStore();
+    await mountCard(true);
+    await settle();
+    const dialog = within(await screen.findByTestId('approval-dialog'));
+    expect(refusedRows(dialog)).toEqual(['approval-refused-sale-0190aaaa-0000-7000-8000-00000000a001',
+      'approval-refused-sale-0190aaaa-0000-7000-8000-00000000b002']);
+    const cash = within(dialog.getByTestId('approval-refused-sale-0190aaaa-0000-7000-8000-00000000a001'));
+    expect(cash.getByText('Order 0000a001 · insufficient_stock')).toBeTruthy();
+    expect(cash.getByText('€10.00')).toBeTruthy();
+    const split = within(dialog.getByTestId('approval-refused-sale-0190aaaa-0000-7000-8000-00000000b002'));
+    expect(split.getByText('Order 0000b002 · figures_mismatch')).toBeTruthy();
+    expect(split.getByText('€2.00')).toBeTruthy();
+  });
+
+  it('with no refused sales, the dialog has no refused-sales list', async () => {
+    await store.orders.insert(sale('0190aaaa-0000-7000-8000-00000000e005', [{ method: 'cash', amountMinor: 1000 }], null));
+    stubStore();
+    await mountCard(true);
+    await settle();
+    const dialog = within(await screen.findByTestId('approval-dialog'));
+    expect(dialog.queryByTestId('approval-refused-sales')).toBeNull();
+  });
+
+  it("does not list another session's refused sale", async () => {
+    await store.orders.bulkInsert([
+      sale('0190aaaa-0000-7000-8000-00000000f006', [{ method: 'cash', amountMinor: 1000 }], 'insufficient_stock'),
+      sale('0190aaaa-0000-7000-8000-000000000007', [{ method: 'cash', amountMinor: 400 }], 'overpaid', { sessionId: 'session-8' }),
+    ]);
+    stubStore();
+    await mountCard(true);
+    await settle();
+    const dialog = within(await screen.findByTestId('approval-dialog'));
+    expect(refusedRows(dialog)).toEqual(['approval-refused-sale-0190aaaa-0000-7000-8000-00000000f006']);
+  });
   async function mountCard(liveAtStore: boolean) {
     signIn(STORE_CAPABILITIES);
     withRegister({ session: null, lastClosure: { id: 'closure-9' }, approvalNeeded: needed(liveAtStore), liveAtStore: false });
