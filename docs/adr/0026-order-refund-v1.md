@@ -59,7 +59,10 @@ The plugin still accepts and prices ADR-080's general payload: any line quantiti
   - `apply` records a refund the admin made by hand, with its Medusa refund id.
 
   There is no `reject` once stock has moved.
-- **Never refund twice.** Before step 3, the workflow compares the payment's refunded amount in Medusa with the sum of the `medusa_refund_id` amounts that `tally_refund` already records for it. If Medusa shows more, a refund happened without being recorded. Step 3 then does not run, and the command goes to `needs_admin` with the reason `refund_unrecorded`.
+- **Never refund twice.** The workflow compares the payment's refunded amount in Medusa with the sum of the `medusa_refund_id` amounts that `tally_refund` already records for it. If Medusa shows more, a refund happened without being recorded, and the command goes to `needs_admin` with the reason `refund_unrecorded`.
+  - The check runs before step 2, so stock never moves when the money won't (amended 2026-11-23, desk ruling).
+  - It runs again before step 3, for a resume whose receive is already recorded.
+  - A refund with no lines runs it once, before step 3.
 
 **Required tests.** The plugin PR tests these rows explicitly:
 - Fail after the receive confirms and before the money moves, then retry with the same command and `clientRefundId`: exactly one Medusa refund, and stock received once.
@@ -116,7 +119,15 @@ The plugin prices the refund with ADR-080's cumulative-share rule, net and tax s
 
 Each line's net is `round(gross − tax)`, the connector's split, never `round(gross) − round(tax)`. The till prices from the connector's figures, so any other split would refuse a correct refund by one minor unit.
 
-**Required test.** A line where `round(gross) − round(tax)` and `round(gross − tax)` differ by one minor unit: the refund is accepted, and its amounts are the connector's.
+**The last units take the remainder** (amended 2026-11-23, desk ruling). Per-line rounding can ask for more than the till took. Take three one-unit lines at 0.99 ex 19%: each line is 1.18, which sums to 3.54, but the sale was paid 3.53.
+
+So a refund that leaves every line fully refunded is priced at the order's remaining refundable money. That is the payment's amount, less Medusa's refunds on it, less any shipping still unrefunded. The difference from the per-line sum goes on the net of the request's last line.
+
+A difference of more than one minor unit per line means the payment and the order disagree by more than rounding. It is refused `amount_mismatch`, never refunded silently. The till prices the same way. TallyUI 4.1.0's `priceRefund` does not, so the app sends the remainder for its full-order refund.
+
+**Required tests.**
+- **Per-line rounding.** A line where `round(gross) − round(tax)` and `round(gross − tax)` differ by one minor unit: the refund is accepted, and its amounts are the connector's.
+- **Per-order rounding.** Refunding all three lines of the 3.53 sale above gives 3.53. Refunding two of them gives 2.36, and the last line then gets 1.17.
 
 ### 6. Register figures follow ADR-080 decision 6
 - **The session.** A refund counts in its own `sessionId`, which must be open, not counting. Anything else is refused `no_open_session`. The check holds the session row lock, as the register commands do (`lockSession`), so a close cannot interleave with a refund.
