@@ -261,6 +261,7 @@ medusaIntegrationTestRunner({
         lineTax: { none: false, classes: false },
         coupons: true,
         pluginContract: 4,
+        customerDisplay: { v: 1, iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 },
       })
     })
 

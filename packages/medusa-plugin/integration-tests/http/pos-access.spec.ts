@@ -47,7 +47,7 @@ medusaIntegrationTestRunner({
       const headers = await loginWithRoles([])
       for (const url of [
         '/tally/v1/info', '/tally/v1/registers/reg_x', '/tally/v1/changes', '/tally/v1/changes/tick',
-        '/tally/v1/registers/reg_x/closures', '/tally/v1/payment-providers',
+        '/tally/v1/registers/reg_x/closures', '/tally/v1/payment-providers', '/tally/v1/display-pairings', '/tally/v1/displays',
       ]) {
         const response = await api.get(url, { headers, validateStatus: () => true })
         expect(response.status).toBe(403)
@@ -62,6 +62,16 @@ medusaIntegrationTestRunner({
       const preview = await api.post('/tally/v1/promotions/preview', {}, { headers, validateStatus: () => true })
       expect(preview.status).toBe(403)
       expect(preview.data).toMatchObject({ type: 'forbidden', message: 'Forbidden' })
+      for (const [method, url, body] of [
+        ['post', '/tally/v1/display-devices', { deviceId: 'till-x' }], ['post', '/tally/v1/display-codes', {}],
+        ['post', '/tally/v1/display-pairings/c1/confirm', {}], ['post', '/tally/v1/display-pairings/c1/decline', {}],
+        ['delete', '/tally/v1/displays/d1', undefined], ['post', '/tally/v1/displays/d1/signals', { type: 'offer', payload: 'o' }],
+        ['put', '/tally/v1/displays/d1/snapshot', { snapshot: null }], ['post', '/tally/v1/display-signals/drain', {}],
+      ] as const) {
+        const display = await api.request({ method, url, data: body, headers, validateStatus: () => true })
+        expect([url, display.status]).toEqual([url, 403])
+        expect(display.data).toMatchObject({ type: 'forbidden', message: 'Forbidden' })
+      }
     })
 
     it('role_super_admin may use the POS', async () => {
@@ -88,6 +98,7 @@ medusaIntegrationTestRunner({
           expect(new Set(policies.map(policy => policy.key))).toEqual(new Set(keys))
           expect(links).toHaveLength(keys.length)
           expect(policies.map(policy => policy.key).includes('tally_pos:clear_device')).toBe(clearsDevice)
+          expect(keys).toContain('tally_pos:pair_display')
         }
         expect(process.exitCode).not.toBe(1)
       } finally {
@@ -108,6 +119,9 @@ medusaIntegrationTestRunner({
       }
       const response = await api.get('/admin/orders?limit=1', { headers, validateStatus: () => true })
       expect(response.status).toBe(403)
+      // tally_pos:pair_display is customer_display.pair: the cashier registers a till device for a customer display.
+      const device = await api.post('/tally/v1/display-devices', { deviceId: `till-${randomUUID()}` }, { headers })
+      expect(device.status).toBe(201)
     })
 
     it('a POS manager may use /tally/v1', async () => {

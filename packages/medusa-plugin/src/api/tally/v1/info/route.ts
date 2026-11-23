@@ -1,4 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
+import { TALLY_DISPLAY_MODULE } from '../../../../modules/tally-display'
+import type TallyDisplayModuleService from '../../../../modules/tally-display/service'
 import { TALLY_LEDGER_MODULE } from '../../../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../../../modules/tally-ledger/service'
 import { approvalThresholdMinor, LINE_TAX, PLUGIN_CONTRACT, SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS, TAX_ROUNDING } from '../versions'
@@ -12,5 +14,7 @@ export async function GET(req: MedusaRequest, res: MedusaResponse) {
     'order.create': SUPPORTED_ORDER_CREATE_VERSIONS, register: SUPPORTED_REGISTER_VERSIONS, ...(sync ? { sync: [1] } : {}),
   }, taxRounding: TAX_ROUNDING, registerApproval: { thresholdMinor: approvalThresholdMinor(options) }, lineTax: LINE_TAX,
   // TallyUI reads capabilities.coupons to enable store-priced coupons at the till.
-  coupons: true, pluginContract: PLUGIN_CONTRACT })
+  coupons: true, pluginContract: PLUGIN_CONTRACT,
+  // TallyUI reads customerDisplay to offer a second-device customer display (ADR-085 d2, d7).
+  customerDisplay: req.scope.resolve<TallyDisplayModuleService>(TALLY_DISPLAY_MODULE).customerDisplay() })
 }
