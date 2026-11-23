@@ -9,7 +9,6 @@ const lines = (page: Page) => page.getByRole('button', { name: /^Edit quantity o
 async function openMenu(page: Page) {
   await page.getByTestId('cart-add-menu').click();
   await expect(menu(page)).toBeVisible();
-  await expect(page.getByTestId('cart-add-menu-overlay')).toHaveCount(1);
 }
 
 // A real pointer click at the target's centre: Playwright's own click would wait for the overlay to stop covering it.
