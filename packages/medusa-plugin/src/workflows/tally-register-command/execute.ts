@@ -16,7 +16,7 @@ import { commandFingerprint } from '../tally-order-create/fingerprint'
 import { envelopeErrors, MAX_PAYLOAD_ERRORS } from '../tally-order-create/payload-shape'
 import { clientTimeStageErrors } from '../client-time'
 import { registerPayloadErrors } from './payload-shape'
-import { loadSessionFigures } from './figures'
+import { holdsEveryOrder, loadSessionFigures } from './figures'
 
 type RegisterResult = CommandResult
 const conflictMessages = {
@@ -94,7 +94,9 @@ export async function executeRegisterCommand(container: MedusaContainer, command
         case 'register.closure.submit': {
           const closing = payload as RegisterClosureSubmitV3Payload
           // ADR 0023 amendment: with every sale synced, the approval gate decides on the server's own expected figures.
-          const serverExpected = command.version >= 3 && closing.unsyncedCount === 0
+          // Desk ruling 2026-11-23: an unsynced claim is false when the server holds every orderIds sale.
+          const serverExpected = command.version >= 3
+            && (closing.unsyncedCount === 0 || await holdsEveryOrder(container, closing.orderIds))
             ? (await loadSessionFigures(container, closing.sessionId))?.expected : undefined
           outcome = await service.submitClosure({ ...closing, contract: command.version, commandId: command.id,
             thresholdMinor: approvalThresholdMinor(options), serverExpected } satisfies RegisterClosureSubmitInput); break
