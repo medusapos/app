@@ -16,10 +16,9 @@ const LAST = ['09e', '09f', '13b'];
 const selected = rows.filter(row => !wanted || wanted.includes(row.id));
 const order = [...selected.filter(row => !LAST.includes(row.id)), ...LAST.flatMap(id => selected.filter(row => row.id === id))];
 const SIZES: Size[] = ['desktop', 'tablet', 'phone'];
-// Each size runs in its own worker, and a long capture may run in parts (CAPTURE_ROWS); the outcomes behind the index
-// are kept outside the output folder and merged, and start afresh with a folder that has no index yet.
+// Each size runs in its own worker, and a capture may run in parts (CAPTURE_ROWS): the index in the output folder is the
+// merge state, so a part keeps every other row's cells, and a folder with no index starts afresh.
 const index = path.join(out, 'README.md');
-const statePath = path.join(root, 'e2e/.tmp/capture-index', `${out.replace(/[^\w.-]+/g, '_')}.json`);
 const outcomes: Partial<Record<string, string>> = {};
 let ranSize: Size | undefined;
 
@@ -58,8 +57,10 @@ async function reset(page: Page, size: Size) {
   if (await visibleText(page) === 'Counting') await finishClose(page);
   if (await page.getByTestId('view-toggle-grid').isVisible()) await page.getByTestId('view-toggle-grid').click();
   // Right after a reload the header reads "Closed" until the till has loaded its open session; only a state that
-  // lasts means the register is really closed. An unbound till (row 09a) shows the picker in place of the cart, so this
-  // comes before the cart is cleared.
+  // lasts means the register is really closed. No condition tells the two apart: a loading session reads "Closed" too,
+  // and the header can go blank and back to "Closed" while it loads, so a wait that ends on the first other reading
+  // reopened an open register (a full run, 2026-11-23). Hence a fixed 5 s. An unbound till (row 09a) shows the picker
+  // in place of the cart, so this comes before the cart is cleared.
   const closed = async () => ['Closed', 'Choose register'].includes(await visibleText(page) ?? '');
   if (await closed()) await page.waitForTimeout(5_000);
   const state = await visibleText(page);
@@ -90,39 +91,76 @@ async function reset(page: Page, size: Size) {
       }
     }
   }
+  // A sale left over fails this row here rather than showing in the next shots.
+  if (phone && await cartTab(page).isVisible()) await cartTab(page).click();
+  await expect(empty).toBeVisible();
+  await expect(page.getByTestId(/^open-sale-tab-.*-who$/)).toHaveCount(0);
   if (phone && await productsTab(page).isVisible()) await productsTab(page).click();
   await expect(page.getByText(/Up to date · \d+ products/)).toBeVisible();
+  // The category stays chosen across a reload (row 02e picks Drinks).
+  const all = page.getByRole('radiogroup', { name: 'Categories' }).getByRole('radio', { name: 'All products', exact: true });
+  if (await all.isVisible() && !await all.isChecked()) await all.click();
+  if (await all.isVisible()) await expect(all).toBeChecked();
 }
 
 async function shoot(page: Page, row: CaptureRow, size: Size) {
   await page.evaluate(() => document.fonts.ready);
   await page.waitForLoadState('networkidle');
-  // Sheets and menus slide in; let them settle.
-  await page.waitForTimeout(400);
-  writeFileSync(path.join(out, `${row.id}-${size}.jpg`), await page.screenshot({ type: 'jpeg', quality: 70 }));
+  // The pointer rests on the header's top edge, so no hover state or tooltip (a rail's "Orders") shows in the shot.
+  const viewport = page.viewportSize() ?? { width: 1280, height: 800 };
+  await page.mouse.move(Math.round(viewport.width / 2), 1);
+  // Sheets and menus slide in, some driven by script rather than CSS, so the shot is taken once two frames in a row
+  // match. Something that never stops moving (a spinner) is shot as it is after 3 s.
+  let shot = await page.screenshot({ type: 'jpeg', quality: 70 });
+  for (const until = Date.now() + 3_000; Date.now() < until;) {
+    const next = await page.screenshot({ type: 'jpeg', quality: 70 });
+    if (next.equals(shot)) break;
+    shot = next;
+  }
+  writeFileSync(path.join(out, `${row.id}-${size}.jpg`), shot);
 }
 
 const escape = (text: string) => text.replace(/\|/g, '\\|');
+const link = (row: CaptureRow, size: Size) => `[${size}](${row.id}-${size}.jpg)`;
+
+// The outcomes in an existing index: per row, per size, 'shot' for a link, else the cell's text.
+function readIndex(): Record<string, Partial<Record<Size, string>>> {
+  const state: Record<string, Partial<Record<Size, string>>> = {};
+  if (!existsSync(index)) return state;
+  for (const line of readFileSync(index, 'utf8').split('\n')) {
+    const cells = line.split(/(?<!\\)\|/).slice(1, -1).map(cell => cell.trim());
+    const row = rows.find(candidate => candidate.id === cells[0]);
+    if (!row || cells.length !== 3 + SIZES.length) continue;
+    state[row.id] = Object.fromEntries(SIZES.map((size, i) =>
+      [size, cells[3 + i] === link(row, size) ? 'shot' : cells[3 + i].replace(/\\\|/g, '|')]));
+  }
+  return state;
+}
+
+// The commit the shots were taken at, "dirty" when the tree differs from it (the output folder aside).
+function commit() {
+  const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+  const inside = path.relative(root, out);
+  const exclude = inside && !inside.startsWith('..') && !path.isAbsolute(inside) ? [`:(exclude)${inside}`] : [];
+  const dirty = git('status', '--porcelain', '--', '.', ...exclude) !== '';
+  return `${git('rev-parse', '--short', 'HEAD')}${dirty ? ' dirty' : ''}`;
+}
 
 function writeIndex() {
   if (!ranSize) return;
-  const state: Record<string, Partial<Record<Size, string>>> = existsSync(index) && existsSync(statePath)
-    ? JSON.parse(readFileSync(statePath, 'utf8')) : {};
+  const state = readIndex();
   for (const [id, outcome] of Object.entries(outcomes)) state[id] = { ...state[id], [ranSize]: outcome };
-  mkdirSync(path.dirname(statePath), { recursive: true });
-  writeFileSync(statePath, JSON.stringify(state, null, 1));
   const cell = (row: CaptureRow, size: Size) => {
     const outcome = state[row.id]?.[size];
-    return outcome === 'shot' ? `[${size}](${row.id}-${size}.jpg)` : escape(outcome ?? '—');
+    return outcome === 'shot' ? link(row, size) : escape(outcome ?? '—');
   };
   const listed = rows.filter(row => state[row.id]);
   const shots = listed.reduce((count, row) => count + SIZES.filter(size => state[row.id]?.[size] === 'shot').length, 0);
-  const sha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
   const tallyui = JSON.parse(readFileSync(path.join(root, 'apps/expo/package.json'), 'utf8')).dependencies['@tallyui/components'];
   writeFileSync(index, [
     '# MedusaPOS capture',
     '',
-    `Taken ${new Date().toISOString().slice(0, 10)} at \`${sha}\` with TallyUI ${tallyui}, by \`pnpm capture\` against the throwaway e2e store (e2e/README.md). ${shots} shots.`,
+    `Taken ${new Date().toISOString().slice(0, 10)} at \`${commit()}\` with TallyUI ${tallyui}, by \`pnpm capture\` against the throwaway e2e store (e2e/README.md). ${shots} shots.`,
     '',
     '| Row | Screen | State | Desktop 1280×800 | Tablet 1024×768 | Phone 390×844 |',
     '|---|---|---|---|---|---|',
