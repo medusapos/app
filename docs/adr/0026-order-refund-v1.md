@@ -129,7 +129,12 @@ So a refund that leaves every product line fully refunded prices its lines at th
   - **Fees.** Fee items (`metadata.tally_fee_uuid`) are not lines here. They are not in the "every line refunded" set, and they are not in the bound's line count. A fee goes back only as `adjustmentMinor`, under the overall cap.
   - **Never in the remainder.** Adjustments and shipping refunds.
 - **B. Which line takes the difference.** The request's last line whose net covers the difference (net ≥ |difference|). If no line does, the line with the largest net, with ties going to the later line. A net is never negative. The till applies the same rule.
-  - **Ruling N1** (desk, 2026-11-23, review 2). A negative difference that no net in the request covers goes on the tax of the request's line with the largest gross (net + tax); ties go to the later line. It applies only within D's bound, and only while that tax stays ≥ 0; otherwise the refund is refused as money drift. The till applies the same rule.
+  - **Ruling N1** (desk, 2026-11-23, review 2). A negative difference that no net in the request covers goes on the tax of the request's line with the largest gross (net + tax); ties go to the later line. The tax takes it only if it covers it.
+  - Otherwise, within D's bound, the difference is dropped and the lines price at their own figures; no net or tax is ever negative. Beyond the bound it is money drift. The till applies the same rule.
+  - **Accepted limit:** a dropped difference over-refunds the lines by at most one minor unit per line; the payment cap still bounds the order's refunds.
+    - Example: 3 × 0.99 ex 19% plus a free line z, with 5.95 of shipping (paid 9.48). Refunding a, b and c singly takes 1.18 each, 3.54 against 3.53 of line money.
+    - z alone then prices at 0 and is refused `nothing_to_refund`.
+    - A stock-only return of a free line is not in v1.
 - **C. A resume or takeover after the session has closed.** The refund parks again as `needs_admin`, reason `session_closed`, with no money and no stock moved. The closed session's figures never move.
   - On the till, the refund reads as in progress, never as paid. TallyUI's wire has no message for a parked command; the plain "not paid" wording on the till is a TallyUI contract change: TallyUI/tallyui#1280.
   - The admin path that finishes such a refund is medusapos/app#542, the next ticket after #540.
