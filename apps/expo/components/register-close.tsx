@@ -16,6 +16,12 @@ export const APPROVE_OFFLINE = 'Connect to approve, or count again.';
 export const APPROVE_CONTEXT = "This count is over the threshold. A manager's admin login approves it.";
 const APPROVE_FAILED = "Couldn't check the approval. Try again.";
 
+// Why a refused closure's variance is what it is (desk, 2026-11-23): the till's drawer counts these sales' cash.
+export const APPROVE_REFUSED_SALES = "The store refused these sales, so its expected cash leaves out the cash they took:";
+
+/** A sale the store refused, listed on a refused closure's re-approval: its reference, its cash and its refusal code. */
+export type RefusedSale = { id: string; reference: string; amount: string; code: string };
+
 /** The dialog's approver; store-verified (ADR 0023), also the store's proof and the variance it was issued for. */
 export type DialogApproval = Approval & { approval?: string; approvedVariance?: Record<string, number> };
 /** What Approve sends the email and password to; without one, ADR 0018's second login. */
@@ -38,13 +44,14 @@ export function storeApproval(baseUrl: string, token: string, sessionId: string,
 /**
  * Opens "Manager approval" (ADR 0018, option b) and resolves with the approver, or null on Cancel. `request` makes it
  * store-verified (ADR 0023); `reachable: false` shows only its offline line. `dialog` must be rendered by the caller.
+ * `refused` lists the store's refused sales behind a refused closure's variance.
  */
-export function useApprove(baseUrl: string, online: boolean) {
+export function useApprove(baseUrl: string, online: boolean, refused?: readonly RefusedSale[]) {
   const [pending, setPending] = useState<{ resolve: (result: DialogApproval | null) => void; request?: ApprovalRequest; reachable: boolean } | null>(null);
   const approve = (request?: ApprovalRequest, reachable = true) =>
     new Promise<DialogApproval | null>((resolve) => setPending({ resolve, request, reachable }));
   const dialog = pending ? <ApprovalDialog baseUrl={baseUrl} online={online && pending.reachable} request={pending.request}
-    onResult={(result) => { setPending(null); pending.resolve(result); }} /> : null;
+    refused={refused} onResult={(result) => { setPending(null); pending.resolve(result); }} /> : null;
   return { approve, dialog };
 }
 
@@ -53,10 +60,11 @@ export function useApprove(baseUrl: string, online: boolean) {
  * the dialog closing. Cancel works while a request is in flight: it aborts it, and a late answer is ignored.
  */
 export function ApprovalDialog({ baseUrl, online, request: send, onResult, context = APPROVE_CONTEXT, offlineText = APPROVE_OFFLINE,
-  remember = true }: {
+  remember = true, refused }: {
   baseUrl: string; online: boolean; request?: ApprovalRequest; onResult: (result: DialogApproval | null) => void;
   /** The dialog's copy and whether an approver's name is kept (`rememberApprover`); a close's by default. */
   context?: string; offlineText?: string; remember?: boolean;
+  refused?: readonly RefusedSale[];
 }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -110,6 +118,13 @@ export function ApprovalDialog({ baseUrl, online, request: send, onResult, conte
     <DialogContent testID="approval-dialog">
       <DialogTitle>Manager approval</DialogTitle>
       <Text testID="approval-context" className="text-muted-foreground">{context}</Text>
+      {refused?.length ? <View testID="approval-refused-sales" className="gap-1">
+        <Text className="text-muted-foreground">{APPROVE_REFUSED_SALES}</Text>
+        {refused.map((sale) => <View key={sale.id} testID={`approval-refused-sale-${sale.id}`} className="flex-row justify-between gap-3">
+          <Text className="shrink">{`Order ${sale.reference} · ${sale.code}`}</Text>
+          <Text className="tabular-nums">{sale.amount}</Text>
+        </View>)}
+      </View> : null}
       {offline ? <Text testID="approval-offline" accessibilityRole="alert">{offlineText}</Text> : <>
         <Label nativeID="approval-email-label">Email</Label>
         <Input><Input.Field testID="approval-email" value={email} onChangeText={setEmail} autoCapitalize="none" autoComplete="off"

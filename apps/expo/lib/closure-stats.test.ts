@@ -56,4 +56,10 @@ describe('closureStats', () => {
       closed: 1, floatsMinor: 0, floatsKnown: 0, activityMinor: 0, activityKnown: 0, countedMinor: 0, counts: 0,
       varianceMinor: 0, short: 0, over: 0, exact: 0 });
   });
+
+  it('an earlier closure that counted cash only is exact, not short by its uncounted card takings', () => {
+    const stats = closureStats({ open: null, closures: [], local: [],
+      earlier: [entry({ counted: { cash: 1000 }, tillExpected: { cash: 1000, external: 50000 } })] });
+    expect(stats).toMatchObject({ closed: 1, countedMinor: 1000, counts: 1, varianceMinor: 0, short: 0, over: 0, exact: 1 });
+  });
 });

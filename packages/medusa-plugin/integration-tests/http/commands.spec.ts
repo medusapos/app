@@ -891,7 +891,7 @@ medusaIntegrationTestRunner({
     it('rejects reuse of an id with a changed payload', async () => {
       const sale = command()
       expect((await post([sale])).data.results[0].status).toBe('applied')
-      const response = await post([{ ...sale, payload: { ...sale.payload, totalMinor: 999 } }])
+      const response = await post([{ ...sale, payload: { ...sale.payload, totalMinor: 999, payments: [{ ...sale.payload.payments[0], amountMinor: 999 }] } }])
       expect(response.status).toBe(200)
       expect(response.data.results).toEqual([expect.objectContaining({
         id: sale.id, status: 'rejected', error: expect.objectContaining({ code: 'idempotency_mismatch' }),
@@ -1108,10 +1108,11 @@ medusaIntegrationTestRunner({
       })
 
       it('an applied A copies its stored warnings and serverRefs to B despite a different totalMinor, then B replays as duplicate', async () => {
-        const a = command({ totalMinor: 999 })
+        const a = command({ totalMinor: 999, payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 999 }] })
         const first = await post([a])
         expect(first.status).toBe(200)
         expect(first.data.results[0].warnings).toContainEqual({ code: 'total_mismatch', expectedMinor: 999, serverMinor: 1000 })
+        // B keeps A's 999 payment: checkCollision copies A's stored result and B is never planned (planning would refuse it as underpaid).
         const b = { ...a, id: randomUUID(), payload: { ...a.payload, totalMinor: 1000 } }
         const response = await post([b])
         const copied = { ...first.data.results[0], id: b.id, status: 'applied' }
@@ -1171,7 +1172,7 @@ medusaIntegrationTestRunner({
       it('an A superseded by applied C lets a new D copy C serverRefs and stored warnings', async () => {
         const a = command()
         expect((await post([a])).status).toBe(200)
-        const c = command({ totalMinor: 998 })
+        const c = command({ totalMinor: 998, payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 998 }] })
         const successor = await post([c])
         expect(successor.status).toBe(200)
         await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_command').where({ id: a.id }).update({
