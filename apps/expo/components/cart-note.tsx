@@ -60,7 +60,8 @@ export function CartNoteSheet({ open, onOpenChange, value, onChangeText, cartSid
           formatDate={formatReceiptDate} doneLabel="Back" newSale={() => setReceipt(false)} />
       </ScrollView> : <Tabs value={tab} onValueChange={setTab}>
         <View className="flex-1 gap-2">
-          <TabsList className="w-full">
+          {/* TallyUI's TabsList has inline-flex but no flex-row, so a View stacks its triggers in a column. */}
+          <TabsList className="w-full flex-row">
             <TabsTrigger value="form" testID="cart-order-tab-form" className="flex-1"><Text>Form</Text></TabsTrigger>
             <TabsTrigger value="json" testID="cart-order-tab-json" className="flex-1"><Text>JSON</Text></TabsTrigger>
           </TabsList>

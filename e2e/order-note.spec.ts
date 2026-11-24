@@ -107,6 +107,26 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(noteField(page)).toHaveValue('x'.repeat(1000));
     });
 
+    test('the Order details Form and JSON tabs sit side by side', async ({ page }) => {
+      await signIn(page);
+      await addE2E1(page);
+      await openCart(page);
+      await openOrderDetails(page);
+      const formTab = page.getByTestId('cart-order-tab-form');
+      const form = (await formTab.boundingBox())!;
+      const json = (await page.getByTestId('cart-order-tab-json').boundingBox())!;
+      const list = (await formTab.locator('..').boundingBox())!;
+      expect(Math.abs(json.y - form.y)).toBeLessThanOrEqual(1);
+      expect(json.x).toBeGreaterThanOrEqual(form.x + form.width - 1);
+      for (const tab of [form, json]) {
+        expect(tab.x).toBeGreaterThanOrEqual(list.x - 1);
+        expect(tab.y).toBeGreaterThanOrEqual(list.y - 1);
+        expect(tab.x + tab.width).toBeLessThanOrEqual(list.x + list.width + 1);
+        expect(tab.y + tab.height).toBeLessThanOrEqual(list.y + list.height + 1);
+      }
+      await page.getByTestId('cart-note-close').click();
+    });
+
     test('a sale with no note goes at its base version, with no note', async ({ page }) => {
       await signIn(page);
       await addE2E1(page);
