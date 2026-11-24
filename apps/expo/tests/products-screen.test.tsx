@@ -470,6 +470,18 @@ describe('ProductsScreen catalogue', () => {
     expect(router.replace).not.toHaveBeenCalled();
   });
 
+  it('counts a stuck pending sale on the frame\'s Orders badge with nothing refused', async () => {
+    const order = { ...savedSale(), syncStatus: 'pending' as const };
+    const firstFailedAt = new Date('2026-11-22T09:05:00').getTime();
+    const entry = { commandId: order.commandId, since: firstFailedAt, firstFailedAt, reason: 'platform_error' };
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [order],
+      state: { pending: 1, sending: false, stuck: { commandIds: [order.commandId], since: firstFailedAt, firstFailedAt,
+        reason: 'platform_error', orders: [entry] } },
+    });
+    await mountFramed();
+    expect(screen.getByTestId('nav-item-orders-badge').textContent).toBe('1');
+  });
+
   it('the receipt prints the finalized order reference, not (draft) (TallyUI 3.0.2)', async () => {
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{
       id: 'shirt', title: 'Shirt', status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE',

@@ -137,7 +137,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     // The store was short, so local stock is stale.
     if (fresh.length) void reconcileStock();
   }, [recent, reconcileStock]);
-  const attentionCount = needsAttention(recent).length;
+  // Use the Orders screen's own attention rule.
+  const attentionCount = needsAttention(recent, { stuckCommandIds: outboxState.stuck?.commandIds }).length;
   useFrameBadge('orders', attentionCount);
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once

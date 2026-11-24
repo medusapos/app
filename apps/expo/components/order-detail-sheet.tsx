@@ -4,7 +4,7 @@ import {
   Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, OrderDetail, orderReference, OrderSyncNotices, Receipt, Text, XIcon,
 } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import { buildReceiptDataFromPosOrder, type PosOrder, type UseOrderOutboxResult } from '@tallyui/pos';
+import { buildReceiptDataFromPosOrder, refundDueOf, type PosOrder, type UseOrderOutboxResult } from '@tallyui/pos';
 import {
   canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
 } from '../lib/order-detail';
@@ -62,6 +62,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
         customerSlot={<View className="gap-1">
           <Text className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</Text>
           <Text className="text-sm text-foreground">{order.customer?.name || order.customer?.email || 'Guest'}</Text>
+          {order.note ? <Text testID="order-detail-note" className="text-sm text-muted-foreground">{`Customer note: ${order.note}`}</Text> : null}
           {/* The notices OrdersList showed under each sale. */}
           <View testID="order-detail-notices" className="gap-1"><OrderSyncNotices order={order} stuck={stuck} /></View>
         </View>}
@@ -72,11 +73,17 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
               <Text className="text-sm text-foreground">{paymentLabel(payment.method)}</Text>
               <Text className="text-sm text-foreground">{money(payment.amountMinor)}</Text>
             </View>
+            {payment.reference ? <Text testID={`order-detail-payment-reference-${payment.id}`} className="text-sm text-muted-foreground">
+              {payment.reference}</Text> : null}
             {(payment.changeMinor ?? 0) > 0 ? <View className="flex-row justify-between">
               <Text className="text-sm text-muted-foreground">Change</Text>
               <Text className="text-sm text-muted-foreground">{money(payment.changeMinor ?? 0)}</Text>
             </View> : null}
           </View>)}
+          {refundDueOf(order) > 0 ? <View testID="order-detail-refund-due" className="flex-row justify-between">
+            <Text className="text-sm text-foreground">Refund due</Text>
+            <Text className="text-sm text-foreground">{money(refundDueOf(order))}</Text>
+          </View> : null}
         </View>}
         footerSlot={<View className="flex-row gap-2">
           {canSyncOrder(order) ? <Button variant="outline" className="flex-1" testID="order-detail-sync" disabled={syncing}
