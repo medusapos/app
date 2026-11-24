@@ -496,6 +496,99 @@ medusaIntegrationTestRunner({
       expect(await loadSessionFigures(container, till.sessionId)).toEqual({ expected: { cash: 100 }, salesCount: 1, refundsTotalMinor: 1000 })
     })
 
+    it('T-takeover-closed: a takeover of an expired claim whose session closed parks session_closed, moving no money or stock', async () => {
+      const till = await tillSale()
+      const stock = await stockA()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new Error('request probe'))
+      jest.spyOn(workflow, 'cancelReturn').mockRejectedValueOnce(new Error('cancel probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const row = await knex('tally_refund').where({ command_id: order.id }).first()
+      const [begun] = await returns(till.orderId)
+      expect(row).toMatchObject({ return_id: begun.id, received_at: null, medusa_refund_id: null })
+      // The first worker died holding its claim: the row and command stay in_progress past the lease.
+      await knex('tally_refund').where({ id: row.id }).update({ status: 'in_progress' })
+      await knex('tally_command').where({ id: order.id }).update({ status: 'in_progress', needs_admin_reason: null,
+        updated_at: knex.raw("now() - interval '1 hour'") })
+      await applied([command('register.session.transition', { sessionId: till.sessionId, status: 'closed',
+        at: closedAt, counted: { cash: 500 } })])
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'session',
+        reason: 'session_closed', message: expect.stringMatching(/^session_closed: refund /) } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', received_at: null,
+        medusa_refund_id: null })
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+      expect(await stockA()).toBe(stock)
+    })
+
+    it('N3-double-subtraction (deliberate, conservative): a refund_unrecorded row whose money moved is held back twice from the cap', async () => {
+      const till = await remainderSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const original = workflow.moneyStep
+      jest.spyOn(workflow, 'moneyStep').mockImplementationOnce(async (...args) => {
+        await original(...args)
+        throw new Error('record probe')
+      })
+      const first = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
+      expect((await post([first])).data).toEqual({ code: 'in_progress', id: first.id })
+      await resolve(first.id, 'resume')
+      expect(await commandRow(first.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'refund_unrecorded' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_refund').where({ command_id: first.id }).first()).toMatchObject({ medusa_refund_id: null })
+      const beforeReturns = await returns(till.orderId)
+      // 353 − 118 = 235 is truly left, and the last two lines price at 235; the cap takes the 118 off twice and allows 117.
+      const last = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(),
+        lines: till.full.payload.lines.slice(1), totalMinor: 235 })
+      expect((await post([last])).data.results).toEqual([{ id: last.id, status: 'rejected', error: { code: 'amount_mismatch',
+        message: expect.any(String), data: { expectedMinor: 235, serverMinor: 117 } } }])
+      expect(await knex('tally_refund').where({ command_id: last.id }).first()).toBeUndefined()
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
+      expect(await returns(till.orderId)).toEqual(beforeReturns)
+    })
+
+    it('T-counting-apply: apply in a counting session without a closure records one Medusa refund and counts it', async () => {
+      const till = await tillSale(true)
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const row = await knex('tally_refund').where({ command_id: order.id }).first()
+      expect(row.received_at).not.toBeNull()
+      await applied([command('register.session.transition', { sessionId: till.sessionId, status: 'counting', at: closedAt })])
+      const { loadRefundOrder } = require(`${built}/workflows/tally-order-refund/execute`) as typeof import('../../src/workflows/tally-order-refund/execute')
+      const paymentId = (await loadRefundOrder(container, till.orderId))!.payment!.id
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: paymentId, amount: 10, note: 'by hand' } })
+      const medusa = await knex('refund').where({ payment_id: paymentId }).whereNull('deleted_at').first('id')
+      await resolve(order.id, 'apply', medusa.id)
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'applied', medusa_refund_id: medusa.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 1000 } } })
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId, amount: 10 }])
+      expect(await loadSessionFigures(container, till.sessionId)).toEqual({ expected: { cash: 100 }, salesCount: 1, refundsTotalMinor: 1000 })
+    })
+
+    it('T-resume-after-filed-closure: resume after a closure is filed, session still open, parks session_closed with no money', async () => {
+      const { till, order, row } = await parkedReceived(false)
+      await applied([command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId,
+        registerId: till.registerId, number: 1, openedAt, closedAt, tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+        periodSalesTotalMinor: 1000, periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 1000,
+        perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0',
+        orderIds: [till.sale.payload.clientOrderId], movementIds: [] }, 3)])
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_register_session').where({ id: row.session_id }).first('status')).toEqual({ status: 'open' })
+      const figures = await loadSessionFigures(container, till.sessionId), stock = await stockA()
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'session', reason: 'session_closed' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', medusa_refund_id: null })
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+      expect(await loadSessionFigures(container, till.sessionId)).toEqual(figures)
+    })
+
     it.each([false, true])('F5-apply: an unreceived row or a different Medusa amount writes nothing (received=%s)', async received => {
       const till = await remainderSale()
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
