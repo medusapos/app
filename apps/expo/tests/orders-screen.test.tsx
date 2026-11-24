@@ -263,6 +263,37 @@ describe('orders table (row 10.1)', () => {
     await act(async () => { resolve(1); });
   });
 
+  it('two presses of Retry before React re-renders requeue the sale once', async () => {
+    const refused = sale('Red hat', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
+    withSales(refused);
+    let resolve: (count: number) => void = () => {};
+    const requeue = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), requeue });
+    mount();
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    // One act: the button is not yet disabled for the second press, so only the ref stops it.
+    await act(async () => { fireEvent.click(retry); fireEvent.click(retry); });
+    expect(requeue).toHaveBeenCalledExactlyOnceWith([refused.id]);
+    await act(async () => { resolve(1); });
+  });
+
+  it.each([
+    ['resolves 0', () => Promise.resolve(0)],
+    ['rejects', () => Promise.reject(new Error('offline'))],
+  ])('a Retry whose requeue %s leaves Retry enabled, and a second press requeues again', async (_, outcome) => {
+    const refused = sale('Red hat', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
+    withSales(refused);
+    const requeue = vi.fn(outcome);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), requeue });
+    mount();
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    await act(async () => { fireEvent.click(retry); });
+    expect(screen.getByRole('button', { name: 'Retry' }).getAttribute('aria-disabled')).not.toBe('true');
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
+    expect(requeue).toHaveBeenCalledTimes(2);
+    expect(requeue).toHaveBeenNthCalledWith(2, [refused.id]);
+  });
+
   it('a refused sale the outbox cannot requeue is under attention with its notice and no Retry', () => {
     const refused = sale('Red hat', 'rejected', { error: { code: 'idempotency_mismatch', message: 'Refused' } });
     withSales(refused);
