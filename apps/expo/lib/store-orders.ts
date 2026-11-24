@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrderDetailLineItem, OrderDetailTaxLine, OrderStatus } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type StoreOrder, type SyncContext } from '@tallyui/core';
 import { buildReceiptDataFromStoreOrder, orderFiltersQuery, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
+import { ordersScreenFilterFields } from './order-filters';
 import { authHeaders, createPosConnector } from './pos-connector';
 import type { Session } from './session';
 
@@ -67,6 +68,7 @@ export type StoreOrdersFailure = 'network' | 'other';
 export function useStoreOrders(session: Session, search: string, filters: OrderFilterValue, appliedCount: number,
   onUnauthorized: () => void) {
   const connector = useMemo(() => createPosConnector(), []);
+  const filterFields = useMemo(() => ordersScreenFilterFields(connector.orderFilters), [connector]);
   const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
     headers: authHeaders(session.token) }), [connector.id, session.baseUrl, session.token]);
   const [debounced, setDebounced] = useState(search.trim());
@@ -120,6 +122,6 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
   const retry = useCallback(() => setPaging({ query, page: 1, attempt: attempt + 1 }), [query, attempt]);
   return {
     orders: result?.orders ?? [], loaded: result !== null, hasMore: !!result?.hasMore, total: result?.total,
-    unreadable: result?.unreadable ?? 0, loading, failure, loadMore, retry,
+    unreadable: result?.unreadable ?? 0, loading, failure, loadMore, retry, filterFields,
   };
 }

@@ -1,10 +1,15 @@
 import type { OrderFilterBarProps, OrderFilterOption } from '@tallyui/components';
-import type { OrderFilterField, StoreOrder } from '@tallyui/core';
+import { ORDER_FILTER_FIELDS, type OrderFilterField, type StoreOrder } from '@tallyui/core';
 import { inRange, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
 
-// The filters Medusa's order list honours: cashier, register, store and payment method are refused
-// (connector-medusa's UnsupportedOrderFilterError), so the bar leaves them out.
-export const ORDERS_SCREEN_FILTER_FIELDS: readonly OrderFilterField[] = ['status', 'customerId', 'dateRange'];
+// The bar's candidate fields, in the bar's order (cashier, register, store and channel are left out of the bar).
+const ORDERS_SCREEN_CANDIDATE_FIELDS: readonly OrderFilterField[] = ['status', 'paymentMethod', 'customerId', 'dateRange'];
+
+// The fields the bar shows: only those the connector's listOrders honours (its `orderFilters` capability), since it
+// refuses any other. A connector without the capability filters nothing, so it gets none. Medusa drops payment method.
+export function ordersScreenFilterFields(supported: readonly OrderFilterField[] | undefined): OrderFilterField[] {
+  return ORDERS_SCREEN_CANDIDATE_FIELDS.filter((field) => ORDER_FILTER_FIELDS.includes(field) && !!supported?.includes(field));
+}
 
 export type MedusaOrderStatus = 'completed' | 'pending' | 'canceled';
 

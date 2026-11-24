@@ -12,7 +12,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
 import type { Session } from '../lib/session';
 import { formatDate } from '../lib/format-date';
-import { filterOrders, orderFilterOptions, ORDERS_SCREEN_FILTER_FIELDS } from '../lib/order-filters';
+import { filterOrders, orderFilterOptions } from '../lib/order-filters';
 import { mergeOrderRows, useStoreOrders, type OrdersRow } from '../lib/store-orders';
 
 export const ORDERS_LOADING_TEXT = 'Loading orders…';
@@ -62,7 +62,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
       {!openMenu && <AreaAccountButton />}
     </View>
     <View className="px-4 pb-2">
-      <OrderFilterBar value={filters} onChange={setFilters} fields={ORDERS_SCREEN_FILTER_FIELDS}
+      <OrderFilterBar value={filters} onChange={setFilters} fields={store.filterFields}
         options={options} timezone="device" testID="orders-filter-bar" />
     </View>
     <ScrollView className="flex-1" contentContainerClassName="gap-3 p-4">

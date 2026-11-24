@@ -11,9 +11,10 @@ import { formatDate } from '../lib/format-date';
 import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEXT, ORDERS_NO_MATCH_TEXT, ORDERS_OFFLINE_TEXT }
   from '../app/orders';
 
-const { listOrders, sessionState } = vi.hoisted(() => ({
+const { listOrders, sessionState, connector } = vi.hoisted(() => ({
   listOrders: vi.fn(),
   sessionState: { session: null as Session | null, reportUnauthorized: vi.fn() },
+  connector: { orderFilters: [] as string[] },
 }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
@@ -21,7 +22,7 @@ vi.mock('expo-router', () => ({
   Stack: { Screen: () => null },
 }));
 vi.mock('../lib/pos-connector', () => ({
-  createPosConnector: () => ({ id: 'medusa', listOrders }),
+  createPosConnector: () => ({ id: 'medusa', listOrders, orderFilters: connector.orderFilters }),
   authHeaders: () => ({ Authorization: 'Bearer t' }),
 }));
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
@@ -66,6 +67,7 @@ const openButtons = () => within(screen.getByTestId('orders-table')).getAllByRol
 beforeEach(() => {
   vi.useFakeTimers();
   listOrders.mockReset().mockResolvedValue(page([]));
+  connector.orderFilters = ['status', 'customerId', 'dateRange'];
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't' };
   withSales();
 });
@@ -163,6 +165,12 @@ describe('Orders lists the whole store (row 10)', () => {
     fireEvent.click(screen.getByTestId('order-filter-status-pending'));
     await settle();
     expect(listOrders).toHaveBeenLastCalledWith(context, { page: 1, perPage: 25, status: 'pending' });
+  });
+
+  it('a connector advertising paymentMethod gets the Payment Method field', async () => {
+    connector.orderFilters = ['status', 'paymentMethod', 'customerId', 'dateRange'];
+    await mount();
+    expect(screen.getByTestId('order-filter-payment-method')).toBeTruthy();
   });
 
   it('opens an order only the store has in its own read-only sheet, and the till\'s own sale in the till\'s sheet', async () => {
