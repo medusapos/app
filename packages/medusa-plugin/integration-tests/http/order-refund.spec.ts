@@ -5,6 +5,7 @@ import { ContainerRegistrationKeys, FeatureFlag, Modules } from '@medusajs/frame
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import tallyPosRoles from '../../src/scripts/tally-pos-roles'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
+import { Migration20261124120000 } from '../../src/modules/tally-register/migrations/Migration20261124120000'
 import { seed } from './seed'
 
 jest.setTimeout(240000)
@@ -939,6 +940,115 @@ medusaIntegrationTestRunner({
       expect(await loadSessionFigures(container, till.sessionId)).toEqual({ expected: { cash: 1100 }, salesCount: 1 })
       expect(await loadSessionFigures(container, other.sessionId)).toEqual({ expected: { cash: 1000 }, salesCount: 0,
         refundsTotalMinor: 1000 })
+    })
+
+    describe("C544: a closure stores the server's period refunds and keeps the till's when they differ", () => {
+      const knex = () => container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      type Till = Awaited<ReturnType<typeof tillSale>>
+      // The till's perpetual refunds are 5000 plus its period figure, so a shift shows.
+      const submit = (till: Till, refundsMinor: number, cash = 1100, extra: Record<string, unknown> = {}, version = 3) =>
+        command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId, registerId: till.registerId,
+          number: 1, openedAt, closedAt, tillExpected: { cash }, counted: { cash }, periodSalesTotalMinor: 1000,
+          periodRefundsTotalMinor: refundsMinor, perpetualSalesTotalMinor: 1000, perpetualRefundsTotalMinor: 5000 + refundsMinor,
+          unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0', orderIds: [till.sale.payload.clientOrderId],
+          movementIds: [], ...extra }, version)
+      const closureRow = (id: string) => knex()('tally_register_closure').where({ id }).first()
+      const registerRow = (id: string) => knex()('tally_register').where({ id }).first()
+      async function close(till: Till, submission: ReturnType<typeof submit>, cash = 1100) {
+        const [, { register }] = await applied([command('register.session.transition', { sessionId: till.sessionId,
+          status: 'closed', at: closedAt, counted: { cash } }), submission])
+        const row = await closureRow(submission.payload.closureId)
+        return { register, row, stored: { period: Number(row.period_refunds_total_minor), perpetual: Number(row.perpetual_refunds_total_minor),
+          till: row.till_period_refunds_total_minor === null ? null : Number(row.till_period_refunds_total_minor),
+          register: Number((await registerRow(till.registerId)).perpetual_refunds_total_minor) } }
+      }
+      async function refunded() {
+        const till = await tillSale(true)
+        expect((await post([refund(till)])).data.results[0]).toMatchObject({ status: 'applied', refund: { byMethod: { cash: 1000 } } })
+        return till
+      }
+
+      it.each([0, 1000])('C544-equal: till and server both %d: stored as sent, no till column, no refunds', async minor => {
+        const till = minor ? await refunded() : await tillSale(true)
+        const { register, stored } = await close(till, submit(till, minor, 1100 - minor), 1100 - minor)
+        expect(stored).toEqual({ period: minor, perpetual: 5000 + minor, till: null, register: 5000 + minor })
+        expect(register.closure).not.toHaveProperty('refunds')
+      })
+
+      it('C544-till-over: till 1000, server 0: stores 0, keeps 1000, shifts perpetual down, warns', async () => {
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        const till = await tillSale(true)
+        const { register, stored } = await close(till, submit(till, 1000))
+        expect(stored).toEqual({ period: 0, perpetual: 5000, till: 1000, register: 5000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 1000, serverMinor: 0 })
+        expect(register.counters.perpetualRefundsTotalMinor).toBe(5000)
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${till.sessionId}.*refunds 1000 .*server's 0`)))
+      })
+
+      it('C544-till-under: a refund applied in the session, till sends 0: stores 1000, keeps 0, shifts perpetual up', async () => {
+        const till = await refunded()
+        const { register, stored } = await close(till, submit(till, 0, 100), 100)
+        expect(stored).toEqual({ period: 1000, perpetual: 6000, till: 0, register: 6000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 0, serverMinor: 1000 })
+      })
+
+      it.each([
+        ['C544-unsynced', 3, (till: Till) => ({ unsyncedCount: 1, unsyncedTotalMinor: 500, orderIds: [till.sale.payload.clientOrderId, randomUUID()] })],
+        ['C544-v2', 2, () => ({})],
+      ] as const)("%s: the till's figures are stored as sent", async (_tag, version, extra) => {
+        const till = await tillSale(true)
+        const { register, stored } = await close(till, submit(till, 1000, 1100, extra(till), version))
+        expect(stored).toEqual({ period: 1000, perpetual: 6000, till: null, register: 6000 })
+        expect(register.closure).not.toHaveProperty('refunds')
+      })
+
+      it('C544-resend: a resend returns the same refunds and changes neither the closure nor the register', async () => {
+        const till = await tillSale(true)
+        const submission = submit(till, 1000)
+        const { register, row } = await close(till, submission)
+        const counters = await registerRow(till.registerId)
+        const [resent] = await applied([{ ...submission, id: randomUUID() }])
+        expect(resent.register.closure).toEqual(register.closure)
+        expect((await post([submission])).data.results[0]).toMatchObject({ status: 'duplicate', register: { closure: register.closure } })
+        expect(await closureRow(submission.payload.closureId)).toEqual(row)
+        expect(await registerRow(till.registerId)).toEqual(counters)
+      })
+
+      it("C544-history: closure history reads both figures, and leaves the till's out when it is null", async () => {
+        const over = await tillSale(true), equal = await tillSale(true)
+        await close(over, submit(over, 1000))
+        await close(equal, submit(equal, 0))
+        const read = async (till: Till) => (await api.get(`/tally/v1/registers/${till.registerId}/closures`, { headers })).data.closures[0]
+        expect(await read(over)).toMatchObject({ periodRefundsTotalMinor: 0, tillPeriodRefundsTotalMinor: 1000 })
+        const plain = await read(equal)
+        expect(plain.periodRefundsTotalMinor).toBe(0)
+        expect(plain).not.toHaveProperty('tillPeriodRefundsTotalMinor')
+      })
+
+      it('C544-migration: down then up on a database holding a closure keeps the row and brings the column back null', async () => {
+        const till = await tillSale(true)
+        const submission = submit(till, 0)
+        await close(till, submission)
+        const before = await closureRow(submission.payload.closureId)
+        const migration = new Migration20261124120000(undefined as never, undefined as never)
+        const columns = async () => Object.keys(await knex()('tally_register_closure').columnInfo())
+        const run = async (step: 'up' | 'down') => {
+          migration.reset()
+          await migration[step]()
+          for (const sql of migration.getQueries()) await knex().raw(sql as string)
+        }
+        try {
+          await run('down')
+          expect(await columns()).not.toContain('till_period_refunds_total_minor')
+          const { till_period_refunds_total_minor: _dropped, ...rest } = before
+          expect(await closureRow(submission.payload.closureId)).toEqual(rest)
+          await run('up')
+          expect(await columns()).toContain('till_period_refunds_total_minor')
+          expect(await closureRow(submission.payload.closureId)).toEqual({ ...before, till_period_refunds_total_minor: null })
+        } finally {
+          if (!(await columns()).includes('till_period_refunds_total_minor')) await run('up')
+        }
+      })
     })
   },
 })

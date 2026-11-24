@@ -95,11 +95,19 @@ export async function executeRegisterCommand(container: MedusaContainer, command
           const closing = payload as RegisterClosureSubmitV3Payload
           // ADR 0023 amendment: with every sale synced, the approval gate decides on the server's own expected figures.
           // Desk ruling 2026-11-23: an unsynced claim is false when the server holds every orderIds sale.
-          const serverExpected = async () => command.version >= 3
+          // Loaded once per submit; #544: the same condition decides whether the server's refunds (none applied: 0) replace the till's.
+          let held: Promise<Awaited<ReturnType<typeof loadSessionFigures>> | undefined> | undefined
+          const serverFigures = () => held ??= (async () => command.version >= 3
             && (closing.unsyncedCount === 0 || await holdsEveryOrder(container, closing.orderIds))
-            ? (await loadSessionFigures(container, closing.sessionId))?.expected : undefined
+            ? loadSessionFigures(container, closing.sessionId) : undefined)()
+          const serverExpected = async () => (await serverFigures())?.expected
+          const serverRefundsTotalMinor = async () => (figures => figures ? figures.refundsTotalMinor ?? 0 : undefined)(await serverFigures())
           outcome = await service.submitClosure({ ...closing, contract: command.version, commandId: command.id,
-            thresholdMinor: approvalThresholdMinor(options), serverExpected } satisfies RegisterClosureSubmitInput); break
+            thresholdMinor: approvalThresholdMinor(options), serverExpected, serverRefundsTotalMinor } satisfies RegisterClosureSubmitInput)
+          const refunds = outcome.kind === 'ok' ? outcome.register.closure?.refunds : undefined
+          if (refunds) container.resolve(ContainerRegistrationKeys.LOGGER).warn(`Closure for session ${closing.sessionId}: the till's `
+            + `period refunds ${refunds.tillMinor} differ from the server's ${refunds.serverMinor}; the server's figure is stored.`)
+          break
         }
         default: throw new Error('Unknown register command type')
       }

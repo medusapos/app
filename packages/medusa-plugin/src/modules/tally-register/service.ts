@@ -267,13 +267,14 @@ export default class TallyRegisterModuleService extends MedusaService({
       const session = await this.lockSession(p.sessionId, em)
       if (!session) return { kind: 'invalid', message: 'unknown session' }
       p = { ...p, sessionId: session.id }
-      let [closure] = await em.execute(`select id, register_id, number, approval_id from tally_register_closure
+      let [closure] = await em.execute(`select id, register_id, number, approval_id, period_refunds_total_minor, till_period_refunds_total_minor from tally_register_closure
         where id = ? or session_id = ? order by (id = ?) desc`, [p.closureId, p.sessionId, p.closureId])
       if (closure?.id !== p.closureId) {
         if (p.registerId !== session.register_id) return { kind: 'invalid', message: "closure registerId does not match the session's register" }
         if (session.status === 'superseded') return this.supersededOutcome(session, em)
         if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }
         let approval: { id: string; approved_by: string } | undefined
+        let refunds = { period: p.periodRefundsTotalMinor, perpetual: p.perpetualRefundsTotalMinor, till: null as number | null }
         if (v3) {
           // ADR 0023 amendment (2026-11-22): with every sale synced the server's own expected figures decide; else the till's.
           const expected = (await p.serverExpected?.()) ?? p.tillExpected
@@ -293,31 +294,35 @@ export default class TallyRegisterModuleService extends MedusaService({
             if (reason) return { kind: 'conflict', code: 'register_approval_invalid', data: { reason, variance } }
             approval = { id: row.id as string, approved_by: row.approved_by as string }
           }
+          // #544: with every sale held, the session's applied refunds are the period's; the till's differing figure is kept.
+          const server = await p.serverRefundsTotalMinor?.()
+          if (server !== undefined && server !== p.periodRefundsTotalMinor) refunds = { period: server,
+            perpetual: p.perpetualRefundsTotalMinor + (server - p.periodRefundsTotalMinor), till: p.periodRefundsTotalMinor }
         }
         let [{ counters }] = await em.execute(`${COUNTER_STATE} for update`, [p.registerId])
         const inserted = p.number === counters.lastClosureNumber + 1
           ? await em.execute(`insert into tally_register_closure
             (id, session_id, register_id, number, business_day, opened_at, closed_at, closed_by, approved_by,
              till_expected, counted, period_sales_total_minor, period_refunds_total_minor, perpetual_sales_total_minor,
-             perpetual_refunds_total_minor, unsynced_count, unsynced_total_minor, software_version, order_ids, movement_ids, approval_id)
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?)
+             perpetual_refunds_total_minor, unsynced_count, unsynced_total_minor, software_version, order_ids, movement_ids, approval_id, till_period_refunds_total_minor)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?, ?, ?, ?, ?, ?, ?::jsonb, ?::jsonb, ?, ?)
             on conflict do nothing returning id`,
           [p.closureId, p.sessionId, p.registerId, p.number, p.businessDay ?? null, p.openedAt, p.closedAt, p.closedBy ?? null,
             approval ? approval.approved_by : p.approvedBy ?? null, JSON.stringify(p.tillExpected), JSON.stringify(p.counted), p.periodSalesTotalMinor,
-            p.periodRefundsTotalMinor, p.perpetualSalesTotalMinor, p.perpetualRefundsTotalMinor, p.unsyncedCount,
-            p.unsyncedTotalMinor, p.softwareVersion, JSON.stringify(p.orderIds), JSON.stringify(p.movementIds), approval?.id ?? null]) : []
+            refunds.period, p.perpetualSalesTotalMinor, refunds.perpetual, p.unsyncedCount, p.unsyncedTotalMinor,
+            p.softwareVersion, JSON.stringify(p.orderIds), JSON.stringify(p.movementIds), approval?.id ?? null, refunds.till]) : []
         if (inserted.length) {
           await em.execute(`update tally_register set last_closure_number = ?,
             perpetual_sales_total_minor = greatest(perpetual_sales_total_minor, ?),
             perpetual_refunds_total_minor = greatest(perpetual_refunds_total_minor, ?), updated_at = now() where id = ?`,
-          [p.number, p.perpetualSalesTotalMinor, p.perpetualRefundsTotalMinor, p.registerId])
+          [p.number, p.perpetualSalesTotalMinor, refunds.perpetual, p.registerId])
           if (approval) {
             await em.execute(`update tally_register_approval set used_at = now(), used_by_command_id = ?, closure_id = ? where id = ?`,
               [p.commandId, p.closureId, approval.id])
             await em.execute('update tally_register_session set approved_by = ?, updated_at = now() where id = ?', [approval.approved_by, session.id])
           }
         }
-        ;[closure] = await em.execute(`select id, register_id, number, approval_id from tally_register_closure
+        ;[closure] = await em.execute(`select id, register_id, number, approval_id, period_refunds_total_minor, till_period_refunds_total_minor from tally_register_closure
           where id = ? or session_id = ? order by (id = ?) desc`, [p.closureId, p.sessionId, p.closureId])
         if (closure?.id !== p.closureId) {
           if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }
@@ -327,7 +332,8 @@ export default class TallyRegisterModuleService extends MedusaService({
       }
       const [{ counters }] = await em.execute(COUNTER_STATE, [closure.register_id])
       return { kind: 'ok', register: { counters, closure: { serverClosureId: closure.id, number: closure.number,
-        ...(v3 ? { approvalVerified: closure.approval_id !== null } : {}) } } }
+        ...(v3 ? { approvalVerified: closure.approval_id !== null } : {}), ...(closure.till_period_refunds_total_minor === null ? {} : {
+          refunds: { tillMinor: Number(closure.till_period_refunds_total_minor), serverMinor: Number(closure.period_refunds_total_minor) } }) } } }
     })
   }
 
@@ -392,6 +398,7 @@ export default class TallyRegisterModuleService extends MedusaService({
       'till_expected', c.till_expected, 'counted', c.counted,
       'period_sales_total_minor', c.period_sales_total_minor, 'period_refunds_total_minor', c.period_refunds_total_minor,
       'perpetual_sales_total_minor', c.perpetual_sales_total_minor, 'perpetual_refunds_total_minor', c.perpetual_refunds_total_minor,
+      'till_period_refunds_total_minor', c.till_period_refunds_total_minor,
       'unsynced_count', c.unsynced_count, 'unsynced_total_minor', c.unsynced_total_minor, 'software_version', c.software_version,
       'order_ids', c.order_ids, 'movement_ids', c.movement_ids,
       'store_key', s.store_key, 'device_name', s.device_name, 'opened_by', s.opened_by) as closure

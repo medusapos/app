@@ -23,6 +23,8 @@ export const TallyRegisterClosure = model.define('tally_register_closure', {
   perpetual_sales_total_minor: model.number(),
   // The migration uses bigint for this integer; results use JSON numeric values.
   perpetual_refunds_total_minor: model.number(),
+  // The migration uses bigint for this integer; results use JSON numeric values.
+  till_period_refunds_total_minor: model.number().nullable(),
   unsynced_count: model.number(),
   // The migration uses bigint for this integer; results use JSON numeric values.
   unsynced_total_minor: model.number(),

@@ -56,7 +56,7 @@ describe('toClosureHistoryRow', () => {
     opened_by: 'user_opener', closed_by: 'user_closer', approved_by: 'user_approver', approval_id: 'apv_1',
     store_key: 'store-a', device_name: 'Till 1', till_expected: { cash: 1100, card: 500 }, counted: { cash: 1000, card: 500 },
     period_sales_total_minor: 1000, period_refunds_total_minor: 100,
-    perpetual_sales_total_minor: 3000, perpetual_refunds_total_minor: 200,
+    perpetual_sales_total_minor: 3000, perpetual_refunds_total_minor: 200, till_period_refunds_total_minor: null,
     unsynced_count: 2, unsynced_total_minor: 500, software_version: '1.0',
     order_ids: ['order_1'], movement_ids: ['movement_1'],
   }
@@ -85,5 +85,14 @@ describe('toClosureHistoryRow', () => {
       unsyncedCount: 2, unsyncedTotalMinor: 500, softwareVersion: '1.0',
       orderIds: ['order_1'], movementIds: ['movement_1'],
     })
+  })
+
+  it('C544-history: a stored till figure comes back as tillPeriodRefundsTotalMinor beside the server\'s period refunds', () => {
+    expect(toClosureHistoryRow({ ...stored, till_period_refunds_total_minor: 0 })).toMatchObject({
+      periodRefundsTotalMinor: 100, tillPeriodRefundsTotalMinor: 0 })
+  })
+
+  it('C544-history: a null till figure leaves tillPeriodRefundsTotalMinor out', () => {
+    expect(toClosureHistoryRow(stored)).not.toHaveProperty('tillPeriodRefundsTotalMinor')
   })
 })
