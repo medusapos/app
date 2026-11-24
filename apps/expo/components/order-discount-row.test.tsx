@@ -5,7 +5,7 @@ import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/cor
 import { medusaConnector } from '@tallyui/connector-medusa';
 import { catalogueEntries, TaxProvider, taxProviderProps, useSale } from '@tallyui/pos';
 import { Cart } from '@tallyui/components';
-import { OrderDiscountRow } from './order-discount-row';
+import { OrderDiscountRow, orderDiscountInRowMinor } from './order-discount-row';
 
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
 
@@ -21,7 +21,7 @@ function SaleView({ chips, spy }: { chips: boolean; spy?: (id: string) => void }
   const shown = spy ? { ...sale, removeDiscount: spy } : sale;
   // As the app's Cart: no inline "Order discount" action (it is in the + menu).
   return <Cart sale={shown} orderActions={false} orderDiscountChips={chips} afterSubtotal={<OrderDiscountRow sale={shown} />}
-    couponDiscountMinor={sale.order.display.orderDiscountMinor} />;
+    couponDiscountMinor={orderDiscountInRowMinor(sale.order)} />;
 }
 // Two shirts at €12.50: €25.00 before tax.
 function start(props: { chips: boolean; spy?: (id: string) => void }) {
@@ -65,6 +65,34 @@ describe('OrderDiscountRow', () => {
     act(() => { sale.applyDiscount(null, { type: 'fixed', value: 50 }); });
     expect(screen.getByTestId('order-discount-row-0').textContent).toBe(`Discount−${money(50)}`);
     expect(screen.getByTestId('order-discount-remove-0').getAttribute('aria-label')).toBe(`Remove discount ${money(50)}`);
+  });
+
+  it('keeps two order discounts in Cart\'s Discount row so the visible totals add up', () => {
+    start({ chips: false });
+    act(() => {
+      expect(sale.applyDiscount(null, { type: 'percentage', value: 10 })).toBeNull();
+      expect(sale.applyDiscount(null, { type: 'fixed', value: 100 })).toBeNull();
+    });
+    expect(screen.getByTestId('order-discount-row-0').textContent).toBe('Discount (10%)');
+    expect(screen.getByTestId('order-discount-row-1').textContent).toBe(`Discount (${money(100)})`);
+    const { subtotalMinor, orderDiscountMinor, taxMinor } = sale.order.display;
+    const footer = within(screen.getByTestId('cart-footer'));
+    expect(footer.getByText('Subtotal').parentElement!.textContent).toBe(`Subtotal${money(subtotalMinor)}`);
+    expect(footer.getByText('Discount').parentElement!.textContent).toBe(`Discount−${money(orderDiscountMinor)}`);
+    expect(within(footer.getByTestId('cart-total-tax-0')).getByText(money(taxMinor)!)).toBeTruthy();
+    expect(subtotalMinor - orderDiscountMinor + taxMinor).toBe(sale.order.totalMinor);
+    expect(footer.getByText('Total').parentElement!.textContent).toBe(`Total${money(sale.order.totalMinor)}`);
+  });
+
+  it('orderDiscountInRowMinor returns the display amount only for a single order discount', () => {
+    start({ chips: false });
+    expect(orderDiscountInRowMinor(sale.order)).toBe(0);
+    act(() => { sale.applyDiscount(null, { type: 'percentage', value: 10 }); });
+    expect(sale.order.display.orderDiscountMinor).toBe(250);
+    expect(orderDiscountInRowMinor(sale.order)).toBe(sale.order.display.orderDiscountMinor);
+    act(() => { sale.applyDiscount(null, { type: 'fixed', value: 100 }); });
+    expect(sale.order.discounts).toHaveLength(2);
+    expect(orderDiscountInRowMinor(sale.order)).toBe(0);
   });
 
   it('renders nothing without an order discount, a line discount included', () => {
