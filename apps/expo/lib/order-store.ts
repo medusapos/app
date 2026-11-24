@@ -6,8 +6,8 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { RxDBLocalDocumentsPlugin } from 'rxdb/plugins/local-documents';
 import { withStorageWatchdog } from '@tallyui/database';
 import {
-  addPosOrderCollection, addPrinterProfileCollection, addRegisterSessionCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, posOrderCollection, posOrderSchema, registerCommandCollection,
-  type CashMovementCollection, type ClosureCollection, type PosOrder, type RegisterCommandCollection, type RegisterSessionCollection,
+  addPosOrderCollection, addPrinterProfileCollection, addRegisterSessionCollection, cashMovementSchema, closureSchema, ensureRegister, orderDraftSchema, posOrderCollection, posOrderSchema, posRefundCollection, registerCommandCollection,
+  type CashMovementCollection, type ClosureCollection, type PosOrder, type PosRefundCollection, type RegisterCommandCollection, type RegisterSessionCollection,
 } from '@tallyui/pos';
 import { legacyDexieName, productCacheName, productCacheStorage } from './product-cache';
 import { terminateWebStorage, webStorageAvailable } from './web-storage';
@@ -56,6 +56,11 @@ export function registerCollections(orders: RxCollection<PosOrder>): RegisterCol
 
 export function draftsCollection(orders: RxCollection<PosOrder> | null): RxCollection | undefined {
   return orders?.database?.collections.drafts;
+}
+
+/** The till's `pos_refunds` (TallyUI's refund store), in the database `orders` belongs to. */
+export function refundsCollection(orders: RxCollection<PosOrder> | null): PosRefundCollection | undefined {
+  return orders?.database?.collections.pos_refunds as PosRefundCollection | undefined;
 }
 
 export function orderDatabaseName(baseUrl: string): string {
@@ -205,6 +210,8 @@ export async function openOrderStore(baseUrl: string): Promise<OrderStore> {
         const { closures } = await db.addCollections({
           cash_movements: { schema: cashMovementSchema }, closures: { schema: closureSchema },
           register_commands: registerCommandCollection(), drafts: { schema: orderDraftSchema },
+          // This till's refunds (ADR 0026), device-local: refund state never goes into the replicated pos_orders.
+          pos_refunds: posRefundCollection(),
         });
         const register_sessions = await addRegisterSessionCollection(db as unknown as RxDatabase);
         // Device-local printers (TallyUI `printer_profiles`), never replicated. A failure here never fails the open:
