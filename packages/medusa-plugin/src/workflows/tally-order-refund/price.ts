@@ -132,7 +132,10 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
   }
   let totalMinor = linesMinor + request.shippingMinor + request.adjustmentMinor
   // #547 (desk 2026-11-24): an overrun no larger than the goodwill already refunded (money no row puts on a line or the
-  // shipping) comes off the lines, split by gross, then net/tax within a line, residue on the largest gross (ties later).
+  // shipping) comes off the lines. O ≤ G is the bound because an overrun beyond G is line or shipping money an earlier row
+  // already took, or a dropped N1 difference, and that must still refuse. The split is by gross: each line takes the floor
+  // of O × gross ÷ Σ gross and the units left (0..n−1) go one each by largest remainder, then larger gross, then the later
+  // line, so the parts add up to O exactly and none passes its gross; then net/tax within a line.
   const overMinor = totalMinor - input.refundableMoneyMinor
   const goodwillMinor = (input.paidMinor ?? 0) - input.refundableMoneyMinor - input.earlier.reduce((sum, earlier) =>
     sum + earlier.shippingMinor + earlier.lines.reduce((total, line) => total + line.netMinor + line.taxMinor, 0), 0)
@@ -140,15 +143,20 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
     && input.earlier.every(earlier => earlier.medusaRefundId !== null)
     && input.lines.every(line => line.returnedQuantity <= (refunded.get(line.id) ?? 0))) {
     const grossOf = (line: PricedLine) => line.netMinor + line.taxMinor
-    const parts = priced.map(line => Number(roundHalfUp(BigInt(overMinor) * BigInt(grossOf(line)), BigInt(linesMinor))))
-    const largest = priced.reduce((best, line, n) => grossOf(line) >= grossOf(priced[best]) ? n : best, 0)
-    parts[largest] += overMinor - parts.reduce((sum, part) => sum + part, 0)
-    const taken = priced.map((line, n) => {
-      const taxMinor = grossOf(line) === 0 ? 0 : Number(roundHalfUp(BigInt(parts[n]) * BigInt(line.taxMinor), BigInt(grossOf(line))))
-      return { netMinor: line.netMinor - (parts[n] - taxMinor), taxMinor: line.taxMinor - taxMinor }
+    const shares = priced.map((line, n) => {
+      const scaled = BigInt(overMinor) * BigInt(grossOf(line))
+      return { n, gross: grossOf(line), part: Number(scaled / BigInt(linesMinor)), rest: scaled % BigInt(linesMinor) }
     })
-    if (parts.every(part => part >= 0) && taken.every(line => line.netMinor >= 0 && line.taxMinor >= 0)) {
-      taken.forEach((line, n) => Object.assign(priced[n], line))
+    const left = overMinor - shares.reduce((sum, share) => sum + share.part, 0)
+    const byRemainder = [...shares].sort((a, b) => (a.rest === b.rest ? 0 : a.rest < b.rest ? 1 : -1) || b.gross - a.gross || b.n - a.n)
+    for (const share of byRemainder.slice(0, left)) share.part += 1
+    const clamped = priced.map((line, n) => {
+      const part = shares[n].part
+      const taxMinor = grossOf(line) === 0 ? 0 : Number(roundHalfUp(BigInt(part) * BigInt(line.taxMinor), BigInt(grossOf(line))))
+      return { netMinor: line.netMinor - (part - taxMinor), taxMinor: line.taxMinor - taxMinor }
+    })
+    if (shares.every(share => share.part <= share.gross) && clamped.every(line => line.netMinor >= 0 && line.taxMinor >= 0)) {
+      clamped.forEach((line, n) => Object.assign(priced[n], line))
       totalMinor -= overMinor
     }
   }

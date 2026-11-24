@@ -219,7 +219,7 @@ describe('the last units take the remainder', () => {
     expect(tiny[0]).toMatchObject({ netMinor: 1, taxMinor: 0 })
     const money = refundMoneyMinor(2, '0.024', [], [])
     expect(money).toEqual({ linesMoneyMinor: 2, shippingMinor: 0 })
-    const price = (totalMinor: number) => priceRefund({ ...order, lines: tiny, ...money, refundableMoneyMinor: 2,
+    const price = (totalMinor: number) => priceRefund({ ...order, lines: tiny, ...money, paidMinor: 2, refundableMoneyMinor: 2,
       request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c', 'ordli_d'), totalMinor }) })
     // The dropped difference prices the lines at 4; the cap refuses 4, and the cap's 2 is not the price (#547).
     expect(price(4)).toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { expectedMinor: 4, serverMinor: 2 } } })
@@ -293,7 +293,8 @@ describe('the goodwill clamp (#547)', () => {
   })
 
   it('clamp: O equals G', () => {
-    expect(priceRefund({ ...sale(5), request: request({ lines: all, totalMinor: 348 }) })).toEqual({ ok: true, totalMinor: 348, lines: priced([97, 98, 96]) })
+    // O = 5 of 353: floors 1, 1, 1 (remainders 237, 237, 232); the 2 units left go to the two 118 lines.
+    expect(priceRefund({ ...sale(5), request: request({ lines: all, totalMinor: 348 }) })).toEqual({ ok: true, totalMinor: 348, lines: priced([97, 97, 97]) })
   })
 
   it('clamp: O above G refuses', () => {
@@ -346,5 +347,46 @@ describe('the goodwill clamp (#547)', () => {
     expect(result).toEqual({ ok: true, totalMinor: 203, lines: priced([57, 57, 56], [11, 11, 11]) })
     expect(result.ok && result.lines.reduce((sum, entry) => sum + entry.netMinor + entry.taxMinor, 0)).toBe(203)
     expect(result.ok && result.lines.every(entry => entry.netMinor >= 0 && entry.taxMinor >= 0)).toBe(true)
+  })
+
+  // n one-unit lines at 1.00 (net 84, tax 16), paid n × 100, with g goodwill refunded earlier.
+  const even = (n: number, goodwill: number) => {
+    const ids = Array.from({ length: n }, (_, index) => `ordli_${index}`)
+    const order = { lines: ids.map(id => ({ id, quantity: 1, returnedQuantity: 0, netMinor: 84, taxMinor: 16 })), linesMoneyMinor: n * 100,
+      shippingMinor: 0, paidMinor: n * 100, earlier: [goodwillRow()], refundableMoneyMinor: n * 100 - goodwill }
+    return { order, take: ids.map(orderLineId => ({ orderLineId, quantity: 1, restock: true })) }
+  }
+
+  it('R2-split-4: the parts never overshoot O; the later lines win the ties', () => {
+    // O = 2 of 400: every floor is 0 with remainder 200, so the 2 units go to the two later lines, 1 each, off the net.
+    const { order, take } = even(4, 2)
+    expect(priceRefund({ ...order, request: request({ lines: take, totalMinor: 398 }) })).toEqual({ ok: true, totalMinor: 398,
+      lines: take.map((entry, n) => ({ ...entry, netMinor: [84, 84, 83, 83][n], taxMinor: 16 })) })
+    expect(priceRefund({ ...order, request: request({ lines: take, totalMinor: 400 }) })).toEqual(refused(differs, 400, 398))
+  })
+
+  it('R2-split-sweep: n equal lines with goodwill 1..n are all accepted at what is left', () => {
+    const failures: string[] = []
+    for (let n = 2; n <= 8; n++) for (let goodwill = 1; goodwill <= n; goodwill++) {
+      const { order, take } = even(n, goodwill)
+      const totalMinor = n * 100 - goodwill
+      const result = priceRefund({ ...order, request: request({ lines: take, totalMinor }) })
+      const sum = result.ok ? result.lines.reduce((total, entry) => total + entry.netMinor + entry.taxMinor, 0) : NaN
+      if (!result.ok || result.totalMinor !== totalMinor || sum !== totalMinor || result.lines.some(entry => entry.netMinor < 0 || entry.taxMinor < 0)) {
+        failures.push(`n=${n} goodwill=${goodwill} total=${totalMinor}: ${JSON.stringify(result.ok ? { sum, lines: result.lines } : result.error)}`)
+      }
+    }
+    expect(failures).toEqual([])
+  })
+
+  it("R2-fee: the app's 472 case: the kept 1.19 fee leaves the cap above the lines, so 353 passes with no clamp", () => {
+    // Paid 4.72 = lines 3.53 + a 1.19 fee the store keeps; 0.01 goodwill refunded, in Medusa Admin (no row) or at a till.
+    const money = refundMoneyMinor(2, '4.72', [], ['1.19'])
+    expect(money).toEqual({ linesMoneyMinor: 353, shippingMinor: 0 })
+    for (const earlier of [[], [goodwillRow()]]) {
+      const order = { lines, ...money, paidMinor: 472, earlier, refundableMoneyMinor: 471 }
+      expect(priceRefund({ ...order, request: request({ lines: all, totalMinor: 353 }) })).toEqual({ ok: true, totalMinor: 353, lines: priced([99, 99, 98]) })
+      expect(priceRefund({ ...order, request: request({ lines: all, totalMinor: 352 }) })).toEqual(refused(differs, 352, 353))
+    }
   })
 })
