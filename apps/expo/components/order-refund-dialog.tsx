@@ -5,7 +5,7 @@ import { formatMoney, type OrderRefundEnvelope, type StoreOrder } from '@tallyui
 import {
   getDeviceId, mintUuid, RefundAnswerPendingError, submitOrderRefund, type OrderRefundOutcome, type PosOrder, type PosRefund, type PosRefundCollection,
 } from '@tallyui/pos';
-import { fullRefundOffer } from '../lib/refund';
+import { fullRefundOffer, REFUND_REASON_MAX } from '../lib/refund';
 import { useRegister } from '../lib/register-context';
 import { defaultStorage, REGISTER_ID_KEY } from '../lib/session';
 import { useNetworkOnline } from '../lib/use-network-online';
@@ -35,7 +35,8 @@ function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'applied' }
 
 /**
  * Refund all (ADR 0026): one order.refund v1 for the whole order, nothing editable but Restock and the reason. Mounted
- * once per opening, so its refund id is minted once; a retry after no answer or a refusal resends the same envelope.
+ * once per opening, so its refund id is minted once. After no answer, a refusal or an unauthorized answer, Confirm resends
+ * the same envelope; after a rejection, it sends a new command for the same refund.
  */
 export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: {
   order: StoreOrder; tenders: PosOrder['payments']; refunds: PosRefundCollection; resume: PosRefund | null; onClose: () => void;
@@ -63,7 +64,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: 
   async function confirm() {
     if (inFlight.current || !online || !sessionId || !boundRegisterId) return;
     if (!envelope.current) {
-      if (!offer.offered || !reason.trim()) return;
+      if (!offer.offered || !reason.trim() || reason.trim().length > REFUND_REASON_MAX) return;
       const createdAt = new Date().toISOString();
       envelope.current = { id: mintUuid(), type: 'order.refund', version: 1, createdAt, deviceId: getDeviceId(defaultStorage(), REGISTER_ID_KEY), attempt: 1,
         payload: { clientRefundId: clientRefundId.current, orderId: order.id, clientOrderId: order.clientOrderId, lines: offer.lines,
@@ -110,7 +111,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: 
         <Switch testID="order-refund-restock" aria-labelledby="order-refund-restock-label" checked={restock} disabled={locked} onCheckedChange={setRestock} />
       </View>
       <Textarea testID="order-refund-reason" value={reason} onChangeText={setReason} editable={!locked} placeholder="Reason"
-        accessibilityLabel="Reason" />
+        accessibilityLabel="Reason" maxLength={REFUND_REASON_MAX} />
       {hold ? <Notice tone="info" title={hold} testID="order-refund-hold" /> : null}
       {message ? <Notice tone="bad" title={message} testID="order-refund-error" /> : null}
       <DialogFooter>

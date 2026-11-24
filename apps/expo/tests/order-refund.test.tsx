@@ -138,6 +138,42 @@ describe('Refund all (ADR 0026)', () => {
     }
   });
 
+  it('a rejection then Confirm sends a new command for the same refund', async () => {
+    send.mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch)).mockImplementationOnce(async (batch) => applied(batch));
+    render(sheet());
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    await giveReason();
+    fireEvent.click(await screen.findByTestId('order-refund-confirm'));
+    expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: amount_mismatch');
+    await waitFor(() => expect(confirm().getAttribute('aria-disabled')).not.toBe('true'));
+    fireEvent.click(confirm());
+    await screen.findByTestId('order-detail-refunded');
+    expect(send).toHaveBeenCalledTimes(2);
+    const [first, second] = send.mock.calls.map(([batch]) => batch[0]);
+    expect(second.id).not.toBe(first.id);
+    expect(second.payload.clientRefundId).toBe(first.payload.clientRefundId);
+    const records = (await refunds.find().exec()).map((doc) => doc.toJSON());
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ id: first.payload.clientRefundId, commandId: second.id, status: 'applied' });
+  });
+
+  it('a reason over 500 characters sends nothing', async () => {
+    send.mockImplementation(async (batch) => applied(batch));
+    render(sheet());
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    const reasonField = await screen.findByTestId('order-refund-reason');
+    expect(reasonField.getAttribute('maxlength')).toBe('500');
+    fireEvent.change(reasonField, { target: { value: 'x'.repeat(501) } });
+    await act(async () => { fireEvent.click(confirm()); });
+    expect(send).not.toHaveBeenCalled();
+    expect(await refunds.count().exec()).toBe(0);
+    // 500 is the plugin's limit and goes out.
+    fireEvent.change(reasonField, { target: { value: 'x'.repeat(500) } });
+    fireEvent.click(confirm());
+    await screen.findByTestId('order-detail-refunded');
+    expect(send.mock.calls[0][0][0].payload.reason).toHaveLength(500);
+  });
+
   it('receipt after refund', async () => {
     send.mockImplementation(async (batch) => applied(batch));
     const view = render(sheet());

@@ -83,6 +83,23 @@ describe('fullRefundOffer', () => {
     const split: PosOrder['payments'] = [{ id: 'p1', method: 'cash', amountMinor: 153 }, { id: 'p2', method: 'external', amountMinor: 200 }];
     // Both store payments count towards the remainder.
     const offer = fullRefundOffer(order({ paid: 353, payments: [{ method: 'cash', amountMinor: 153 }, { method: 'pp_card', amountMinor: 200 }] }), split, true);
-    expect(offer).toMatchObject({ offered: true, totalMinor: 353, destination: 'original_method', methodLabel: 'Card terminal' });
+    expect(offer).toMatchObject({ offered: true, totalMinor: 353, destination: 'original_method', methodLabel: 'Card terminal, then cash' });
+  });
+
+  it('canceled order', () => {
+    expect(fullRefundOffer(order({ paid: 353, status: 'canceled' }), cash, true)).toEqual({ offered: false, reason: 'canceled' });
+    // Checked first: a canceled order with an earlier refund still reads canceled.
+    expect(fullRefundOffer(order({ paid: 353, status: 'canceled', refunds: [{ id: 'refund_1', amountMinor: 100 }] }), cash, true))
+      .toEqual({ offered: false, reason: 'canceled' });
+  });
+
+  it('two shipping methods and a fee, each rounded on its own', () => {
+    // Each charge's own rounded gross is summed in minor units, with no further rounding: 1190 + 2 × 121 + 121 = 1553 paid.
+    const product = line('p', { subtotalMinor: 1000, subtotalTaxMinor: 190, totalMinor: 1000, taxMinor: 190 });
+    const fee = { id: 'fee', clientLineId: undefined, name: 'Service fee', quantity: 1, subtotalMinor: 102, subtotalTaxMinor: 19, totalMinor: 102, taxMinor: 19 };
+    const shipping = [{ name: 'Courier', totalMinor: 102, taxMinor: 19 }, { name: 'Express', totalMinor: 102, taxMinor: 19 }];
+    const offer = fullRefundOffer(order({ paid: 1553, lines: [product, fee], shipping }), cash, true);
+    expect(offer).toMatchObject({ offered: true, totalMinor: 1553 - 121, shippingMinor: 242 });
+    expect(offer.offered && offer.lines.map((entry) => entry.orderLineId)).toEqual(['p']);
   });
 });

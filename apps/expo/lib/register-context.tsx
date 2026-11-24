@@ -10,7 +10,7 @@ import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { storeConfig } from './config';
 import { demoRegisterFor, isDemoAccount } from './demo';
-import { registerCollections, type RegisterCollections } from './order-store';
+import { refundsCollection, registerCollections, type RegisterCollections } from './order-store';
 import { refusedForPosAccess } from './pos-access';
 import { authHeaders } from './pos-connector';
 import { defaultStorage } from './session';
@@ -119,6 +119,8 @@ export function RegisterProvider({ orders, deviceId, demo = storeConfig.demo, ch
     commands: collections?.commands ?? null, capabilities: session?.capabilities,
     deviceName: tillName ?? getDeviceName(),
     orders,
+    // ADR 0026 "Expected per tender": applied refunds leave expected cash, the strip's cash refunds and the closure.
+    refunds: refundsCollection(orders) ?? null,
     register: collections?.sessions ?? null,
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
     actor: { id: session?.email ?? '', name: session?.email ?? '' },

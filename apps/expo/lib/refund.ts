@@ -6,7 +6,10 @@ import { paymentLabel } from './order-detail';
 export type FullRefundOffer =
   | { offered: true; lines: OrderRefundLine[]; shippingMinor: number; adjustmentMinor: 0; totalMinor: number;
       destination: 'cash' | 'original_method'; methodLabel: string }
-  | { offered: false; reason: 'refunded' | 'no_payment' | 'nothing' | 'money_drift' };
+  | { offered: false; reason: 'canceled' | 'refunded' | 'no_payment' | 'nothing' | 'money_drift' };
+
+/** The plugin refuses a longer reason (packages/medusa-plugin/src/workflows/tally-order-refund/payload-shape.ts). */
+export const REFUND_REASON_MAX = 500;
 
 const gross = (charge: { totalMinor: number; taxMinor: number }) => charge.totalMinor + charge.taxMinor;
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
@@ -18,6 +21,7 @@ const sum = (values: number[]) => values.reduce((total, value) => total + value,
  * them and tally_fee_uuid on fees), so a line without one is a fee and stays with the store.
  */
 export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments'], restock: boolean): FullRefundOffer {
+  if (order.status === 'canceled') return { offered: false, reason: 'canceled' };
   if (order.refunds.length > 0) return { offered: false, reason: 'refunded' };
   // The plugin reads one payment; a split store payment is summed here (a NOTES gap, not a pricing rule).
   const paidMinor = sum(order.payments.map((payment) => payment.amountMinor));
@@ -38,10 +42,13 @@ export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments']
   if (covered || (largest && largest.taxMinor + difference >= 0)) linesMinor = remainderMinor;
   const totalMinor = linesMinor + shippingMinor;
   if (totalMinor === 0) return { offered: false, reason: 'nothing' };
-  // Decision 4: a sale paid only in cash refunds to cash; any other refunds to the sale's own method.
+  // Decision 4: a sale paid only in cash refunds to cash; any other refunds to the sale's own method, non-cash first,
+  // and a sale that also took cash gets the rest back in cash.
   const other = tenders.find((tender) => tender.method !== 'cash');
+  const tookCash = tenders.some((tender) => tender.method === 'cash');
+  const methodLabel = !other ? 'Cash' : tookCash ? `${paymentLabel(other.method)}, then cash` : paymentLabel(other.method);
   return {
     offered: true, lines: products.map((line) => ({ orderLineId: line.id, quantity: line.quantity, restock })), shippingMinor,
-    adjustmentMinor: 0, totalMinor, destination: other ? 'original_method' : 'cash', methodLabel: other ? paymentLabel(other.method) : 'Cash',
+    adjustmentMinor: 0, totalMinor, destination: other ? 'original_method' : 'cash', methodLabel,
   };
 }
