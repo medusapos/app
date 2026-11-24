@@ -648,6 +648,112 @@ medusaIntegrationTestRunner({
       expect(await stockA()).toBe(stock)
     })
 
+    // #543 window 2: a run paused inside a Medusa step, still holding the order lock, until the test lets it go.
+    type Workflow = typeof import('../../src/workflows/tally-order-refund/workflow')
+    function paused(step: 'moneyStep' | 'receiveStep') {
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
+      const original = workflow[step] as (...args: unknown[]) => Promise<unknown>
+      let entered!: () => void, release!: () => void
+      const reached = new Promise<void>(resolve => { entered = resolve })
+      const gate = new Promise<void>(resolve => { release = resolve })
+      jest.spyOn(workflow, step).mockImplementationOnce((async (...args: unknown[]) => {
+        entered()
+        await gate
+        return original(...args)
+      }) as never)
+      return { reached, release }
+    }
+    const knexOf = () => container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+    const ageClaim = (id: string) => knexOf()('tally_command').where({ id }).update({ updated_at: knexOf().raw("now() - interval '1 hour'") })
+    const oneLine = (till: Awaited<ReturnType<typeof remainderSale>>, n: number) => command('order.refund', { ...till.full.payload,
+      clientRefundId: randomUUID(), lines: [till.full.payload.lines[n]], totalMinor: 118 })
+
+    it('W2-long-run: a retry past the lease answers in_progress and keeps the command; the first run\'s result lands once', async () => {
+      const before = await stockA()
+      const till = await tillSale()
+      const pause = paused('moneyStep')
+      const order = refund(till)
+      const first = post([order])
+      try {
+        await pause.reached
+        const claimed = await commandRow(order.id)
+        await ageClaim(order.id)
+        const retry = await post([order])
+        expect([retry.status, retry.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+        const kept = await commandRow(order.id)
+        expect(kept).toMatchObject({ status: 'in_progress', claim_token: expect.any(String) })
+        expect(kept.claim_token).not.toBe(claimed.claim_token)
+      } finally {
+        pause.release()
+      }
+      const response = await first
+      expect(response.data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied', refund: expect.objectContaining({ totalMinor: 1000 }) })])
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: response.data.results[0] })
+      expect((await post([order])).data.results).toEqual([{ ...response.data.results[0], status: 'duplicate' }])
+      expect(await knexOf()('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ status: 'applied' })])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('W2-long-park: a run that parks after a lease takeover still parks the command with its reason; resume finishes it once', async () => {
+      const till = await remainderSale()
+      const pause = paused('receiveStep')
+      const order = oneLine(till, 0)
+      const first = post([order])
+      try {
+        await pause.reached
+        // A refund made outside the plugin while the run waits: the check before the money parks it refund_unrecorded.
+        const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+        await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
+        await ageClaim(order.id)
+        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+        expect(await commandRow(order.id)).toMatchObject({ status: 'in_progress' })
+      } finally {
+        pause.release()
+      }
+      expect((await first).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { orderId: till.orderId,
+        clientRefundId: order.payload.clientRefundId, step: 'refund', reason: 'refund_unrecorded' } })
+      const hand = await knexOf()('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      await refundsScript('baseline', till.orderId, hand.id, 'test', 'reason')
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 118 } } })
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((a, b) => a - b)).toEqual([0.01, 1.18])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received',
+        items: [expect.objectContaining({ quantity: 1, received_quantity: 1 })] })])
+    })
+
+    it('W2-dies: a run that died for real (lock freed, claim stale under another token) is resumed by the retry: one row, applied once', async () => {
+      const { before, till, order, knex, row, begun } = await crashed()
+      await knex('tally_command').where({ id: order.id }).update({ claim_token: randomUUID() })
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
+      expect(await knex('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: row.id, status: 'applied' })])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'received' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('W2-busy-other: a new command blocked by another refund of the order is released as today, then claims fresh', async () => {
+      const till = await remainderSale()
+      const pause = paused('moneyStep')
+      const holder = oneLine(till, 0), blocked = oneLine(till, 1)
+      const first = post([holder])
+      try {
+        await pause.reached
+        expect((await post([blocked])).data).toEqual({ code: 'in_progress', id: blocked.id })
+        expect(await commandRow(blocked.id)).toBeUndefined()
+        expect(await knexOf()('tally_refund').where({ command_id: blocked.id }).first()).toBeUndefined()
+      } finally {
+        pause.release()
+      }
+      expect((await first).data.results).toEqual([expect.objectContaining({ id: holder.id, status: 'applied' })])
+      expect((await post([blocked])).data.results).toEqual([expect.objectContaining({ id: blocked.id, status: 'applied',
+        refund: expect.objectContaining({ totalMinor: 118 }) })])
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount)).toEqual([1.18, 1.18])
+    })
+
     it('N3-double-subtraction (deliberate, conservative): a refund_unrecorded row whose money moved is held back twice from the cap', async () => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')

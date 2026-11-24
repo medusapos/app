@@ -344,5 +344,27 @@ moduleIntegrationTestRunner<TallyLedgerModuleService>({
       )
       await expect(service.claim(input)).rejects.toMatchObject({ type: MedusaError.Types.INVALID_DATA })
     })
+
+    it('L-by-command: the by-command writes skip applied, needs_admin and missing commands; in_progress is written whatever its token', async () => {
+      const reason = { orderId: 'order_123', clientRefundId: 'r', refundId: 'tref_1', step: 'refund', message: 'probe' }
+      expect(await service.completeByCommand('unknown', { ...result, id: 'unknown' })).toBe(false)
+      expect(await service.markNeedsAdminByCommand('unknown', reason)).toBe(false)
+      const { command: claim } = await service.claim(input)
+      await MikroOrmWrapper.forkManager().execute(`update tally_command set claim_token = 'someone-else' where id = ?`, [input.id])
+      expect(await service.markNeedsAdminByCommand(input.id, reason)).toBe(true)
+      const parked = await service.retrieveTallyCommand(input.id)
+      expect(parked).toMatchObject({ status: 'needs_admin', needs_admin_reason: reason, claim_token: 'someone-else' })
+      expect(await service.completeByCommand(input.id, result)).toBe(false)
+      expect(await service.markNeedsAdminByCommand(input.id, { ...reason, message: 'again' })).toBe(false)
+      expect(await service.retrieveTallyCommand(input.id)).toEqual(parked)
+      await MikroOrmWrapper.forkManager().execute(`update tally_command set status = 'in_progress', needs_admin_reason = null where id = ?`, [input.id])
+      expect(await service.completeByCommand(input.id, result)).toBe(true)
+      const done = await service.retrieveTallyCommand(input.id)
+      expect(done).toMatchObject({ status: 'applied', result, claim_token: 'someone-else' })
+      expect(await service.completeByCommand(input.id, { ...result, serverRefs: { orderId: 'order_other', totalMinor: 1 } })).toBe(false)
+      expect(await service.markNeedsAdminByCommand(input.id, reason)).toBe(false)
+      expect(await service.retrieveTallyCommand(input.id)).toEqual(done)
+      expect(claim.claim_token).not.toBe('someone-else')
+    })
   },
 })

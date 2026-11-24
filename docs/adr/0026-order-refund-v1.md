@@ -54,6 +54,7 @@ The plugin still accepts and prices ADR-080's general payload: any line quantiti
 **A failure after the return request confirms goes to `needs_admin`.** A retry with the same `clientRefundId` resumes from the recorded step, or answers the same result. It never refunds twice:
 - **How it resumes.** Each step writes its outcome to the `tally_refund` row before the next step starts: `return_id`, then `received_at`, then `medusa_refund_id`. A retry reads the row and runs only the steps that are missing.
 - **A crash or timeout.** The ledger claim stays `in_progress`. After the stale-claim window, the till's retry takes the claim over, as order.create's does, and resumes.
+  - 2026-11-24 (#543 window 2): a retry that takes over a stale claim while the order is locked keeps the command row when its refund row exists; the outcome is written by command id, only under the order lock, so the first run's result still lands.
 - **A failure that will not clear on retry.** The workflow parks the command as `needs_admin`, with the failing step in `needs_admin_reason`. Until an admin resolves it, the till's retry is answered `in_progress`, as for order.create. The admin uses `tally-ledger-resolve` with one of two actions:
   - `resume` runs the missing steps;
   - `apply` records a refund the admin made by hand, with its Medusa refund id;
