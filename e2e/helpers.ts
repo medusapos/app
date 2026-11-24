@@ -484,6 +484,32 @@ export async function variantIdBySku(token: string, sku: string): Promise<string
   return variant.id;
 }
 
+// An order the store has that no till rang up, like a web-shop order: a converted admin draft order.
+export async function createStoreOnlyOrder(token: string, sku: string, email: string): Promise<{ id: string; displayId: number }> {
+  const get = async (path: string) => {
+    const response = await fetch(`${backend}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(response.ok, await response.clone().text()).toBeTruthy();
+    return response.json();
+  };
+  const post = async (path: string, body?: unknown) => {
+    const response = await fetch(`${backend}${path}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    expect(response.ok, await response.clone().text()).toBeTruthy();
+    return response.json();
+  };
+  const { regions } = await get('/admin/regions?limit=100&fields=id,name');
+  const regionId: string = regions.find((entry: { name: string }) => entry.name === 'Europe').id;
+  const { stores } = await get('/admin/stores?fields=id,default_sales_channel_id');
+  const { draft_order } = await post('/admin/draft-orders', {
+    region_id: regionId, sales_channel_id: stores[0].default_sales_channel_id, email,
+    items: [{ variant_id: await variantIdBySku(token, sku), quantity: 1 }],
+  });
+  const { order } = await post(`/admin/draft-orders/${draft_order.id}/convert-to-order?fields=id,display_id`);
+  return { id: order.id, displayId: order.display_id };
+}
+
 // Adds one E2E-1 by scanning its SKU into the search box.
 export async function addE2E1(page: Page) {
   const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
