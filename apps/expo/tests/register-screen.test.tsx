@@ -17,7 +17,7 @@ import { GETTING_READY, OPEN_TO_PAY } from '../components/register';
 import { APPROVE_OFFLINE, closureContext } from '../components/register-close';
 import { rememberApprover } from '../lib/approval';
 import { PRINT_FAILED, PRINT_FRAME_ID, printXReport } from '../lib/closure-print';
-import { openOrderStore, registerCollections } from '../lib/order-store';
+import { openOrderStore, refundsCollection, registerCollections } from '../lib/order-store';
 import { useOutboxContext } from '../lib/outbox-context';
 import { capabilities } from './pos-connector-mock';
 import { RegisterProvider } from '../lib/register-context';
@@ -226,6 +226,25 @@ describe('the register on the sale screen', () => {
     const rows = (await movements.find().exec()).map((doc) => doc.toJSON());
     expect(rows).toHaveLength(2);
     expect(rows.find((row) => row.type === 'void')).toMatchObject({ voids: paidIn.id, amountMinor: 500 });
+  });
+
+  it('an applied cash refund of 5.00 in the open session takes 5.00 off expected cash (ADR 0026)', async () => {
+    const session = await openTestRegister(store.orders, baseUrl);
+    await mount();
+    const panel = await openPanel();
+    await waitFor(() => expect(panel.getByTestId('register-panel-expected').textContent).toContain('€100.00'));
+    // Stored as TallyUI's submitOrderRefund stores an applied answer: the envelope it sent, status applied, the result.
+    const at = '2026-09-28T10:00:00.000Z';
+    const envelope = { id: 'command-1', type: 'order.refund' as const, version: 1 as const, createdAt: at, deviceId: 'test-device', attempt: 1,
+      payload: { clientRefundId: 'refund-1', orderId: 'order_1', clientOrderId: 'sale-1', lines: [{ orderLineId: 'line_1', quantity: 1, restock: true }],
+        shippingMinor: 0, adjustmentMinor: 0, totalMinor: 500, destination: 'cash' as const, reason: 'Damaged', registerId: 'register-1',
+        sessionId: session.id, createdAt: at } };
+    await act(async () => {
+      await refundsCollection(store.orders)!.insert({ id: 'refund-1', commandId: envelope.id, orderId: 'order_1', sessionId: session.id,
+        registerId: 'register-1', envelope, status: 'applied', duplicate: false, createdAt: at, updatedAt: at,
+        result: { totalMinor: 500, byMethod: { cash: 500 }, refunds: [{ id: 'ref_1', paymentId: 'pay_1', totalMinor: 500, state: 'succeeded' }] } });
+    });
+    await waitFor(() => expect(panel.getByTestId('register-panel-expected').textContent).toContain('€95.00'));
   });
 
   it('while counting, the product side is dimmed and taps and scans add nothing until Back to selling', async () => {

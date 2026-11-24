@@ -3,15 +3,18 @@ import { Platform, ScrollView, View } from 'react-native';
 import {
   Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, OrderDetail, orderReference, OrderSyncNotices, Receipt, Text, XIcon,
 } from '@tallyui/components';
-import { formatMoney } from '@tallyui/core';
-import { buildReceiptDataFromPosOrder, refundDueOf, type PosOrder, type UseOrderOutboxResult } from '@tallyui/pos';
+import { formatMoney, type StoreOrder } from '@tallyui/core';
+import { buildReceiptDataFromPosOrder, refundDueOf, type PosOrder, type PosRefundCollection, type UseOrderOutboxResult } from '@tallyui/pos';
 import {
   canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
 } from '../lib/order-detail';
 import { formatReceiptDate } from '../lib/format-date';
+import { REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
+import { fullRefundOffer } from '../lib/refund';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedSettings } from '../lib/store-settings';
+import { OrderRefundDialog, useRefundRecords } from './order-refund-dialog';
 
 // While a reprint shows, a print keeps only it: other branches collapse, its ancestors stop positioning, clipping and
 // painting, and it moves to the page's top left. Inert without a reprint on the page, so the paid screen prints as before.
@@ -30,20 +33,33 @@ export function injectReceiptPrintStyle() {
 }
 
 // One stored sale, read-only, in a right-hand sheet as WCPOS v2 opens an order.
-export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush, stuck }: {
+export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush, stuck, storeOrder, refunds }: {
   order: PosOrder | null; onClose: () => void; formatDate: (iso: string) => string;
   onRetry: (orderIds: string[]) => Promise<number>; onFlush: () => Promise<void>;
   stuck?: UseOrderOutboxResult['state']['stuck'];
+  /** The store's copy of this sale and this till's `pos_refunds`: Refund all (ADR 0026) needs both. */
+  storeOrder?: StoreOrder | null; refunds?: PosRefundCollection;
 }) {
   const { session } = useSession();
   const [reprint, setReprint] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [refunding, setRefunding] = useState(false);
   // Each sale opens on its detail; keyed on the id, so a live sync-status update keeps the receipt up.
-  useEffect(() => setReprint(false), [order?.id]);
+  useEffect(() => { setReprint(false); setRefunding(false); }, [order?.id]);
+  const records = useRefundRecords(refunds, storeOrder?.id ?? undefined);
+  const applied = records.find((record) => record.status === 'applied');
+  const resume = records.find((record) => record.status === 'pending' || record.status === 'unsent') ?? null;
+  const capabilities = session?.capabilities;
+  const canRefund = !!order && !!storeOrder && !!refunds && (capabilities?.orderRefund ?? 0) >= 1
+    && (capabilities?.pluginContract ?? 0) >= REFUND_PLUGIN_CONTRACT && !applied && fullRefundOffer(storeOrder, order.payments, true).offered;
+  // A refund sent without a final answer opens again on its own envelope when its sale does.
+  useEffect(() => { if (resume && canRefund) setRefunding(true); }, [order?.id, resume?.id, canRefund]);
+  const refundedMinor = applied ? applied.result?.totalMinor ?? applied.envelope.payload.totalMinor
+    : storeOrder?.refunds.length ? storeOrder.refunds.reduce((total, refund) => total + refund.amountMinor, 0) : null;
   useEffect(() => { if (reprint) injectReceiptPrintStyle(); }, [reprint]);
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
-  return <Dialog open={order !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
+  return <><Dialog open={order !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
     {order ? <DialogContent side="right" testID="order-detail-sheet" className="flex-col p-0">
       <View className="flex-row items-center justify-end px-4 pt-4">
         <DialogTitle className="sr-only">{`Order ${orderReference(order)}`}</DialogTitle>
@@ -84,7 +100,9 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
             <Text className="text-sm text-foreground">Refund due</Text>
             <Text className="text-sm text-foreground">{money(refundDueOf(order))}</Text>
           </View> : null}
+          {refundedMinor !== null ? <Text testID="order-detail-refunded" className="text-sm text-foreground">{`Refunded ${money(refundedMinor)}`}</Text> : null}
         </View>}
+        onRefund={canRefund ? () => setRefunding(true) : undefined}
         footerSlot={<View className="flex-row gap-2">
           {canSyncOrder(order) ? <Button variant="outline" className="flex-1" testID="order-detail-sync" disabled={syncing}
             onPress={() => {
@@ -96,5 +114,9 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
           <Button variant="outline" className="flex-1" testID="order-detail-receipt" onPress={() => setReprint(true)}><Text>Receipt</Text></Button>
         </View>} />}
     </DialogContent> : null}
-  </Dialog>;
+  </Dialog>
+    {/* Over the sheet as user-sheet's SwitchConfirm: a sibling, since a dialog inside DialogContent never shows on web. */}
+    {refunding && order && storeOrder && refunds ? <OrderRefundDialog order={storeOrder} tenders={order.payments} refunds={refunds} resume={resume}
+      onClose={() => setRefunding(false)} /> : null}
+  </>;
 }

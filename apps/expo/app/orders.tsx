@@ -12,6 +12,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
 import type { Session } from '../lib/session';
 import { formatDate } from '../lib/format-date';
+import { refundsCollection } from '../lib/order-store';
 import { filterOrders, orderFilterOptions } from '../lib/order-filters';
 import { mergeOrderRows, useStoreOrders, type OrdersRow } from '../lib/store-orders';
 
@@ -29,7 +30,7 @@ export default function OrdersScreen() {
 
 // v2's Orders: every order in the store, newest first, under this till's sales that haven't reached it yet.
 function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnauthorized: () => void }) {
-  const { recent, requeue, flush, state } = useOutboxContext();
+  const { recent, requeue, flush, state, orders: localOrders } = useOutboxContext();
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<OrderFilterValue>({});
   const [openId, setOpenId] = useState<string | null>(null);
@@ -92,6 +93,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
     </ScrollView>
     {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. */}
     <OrderDetailSheet order={recent.find((order) => order.id === openId) ?? null} onClose={() => setOpenId(null)}
+      storeOrder={openId ? store.orders.find((order) => order.clientOrderId === openId) ?? null : null} refunds={refundsCollection(localOrders)}
       formatDate={formatDate} onRetry={requeue} onFlush={flush} stuck={state.stuck} />
     <StoreOrderDetailSheet order={store.orders.find((order) => order.id === openStoreId) ?? null}
       onClose={() => setOpenStoreId(null)} formatDate={formatDate} />

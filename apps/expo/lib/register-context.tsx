@@ -1,14 +1,16 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 import type { RxCollection } from 'rxdb';
+import type { AnyCommandEnvelope } from '@tallyui/core';
 import {
-  bindRegister, createHttpCommandTransport, getBoundRegisterId, observeRegister$, unbindRegister, useRegisterOutbox, useRegisterSession, type PosOrder, type UseRegisterOutboxResult,
+  bindRegister, createHttpCommandTransport, getBoundRegisterId, observeRegister$, unbindRegister, useRegisterOutbox, useRegisterSession, type CommandTransport, type PosOrder,
+  type UseRegisterOutboxResult,
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { storeConfig } from './config';
 import { demoRegisterFor, isDemoAccount } from './demo';
-import { registerCollections, type RegisterCollections } from './order-store';
+import { refundsCollection, registerCollections, type RegisterCollections } from './order-store';
 import { refusedForPosAccess } from './pos-access';
 import { authHeaders } from './pos-connector';
 import { defaultStorage } from './session';
@@ -36,6 +38,8 @@ export type RegisterContextValue = {
   register: ReturnType<typeof useRegisterSession>;
   /** The one register outbox for the signed-in backend, including pending till updates. */
   registerOutbox: UseRegisterOutboxResult;
+  /** The signed-in backend's command transport, with the session's current token: Refund sends through it (ADR 0026). */
+  commandTransport: () => CommandTransport<AnyCommandEnvelope>;
   /** The TallyUI register (drawer) this till is bound to, read from its `register` document: `null` when unbound,
    *  `undefined` until the store is open and read. Not `registerId`, which is this till's own device id. */
   boundRegisterId: string | null | undefined;
@@ -79,10 +83,11 @@ export function RegisterProvider({ orders, deviceId, demo = storeConfig.demo, ch
   const tokenRef = useRef(session?.token);
   tokenRef.current = session?.token;
   const collections = useMemo(() => orders ? registerCollections(orders) : null, [orders]);
+  const commandTransport = () => createHttpCommandTransport({ baseUrl: storeKey, getHeaders: () => authHeaders(tokenRef.current ?? '') });
   const registerOutbox = useRegisterOutbox({
     commands: collections && (session?.capabilities?.register ?? 0) >= 1 ? collections.commands : null,
     sessions: collections?.sessions ?? null,
-    transport: () => createHttpCommandTransport({ baseUrl: storeKey, getHeaders: () => authHeaders(tokenRef.current ?? '') }),
+    transport: commandTransport,
     deviceId,
   });
   const [bound, setBound] = useState<Bound | null>(null);
@@ -114,6 +119,8 @@ export function RegisterProvider({ orders, deviceId, demo = storeConfig.demo, ch
     commands: collections?.commands ?? null, capabilities: session?.capabilities,
     deviceName: tillName ?? getDeviceName(),
     orders,
+    // ADR 0026 "Expected per tender": applied refunds leave expected cash, the strip's cash refunds and the closure.
+    refunds: refundsCollection(orders) ?? null,
     register: collections?.sessions ?? null,
     storeKey, registerId: current?.id ?? null, enabled: !!collections,
     actor: { id: session?.email ?? '', name: session?.email ?? '' },
@@ -159,7 +166,7 @@ export function RegisterProvider({ orders, deviceId, demo = storeConfig.demo, ch
     error: closeError.storeKey === storeKey ? closeError.message : '',
   };
   const value: RegisterContextValue = {
-    register, registerOutbox, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers,
+    register, registerOutbox, commandTransport, boundRegisterId: current ? current.id : undefined, registerName: current?.name ?? null, registers,
     async bind(id) {
       const choice = registers.find((entry) => entry.id === id);
       if (collections && choice) await bindRegister(collections.sessions, storeKey, choice);

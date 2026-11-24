@@ -8,6 +8,8 @@ export const MIN_PLUGIN_CONTRACT = 1;
 // The plugin contract that adds POST /tally/v1/device-clear-approvals (#280); only Clear all local data needs it, so
 // MIN_PLUGIN_CONTRACT stays 1 (raising it would lock every store on an older plugin out of the app).
 export const DEVICE_CLEAR_PLUGIN_CONTRACT = 2;
+// The plugin contract that prices and applies order.refund v1 (ADR 0026 decision 8); only Refund needs it.
+export const REFUND_PLUGIN_CONTRACT = 5;
 
 /** `unknown`: the read was inconclusive (offline, a timeout, a non-2xx, not an info body) and never latches. */
 export type PluginContractStatus = 'ok' | 'too_old' | 'unknown';
