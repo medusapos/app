@@ -111,7 +111,7 @@ describe('ordersScreenFilterFields', () => {
     expect(ordersScreenFilterFields(['status', 'customerId', 'dateRange'])).toEqual(['status', 'customerId', 'dateRange']);
     expect(ordersScreenFilterFields(['dateRange', 'paymentMethod', 'customerId', 'status']))
       .toEqual(['status', 'paymentMethod', 'customerId', 'dateRange']);
-    expect(ordersScreenFilterFields(['status', 'cashierId', 'registerId', 'storeId', 'createdVia'])).toEqual(['status']);
+    expect(ordersScreenFilterFields(['status', 'cashierId', 'registerId', 'storeId', 'createdVia'])).toEqual(['status', 'registerId']);
     expect(ordersScreenFilterFields(undefined)).toEqual([]);
   });
 });

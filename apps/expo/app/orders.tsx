@@ -9,6 +9,7 @@ import { OrdersTable } from '../components/orders-table';
 import { StoreOrderDetailSheet } from '../components/store-order-detail-sheet';
 import { StripHeightContext } from '../components/store-refused';
 import { useOutboxContext } from '../lib/outbox-context';
+import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
 import type { Session } from '../lib/session';
 import { formatDate } from '../lib/format-date';
@@ -38,7 +39,9 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   // A sale reaching the store changes this count, and the store's first page is read again to list it.
   const appliedCount = useMemo(() => recent.filter((order) => order.syncStatus === 'applied').length, [recent]);
   const store = useStoreOrders(session, search, filters, appliedCount, onUnauthorized);
-  const options = useMemo(() => orderFilterOptions(recent, store.orders), [recent, store.orders]);
+  const { registers } = useRegister();
+  const options = useMemo(() => ({ ...orderFilterOptions(recent, store.orders),
+    register: registers.map(({ id, name }) => ({ value: id, label: name })) }), [recent, store.orders, registers]);
   const orders = useMemo(() => filterOrders(recent, search, filters, 'device'), [recent, search, filters]);
   // OrdersList's own rule: the stuck pending sales need attention too.
   const attention = useMemo(() => needsAttention(orders, { stuckCommandIds: state.stuck?.commandIds }), [orders, state.stuck]);

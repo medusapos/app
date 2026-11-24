@@ -22,6 +22,10 @@ vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 // Settings' Danger zone imports the approval dialog, which reads the locale.
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
+vi.mock('../lib/register-context', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/register-context')>();
+  return { ...actual, useRegister: () => ({ registers: actual.DEFAULT_REGISTERS }) };
+});
 
 beforeEach(() => {
   vi.spyOn(window, 'open').mockImplementation(() => null);

@@ -3,7 +3,7 @@ import type { OrderDetailLineItem, OrderDetailTaxLine, OrderStatus } from '@tall
 import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type StoreOrder, type SyncContext } from '@tallyui/core';
 import { buildReceiptDataFromStoreOrder, orderFiltersQuery, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
 import { ordersScreenFilterFields } from './order-filters';
-import { authHeaders, createPosConnector } from './pos-connector';
+import { authHeaders, createPosConnector, storeOrderFilters } from './pos-connector';
 import type { Session } from './session';
 
 // listOrders' own default page size (its max is 100); WCPOS v2 pages its Orders list the same way.
@@ -68,9 +68,11 @@ export type StoreOrdersFailure = 'network' | 'other';
 export function useStoreOrders(session: Session, search: string, filters: OrderFilterValue, appliedCount: number,
   onUnauthorized: () => void) {
   const connector = useMemo(() => createPosConnector(), []);
-  const filterFields = useMemo(() => ordersScreenFilterFields(connector.orderFilters), [connector]);
+  const filterFields = useMemo(() => ordersScreenFilterFields(storeOrderFilters(session.capabilities)), [session.capabilities]);
+  // The capabilities let listOrders route and accept the register filter (plugin contract 3).
   const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
-    headers: authHeaders(session.token) }), [connector.id, session.baseUrl, session.token]);
+    headers: authHeaders(session.token), capabilities: session.capabilities }),
+  [connector.id, session.baseUrl, session.token, session.capabilities]);
   const [debounced, setDebounced] = useState(search.trim());
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(search.trim()), STORE_ORDERS_SEARCH_DEBOUNCE_MS);

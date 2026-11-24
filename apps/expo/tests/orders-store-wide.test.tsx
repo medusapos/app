@@ -3,7 +3,8 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderReference } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
-import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type StoreOrder, type StoreOrderPage } from '@tallyui/core';
+import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type OrderFilterField, type ServerCapabilities,
+  type StoreOrder, type StoreOrderPage } from '@tallyui/core';
 import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
 import type { Session } from '../lib/session';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -14,17 +15,23 @@ import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEX
 const { listOrders, sessionState, connector } = vi.hoisted(() => ({
   listOrders: vi.fn(),
   sessionState: { session: null as Session | null, reportUnauthorized: vi.fn() },
-  connector: { orderFilters: [] as string[] },
+  connector: { orderFilters: null as OrderFilterField[] | null },
 }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/orders',
   Stack: { Screen: () => null },
 }));
-vi.mock('../lib/pos-connector', () => ({
-  createPosConnector: () => ({ id: 'medusa', listOrders, orderFilters: connector.orderFilters }),
-  authHeaders: () => ({ Authorization: 'Bearer t' }),
-}));
+vi.mock('../lib/pos-connector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/pos-connector')>();
+  return {
+    createPosConnector: () => ({ id: 'medusa', listOrders }),
+    authHeaders: () => ({ Authorization: 'Bearer t' }),
+    // A test may stand in its own filter list; otherwise the real plugin-contract gate decides.
+    storeOrderFilters: (capabilities?: ServerCapabilities) => connector.orderFilters ?? actual.storeOrderFilters(capabilities),
+  };
+});
+vi.mock('../lib/register-context', () => ({ useRegister: () => ({ registers: [{ id: 'register-1', name: 'Register 1' }] }) }));
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
@@ -67,7 +74,7 @@ const openButtons = () => within(screen.getByTestId('orders-table')).getAllByRol
 beforeEach(() => {
   vi.useFakeTimers();
   listOrders.mockReset().mockResolvedValue(page([]));
-  connector.orderFilters = ['status', 'customerId', 'dateRange'];
+  connector.orderFilters = null;
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't' };
   withSales();
 });
@@ -171,6 +178,26 @@ describe('Orders lists the whole store (row 10)', () => {
     connector.orderFilters = ['status', 'paymentMethod', 'customerId', 'dateRange'];
     await mount();
     expect(screen.getByTestId('order-filter-payment-method')).toBeTruthy();
+  });
+
+  it('plugin contract 3: the Register pill filters the store\'s orders by register', async () => {
+    const capabilities = { orderCreate: 1, pluginContract: 3 };
+    sessionState.session = { ...sessionState.session!, capabilities };
+    await mount();
+    fireEvent.click(screen.getByTestId('order-filter-register'));
+    fireEvent.click(screen.getByTestId('order-filter-register-register-1'));
+    await settle();
+    expect(listOrders).toHaveBeenLastCalledWith({ ...context, capabilities }, { page: 1, perPage: 25, registerId: 'register-1' });
+  });
+
+  it('below plugin contract 3 there is no Register pill', async () => {
+    for (const capabilities of [{ orderCreate: 1, pluginContract: 2 }, { orderCreate: 1 }]) {
+      sessionState.session = { ...sessionState.session!, capabilities };
+      const view = await mount();
+      expect(screen.getByTestId('order-filter-status')).toBeTruthy();
+      expect(screen.queryByTestId('order-filter-register')).toBeNull();
+      view.unmount();
+    }
   });
 
   it('opens an order only the store has in its own read-only sheet, and the till\'s own sale in the till\'s sheet', async () => {
