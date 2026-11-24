@@ -86,6 +86,25 @@ describe('fullRefundOffer', () => {
     expect(offer).toMatchObject({ offered: true, totalMinor: 353, destination: 'original_method', methodLabel: 'Card terminal, then cash' });
   });
 
+  it('split sale inside the card share', () => {
+    // Cash 0.50 + card 2.00 with a 1.21 fee: the 1.29 refund fits on the card, so no cash leaves the drawer.
+    const split: PosOrder['payments'] = [{ id: 'p1', method: 'cash', amountMinor: 50 }, { id: 'p2', method: 'external', amountMinor: 200 }];
+    const product = line('p', { subtotalMinor: 108, subtotalTaxMinor: 21, totalMinor: 108, taxMinor: 21 });
+    const fee = { id: 'fee', clientLineId: undefined, name: 'Service fee', quantity: 1, subtotalMinor: 102, subtotalTaxMinor: 19, totalMinor: 102, taxMinor: 19 };
+    const payments = [{ method: 'cash', amountMinor: 50 }, { method: 'pp_card', amountMinor: 200 }];
+    const offer = fullRefundOffer(order({ paid: 250, lines: [product, fee], payments }), split, true);
+    expect(offer).toMatchObject({ offered: true, totalMinor: 129, destination: 'original_method', methodLabel: 'Card terminal' });
+  });
+
+  it('two non-cash methods', () => {
+    // 'external' is the only non-cash wire method and paymentLabel names it 'Card terminal', so the label names it once.
+    const two: PosOrder['payments'] = [
+      { id: 'p1', method: 'external', methodId: 'pp_card', amountMinor: 200 }, { id: 'p2', method: 'external', methodId: 'pp_gift', amountMinor: 153 },
+    ];
+    expect(fullRefundOffer(order({ paid: 353 }), two, true))
+      .toMatchObject({ offered: true, totalMinor: 353, destination: 'original_method', methodLabel: 'Card terminal' });
+  });
+
   it('canceled order', () => {
     expect(fullRefundOffer(order({ paid: 353, status: 'canceled' }), cash, true)).toEqual({ offered: false, reason: 'canceled' });
     // Checked first: a canceled order with an earlier refund still reads canceled.

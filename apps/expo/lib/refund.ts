@@ -43,12 +43,14 @@ export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments']
   const totalMinor = linesMinor + shippingMinor;
   if (totalMinor === 0) return { offered: false, reason: 'nothing' };
   // Decision 4: a sale paid only in cash refunds to cash; any other refunds to the sale's own method, non-cash first,
-  // and a sale that also took cash gets the rest back in cash.
-  const other = tenders.find((tender) => tender.method !== 'cash');
-  const tookCash = tenders.some((tender) => tender.method === 'cash');
-  const methodLabel = !other ? 'Cash' : tookCash ? `${paymentLabel(other.method)}, then cash` : paymentLabel(other.method);
+  // and a sale that also took cash gets back in cash only what the non-cash tenders cannot take (fees stay with the store).
+  const nonCash = tenders.filter((tender) => tender.method !== 'cash');
+  const tookCash = nonCash.length < tenders.length;
+  const labels = [...new Set(nonCash.map((tender) => paymentLabel(tender.method)))].join(', ');
+  const cashToo = tookCash && totalMinor > sum(nonCash.map((tender) => tender.amountMinor));
+  const methodLabel = nonCash.length === 0 ? 'Cash' : cashToo ? `${labels}, then cash` : labels;
   return {
     offered: true, lines: products.map((line) => ({ orderLineId: line.id, quantity: line.quantity, restock })), shippingMinor,
-    adjustmentMinor: 0, totalMinor, destination: other ? 'original_method' : 'cash', methodLabel,
+    adjustmentMinor: 0, totalMinor, destination: nonCash.length > 0 ? 'original_method' : 'cash', methodLabel,
   };
 }
