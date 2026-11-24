@@ -9,7 +9,8 @@ import { fiscalFiguresErrors, type CommandErrorWithData, type OrderCreatePayload
 import { envelopeErrors, payloadNulErrors, payloadShapeErrors, MAX_PAYLOAD_ERRORS } from '../../../../workflows/tally-order-create/payload-shape'
 import { clientTimeStageErrors, clientTimeUpperBound } from '../../../../workflows/client-time'
 import { lineTaxRefusals, v5DisplayErrors, withoutV5Display } from '../../../../workflows/tally-order-create/v5'
-import { registerVersionAccepted, SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
+import { executeOrderRefund } from '../../../../workflows/tally-order-refund/execute'
+import { registerVersionAccepted, SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_ORDER_REFUND_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }
@@ -49,7 +50,7 @@ export function validateBatch(body: unknown):
     let field: string | undefined
     if (typeof command.id !== 'string' || command.id.length === 0 || command.id.length > 64 || command.id.includes('\0')) field = 'id'
     else if (!['order.create', 'register.session.open', 'register.session.transition', 'register.movement.record',
-      'register.movement.void', 'register.closure.submit'].includes(command.type)) field = 'type'
+      'register.movement.void', 'register.closure.submit', 'order.refund'].includes(command.type)) field = 'type'
     else if (!Number.isSafeInteger(command.version) || command.version < 1) field = 'version'
     else if (typeof command.payload !== 'object' || command.payload === null || Array.isArray(command.payload)) field = 'payload'
     else if (typeof command.createdAt !== 'string') field = 'createdAt'
@@ -63,11 +64,28 @@ export function validateBatch(body: unknown):
 export async function processBatch(
   container: MedusaContainer,
   commands: CommandEnvelope<unknown>[],
-  options: TallyPluginOptions
+  options: TallyPluginOptions,
+  actorId?: string
 ): Promise<BatchOutcome> {
   const upperBound = clientTimeUpperBound()
   const results: CommandResult[] = []
   for (const envelope of commands) {
+    // core's CommandEnvelope types `type` as 'order.create' only; validateBatch admits the others.
+    if ((envelope.type as string) === 'order.refund') {
+      // The register commands' step order: replay read (the same ledger rule), the version rule, then shape and claim.
+      const replay = await replayRegisterCommand(container, envelope)
+      if (!replay && !SUPPORTED_ORDER_REFUND_VERSIONS.includes(envelope.version)) {
+        results.push({ id: envelope.id, status: 'rejected', error: { code: 'unsupported_version',
+          message: `order.refund version ${envelope.version} is not supported; this server supports ${SUPPORTED_ORDER_REFUND_VERSIONS.join(', ')}`,
+          data: { orderRefund: Math.max(...SUPPORTED_ORDER_REFUND_VERSIONS) },
+        } as CommandErrorWithData })
+        continue
+      }
+      const outcome = replay ?? await executeOrderRefund(container, envelope, upperBound, actorId)
+      if (outcome.kind !== 'result') return batchFailure(container, outcome)
+      results.push(outcome.result)
+      continue
+    }
     if (envelope.type !== 'order.create') {
       // Same step order as order.create: replay read, then the version rule, then shape and claim (ADR 0003, 0004).
       const replay = await replayRegisterCommand(container, envelope)

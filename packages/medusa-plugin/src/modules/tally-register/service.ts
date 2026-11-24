@@ -8,6 +8,7 @@ import { TallyRegisterSessionAlias } from './models/tally-register-session-alias
 import { TallyRegisterMovement } from './models/tally-register-movement'
 import { TallyRegisterClosure } from './models/tally-register-closure'
 import { TallyRegisterApproval } from './models/tally-register-approval'
+import { sessionTakesMoney } from './session-open'
 import type {
   RegisterCommandResult, RegisterCounters, RegisterOutcome, RegisterSessionOpenInput,
   RegisterSessionTransitionInput, RegisterMovementRecordInput, RegisterMovementVoidInput,
@@ -216,8 +217,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         return { kind: 'ok', register: await this.sessionState(p.sessionId, em) }
       }
       if (session.status === 'superseded') return this.supersededOutcome(session, em)
-      const [closure] = await em.execute('select id from tally_register_closure where session_id = ?', [p.sessionId])
-      if (session.status === 'closed' || closure) return { kind: 'conflict', code: 'register_session_closed' }
+      if (!await sessionTakesMoney(session, (sql, params) => em.execute(sql, params))) return { kind: 'conflict', code: 'register_session_closed' }
       const inserted = await em.execute(`insert into tally_register_movement
         (id, session_id, type, amount_minor, reason, created_at_client, created_by) values (?, ?, ?, ?, ?, ?, ?)
         on conflict do nothing returning id`, [p.movementId, p.sessionId, p.type, p.amountMinor, p.reason, p.createdAt, p.createdBy ?? null])
@@ -240,8 +240,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         return { kind: 'ok', register: await this.sessionState(p.sessionId, em) }
       }
       if (session.status === 'superseded') return this.supersededOutcome(session, em)
-      const [closure] = await em.execute('select id from tally_register_closure where session_id = ?', [p.sessionId])
-      if (session.status === 'closed' || closure) return { kind: 'conflict', code: 'register_session_closed' }
+      if (!await sessionTakesMoney(session, (sql, params) => em.execute(sql, params))) return { kind: 'conflict', code: 'register_session_closed' }
       const [target] = await em.execute('select session_id, type, voided_by from tally_register_movement where id = ?', [p.voids])
       if (!target) return { kind: 'invalid', message: 'void target is missing' }
       if (target.session_id !== p.sessionId) return { kind: 'invalid', message: 'void target belongs to another session' }
@@ -277,7 +276,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         let approval: { id: string; approved_by: string } | undefined
         if (v3) {
           // ADR 0023 amendment (2026-11-22): with every sale synced the server's own expected figures decide; else the till's.
-          const expected = p.serverExpected ?? p.tillExpected
+          const expected = (await p.serverExpected?.()) ?? p.tillExpected
           const variance = Object.fromEntries(Object.entries(p.counted).map(([k, v]) => [k, v - (expected[k] ?? 0)]))
           const thresholdMinor = p.thresholdMinor!
           // A counted without cash counts as 0 cash, so leaving it out never skips the gate.

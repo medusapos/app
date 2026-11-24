@@ -41,7 +41,8 @@ export function parseCommandResult(value: unknown): CommandResult {
     if (!object(input.register)) throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid register')
     result.register = input.register as RegisterCommandResult
   }
-  if (result.status === 'applied' && result.serverRefs === undefined && result.register === undefined) {
+  if (input.refund !== undefined) result.refund = parseRefund(input.refund, object)
+  if (result.status === 'applied' && result.serverRefs === undefined && result.register === undefined && result.refund === undefined) {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid serverRefs: required for applied')
   }
   if (input.warnings !== undefined) {
@@ -123,4 +124,36 @@ export function parseCommandResult(value: unknown): CommandResult {
     throw new MedusaError(MedusaError.Types.INVALID_DATA, 'Invalid error: required for rejected')
   }
   return result
+}
+
+/** An order.refund applied result (ADR-080): byMethod and refunds each sum to totalMinor. */
+function parseRefund(value: unknown, object: (value: unknown) => boolean): NonNullable<CommandResult['refund']> {
+  const invalid = (field: string) => new MedusaError(MedusaError.Types.INVALID_DATA, `Invalid refund${field}`)
+  if (!object(value)) throw invalid('')
+  const input = value as Record<string, unknown>
+  if (!Number.isSafeInteger(input.totalMinor) || (input.totalMinor as number) < 0) throw invalid('.totalMinor')
+  const totalMinor = input.totalMinor as number
+  if (!object(input.byMethod)) throw invalid('.byMethod')
+  const byMethod: Record<string, number> = Object.create(null)
+  let sum = 0
+  for (const [method, amount] of Object.entries(input.byMethod as Record<string, unknown>)) {
+    if (!method.length || !Number.isSafeInteger(amount)) throw invalid(`.byMethod.${method}`)
+    byMethod[method] = amount as number
+    sum += amount as number
+  }
+  if (sum !== totalMinor) throw invalid('.byMethod: expected to sum to totalMinor')
+  if (!Array.isArray(input.refunds) || input.refunds.length === 0) throw invalid('.refunds')
+  sum = 0
+  const refunds = input.refunds.map((entry: unknown, index) => {
+    const item = entry as Record<string, unknown>
+    if (!object(entry)) throw invalid(`.refunds[${index}]`)
+    for (const key of ['id', 'paymentId', 'state']) {
+      if (typeof item[key] !== 'string' || !(item[key] as string).length) throw invalid(`.refunds[${index}].${key}`)
+    }
+    if (!Number.isSafeInteger(item.totalMinor)) throw invalid(`.refunds[${index}].totalMinor`)
+    sum += item.totalMinor as number
+    return { id: item.id as string, paymentId: item.paymentId as string, totalMinor: item.totalMinor as number, state: item.state as string }
+  })
+  if (sum !== totalMinor) throw invalid('.refunds: expected to sum to totalMinor')
+  return { totalMinor, byMethod: { ...byMethod }, refunds } as NonNullable<CommandResult['refund']>
 }

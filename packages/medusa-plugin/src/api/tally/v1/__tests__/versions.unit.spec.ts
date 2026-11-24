@@ -1,5 +1,6 @@
 import { approvalThresholdMinor, DEFAULT_APPROVAL_THRESHOLD_MINOR, LINE_TAX, PLUGIN_CONTRACT, registerVersionAccepted,
-  SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_REGISTER_VERSIONS, TAX_ROUNDING } from '../versions'
+  SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_ORDER_REFUND_VERSIONS, SUPPORTED_REGISTER_VERSIONS, TAX_ROUNDING } from '../versions'
+import { GET } from '../info/route'
 
 // The ServerCapabilities.taxRounding contract (TallyUI #309): /info tells the till to round tax the way the store does.
 describe('TAX_ROUNDING', () => {
@@ -28,7 +29,13 @@ it('accepts supported register versions, subject to the optional minimum', () =>
   expect(registerVersionAccepted(4, { minRegisterContract: 3 })).toBe(false)
 })
 
-// The connector gates allChannels=true on plugin contract 4 or later.
-it('advertises plugin contract 4', () => {
-  expect(PLUGIN_CONTRACT).toBe(4)
+// The connector gates allChannels=true on plugin contract 4 or later; the app gates Refund on 5 (ADR 0026).
+it('V1: advertises plugin contract 5 and order.refund [1] on /info', async () => {
+  expect(PLUGIN_CONTRACT).toBe(5)
+  expect(SUPPORTED_ORDER_REFUND_VERSIONS).toEqual([1])
+  const req = { scope: { resolve: () => ({ getPluginOptions: () => ({}), customerDisplay: () => undefined }) } }
+  const res = { json: jest.fn() }
+  await GET(req as unknown as Parameters<typeof GET>[0], res as unknown as Parameters<typeof GET>[1])
+  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pluginContract: 5,
+    contracts: { 'order.create': SUPPORTED_ORDER_CREATE_VERSIONS, register: SUPPORTED_REGISTER_VERSIONS, 'order.refund': [1] } }))
 })

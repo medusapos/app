@@ -140,12 +140,12 @@ medusaIntegrationTestRunner({
       for (const requestHeaders of [{ Authorization: headers.Authorization }, { Cookie: cookie }] as Record<string, string>[]) {
         const response = await info(requestHeaders)
         expect([response.status, response.data]).toEqual([200, {
-          contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], sync: [1] },
+          contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], 'order.refund': [1], sync: [1] },
           taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
           lineTax: { none: false, classes: false },
           coupons: true,
           registerApproval: { thresholdMinor: 500 },
-          pluginContract: 4,
+          pluginContract: 5,
           customerDisplay: { v: 1, iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 },
         }])
       }
@@ -164,12 +164,12 @@ medusaIntegrationTestRunner({
       const response = await api.get('/tally/v1/info', { headers })
       expect(response.status).toBe(200)
       expect(response.data).toEqual({
-        contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], sync: [1] },
+        contracts: { 'order.create': [1, 2, 3, 4, 5, 6, 7], register: [1, 2, 3], 'order.refund': [1], sync: [1] },
         taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' },
         lineTax: { none: false, classes: false },
         coupons: true,
         registerApproval: { thresholdMinor: 500 },
-        pluginContract: 4,
+        pluginContract: 5,
         customerDisplay: { v: 1, iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 },
       })
     })

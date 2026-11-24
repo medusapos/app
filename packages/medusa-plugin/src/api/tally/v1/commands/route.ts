@@ -1,4 +1,4 @@
-import type { MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
+import type { AuthenticatedMedusaRequest, MedusaRequest, MedusaResponse } from '@medusajs/framework/http'
 import type { CommandBatchRequest } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../../../modules/tally-ledger/service'
@@ -12,6 +12,8 @@ export async function POST(req: MedusaRequest<CommandBatchRequest>, res: MedusaR
   if (batch.ok === false && batch.status === 413) return res.status(413).json({ code: batch.code, maxCommands: batch.maxCommands, message: batch.message })
   if (batch.ok === false) return res.status(batch.status).json({ message: batch.message })
   const ledger = req.scope.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
-  const outcome = await processBatch(req.scope, batch.commands, ledger.getPluginOptions())
+  // The signed-in user, for order.refund's manager check (ADR 0026 decision 7).
+  const actorId = (req as unknown as AuthenticatedMedusaRequest).auth_context?.actor_id
+  const outcome = await processBatch(req.scope, batch.commands, ledger.getPluginOptions(), actorId)
   return res.status(outcome.status).json(outcome.body)
 }
