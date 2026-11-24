@@ -91,9 +91,14 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
   const [shortOrder] = shortOrders;
   expect(shortOrder.status).toBe('completed');
   await openArea(page, 'Orders');
-  const attention = page.getByRole('heading', { name: 'Needs attention', exact: true }).locator('..');
-  const row = attention.getByText(`Order ${shortSale.clientOrderId.slice(-8)} · #${shortOrder.display_id} · 3 items`, { exact: true }).locator('../..');
-  await expect(row).toBeVisible();
-  await expect(row.getByText(/· Synced$/)).toBeVisible();
-  await expect(row.getByText('1 sold without stock: E2E product 5', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Needs attention', exact: true })).toBeVisible();
+  const row = page.getByTestId(`orders-attention-row-${shortSale.clientOrderId}`);
+  await expect(row.getByRole('button', { name: `Open order ${shortSale.clientOrderId.slice(-8)} · #${shortOrder.display_id}`, exact: true })).toBeVisible();
+  await expect(row.getByTestId(`orders-attention-row-${shortSale.clientOrderId}-status`)).toHaveText('Completed');
+  await expect(page.getByTestId(`orders-attention-row-${shortSale.clientOrderId}-notices`)
+    .getByText('1 sold without stock: E2E product 5', { exact: true })).toBeVisible();
+  // This is the item count the old row showed.
+  await row.getByRole('button', { name: `Open order ${shortSale.clientOrderId.slice(-8)} · #${shortOrder.display_id}`, exact: true }).click();
+  await expect(page.getByTestId('order-detail-sheet')
+    .getByText('E2E product 5 x3', { exact: true })).toBeVisible();
 });

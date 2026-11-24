@@ -43,7 +43,7 @@ test('sign-in strip: outbox pauses after three 401s, resumes once signed in agai
   await expect(page.getByText('saved, waiting to send', { exact: false })).not.toBeVisible();
 
   await openArea(page, 'Orders');
-  await expect(page.getByText('· Synced', { exact: false })).toBeVisible();
+  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible();
 });
 
 test('refused strip: shows the store\'s refusal reason and recovers via Try again', async ({ page }) => {
@@ -68,5 +68,5 @@ test('refused strip: shows the store\'s refusal reason and recovers via Try agai
   await expect(page.getByText('not accepted', { exact: false })).not.toBeVisible();
 
   await openArea(page, 'Orders');
-  await expect(page.getByText('· Synced', { exact: false })).toBeVisible();
+  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible();
 });

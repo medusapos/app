@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
+import { formatMoney } from '@tallyui/core';
 import { createOrderBuilder, finalizeOrder, type PosOrder, type PosOrderSyncStatus } from '@tallyui/pos';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
@@ -39,6 +40,43 @@ describe('order detail Sync (row 10.3)', () => {
       onFlush={onFlush} /><PortalHost /></SessionProvider>;
   }
   const disabled = (element: HTMLElement) => element.getAttribute('aria-disabled') === 'true';
+
+  describe('order detail sync notices', () => {
+    it('shows the customer note and payment reference exactly', async () => {
+      const order = sale('applied');
+      order.note = 'Gift wrap';
+      order.payments[0].reference = 'ch_123';
+      render(sheet(order));
+      expect((await screen.findByTestId('order-detail-note')).textContent).toBe('Customer note: Gift wrap');
+      expect(screen.getByTestId(`order-detail-payment-reference-${order.payments[0].id}`).textContent).toBe('ch_123');
+    });
+
+    it('shows the refund due with its formatted amount', async () => {
+      render(sheet({ ...sale('applied'), refundDueMinor: 300 }));
+      const refundDue = await screen.findByTestId('order-detail-refund-due');
+      expect(refundDue.textContent).toContain('Refund due');
+      expect(refundDue.textContent).toContain(formatMoney({ amount: 300, currency: 'EUR' }));
+    });
+
+    it('omits note, refund due and payment references for a plain applied sale', async () => {
+      render(sheet(sale('applied')));
+      expect(await screen.findByTestId('order-detail')).toBeTruthy();
+      expect(screen.queryByTestId('order-detail-note')).toBeNull();
+      expect(screen.queryByTestId('order-detail-refund-due')).toBeNull();
+      expect(screen.queryAllByTestId(/^order-detail-payment-reference-/)).toHaveLength(0);
+    });
+
+    it('shows the closure notice for an applied sale counted in a closed register', async () => {
+      render(sheet({ ...sale('applied'), countedInClosureOf: 'reg_1' }));
+      expect((await screen.findByTestId('order-detail-notices')).textContent)
+        .toBe("Recorded after the register closed. Its payment is in that register's closure.");
+    });
+
+    it('has no notice text for an applied sale without notice fields', async () => {
+      render(sheet(sale('applied')));
+      expect((await screen.findByTestId('order-detail-notices')).textContent).toBe('');
+    });
+  });
 
   it('a pending sale shows Sync first in the footer, and pressing it flushes', async () => {
     const onRetry = vi.fn(async () => 1);
