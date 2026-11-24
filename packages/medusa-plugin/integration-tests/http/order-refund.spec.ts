@@ -1,10 +1,11 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, FeatureFlag, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, FeatureFlag, MedusaError, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import tallyPosRoles from '../../src/scripts/tally-pos-roles'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
+import { Migration20261124120000 } from '../../src/modules/tally-register/migrations/Migration20261124120000'
 import { seed } from './seed'
 
 jest.setTimeout(240000)
@@ -62,8 +63,8 @@ medusaIntegrationTestRunner({
      * An open session and a 10.00 EUR sale of variant A in it, paid card 6.00 + cash 4.00 (or all cash). A till discount
      * (gross, as v3 sends it) comes off the line and the cash, with the sale's tax after it.
      */
-    async function tillSale(cashOnly = false, discount?: { minor: number; taxMinor: number }) {
-      const session = { sessionId: randomUUID(), registerId: randomUUID() }
+    async function tillSale(cashOnly = false, discount?: { minor: number; taxMinor: number }, registerId: string = randomUUID()) {
+      const session = { sessionId: randomUUID(), registerId }
       const cardId = randomUUID()
       const cashId = randomUUID()
       const clientLineId = randomUUID()
@@ -614,6 +615,130 @@ medusaIntegrationTestRunner({
       expect(await stockA()).toBe(stock)
     })
 
+    // #543 window 1: a run that died between beginReturn and recording its id. The row is in_progress with no return_id,
+    // its open return carries the row's tag, and the command's claim is past its lease.
+    async function crashed() {
+      const before = await stockA()
+      const till = await tillSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new Error('request probe'))
+      jest.spyOn(workflow, 'cancelReturn').mockRejectedValueOnce(new Error('cancel probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const row = await knex('tally_refund').where({ command_id: order.id }).first()
+      const begun = await knex('return').where({ order_id: till.orderId }).first()
+      expect(begun).toMatchObject({ id: row.return_id, status: 'open', metadata: { tally_refund_id: row.id } })
+      await knex('tally_refund').where({ id: row.id }).update({ status: 'in_progress', return_id: null })
+      await knex('tally_command').where({ id: order.id }).update({ status: 'in_progress', needs_admin_reason: null,
+        updated_at: knex.raw("now() - interval '1 hour'") })
+      return { before, till, workflow, order, knex, row, begun }
+    }
+
+    it('W1-reuse: a retry records the open return its row began instead of beginning a second: one return, one refund', async () => {
+      const { before, till, order, knex, row, begun } = await crashed()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'applied', return_id: begun.id })
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'received' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    for (const [name, metadata] of [['untagged', null], ['other row', { tally_refund_id: 'tref_someone_else' }]] as const) {
+      it(`W1-foreign: ${name}: an open return that is not this row's is never reused; the retry refuses and leaves it open`, async () => {
+        const { till, order, knex, row, begun } = await crashed()
+        await knex('return').where({ id: begun.id }).update({ metadata })
+        expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+        expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+        expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id,
+          status: 'open', metadata })])
+        expect(await medusaRefunds(till.orderId)).toEqual([])
+      })
+    }
+
+    it('W1-not-reused: cancelled: a cancelled tagged return stays cancelled; the retry begins a new one and finishes', async () => {
+      const { before, till, workflow, order, knex, begun } = await crashed()
+      await workflow.cancelReturn(container, begun.id)
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      // Medusa cancels a return request by soft-deleting the return; it stays so, and the refund has a second return.
+      expect(await knex('return').where({ id: begun.id }).first()).toMatchObject({ deleted_at: expect.any(Date) })
+      const after = await returns(till.orderId)
+      expect(after).toEqual([expect.objectContaining({ status: 'received' })])
+      const second = after[0]
+      expect(second.id).not.toBe(begun.id)
+      expect(await knex('tally_refund').where({ command_id: order.id }).first()).toMatchObject({ status: 'applied',
+        return_id: second.id })
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('W1-not-reused: not open: a tagged return whose status is no longer open is not reused; the retry refuses as today', async () => {
+      const { till, order, knex, row, begun } = await crashed()
+      await knex('return').where({ id: begun.id }).update({ status: 'requested' })
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id,
+        status: 'requested', metadata: { tally_refund_id: row.id } })])
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+    })
+
+    it('W1-lookup-fails-parks: a lookup that throws parks at the return step and never deletes the row', async () => {
+      const { till, workflow, order, knex, row, begun } = await crashed()
+      jest.spyOn(workflow, 'findOwnOpenReturn').mockRejectedValueOnce(new Error('lookup probe'))
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'return',
+        message: 'lookup probe' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', return_id: null })
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+    })
+
+    // #543 round 2: an open tagged return is reused only while its active request change is empty.
+    const activeChanges = (knex: any, returnId: string) => knex('order_change')
+      .where({ return_id: returnId }).whereIn('status', ['pending', 'requested']).whereNull('deleted_at')
+    it('R2-no-change: a tagged return left without an active change (death inside the begin) is not reused; a second return finishes the refund', async () => {
+      const { before, till, order, knex, row, begun } = await crashed()
+      const ids = await activeChanges(knex, begun.id).pluck('id')
+      expect(ids).toHaveLength(1)
+      await knex('order_change_action').whereIn('order_change_id', ids).delete()
+      await knex('order_change').whereIn('id', ids).delete()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      const recorded = await knex('tally_refund').where({ id: row.id }).first()
+      expect(recorded).toMatchObject({ status: 'applied' })
+      expect(recorded.return_id).not.toBe(begun.id)
+      expect(await returns(till.orderId)).toEqual(expect.arrayContaining([expect.objectContaining({ id: begun.id, status: 'open' }),
+        expect.objectContaining({ id: recorded.return_id, status: 'received' })]))
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('R2-actions: a tagged return whose request holds an Admin\'s items is not reused; the retry refuses and leaves them', async () => {
+      const { till, order, knex, row, begun } = await crashed()
+      const stock = await stockA()
+      const { requestItemReturnWorkflow } = require('@medusajs/medusa/core-flows')
+      await requestItemReturnWorkflow(container).run({ input: { return_id: begun.id, items: [{ id: till.lineId, quantity: 1 }] } })
+      const [changeId] = await activeChanges(knex, begun.id).pluck('id')
+      const actions = async () => (await knex('order_change_action').where({ order_change_id: changeId }).whereNull('deleted_at')).length
+      expect(await actions()).toBe(1)
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+      expect(await actions()).toBe(1)
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+    })
+
+    it('R2-reuse-request-fails: a reused return whose request fails is cancelled and the row deleted, as for a begun one', async () => {
+      const { till, workflow, order, knex, row, begun } = await crashed()
+      const stock = await stockA()
+      jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new MedusaError(MedusaError.Types.NOT_ALLOWED, 'request probe'))
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error',
+        message: expect.stringContaining('request probe') } })
+      expect(await knex('return').where({ id: begun.id }).first()).toMatchObject({ deleted_at: expect.any(Date) })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+    })
+
     it('N3-double-subtraction: a refund_unrecorded row whose money moved is refused up front, never priced against the cap (#547)', async () => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
@@ -1027,6 +1152,178 @@ medusaIntegrationTestRunner({
       expect(await loadSessionFigures(container, till.sessionId)).toEqual({ expected: { cash: 1100 }, salesCount: 1 })
       expect(await loadSessionFigures(container, other.sessionId)).toEqual({ expected: { cash: 1000 }, salesCount: 0,
         refundsTotalMinor: 1000 })
+    })
+
+    describe("C544: a closure stores the server's period refunds and keeps the till's when they differ", () => {
+      const knex = () => container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      type Till = Awaited<ReturnType<typeof tillSale>>
+      // The register's refunds counter starts at 5000, and the till's perpetual refunds are 5000 plus its period figure.
+      const submit = (till: Till, refundsMinor: number, cash = 1100, extra: Record<string, unknown> = {}, version = 3) =>
+        command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId, registerId: till.registerId,
+          number: 1, openedAt, closedAt, tillExpected: { cash }, counted: { cash }, periodSalesTotalMinor: 1000,
+          periodRefundsTotalMinor: refundsMinor, perpetualSalesTotalMinor: 1000, perpetualRefundsTotalMinor: 5000 + refundsMinor,
+          unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0', orderIds: [till.sale.payload.clientOrderId],
+          movementIds: [], ...extra }, version)
+      const closureRow = (id: string) => knex()('tally_register_closure').where({ id }).first()
+      const registerRow = (id: string) => knex()('tally_register').where({ id }).first()
+      async function close(till: Till, submission: ReturnType<typeof submit>, cash = 1100) {
+        const [, { register }] = await applied([command('register.session.transition', { sessionId: till.sessionId,
+          status: 'closed', at: closedAt, counted: { cash } }), submission])
+        const row = await closureRow(submission.payload.closureId)
+        return { register, row, stored: { period: Number(row.period_refunds_total_minor), perpetual: Number(row.perpetual_refunds_total_minor),
+          till: row.till_period_refunds_total_minor === null ? null : Number(row.till_period_refunds_total_minor),
+          register: Number((await registerRow(till.registerId)).perpetual_refunds_total_minor) } }
+      }
+      async function sale(registerId?: string) {
+        const till = await tillSale(true, undefined, registerId)
+        if (!registerId) expect(await knex()('tally_register').where({ id: till.registerId }).update({ perpetual_refunds_total_minor: 5000 })).toBe(1)
+        return till
+      }
+      async function refunded(registerId?: string) {
+        const till = await sale(registerId)
+        expect((await post([refund(till)])).data.results[0]).toMatchObject({ status: 'applied', refund: { byMethod: { cash: 1000 } } })
+        return till
+      }
+
+      it.each([0, 1000])('C544-equal: till and server both %d: stored as sent, no till column, no refunds', async minor => {
+        const till = minor ? await refunded() : await sale()
+        const { register, stored } = await close(till, submit(till, minor, 1100 - minor), 1100 - minor)
+        expect(stored).toEqual({ period: minor, perpetual: 5000 + minor, till: null, register: 5000 + minor })
+        expect(register.closure).not.toHaveProperty('refunds')
+      })
+
+      it('C544-till-over: till 1000, server 0: stores 0, keeps 1000, shifts perpetual down, warns', async () => {
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        const till = await sale()
+        const { register, stored } = await close(till, submit(till, 1000))
+        expect(stored).toEqual({ period: 0, perpetual: 5000, till: 1000, register: 5000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 1000, serverMinor: 0 })
+        expect(register.counters.perpetualRefundsTotalMinor).toBe(5000)
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${till.sessionId}.*refunds 1000 .*server's 0`)))
+      })
+
+      it('C544-till-under: a refund applied in the session, till sends 0: stores 1000, keeps 0, shifts perpetual up', async () => {
+        const till = await refunded()
+        const { register, stored } = await close(till, submit(till, 0, 100), 100)
+        expect(stored).toEqual({ period: 1000, perpetual: 6000, till: 0, register: 6000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 0, serverMinor: 1000 })
+      })
+
+      it.each([
+        ['C544-unsynced', 3, (till: Till) => ({ unsyncedCount: 1, unsyncedTotalMinor: 500, orderIds: [till.sale.payload.clientOrderId, randomUUID()] })],
+        ['C544-v2', 2, () => ({})],
+        ['C544-unsynced-base', 3, (till: Till) => ({ unsyncedCount: 1, unsyncedTotalMinor: 500, perpetualRefundsTotalMinor: 7000,
+          orderIds: [till.sale.payload.clientOrderId, randomUUID()] })],
+      ] as const)("%s: the till's figures are stored as sent", async (_tag, version, extra) => {
+        const till = await sale()
+        const { register, stored } = await close(till, submit(till, 1000, 1100, extra(till), version))
+        const perpetual = 'perpetualRefundsTotalMinor' in extra(till) ? 7000 : 6000
+        expect(stored).toEqual({ period: 1000, perpetual, till: null, register: perpetual })
+        expect(register.closure).not.toHaveProperty('refunds')
+      })
+
+      it('C544-unsynced-claim: an unsynced claim the server disproves stores the server\'s figure, as till-over', async () => {
+        const till = await sale()
+        const { register, stored } = await close(till, submit(till, 1000, 1100, { unsyncedCount: 1, unsyncedTotalMinor: 500 }))
+        expect(stored).toEqual({ period: 0, perpetual: 5000, till: 1000, register: 5000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 1000, serverMinor: 0 })
+      })
+
+      it('C544-chain: after a till-over closure the till keeps its high base, and the next closure stays on the counter', async () => {
+        const first = await sale()
+        const one = await close(first, submit(first, 1000))
+        expect(one.stored).toEqual({ period: 0, perpetual: 5000, till: 1000, register: 5000 })
+        const second = await sale(first.registerId)
+        const two = await close(second, submit(second, 0, 1100, { number: 2, perpetualRefundsTotalMinor: 6000 }))
+        expect(two.stored).toEqual({ period: 0, perpetual: 5000, till: null, register: 5000 })
+        expect(two.stored.perpetual - one.stored.perpetual).toBe(two.stored.period)
+      })
+
+      it('C544-race: two closures of one register queued on its lock each store the counter at insert plus their period', async () => {
+        const transition = (till: Till) => applied([command('register.session.transition', { sessionId: till.sessionId,
+          status: 'closed', at: closedAt, counted: { cash: 100 } })])
+        const first = await refunded()
+        await transition(first)
+        const second = await refunded(first.registerId)
+        await transition(second)
+        const waiting = async (n: number) => {
+          for (let i = 0; i < 200; i++) {
+            const { rows: [{ count }] } = await knex().raw(`select count(*)::int as count from pg_stat_activity
+              where datname = current_database() and wait_event_type = 'Lock'`)
+            if (count >= n) return
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          throw new Error(`fewer than ${n} commands wait on the register lock`)
+        }
+        // Hold the register row so both closures pass their gates first and then queue on its lock in order.
+        const hold = await knex().transaction()
+        const submissions = [submit(first, 1000, 100), submit(second, 1000, 100, { number: 2, perpetualRefundsTotalMinor: 7000 })]
+        let responses: Promise<Awaited<ReturnType<typeof post>>>[]
+        try {
+          await hold('tally_register').where({ id: first.registerId }).forUpdate().first()
+          responses = [post([submissions[0]])]
+          await waiting(1)
+          responses.push(post([submissions[1]]))
+          await waiting(2)
+        } finally { await hold.commit() }
+        expect((await Promise.all(responses)).map(response => response.data.results[0].status)).toEqual(['applied', 'applied'])
+        const rows = await Promise.all(submissions.map(submission => closureRow(submission.payload.closureId)))
+        expect(rows.map(row => [Number(row.period_refunds_total_minor), Number(row.perpetual_refunds_total_minor)]))
+          .toEqual([[1000, 6000], [1000, 7000]])
+        expect(Number((await registerRow(first.registerId)).perpetual_refunds_total_minor)).toBe(7000)
+      })
+
+      it.each([
+        ['C544-resend', false, 1000, 1100, { period: 0, perpetual: 5000, till: 1000, register: 5000 }],
+        ['C544-resend-under', true, 0, 100, { period: 1000, perpetual: 6000, till: 0, register: 6000 }],
+      ] as const)('%s: a resend returns the same refunds and changes neither the closure nor the register', async (_tag, refund, minor, cash, expected) => {
+        const till = refund ? await refunded() : await sale()
+        const submission = submit(till, minor, cash)
+        const { register, row, stored } = await close(till, submission, cash)
+        expect(stored).toEqual(expected)
+        const counters = await registerRow(till.registerId)
+        const [resent] = await applied([{ ...submission, id: randomUUID() }])
+        expect(resent.register.closure).toEqual(register.closure)
+        expect((await post([submission])).data.results[0]).toMatchObject({ status: 'duplicate', register: { closure: register.closure } })
+        expect(await closureRow(submission.payload.closureId)).toEqual(row)
+        expect(await registerRow(till.registerId)).toEqual(counters)
+      })
+
+      it("C544-history: closure history reads both figures, and leaves the till's out when it is null", async () => {
+        const over = await sale(), equal = await sale()
+        await close(over, submit(over, 1000))
+        await close(equal, submit(equal, 0))
+        const read = async (till: Till) => (await api.get(`/tally/v1/registers/${till.registerId}/closures`, { headers })).data.closures[0]
+        expect(await read(over)).toMatchObject({ periodRefundsTotalMinor: 0, tillPeriodRefundsTotalMinor: 1000 })
+        const plain = await read(equal)
+        expect(plain.periodRefundsTotalMinor).toBe(0)
+        expect(plain).not.toHaveProperty('tillPeriodRefundsTotalMinor')
+      })
+
+      it('C544-migration: down then up on a database holding a closure keeps the row and brings the column back null', async () => {
+        const till = await sale()
+        const submission = submit(till, 0)
+        await close(till, submission)
+        const before = await closureRow(submission.payload.closureId)
+        const migration = new Migration20261124120000(undefined as never, undefined as never)
+        const columns = async () => Object.keys(await knex()('tally_register_closure').columnInfo())
+        const run = async (step: 'up' | 'down') => {
+          migration.reset()
+          await migration[step]()
+          for (const sql of migration.getQueries()) await knex().raw(sql as string)
+        }
+        try {
+          await run('down')
+          expect(await columns()).not.toContain('till_period_refunds_total_minor')
+          const { till_period_refunds_total_minor: _dropped, ...rest } = before
+          expect(await closureRow(submission.payload.closureId)).toEqual(rest)
+          await run('up')
+          expect(await columns()).toContain('till_period_refunds_total_minor')
+          expect(await closureRow(submission.payload.closureId)).toEqual({ ...before, till_period_refunds_total_minor: null })
+        } finally {
+          if (!(await columns()).includes('till_period_refunds_total_minor')) await run('up')
+        }
+      })
     })
   },
 })

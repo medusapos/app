@@ -183,6 +183,7 @@ So a refund that leaves every product line fully refunded prices its lines at th
 - **Closure totals.**
   - `periodRefundsTotalMinor` is the sum of the session's applied refunds.
   - `perpetualRefundsTotalMinor` accumulates across sessions.
+  - **2026-11-24 (#544):** when the server holds every sale (the ADR 0023 condition of 2026-11-22/23), the session's applied refunds are stored as the period, and a differing till figure is kept in `till_period_refunds_total_minor`. The stored perpetual is the register counter plus the stored period, read and written under the register lock. The result carries `closure.refunds = { tillMinor, serverMinor }`, the difference is logged as a warning, and there is no gate. The till adopts the counters raise-only, so its own counter can stay high on its screen until TallyUI adopts a lowered counter.
 - **Contract.** The register contract version does not change.
 
 ### 7. Who may refund: the closure-approval manager check (ruling E)

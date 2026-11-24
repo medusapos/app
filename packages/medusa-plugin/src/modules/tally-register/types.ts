@@ -13,8 +13,8 @@ export interface RegisterCommandResult {
   session?: { id: string; status: 'open' | 'counting' | 'closed'; openedAt?: string; openingFloatMinor?: number; expected?: Record<string, number>; salesCount?: number };
   /** The register's counters: a floor for the till's own, never lowered. */
   counters?: { lastClosureNumber: number; perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number };
-  /** `register.closure.submit` only. */
-  closure?: { serverClosureId: string; number: number; expected?: Record<string, number>; variance?: Record<string, number>; approvalVerified?: boolean };
+  /** `register.closure.submit` only. `refunds` only when the server's period refunds replaced the till's (#544). */
+  closure?: { serverClosureId: string; number: number; expected?: Record<string, number>; variance?: Record<string, number>; approvalVerified?: boolean; refunds?: { tillMinor: number; serverMinor: number } };
 }
 
 export interface RegisterSessionOpenPayload {
@@ -30,7 +30,9 @@ export type RegisterMovementRecordInput = RegisterMovementRecordPayload & { cont
 export type RegisterMovementVoidInput = RegisterMovementVoidPayload & { contract?: number }
 export type RegisterClosureSubmitInput = RegisterClosureSubmitV3Payload & { contract?: number; commandId?: string; thresholdMinor?: number
   /** Contract 3 with unsyncedCount 0, or a false unsynced claim (the server holds every orderIds sale): the server's expected figures, which then decide the approval gate (ADR 0023). */
-  serverExpected?: () => Promise<Record<string, number> | undefined> }
+  serverExpected?: () => Promise<Record<string, number> | undefined>
+  /** Under the same condition: the session's applied refunds, which replace a differing periodRefundsTotalMinor (#544). */
+  serverRefundsTotalMinor?: () => Promise<number | undefined> }
 
 export interface RegisterSessionTransitionPayload {
   sessionId: string; status: 'open' | 'counting' | 'closed'; at: string;
@@ -62,6 +64,7 @@ export interface StoredClosure {
   till_expected: Record<string, number>; counted: Record<string, number>
   period_sales_total_minor: number; period_refunds_total_minor: number
   perpetual_sales_total_minor: number; perpetual_refunds_total_minor: number
+  till_period_refunds_total_minor: number | null
   unsynced_count: number; unsynced_total_minor: number; software_version: string
   order_ids: string[]; movement_ids: string[]
   store_key: string | null; device_name: string | null; opened_by: string | null

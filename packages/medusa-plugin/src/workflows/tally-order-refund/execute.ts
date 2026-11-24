@@ -16,7 +16,7 @@ import { clientTimeStageErrors } from '../client-time'
 import { refundPayloadErrors } from './payload-shape'
 import { connectorSplit, medusaSumMinor, priceRefund, refundMoneyMinor, type PricedLine, type RefundableLine } from './price'
 import { splitRefund, type SplitEntry, type TillTender } from './split'
-import { beginReturn, cancelReturn, moneyStep, receiveStep, requestReturn } from './workflow'
+import { beginReturn, cancelReturn, findOwnOpenReturn, moneyStep, receiveStep, requestReturn } from './workflow'
 import { moveOrderRefund } from './admin'
 
 type Raw = { value: string }
@@ -212,9 +212,11 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
     let begun = false
     if (lines.length && !row.return_id) {
       if (!order.locationId) throw new MedusaError(MedusaError.Types.INVALID_DATA, `Order ${order.id} has no stock location`)
-      let returnId: string
+      // A run that died between the begin and the record left its tagged return open: record that one, never a second.
+      let returnId = await findOwnOpenReturn(container, { orderId: order.id, refundRowId: row.id })
       try {
-        returnId = await beginReturn(container, { orderId: order.id, locationId: order.locationId, actorId, note: row.reason })
+        returnId ??= await beginReturn(container, { orderId: order.id, locationId: order.locationId, actorId, note: row.reason,
+          refundRowId: row.id })
       } catch (error) {
         return await undo(error)
       }
