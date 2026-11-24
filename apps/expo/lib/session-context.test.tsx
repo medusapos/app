@@ -167,6 +167,34 @@ describe('SessionProvider', () => {
     act(() => context.mergeCapabilities(structuredClone(fresh)));
     expect(context.session).toBe(updated);
   });
+  it('a coupons flag turned off mid-session updates the session', async () => {
+    await mount({ ...stored, capabilities: { orderCreate: 6, register: 3, coupons: true } });
+    for (const fresh of [{ orderCreate: 6, register: 3, coupons: false }, { orderCreate: 6, register: 3 }]) {
+      const before = context.session;
+      act(() => context.mergeCapabilities(fresh));
+      expect(context.session).not.toBe(before);
+      expect(context.session?.capabilities).toEqual(fresh);
+      expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(fresh);
+    }
+  });
+  it.each([
+    ['lineTax', { orderCreate: 6, lineTax: { none: true, classes: false } }, { orderCreate: 6, lineTax: { none: true, classes: true } }],
+    ['multiplePayments', { orderCreate: 6, multiplePayments: true }, { orderCreate: 6, multiplePayments: false }],
+    ['orderRefund', { orderCreate: 6, orderRefund: 1 }, { orderCreate: 6 }],
+  ] as const)('a changed %s updates the session', async (_field, kept, fresh) => {
+    await mount({ ...stored, capabilities: kept });
+    const before = context.session;
+    act(() => context.mergeCapabilities(fresh));
+    expect(context.session).not.toBe(before);
+    expect(context.session?.capabilities).toEqual(fresh);
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(fresh);
+  });
+  it('a fresh read in a different key order keeps the session', async () => {
+    await mount({ ...stored, capabilities: { orderCreate: 6, coupons: true, lineTax: { none: true, classes: false } } });
+    const before = context.session;
+    act(() => context.mergeCapabilities({ lineTax: { classes: false, none: true }, coupons: true, orderCreate: 6 }));
+    expect(context.session).toBe(before);
+  });
   it.each(['signOut', 'reportUnauthorized'] as const)('%s clears state, storage and this backend cache', async (action) => {
     await mount();
     act(() => context[action]());

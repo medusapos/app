@@ -1,10 +1,10 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { POS_CONNECTOR_ID } from './pos-connector';
-import { parseTaxRounding, resolveCapabilities, type ServerCapabilities } from '@tallyui/core';
+import { resolveCapabilities, type ServerCapabilities } from '@tallyui/core';
 import { exposeE2eHook } from './e2e-debug';
 import { clearProductCache } from './product-cache';
 import {
-  clearSession, defaultStorage, loadSession, login, LoginError, NO_POS_ACCESS_MESSAGE, parseRegisterApproval, refreshSession,
+  clearSession, defaultStorage, loadSession, login, LoginError, NO_POS_ACCESS_MESSAGE, refreshSession,
   saveSession, shouldRefresh, type Session,
 } from './session';
 
@@ -31,6 +31,10 @@ type SessionContextValue = {
   signOutDeferred: boolean;
 };
 export type SaleHold = 'saving' | 'receipt' | null;
+// JSON with object keys sorted at every depth, so a capability read in another key order compares equal; an undefined
+// value and an absent key compare equal too.
+const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => item && typeof item === 'object' &&
+  !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map((k) => [k, (item as Record<string, unknown>)[k]])) : item);
 const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -86,11 +90,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const current = currentSession.current;
     const capabilities = resolveCapabilities(fresh, current?.capabilities);
     // Unchanged keeps the session's identity, so nothing that depends on it re-runs.
-    if (!current || (capabilities?.orderCreate === current.capabilities?.orderCreate &&
-      capabilities?.register === current.capabilities?.register &&
-      parseRegisterApproval(capabilities?.registerApproval)?.thresholdMinor ===
-        parseRegisterApproval(current.capabilities?.registerApproval)?.thresholdMinor &&
-      JSON.stringify(parseTaxRounding(capabilities?.taxRounding)) === JSON.stringify(parseTaxRounding(current.capabilities?.taxRounding)))) return;
+    if (!current || canonicalJson(capabilities) === canonicalJson(current.capabilities)) return;
     const next = { ...current, capabilities };
     saveSession(defaultStorage(), next);
     currentSession.current = next;
