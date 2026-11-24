@@ -742,7 +742,7 @@ medusaIntegrationTestRunner({
 
     // #543 window 2: a run paused inside a Medusa step, still holding the order lock, until the test lets it go.
     type Workflow = typeof import('../../src/workflows/tally-order-refund/workflow')
-    function paused(step: 'moneyStep' | 'receiveStep') {
+    function paused(step: 'moneyStep' | 'receiveStep', dies = false) {
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
       const original = workflow[step] as (...args: unknown[]) => Promise<unknown>
       let entered!: () => void, release!: () => void
@@ -751,12 +751,26 @@ medusaIntegrationTestRunner({
       jest.spyOn(workflow, step).mockImplementationOnce((async (...args: unknown[]) => {
         entered()
         await gate
+        if (dies) throw new Error('dead run: the step never ran')
         return original(...args)
       }) as never)
       return { reached, release }
     }
     const knexOf = () => container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
     const ageClaim = (id: string) => knexOf()('tally_command').where({ id }).update({ updated_at: knexOf().raw("now() - interval '1 hour'") })
+    // The backends holding the order's refund lock (takeOrderLock's two keys) in this database; `waiting`: blocked on a row lock.
+    const lockHolders = async (orderId: string, waiting = false): Promise<number[]> => (await knexOf().raw(`select l.pid from pg_locks l
+      join pg_stat_activity a on a.pid = l.pid where l.locktype = 'advisory' and l.granted and l.objsubid = 2
+      and l.database = (select oid from pg_database where datname = current_database()) and l.classid = hashtext('tally_refund')::oid
+      and l.objid = hashtext(?)::oid${waiting ? " and a.wait_event_type = 'Lock'" : ''}`, [orderId])).rows.map((r: Row) => r.pid)
+    async function untilHeld(orderId: string, waiting = false) {
+      for (let n = 0; n < 150; n++) {
+        const pids = await lockHolders(orderId, waiting)
+        if (pids.length) return pids
+        await new Promise(done => setTimeout(done, 100))
+      }
+      throw new Error(`No run holds order ${orderId}'s refund lock`)
+    }
     const oneLine = (till: Awaited<ReturnType<typeof remainderSale>>, n: number) => command('order.refund', { ...till.full.payload,
       clientRefundId: randomUUID(), lines: [till.full.payload.lines[n]], totalMinor: 118 })
 
@@ -816,11 +830,94 @@ medusaIntegrationTestRunner({
         items: [expect.objectContaining({ quantity: 1, received_quantity: 1 })] })])
     })
 
-    it('W2-dies: a run that died for real (lock freed, claim stale under another token) is resumed by the retry: one row, applied once', async () => {
+    it('W2-dies: a run whose backend is terminated while it holds the lock never moves money; the retry re-parks it and resume finishes once', async () => {
+      const before = await stockA()
+      const till = await tillSale()
+      const pause = paused('moneyStep', true)
+      const order = refund(till)
+      const first = post([order])
+      try {
+        await pause.reached
+        await ageClaim(order.id)
+        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+        expect(await commandRow(order.id)).toMatchObject({ status: 'in_progress' })
+        const pids = await lockHolders(till.orderId)
+        expect(pids).toHaveLength(1)
+        expect((await knexOf().raw('select pg_terminate_backend(?) as ended', [pids[0]])).rows[0].ended).toBe(true)
+      } finally {
+        pause.release()
+      }
+      await first
+      expect(await lockHolders(till.orderId)).toEqual([])
+      // The dead run parked its row, but its command park went through the terminated connection and never landed.
+      const row = await knexOf()('tally_refund').where({ command_id: order.id }).first()
+      expect(row).toMatchObject({ status: 'needs_admin', received_at: expect.any(Date), medusa_refund_id: null })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'in_progress' })
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      await ageClaim(order.id)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { refundId: row.id,
+        step: 'park', reason: 'park_unrecorded' } })
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 1000 } } })
+      expect(await knexOf()('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: row.id, status: 'applied' })])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: row.return_id, status: 'received' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('W2-takeover-before-row: a run taken over before its row insert parks a released command; the next retry re-parks it and resume finishes once', async () => {
+      const till = await remainderSale()
+      const pause = paused('receiveStep')
+      const order = oneLine(till, 0)
+      // The session row held, so the first run waits after it takes the order lock and before it inserts its row.
+      const hold = await knexOf().transaction()
+      await hold.raw('select id from tally_register_session where id = ? for update', [till.sessionId])
+      const first = post([order])
+      try {
+        await untilHeld(till.orderId, true)
+        await ageClaim(order.id)
+        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+        expect(await commandRow(order.id)).toBeUndefined()
+        await hold.commit()
+        await pause.reached
+        // A refund made outside the plugin while the run waits: the check before the money parks it refund_unrecorded.
+        const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+        await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
+      } finally {
+        if (!hold.isCompleted()) await hold.rollback()
+        pause.release()
+      }
+      expect((await first).data).toEqual({ code: 'in_progress', id: order.id })
+      const row = await knexOf()('tally_refund').where({ command_id: order.id }).first()
+      expect(row).toMatchObject({ status: 'needs_admin', medusa_refund_id: null })
+      expect(await commandRow(order.id)).toBeUndefined()
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { refundId: row.id,
+        clientRefundId: order.payload.clientRefundId, step: 'park', reason: 'park_unrecorded' } })
+      const hand = await knexOf()('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      await refundsScript('baseline', till.orderId, hand.id, 'test', 'reason')
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 118 } } })
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((a, b) => a - b)).toEqual([0.01, 1.18])
+    })
+
+    it('W2-crash-between-parks: a row parked before a crash whose command park never landed is re-parked by the retry; resume finishes it once', async () => {
       const { before, till, order, knex, row, begun } = await crashed()
+      // The crash came after the row's park and before the command's: the row is needs_admin, its command in_progress and stale.
+      await knex('tally_refund').where({ id: row.id }).update({ status: 'needs_admin', return_id: begun.id })
       await knex('tally_command').where({ id: order.id }).update({ claim_token: randomUUID() })
-      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
-      expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
+      const stock = await stockA()
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { refundId: row.id,
+        step: 'park', reason: 'park_unrecorded' } })
+      expect(await knex('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: row.id,
+        status: 'needs_admin', return_id: begun.id, received_at: null, medusa_refund_id: null })])
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+      // Not received, so apply refuses; resume runs the missing steps on the same row and return.
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 1000 } } })
       expect(await knex('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: row.id, status: 'applied' })])
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'received' })])
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])

@@ -139,6 +139,11 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       if (row.status !== 'applied') return busy
       return { outcome: rejected(id, 'invalid_payload', `clientRefundId: ${payload.clientRefundId} is already refund ${row.id}`), keepClaim: false }
     }
+    // A parked row whose command park never landed (a takeover before the row insert, or a crash between the two parks) is
+    // parked again by command id. No money step runs here: it returns before sessionTakesMoney, pricing, the insert and runSteps.
+    if (row?.status === 'needs_admin' && row.command_id === id) {
+      return parkRefund(container, { id, row, trx }, 'park', "This refund was parked, but the park did not reach the ledger. Check the order's Medusa refunds, then use tally-ledger-resolve resume or apply.", 'park_unrecorded')
+    }
     if (row?.status === 'needs_admin') return busy
     if (row?.status === 'applied') {
       const result = refundResult(id, row)
@@ -181,7 +186,7 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
 }
 
 async function parkRefund(container: MedusaContainer, { id, row, trx }: { id: string; row: RefundRow; trx: Knex.Transaction },
-  step: string, message: string, reason?: 'refund_unrecorded' | 'session_closed'): Promise<Run> {
+  step: string, message: string, reason?: 'refund_unrecorded' | 'session_closed' | 'park_unrecorded'): Promise<Run> {
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
