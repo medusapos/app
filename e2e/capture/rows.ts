@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, cartTab, createAdminCustomer, discount, openArea, openRegisterPanel, productsTab, sellBySku, signIn } from '../helpers';
+import { addE2E1, adminToken, backend, cartTab, createAdminCustomer, createStoreOnlyOrder, discount, openArea, openRegisterPanel, productsTab, sellBySku, signIn } from '../helpers';
 
 export type Size = 'desktop' | 'tablet' | 'phone';
 export type CaptureRow = {
@@ -318,10 +318,12 @@ export const rows: CaptureRow[] = [
   { id: '09f', title: 'Closure (Z)', state: 'Closure sheet after closing', reach: async (page) => {
     await closeRegister(page, false);
   } },
-  { id: '10', title: 'Orders', state: 'Orders after two sales', reach: async (page, size) => {
+  { id: '10', title: 'Orders', state: 'Orders after two sales and a web order', reach: async (page, size) => {
     await sell(page, size, 'E2E-2');
     await sell(page, size, 'E2E-3');
+    const order = await createStoreOnlyOrder(await adminToken(), 'E2E-3', `web-${crypto.randomUUID()}@example.com`);
     await openArea(page, 'Orders');
+    await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${order.id}`)).toBeVisible();
     await expect(page.getByRole('button', { name: /^Open order / }).nth(1)).toBeVisible();
   } },
   { id: '11', title: 'Customers', state: 'Customers searched to Ada Lovelace', reach: async (page) => {
