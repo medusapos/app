@@ -7,24 +7,24 @@ import { takeBackStockWorkflow } from '../workflows/tally-order-create/workflow'
 import { resolveOrderRefund } from '../workflows/tally-order-refund/execute'
 
 // npx medusa exec <built path>/tally-ledger-resolve.js <commandId> apply|reject [message]
-// npx medusa exec <built path>/tally-ledger-resolve.js <commandId> resume|apply <medusaRefundId>   (an order.refund)
+// npx medusa exec <built path>/tally-ledger-resolve.js <commandId> resume|apply <medusaRefundId>|move [<sessionId>]   (an order.refund)
 // Resolves an order.create or order.refund the ledger parked as needs_admin (see the plugin README).
 export default async function tallyLedgerResolve({ container, args }: ExecArgs) {
   const [id, action, ...words] = args
   const message = words.join(' ') || (action === 'reject' ? 'Rejected by an admin.' : 'Fixed by an admin.')
-  if (!id || (action !== 'apply' && action !== 'reject' && action !== 'resume')) {
-    throw new Error('Usage: medusa exec tally-ledger-resolve.js <commandId> apply|reject [message], or <commandId> resume|apply <medusaRefundId> for an order.refund')
+  if (!id || (action !== 'apply' && action !== 'reject' && action !== 'resume' && action !== 'move')) {
+    throw new Error('Usage: medusa exec tally-ledger-resolve.js <commandId> apply|reject [message], or <commandId> resume|apply <medusaRefundId>|move [<sessionId>] for an order.refund')
   }
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const row = await knex('tally_command').where({ id }).first()
-  if (row?.status !== 'needs_admin') throw new Error(`Command ${id} is ${row?.status ?? 'missing'}, not needs_admin`)
+  if (row?.status !== 'needs_admin') throw new Error(`Command ${id} is ${row?.status ?? 'missing'}, not needs_admin; nothing written`)
   if (row.type === 'order.refund') {
     const outcome = await resolveOrderRefund(container, id, action, words[0])
     logger.info(`tally_ledger_resolve: refund command ${id} ${action}: ${outcome.kind === 'result' ? outcome.result.status : outcome.kind}`)
     return
   }
-  if (action === 'resume') throw new Error(`Command ${id} is an ${row.type}; resume is for an order.refund`)
+  if (action === 'resume' || action === 'move') throw new Error(`Command ${id} is an ${row.type}; ${action} is for an order.refund; nothing written`)
   const reason = row.needs_admin_reason as { orderId: string; clientOrderId: string }
   // The same per-sale lock execute.ts holds, so no order.create of this sale runs while it is resolved.
   const connection = await knex.client.acquireConnection()

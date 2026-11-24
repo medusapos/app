@@ -235,12 +235,15 @@ Cancelling the order by hand is fine: `reject` still takes back the plugin's top
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
 **A parked `order.refund`** (ADR 0026) carries `needs_admin_reason` `{ orderId, clientRefundId, refundId, step, message, reason? }`, where
 `step` is the Medusa step that failed (`return`, `receive` or `refund`). Its `tally_refund` row records what already ran
-(`return_id`, `received_at`, `medusa_refund_id`). Two actions: `tally-ledger-resolve.js <commandId> resume` runs the missing
+(`return_id`, `received_at`, `medusa_refund_id`). `tally-ledger-resolve.js <commandId> resume` runs the missing
 steps and applies the command. Before the receive and again before the money step, the plugin checks that Medusa shows no
 more refunded on the payment than `tally_refund` records; if it does, the row parks with `reason: 'refund_unrecorded'`
 before stock or money moves. `tally-ledger-resolve.js <commandId> apply
 <medusaRefundId>` records a refund the admin made by hand on the order's payment and applies the command. There is no
 `reject` for a refund: once a return exists, stock has moved.
+`npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-resolve.js <commandId> move [<sessionId>]` moves a refund whose session stopped taking money to an open session (by default its register's live session), appends a `tally_refund_moves` audit entry without replacing other metadata, then resumes it; a named session on another register logs which drawer pays.
+`npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-refunds.js baseline <orderId> <medusaRefundId> [--hand-made] <reason words...>` records a hand-made refund's id, amount, time and required reason in `tally_refund_baselines` for the never-twice check, preserving other metadata; an equal-amount pending till refund requires `apply` if it is its own money, or `--hand-made` if an admin made it, then the admin runs `resume`.
+`npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-refunds.js list` lists every parked refund, oldest first, with its order, session, amount, step, reason and update time, followed by every move audit entry with its refund's current status.
 **Backfill for rejects made before the marking.** A store needs it only if an admin ran `tally-ledger-resolve reject`
 before the release that added the `tally_rejected` marker (#121): those cancelled orders still count in register figures.
 The script is manual; nothing runs it automatically. On a real store, plan the run with the store's owner, because it changes

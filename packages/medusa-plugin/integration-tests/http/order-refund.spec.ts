@@ -114,6 +114,34 @@ medusaIntegrationTestRunner({
       const script = require(`${built}/scripts/tally-ledger-resolve`) as typeof import('../../src/scripts/tally-ledger-resolve')
       await script.default({ container, args: [id, ...args] } as never)
     }
+    const refundsScript = async (...args: string[]) => {
+      const script = require(`${built}/scripts/tally-refunds`) as typeof import('../../src/scripts/tally-refunds')
+      await script.default({ container, args } as never)
+    }
+
+    async function parkedReceived(close = true) {
+      const till = await tillSale(true)
+      const stock = await stockA()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await stockA()).toBe(stock + 1)
+      if (close) {
+        await applied([command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId,
+          registerId: till.registerId, number: 1, openedAt, closedAt, tillExpected: { cash: 1100 }, counted: { cash: 1100 },
+          periodSalesTotalMinor: 1000, periodRefundsTotalMinor: 0, perpetualSalesTotalMinor: 1000,
+          perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0',
+          orderIds: [till.sale.payload.clientOrderId], movementIds: [] }, 3),
+        command('register.session.transition', { sessionId: till.sessionId, status: 'closed', at: closedAt, counted: { cash: 1100 } })])
+        await resolve(order.id, 'resume')
+        expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin',
+          needs_admin_reason: { step: 'session', reason: 'session_closed' } })
+      }
+      const row = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_refund').where({ command_id: order.id }).first()
+      expect(row.received_at).not.toBeNull()
+      return { till, order, row }
+    }
 
     /** The remainder order (ADR 0026 decision 5): three one-unit lines at 0.99 ex 19% (gross 1.1781 each), paid 3.53 cash. */
     async function remainderSale(charge?: 'fee' | 'shipping') {
@@ -561,6 +589,196 @@ medusaIntegrationTestRunner({
         message: expect.stringMatching(/^refund_unrecorded/) })
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       expect(await knex('tally_refund').where({ command_id: order.id }).first()).toMatchObject({ status: 'needs_admin', medusa_refund_id: null })
+    })
+
+    it.each([['M1-move-default', false], ['M2-move-named', true]] as const)('%s: finishes in an open session without changing the closed one', async (_tag, named) => {
+      const { till, order, row } = await parkedReceived()
+      const service = container.resolve(Modules.ORDER)
+      const { metadata } = await service.retrieveOrder(till.orderId)
+      expect(metadata?.tally_payments).toBeDefined()
+      const logger = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'info')
+      const figures = await loadSessionFigures(container, till.sessionId), stock = await stockA()
+      const medusa = await medusaRefunds(till.orderId)
+      expect(medusa).toEqual([])
+      const next = { sessionId: randomUUID(), registerId: named ? randomUUID() : till.registerId }
+      await applied([command('register.session.open', { ...next, openedAt, countedFloatMinor: 2000 })])
+      const before = await loadSessionFigures(container, next.sessionId)
+      await resolve(order.id, 'move', ...(named ? [next.sessionId] : []))
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied' } })
+      const moved = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_refund').where({ id: row.id }).first()
+      expect(moved).toMatchObject({ status: 'applied', session_id: next.sessionId, received_at: row.received_at, return_id: row.return_id })
+      expect((await service.retrieveOrder(till.orderId)).metadata).toEqual({ ...metadata, tally_refund_moves: [{
+        refundId: row.id, commandId: order.id, fromSessionId: till.sessionId, toSessionId: next.sessionId,
+        at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/),
+      }] })
+      expect(logger).toHaveBeenCalledWith(expect.stringContaining(`moved from session ${till.sessionId} to ${next.sessionId}`))
+      if (named) expect(logger).toHaveBeenCalledWith(expect.stringContaining(
+        `cash leaves register ${next.registerId}'s drawer, not the sale's register ${till.registerId}`))
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(stock)
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ items: [expect.objectContaining({ received_quantity: 1 })] })])
+      expect(await loadSessionFigures(container, till.sessionId)).toEqual(figures)
+      expect(await loadSessionFigures(container, next.sessionId)).toEqual({ expected: { cash: before!.expected.cash - 1000 },
+        salesCount: 0, refundsTotalMinor: 1000 })
+    })
+
+    it.each(['still open', 'counting', 'filed closure', 'no open session', 'money recorded'])('M3-move-refusals: %s', async scenario => {
+      const { till, order } = await parkedReceived(scenario !== 'still open')
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const next = { sessionId: randomUUID(), registerId: randomUUID() }
+      if (scenario !== 'no open session') {
+        await applied([command('register.session.open', { ...next, openedAt, countedFloatMinor: 2000 })])
+      }
+      if (scenario === 'counting') await applied([command('register.session.transition', { sessionId: next.sessionId, status: 'counting', at: closedAt })])
+      if (scenario === 'filed closure') {
+        await applied([command('register.closure.submit', { closureId: randomUUID(), ...next, number: 1, openedAt, closedAt,
+          tillExpected: { cash: 2000 }, counted: { cash: 2000 }, periodSalesTotalMinor: 0, periodRefundsTotalMinor: 0,
+          perpetualSalesTotalMinor: 0, perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0,
+          softwareVersion: '1.0', orderIds: [], movementIds: [] }, 3)])
+      }
+      if (scenario === 'money recorded') await knex('tally_refund').where({ command_id: order.id }).update({ medusa_refund_id: 'ref_recorded' })
+      const row = await knex('tally_refund').where({ command_id: order.id }).first(), parked = await commandRow(order.id)
+      const refusal = resolve(order.id, 'move', ...(scenario === 'no open session' ? [] : [next.sessionId]))
+      await expect(refusal).rejects.toThrow('nothing written')
+      if (scenario === 'still open') await expect(refusal).rejects.toThrow('use resume')
+      if (scenario === 'counting') await expect(refusal).rejects.toThrow('status counting')
+      if (scenario === 'filed closure') await expect(refusal).rejects.toThrow('status open')
+      if (scenario === 'no open session') await expect(refusal).rejects.toThrow(`Register ${till.registerId} has no open session`)
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toEqual(row)
+      expect(await commandRow(order.id)).toEqual(parked)
+      expect((await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)).metadata).not.toHaveProperty('tally_refund_moves')
+    })
+
+    it.each(['B1-baseline', 'B4-baseline-fails-closed'])('%s: a hand refund baseline preserves metadata and is required on resume', async tag => {
+      const till = await remainderSale()
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { reason: 'refund_unrecorded' } })
+      const service = container.resolve(Modules.ORDER)
+      const { metadata } = await service.retrieveOrder(till.orderId)
+      expect(metadata?.tally_payments).toBeDefined()
+      await refundsScript('baseline', till.orderId, hand.id, 'test', 'reason')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin' })
+      expect((await service.retrieveOrder(till.orderId)).metadata).toEqual({ ...metadata, tally_refund_baselines: [{
+        refundId: hand.id, amountMinor: 1, at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/), reason: 'test reason',
+      }] })
+      if (tag === 'B4-baseline-fails-closed') {
+        // The service merges metadata; undefined removes this key when the JSON is stored.
+        await service.updateOrders(till.orderId, { metadata: { ...metadata, tally_refund_baselines: undefined } })
+        expect((await service.retrieveOrder(till.orderId)).metadata).toEqual(metadata)
+        expect((await service.retrieveOrder(till.orderId)).metadata).not.toHaveProperty('tally_refund_baselines')
+        await resolve(order.id, 'resume')
+        expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'refund_unrecorded' } })
+        expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 0.01 }])
+        return
+      }
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((a, b) => a - b)).toEqual([0.01, 1.18])
+    })
+
+    it.each(['another payment', 'recorded', 'already baselined', 'amount guard'])('B2-baseline-refusals: %s', async scenario => {
+      const till = await remainderSale()
+      const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      let paymentId = till.paymentId
+      if (scenario === 'another payment') paymentId = (await remainderSale()).paymentId
+      if (scenario === 'recorded') await applied([order])
+      else if (scenario === 'amount guard') {
+        const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+        const original = workflow.moneyStep
+        jest.spyOn(workflow, 'moneyStep').mockImplementationOnce(async (...args) => {
+          await original(...args)
+          throw new Error('record probe')
+        })
+        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      } else {
+        const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+        await refundPaymentWorkflow(container).run({ input: { payment_id: paymentId, amount: 0.01, note: 'by hand' } })
+      }
+      const medusa = await knex('refund').where({ payment_id: paymentId }).whereNull('deleted_at').first('id')
+      if (scenario === 'already baselined') await refundsScript('baseline', till.orderId, medusa.id, 'test reason')
+      const service = container.resolve(Modules.ORDER)
+      const { metadata } = await service.retrieveOrder(till.orderId)
+      const refusal = refundsScript('baseline', till.orderId, medusa.id, 'test reason')
+      await expect(refusal).rejects.toThrow('nothing written')
+      if (scenario === 'recorded') await expect(refusal).rejects.toThrow('own money')
+      if (scenario === 'amount guard') {
+        const row = await knex('tally_refund').where({ command_id: order.id }).first()
+        await expect(refusal).rejects.toThrow(row.id)
+        await expect(refusal).rejects.toThrow(`tally-ledger-resolve.js ${order.id} apply ${medusa.id}`)
+        await expect(refusal).rejects.toThrow('--hand-made')
+        await resolve(order.id, 'resume')
+        expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'refund_unrecorded' } })
+        expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId, amount: 1.18 }])
+      }
+      expect((await service.retrieveOrder(till.orderId)).metadata).toEqual(metadata)
+    })
+
+    it('B3-hand-made: only the explicit flag baselines a hand refund equal to the parked row', async () => {
+      const till = await remainderSale()
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'by hand' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { reason: 'refund_unrecorded' } })
+      await expect(refundsScript('baseline', till.orderId, hand.id, 'test reason')).rejects.toThrow('nothing written')
+      await refundsScript('baseline', till.orderId, hand.id, '--hand-made', 'test', 'reason')
+      expect((await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)).metadata?.tally_refund_baselines).toEqual([{
+        refundId: hand.id, amountMinor: 118, at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/), reason: 'test reason',
+      }])
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount)).toEqual([1.18, 1.18])
+    })
+
+    it.each([false, true])('B5-baseline-needs-reason: hand-made flag %s', async handMade => {
+      const till = await remainderSale()
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      await expect(refundsScript('baseline', till.orderId, hand.id, ...(handMade ? ['--hand-made'] : []))).rejects.toThrow('nothing written')
+      expect((await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)).metadata).not.toHaveProperty('tally_refund_baselines')
+    })
+
+    it('L1-list: parked refunds with order, session, money and reason, then moved refunds with current status', async () => {
+      const logger = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'info')
+      await refundsScript('list')
+      expect(logger).toHaveBeenCalledWith('no parked refunds')
+      const { till, order, row } = await parkedReceived()
+      const other = await tillSale(true)
+      await applied([refund(other)])
+      const { listParkedRefunds } = require(`${built}/workflows/tally-order-refund/admin`) as typeof import('../../src/workflows/tally-order-refund/admin')
+      const { display_id } = await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)
+      const { parked: rows, moved } = await listParkedRefunds(container)
+      expect(moved).toEqual([])
+      expect(rows).toEqual([expect.objectContaining({ id: row.id, command_id: order.id, order_id: till.orderId, display_id,
+        session_id: till.sessionId, session_status: 'closed', closure_filed: true, currency_code: 'eur',
+        step: 'session', reason: 'session_closed', updated_at: row.updated_at })])
+      expect(Number(rows[0].total_minor)).toBe(1000)
+      logger.mockClear()
+      await refundsScript('list')
+      expect(logger).toHaveBeenCalledTimes(2)
+      expect(logger).toHaveBeenCalledWith(`refund ${row.id}, command ${order.id}, order ${till.orderId} (#${display_id}), session ${till.sessionId} (closed, closure filed: true), 10.00 eur, step session, reason session_closed, updated_at ${row.updated_at.toISOString()}`)
+      const next = { sessionId: randomUUID(), registerId: till.registerId }
+      await applied([command('register.session.open', { ...next, openedAt, countedFloatMinor: 2000 })])
+      await resolve(order.id, 'move')
+      const listed = await listParkedRefunds(container)
+      expect(listed.parked).toEqual([])
+      expect(listed.moved).toEqual([{ id: row.id, command_id: order.id, order_id: till.orderId, display_id,
+        from_session_id: till.sessionId, to_session_id: next.sessionId, at: expect.any(String), status: 'applied' }])
+      logger.mockClear()
+      await refundsScript('list')
+      expect(logger.mock.calls).toEqual([['no parked refunds'], ['moved refunds'], [
+        `refund ${row.id}, command ${order.id}, order ${till.orderId} (#${display_id}), from session ${till.sessionId}, to session ${next.sessionId}, at ${listed.moved[0].at}, status applied`,
+      ]])
     })
 
     describe('I7: refusals', () => {

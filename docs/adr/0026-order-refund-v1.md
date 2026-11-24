@@ -56,9 +56,20 @@ The plugin still accepts and prices ADR-080's general payload: any line quantiti
 - **A crash or timeout.** The ledger claim stays `in_progress`. After the stale-claim window, the till's retry takes the claim over, as order.create's does, and resumes.
 - **A failure that will not clear on retry.** The workflow parks the command as `needs_admin`, with the failing step in `needs_admin_reason`. Until an admin resolves it, the till's retry is answered `in_progress`, as for order.create. The admin uses `tally-ledger-resolve` with one of two actions:
   - `resume` runs the missing steps;
-  - `apply` records a refund the admin made by hand, with its Medusa refund id.
+  - `apply` records a refund the admin made by hand, with its Medusa refund id;
+  - `move [<sessionId>]` (#542, desk ruling 2026-11-24) changes a parked refund whose session no longer takes money to an open session, then resumes it.
+    - By default the target is the sale register's own open session. Another register's session must be named, because the cash then leaves a different drawer, and the log line says so.
+    - It refuses while the old session still takes money (use `resume`), once the row records its Medusa refund, and for a target that is not open.
+    - Each move appends `{ refundId, commandId, fromSessionId, toSessionId, at }` to the order's metadata `tally_refund_moves`, in the same transaction, merged into the metadata. No migration.
 
   There is no `reject` once stock has moved.
+
+  Two more admin actions live in `tally-refunds` (#542):
+  - `baseline <orderId> <medusaRefundId> [--hand-made] <reason>` records a Medusa refund made outside the plugin, so the never-twice check stops counting it as unrecorded.
+    - The entry is `{ refundId, amountMinor, at, reason }` in the order's metadata `tally_refund_baselines`, merged into the metadata. A reason is required.
+    - The check reads each baselined refund's amount live from Medusa. A lost or cleared key fails closed: the refund counts as unrecorded again and the check refuses.
+    - A refund whose amount equals a pending till refund's needs `--hand-made`, because it may be that refund's own money, which `apply` records instead.
+  - `list` prints the parked refunds, then the moved ones with their current status. It is a script only, with no Admin route.
 - **Never refund twice.** The workflow compares the payment's refunded amount in Medusa with the sum of the `medusa_refund_id` amounts that `tally_refund` already records for it. If Medusa shows more, a refund happened without being recorded, and the command goes to `needs_admin` with the reason `refund_unrecorded`.
   - The check runs before step 2, so stock never moves when the money won't (amended 2026-11-23, desk ruling).
   - It runs again before step 3, for a resume whose receive is already recorded.
@@ -137,7 +148,7 @@ So a refund that leaves every product line fully refunded prices its lines at th
     - A stock-only return of a free line is not in v1.
 - **C. A resume or takeover after the session has closed.** The refund parks again as `needs_admin`, reason `session_closed`, with no money and no stock moved. The closed session's figures never move.
   - On the till, the refund reads as in progress, never as paid. TallyUI's wire has no message for a parked command; the plain "not paid" wording on the till is a TallyUI contract change: TallyUI/tallyui#1280.
-  - The admin path that finishes such a refund is medusapos/app#542, the next ticket after #540.
+  - The admin finishes such a refund with `move` (decision 2, #542).
 - **D. Money drift.** A difference of more than one minor unit per product line means the payment and the order disagree by more than rounding. It is refused `order_state` with `{ state: 'money_drift' }`, for an admin. `amount_mismatch`, which carries `serverMinor`, is only for a till total that differs from the server's price.
 - **E. Shipping basis.** `shippingMinor` is gross: net + tax, the orders list's two shipping figures added.
 
