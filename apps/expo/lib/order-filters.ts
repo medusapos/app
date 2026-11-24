@@ -1,9 +1,10 @@
 import type { OrderFilterBarProps, OrderFilterOption } from '@tallyui/components';
-import type { OrderFilterField } from '@tallyui/core';
+import type { OrderFilterField, StoreOrder } from '@tallyui/core';
 import { inRange, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
 
-// These are one till's own sales; cashier names are not on local orders, so omit cashier/register/store.
-export const ORDERS_SCREEN_FILTER_FIELDS: readonly OrderFilterField[] = ['status', 'paymentMethod', 'customerId', 'dateRange'];
+// The filters Medusa's order list honours: cashier, register, store and payment method are refused
+// (connector-medusa's UnsupportedOrderFilterError), so the bar leaves them out.
+export const ORDERS_SCREEN_FILTER_FIELDS: readonly OrderFilterField[] = ['status', 'customerId', 'dateRange'];
 
 export type MedusaOrderStatus = 'completed' | 'pending' | 'canceled';
 
@@ -24,14 +25,15 @@ export function medusaOrderStatus(order: PosOrder): MedusaOrderStatus {
   }
 }
 
-export function orderFilterOptions(orders: PosOrder[]): Required<Pick<NonNullable<OrderFilterBarProps['options']>,
+// Customers come from the till's sales and the store orders on screen; the till's sales name them first.
+export function orderFilterOptions(orders: PosOrder[], storeOrders: StoreOrder[] = []): Required<Pick<NonNullable<OrderFilterBarProps['options']>,
   'status' | 'paymentMethod' | 'customer'>> {
   const methods = new Set(orders.flatMap((order) => order.payments.map((payment) => payment.method)));
   const paymentMethod: NonNullable<OrderFilterBarProps['options']>['paymentMethod'] = [];
   if (methods.has('cash')) paymentMethod.push({ value: 'cash', label: 'Cash', kind: 'cash' });
   if (methods.has('external')) paymentMethod.push({ value: 'external', label: 'Card', kind: 'card' });
   const customers = new Map<string, string>();
-  for (const { customer } of orders) {
+  for (const { customer } of [...orders, ...storeOrders]) {
     if (customer?.id && !customers.has(customer.id)) {
       customers.set(customer.id, customer.name || customer.email || customer.id);
     }

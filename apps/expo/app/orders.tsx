@@ -1,32 +1,59 @@
 import { useContext, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
-import { OrderFilterBar, SearchInput } from '@tallyui/components';
+import { Button, OrderFilterBar, SearchInput, Text as ButtonText } from '@tallyui/components';
 import { needsAttention, type OrderFilterValue } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
 import { OrdersTable } from '../components/orders-table';
+import { StoreOrderDetailSheet } from '../components/store-order-detail-sheet';
 import { StripHeightContext } from '../components/store-refused';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
+import type { Session } from '../lib/session';
 import { formatDate } from '../lib/format-date';
 import { filterOrders, orderFilterOptions, ORDERS_SCREEN_FILTER_FIELDS } from '../lib/order-filters';
+import { mergeOrderRows, useStoreOrders, type OrdersRow } from '../lib/store-orders';
+
+export const ORDERS_LOADING_TEXT = 'Loading orders…';
+export const ORDERS_EMPTY_TEXT = 'No orders yet.';
+export const ORDERS_NO_MATCH_TEXT = 'No orders match.';
+export const ORDERS_OFFLINE_TEXT = "Can't reach the store. Showing this till's sales.";
+export const ORDERS_FAILED_TEXT = "Couldn't load the store's orders. Showing this till's sales.";
 
 export default function OrdersScreen() {
-  const { session } = useSession();
+  const { session, reportUnauthorized } = useSession();
+  if (!session) return <Redirect href="/login" />;
+  return <StoreWideOrders session={session} onUnauthorized={reportUnauthorized} />;
+}
+
+// v2's Orders: every order in the store, newest first, under this till's sales that haven't reached it yet.
+function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnauthorized: () => void }) {
   const { recent, requeue, flush, state } = useOutboxContext();
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState<OrderFilterValue>({});
   const [openId, setOpenId] = useState<string | null>(null);
-  const options = useMemo(() => orderFilterOptions(recent), [recent]);
+  const [openStoreId, setOpenStoreId] = useState<string | null>(null);
+  // A sale reaching the store changes this count, and the store's first page is read again to list it.
+  const appliedCount = useMemo(() => recent.filter((order) => order.syncStatus === 'applied').length, [recent]);
+  const store = useStoreOrders(session, search, filters, appliedCount, onUnauthorized);
+  const options = useMemo(() => orderFilterOptions(recent, store.orders), [recent, store.orders]);
   const orders = useMemo(() => filterOrders(recent, search, filters, 'device'), [recent, search, filters]);
   // OrdersList's own rule: the stuck pending sales need attention too.
   const attention = useMemo(() => needsAttention(orders, { stuckCommandIds: state.stuck?.commandIds }), [orders, state.stuck]);
+  // Without the store, the table is this till's own sales, as before Orders went store-wide.
+  const fallback = store.failure !== null;
+  const rows = useMemo<OrdersRow[]>(() => {
+    if (fallback) return orders.map((order) => ({ kind: 'local', key: order.id, order }));
+    const attended = new Set(attention.map((order) => order.id));
+    return mergeOrderRows(orders.filter((order) => order.syncStatus !== 'applied' && !attended.has(order.id)), recent, store.orders);
+  }, [fallback, orders, attention, recent, store.orders]);
+  const firstLoad = !fallback && store.loading && !store.loaded;
+  const narrowed = search.trim() !== '' || Object.values(filters).some((value) => value !== undefined);
   // v2's Orders has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
   const openMenu = useFrameMenu();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
   const topInset = useContext(StripHeightContext);
-  if (!session) return <Redirect href="/login" />;
   return <View className="flex-1 bg-background" role="main" aria-label="Orders">
     <Stack.Screen options={{ title: 'Orders', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
@@ -44,12 +71,29 @@ export default function OrdersScreen() {
         <OrdersTable testID="orders-attention" orders={attention} onRetry={requeue} stuck={state.stuck}
           formatDate={formatDate} onOpen={setOpenId} />
       </> : null}
-      {orders.length > 0
-        ? <OrdersTable testID="orders-table" orders={orders} formatDate={formatDate} onOpen={setOpenId} />
-        : <Text testID="orders-empty" className="text-muted-foreground">No sales yet. Completed sales appear here.</Text>}
+      {fallback ? <View className="flex-row items-center gap-3">
+        <Text role="alert" className="text-sm text-muted-foreground">
+          {store.failure === 'network' ? ORDERS_OFFLINE_TEXT : ORDERS_FAILED_TEXT}</Text>
+        <Button size="sm" variant="outline" testID="orders-retry" accessibilityLabel="Retry loading the store's orders"
+          disabled={store.loading} onPress={store.retry}><ButtonText>Retry</ButtonText></Button>
+      </View> : null}
+      {rows.length > 0
+        ? <OrdersTable testID="orders-table" rowTestID="orders-row" rows={rows} formatDate={formatDate} onOpen={setOpenId}
+          onOpenStore={(order) => setOpenStoreId(order.id)} />
+        : firstLoad ? null : <Text testID="orders-empty" className="text-muted-foreground">
+          {narrowed ? ORDERS_NO_MATCH_TEXT : ORDERS_EMPTY_TEXT}</Text>}
+      {firstLoad ? <Text testID="orders-loading" className="text-muted-foreground">{ORDERS_LOADING_TEXT}</Text> : null}
+      {!fallback && store.unreadable > 0 ? <Text testID="orders-unreadable" className="text-sm text-muted-foreground">
+        {`${store.unreadable} ${store.unreadable === 1 ? 'order' : 'orders'} couldn't be read.`}</Text> : null}
+      {!fallback && store.total !== undefined ? <Text testID="orders-count" className="text-sm text-muted-foreground">
+        {`Showing ${store.orders.length} of ${store.total}`}</Text> : null}
+      {!fallback && store.hasMore ? <Button variant="outline" className="self-center" testID="orders-load-more"
+        disabled={store.loading} onPress={store.loadMore}><ButtonText>Load more</ButtonText></Button> : null}
     </ScrollView>
     {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. */}
     <OrderDetailSheet order={recent.find((order) => order.id === openId) ?? null} onClose={() => setOpenId(null)}
       formatDate={formatDate} onRetry={requeue} onFlush={flush} stuck={state.stuck} />
+    <StoreOrderDetailSheet order={store.orders.find((order) => order.id === openStoreId) ?? null}
+      onClose={() => setOpenStoreId(null)} formatDate={formatDate} />
   </View>;
 }

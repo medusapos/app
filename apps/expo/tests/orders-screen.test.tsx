@@ -33,8 +33,16 @@ function AccountPublisher({ open }: { open: () => void }) {
 }
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+// The store is out of reach here, so Orders shows this till's own sales, which these tests pin; the store-wide
+// list is orders-store-wide.test.tsx.
+vi.mock('../lib/pos-connector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/pos-connector')>();
+  const { CustomerServiceError } = await import('@tallyui/core');
+  const listOrders = () => Promise.reject(new CustomerServiceError('network', 'offline'));
+  return { ...actual, createPosConnector: () => ({ ...actual.createPosConnector(), listOrders }) };
+});
 
-const emptyText = 'No sales yet. Completed sales appear here.';
+const emptyText = 'No orders yet.';
 
 beforeEach(() => {
   const data = new Map<string, string>();
@@ -52,24 +60,25 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
-function mount() {
+async function mount() {
   render(<SessionProvider><OrdersScreen /></SessionProvider>);
+  await act(async () => {});
 }
 
 describe('OrdersScreen', () => {
-  it('shows TallyUI\'s single empty state when the till has no sales (#195, TallyUI 3.0.2)', () => {
-    mount();
+  it('shows TallyUI\'s single empty state when the till has no sales (#195, TallyUI 3.0.2)', async () => {
+    await mount();
     expect(screen.getAllByText(emptyText)).toHaveLength(1);
     expect(screen.queryByText('No sales on this till yet. Completed sales show here.')).toBeNull();
     expect(screen.queryByRole('link', { name: 'Send feedback' })).toBeNull();
   });
 
-  it('hides the empty state once there is a sale (#195)', () => {
+  it('hides the empty state once there is a sale (#195)', async () => {
     const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
     builder.addLine({ productId: 'shirt', variantId: 'blue', name: 'Blue shirt', unitPrice: { amount: 1200, currency: 'EUR' } });
     builder.addPayment({ method: 'cash', amountMinor: 1200 });
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [finalizeOrder(builder.getSnapshot())] });
-    mount();
+    await mount();
     expect(screen.queryByText(emptyText)).toBeNull();
   });
 
@@ -129,14 +138,15 @@ describe('order detail (row 10)', () => {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent });
   }
   // The app's root layout holds the PortalHost the sheet renders into.
-  function mount() {
+  async function mount() {
     render(<SessionProvider><OrdersScreen /><PortalHost /></SessionProvider>);
+    await act(async () => {});
   }
 
   it('Open shows the sale in TallyUI\'s OrderDetail sheet, and Close removes it', async () => {
     const order = sale('Blue shirt', 'applied');
     withSales(order);
-    mount();
+    await mount();
     expect(screen.queryByTestId('order-detail-sheet')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: `Open order ${orderReference(order)}` }));
     const sheet = within(await screen.findByTestId('order-detail-sheet'));
@@ -154,19 +164,19 @@ describe('order detail (row 10)', () => {
     const pending = sale('Blue shirt', 'pending');
     const rejected = sale('Red hat', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
     withSales(pending, rejected);
-    mount();
-    fireEvent.click(within(screen.getByTestId(`orders-table-row-${pending.id}`)).getByRole('button', { name: `Open order ${orderReference(pending)}` }));
+    await mount();
+    fireEvent.click(within(screen.getByTestId(`orders-row-${pending.id}`)).getByRole('button', { name: `Open order ${orderReference(pending)}` }));
     expect(within(await screen.findByTestId('order-detail-sheet')).getByText('Pending')).toBeTruthy();
     fireEvent.click(screen.getByTestId('order-detail-close'));
     await waitFor(() => expect(screen.queryByTestId('order-detail-sheet')).toBeNull());
-    fireEvent.click(within(screen.getByTestId(`orders-table-row-${rejected.id}`)).getByRole('button', { name: `Open order ${orderReference(rejected)}` }));
+    fireEvent.click(within(screen.getByTestId(`orders-row-${rejected.id}`)).getByRole('button', { name: `Open order ${orderReference(rejected)}` }));
     expect(within(await screen.findByTestId('order-detail-sheet')).getByText('Cancelled')).toBeTruthy();
   });
 
   it('keeps Retry under Needs attention for a refused sale it can requeue', async () => {
     const rejected = sale('Blue shirt', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
     withSales(rejected);
-    mount();
+    await mount();
     expect(screen.getByText('Needs attention')).toBeTruthy();
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Retry' })); });
     expect(useOutboxContext().requeue).toHaveBeenCalledExactlyOnceWith([rejected.id]);
@@ -176,12 +186,12 @@ describe('order detail (row 10)', () => {
     const blue = sale('Blue shirt', 'applied');
     const red = sale('Red hat', 'applied');
     withSales(blue, red);
-    mount();
-    fireEvent.click(within(screen.getByTestId(`orders-table-row-${red.id}`)).getByRole('button', { name: `Open order ${orderReference(red)}` }));
+    await mount();
+    fireEvent.click(within(screen.getByTestId(`orders-row-${red.id}`)).getByRole('button', { name: `Open order ${orderReference(red)}` }));
     expect(await screen.findByTestId('order-detail-sheet')).toBeTruthy();
     fireEvent.change(screen.getByTestId('orders-search'), { target: { value: 'blue' } });
-    expect(screen.getByTestId(`orders-table-row-${blue.id}`)).toBeTruthy();
-    expect(screen.queryByTestId(`orders-table-row-${red.id}`)).toBeNull();
+    expect(screen.getByTestId(`orders-row-${blue.id}`)).toBeTruthy();
+    expect(screen.queryByTestId(`orders-row-${red.id}`)).toBeNull();
     expect(within(screen.getByTestId('order-detail-sheet')).getByText('Red hat x1')).toBeTruthy();
   });
 });
@@ -196,23 +206,24 @@ describe('orders table (row 10.1)', () => {
   function withSales(...recent: PosOrder[]) {
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent });
   }
-  function mount() {
+  async function mount() {
     render(<SessionProvider><OrdersScreen /><PortalHost /></SessionProvider>);
+    await act(async () => {});
   }
   const sold = () => sale('Blue shirt', 'applied', { cashierRef: 'ann@store.test', customer: { id: 'c1', name: 'Ada Lovelace' } });
   const openButton = (table: string, order: PosOrder) =>
     within(screen.getByTestId(`${table}-row-${order.id}`)).getByRole('button', { name: `Open order ${orderReference(order)}` });
   const refusal = "The online store refused this sale. Ask the store owner to look at the till's sync log.";
 
-  it('a synced sale is only in the table, with v2\'s columns, its own words, and no notices or Retry', () => {
+  it('a synced sale is only in the table, with v2\'s columns, its own words, and no notices or Retry', async () => {
     const order = sold();
     withSales(order);
-    mount();
+    await mount();
     const table = within(screen.getByTestId('orders-table'));
     for (const label of ['Status', 'Order Number', 'Customer', 'Date Created', 'Cashier', 'Payment Method', 'Total']) {
       expect(table.getByText(label, { exact: true })).toBeTruthy();
     }
-    const cell = (name: string) => screen.getByTestId(`orders-table-row-${order.id}-${name}`).textContent;
+    const cell = (name: string) => screen.getByTestId(`orders-row-${order.id}-${name}`).textContent;
     expect(cell('status')).toBe('Completed');
     expect(cell('number')).toBe(orderReference(order));
     expect(cell('customer')).toBe('Ada Lovelace');
@@ -222,16 +233,16 @@ describe('orders table (row 10.1)', () => {
     expect(cell('total')).toBe(formatMoney({ amount: order.totalMinor, currency: 'EUR' }));
     expect(screen.queryByText('Needs attention')).toBeNull();
     expect(screen.queryByTestId('orders-attention')).toBeNull();
-    expect(screen.queryByTestId(`orders-table-row-${order.id}-notices`)).toBeNull();
+    expect(screen.queryByTestId(`orders-row-${order.id}-notices`)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
   it('pressing a row opens the sale\'s detail sheet', async () => {
     const order = sold();
     withSales(order);
-    mount();
+    await mount();
     expect(screen.queryByTestId('order-detail-sheet')).toBeNull();
-    fireEvent.click(openButton('orders-table', order));
+    fireEvent.click(openButton('orders', order));
     const sheet = within(await screen.findByTestId('order-detail-sheet'));
     expect(sheet.getAllByText(`Order ${orderReference(order)}`).length).toBeGreaterThan(0);
   });
@@ -243,17 +254,17 @@ describe('orders table (row 10.1)', () => {
     let resolve: (count: number) => void = () => {};
     const requeue = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), requeue });
-    mount();
+    await mount();
     const attention = within(screen.getByTestId('orders-attention'));
     expect(attention.getByTestId(`orders-attention-row-${refused.id}`)).toBeTruthy();
     expect(screen.queryByTestId(`orders-attention-row-${applied.id}`)).toBeNull();
-    expect(within(screen.getByTestId('orders-table')).getByTestId(`orders-table-row-${refused.id}`)).toBeTruthy();
-    expect(within(screen.getByTestId('orders-table')).getByTestId(`orders-table-row-${applied.id}`)).toBeTruthy();
+    expect(within(screen.getByTestId('orders-table')).getByTestId(`orders-row-${refused.id}`)).toBeTruthy();
+    expect(within(screen.getByTestId('orders-table')).getByTestId(`orders-row-${applied.id}`)).toBeTruthy();
     const notices = within(attention.getByTestId(`orders-attention-row-${refused.id}-notices`));
     expect(notices.getByText(refusal)).toBeTruthy();
     // The notices are the attention table's alone: the all-orders table repeats neither the refusal nor Retry.
     expect(screen.getAllByText(refusal)).toHaveLength(1);
-    expect(screen.queryByTestId(`orders-table-row-${refused.id}-notices`)).toBeNull();
+    expect(screen.queryByTestId(`orders-row-${refused.id}-notices`)).toBeNull();
     expect(screen.getAllByRole('button', { name: 'Retry' })).toHaveLength(1);
     const retry = notices.getByRole('button', { name: 'Retry' });
     await act(async () => { fireEvent.click(retry); });
@@ -269,7 +280,7 @@ describe('orders table (row 10.1)', () => {
     let resolve: (count: number) => void = () => {};
     const requeue = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), requeue });
-    mount();
+    await mount();
     const retry = screen.getByRole('button', { name: 'Retry' });
     // One act: the button is not yet disabled for the second press, so only the ref stops it.
     await act(async () => { fireEvent.click(retry); fireEvent.click(retry); });
@@ -285,7 +296,7 @@ describe('orders table (row 10.1)', () => {
     withSales(refused);
     const requeue = vi.fn(outcome);
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), requeue });
-    mount();
+    await mount();
     const retry = screen.getByRole('button', { name: 'Retry' });
     await act(async () => { fireEvent.click(retry); });
     expect(screen.getByRole('button', { name: 'Retry' }).getAttribute('aria-disabled')).not.toBe('true');
@@ -294,17 +305,17 @@ describe('orders table (row 10.1)', () => {
     expect(requeue).toHaveBeenNthCalledWith(2, [refused.id]);
   });
 
-  it('a refused sale the outbox cannot requeue is under attention with its notice and no Retry', () => {
+  it('a refused sale the outbox cannot requeue is under attention with its notice and no Retry', async () => {
     const refused = sale('Red hat', 'rejected', { error: { code: 'idempotency_mismatch', message: 'Refused' } });
     withSales(refused);
-    mount();
+    await mount();
     const notices = within(within(screen.getByTestId('orders-attention')).getByTestId(`orders-attention-row-${refused.id}-notices`));
     expect(notices.getByText("The online store has a different sale under this sale's number. Don't send it again; ask the store owner to compare the two."))
       .toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
-  it('a pending sale the outbox reports stuck is under attention, with the notices row\'s stuck-since line', () => {
+  it('a pending sale the outbox reports stuck is under attention, with the notices row\'s stuck-since line', async () => {
     const stuck = sale('Green scarf', 'pending');
     const waiting = sale('Blue shirt', 'pending');
     const firstFailedAt = new Date('2026-11-22T09:05:00').getTime();
@@ -314,7 +325,7 @@ describe('orders table (row 10.1)', () => {
       state: { pending: 2, sending: false, stuck: { commandIds: [stuck.commandId], since: firstFailedAt, firstFailedAt,
         reason: 'platform_error', orders: [entry] } },
     });
-    mount();
+    await mount();
     const attention = within(screen.getByTestId('orders-attention'));
     expect(attention.getByTestId(`orders-attention-row-${stuck.id}`)).toBeTruthy();
     expect(screen.queryByTestId(`orders-attention-row-${waiting.id}`)).toBeNull();
@@ -334,17 +345,17 @@ describe('orders table (row 10.1)', () => {
       state: { pending: 2, sending: false, stuck: { commandIds: [stuck.commandId], since: firstFailedAt, firstFailedAt,
         reason: 'platform_error', orders: [entry] } },
     });
-    mount();
-    fireEvent.click(openButton('orders-table', stuck));
+    await mount();
+    fireEvent.click(openButton('orders', stuck));
     expect((await screen.findByTestId('order-detail-notices')).textContent).toContain("Hasn't reached the online store since");
   });
 
-  it('shows the empty state only when the search filters every sale out', () => {
+  it('shows the empty state only when the search filters every sale out', async () => {
     withSales(sold());
-    mount();
+    await mount();
     expect(screen.queryByTestId('orders-empty')).toBeNull();
     fireEvent.change(screen.getByTestId('orders-search'), { target: { value: 'no such sale' } });
-    expect(screen.getByTestId('orders-empty').textContent).toBe(emptyText);
+    expect(screen.getByTestId('orders-empty').textContent).toBe('No orders match.');
     expect(screen.queryByTestId('orders-table')).toBeNull();
   });
 });
