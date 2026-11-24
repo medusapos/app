@@ -128,6 +128,7 @@ medusaIntegrationTestRunner({
       const order = refund(till)
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
       expect(await stockA()).toBe(stock + 1)
+      expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { step: 'refund', reason: 'money_unconfirmed' } })
       if (close) {
         await applied([command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId,
           registerId: till.registerId, number: 1, openedAt, closedAt, tillExpected: { cash: 1100 }, counted: { cash: 1100 },
@@ -135,7 +136,7 @@ medusaIntegrationTestRunner({
           perpetualRefundsTotalMinor: 0, unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0',
           orderIds: [till.sale.payload.clientOrderId], movementIds: [] }, 3),
         command('register.session.transition', { sessionId: till.sessionId, status: 'closed', at: closedAt, counted: { cash: 1100 } })])
-        await resolve(order.id, 'resume')
+        await resolve(order.id, 'resume', '--money-not-sent')
         expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin',
           needs_admin_reason: { step: 'session', reason: 'session_closed' } })
       }
@@ -443,7 +444,7 @@ medusaIntegrationTestRunner({
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
       const parked = await commandRow(order.id)
       expect(parked).toMatchObject({ status: 'needs_admin', needs_admin_reason: { orderId: till.orderId,
-        clientRefundId: order.payload.clientRefundId, step: 'refund', message: 'money probe' } })
+        clientRefundId: order.payload.clientRefundId, step: 'refund', reason: 'money_unconfirmed', message: 'money probe' } })
       expect(await stockA()).toBe(before)
       expect(await medusaRefunds(till.orderId)).toEqual([])
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
@@ -452,7 +453,7 @@ medusaIntegrationTestRunner({
       expect((await post([reused])).data).toEqual({ code: 'in_progress', id: reused.id })
       expect(await commandRow(reused.id)).toBeUndefined()
       expect(await returns(till.orderId)).toHaveLength(1)
-      await resolve(order.id, 'resume')
+      await resolve(order.id, 'resume', '--money-not-sent')
       expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied',
         refund: { totalMinor: 1000, byMethod: { card: 600, cash: 400 } } } })
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
@@ -581,7 +582,7 @@ medusaIntegrationTestRunner({
       const row = await knex('tally_refund').where({ command_id: order.id }).first()
       expect(row.received_at).not.toBeNull()
       await applied([command('register.session.transition', { sessionId: till.sessionId, status: 'counting', at: closedAt })])
-      await resolve(order.id, 'resume')
+      await resolve(order.id, 'resume', '--money-not-sent')
       expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'applied' })
       expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: Number(row.total_minor) / 100 }])
@@ -771,6 +772,17 @@ medusaIntegrationTestRunner({
       }
       throw new Error(`No run holds order ${orderId}'s refund lock`)
     }
+    // #573: ends the backend holding the order's lock (a dead run's trx) and waits until the lock is free.
+    async function terminateHolder(orderId: string) {
+      const pids = await lockHolders(orderId)
+      expect(pids).toHaveLength(1)
+      expect((await knexOf().raw('select pg_terminate_backend(?) as ended', [pids[0]])).rows[0].ended).toBe(true)
+      for (let n = 0; n < 50 && (await lockHolders(orderId)).length; n++) await new Promise(done => setTimeout(done, 100))
+      expect(await lockHolders(orderId)).toEqual([])
+    }
+    // The refund row and its command, byte for byte.
+    const bytes = async (commandId: string) => Promise.all(['tally_refund t where command_id', 'tally_command t where id'].map(async from =>
+      (await knexOf().raw(`select row_to_json(t)::text as json from ${from} = ?`, [commandId])).rows[0]?.json))
     const oneLine = (till: Awaited<ReturnType<typeof remainderSale>>, n: number) => command('order.refund', { ...till.full.payload,
       clientRefundId: randomUUID(), lines: [till.full.payload.lines[n]], totalMinor: 118 })
 
@@ -830,7 +842,88 @@ medusaIntegrationTestRunner({
         items: [expect.objectContaining({ quantity: 1, received_quantity: 1 })] })])
     })
 
-    it('W2-dies: a run whose backend is terminated while it holds the lock never moves money; the retry re-parks it and resume finishes once', async () => {
+    it('L1: a run whose lock is lost before the money stops at its next step; the retry pays once', async () => {
+      const before = await stockA()
+      const till = await tillSale()
+      const pause = paused('receiveStep')
+      const order = refund(till)
+      const first = post([order])
+      try {
+        await pause.reached
+        await terminateHolder(till.orderId)
+      } finally {
+        pause.release()
+      }
+      const response = await first
+      expect([response.status, response.data]).toEqual([503, { code: 'transient', id: order.id, message: 'Temporary failure, retry later.' }])
+      // The zombie's receive landed; its probe at the money step stopped it before the intent.
+      const row = await knexOf()('tally_refund').where({ command_id: order.id }).first()
+      expect(row).toMatchObject({ status: 'in_progress', received_at: expect.any(Date), money_started_at: null, medusa_refund_id: null })
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied',
+        refund: expect.objectContaining({ totalMinor: 1000 }) })])
+      expect(await knexOf()('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: row.id, status: 'applied' })])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: row.return_id, status: 'received',
+        items: [expect.objectContaining({ received_quantity: 1 })] })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('L1b: a lost-lock run never rewrites its row: its park stops before writing; a retry applies once', async () => {
+      const till = await tillSale()
+      const pause = paused('receiveStep', true)
+      const order = refund(till)
+      const first = post([order])
+      let row: string | undefined
+      try {
+        await pause.reached
+        ;[row] = await bytes(order.id)
+        await terminateHolder(till.orderId)
+      } finally {
+        pause.release()
+      }
+      await first
+      expect(row).toEqual(expect.stringContaining('"status":"in_progress"'))
+      expect((await bytes(order.id))[0]).toBe(row)
+      // Only the release touched the command: its own claim, deleted by its token.
+      expect(await commandRow(order.id)).toBeUndefined()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+    })
+
+    it('L2: a run whose lock is lost inside the money step never pays twice: the retry parks money_unconfirmed', async () => {
+      // 1.18 of a 3.53 payment, so Medusa's captured-amount cap cannot hide a second refund.
+      const till = await remainderSale()
+      const pause = paused('moneyStep')
+      const order = oneLine(till, 0)
+      const first = post([order])
+      let retry: Row | undefined, parked: Row | undefined, during: Row[] | undefined
+      try {
+        await pause.reached
+        await terminateHolder(till.orderId)
+        await ageClaim(order.id)
+        retry = (await post([order])).data
+        parked = await commandRow(order.id)
+        during = await medusaRefunds(till.orderId)
+      } finally {
+        pause.release()
+      }
+      await first
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
+      expect(retry).toEqual({ code: 'in_progress', id: order.id })
+      expect(parked).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'refund', reason: 'money_unconfirmed',
+        message: expect.stringContaining('tally-ledger-resolve resume --money-not-sent') } })
+      expect(during).toEqual([])
+      // The zombie's money moved and is recorded; its probe before applied stopped it.
+      expect(await knexOf()('tally_refund').where({ command_id: order.id }).first()).toMatchObject({ status: 'needs_admin',
+        medusa_refund_id: expect.any(String) })
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 118 } } })
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
+    })
+
+    it('L3: a lost-lock run whose money step throws keeps its intent; runs park money_unconfirmed until resume --money-not-sent', async () => {
       const before = await stockA()
       const till = await tillSale()
       const pause = paused('moneyStep', true)
@@ -838,32 +931,72 @@ medusaIntegrationTestRunner({
       const first = post([order])
       try {
         await pause.reached
-        await ageClaim(order.id)
-        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
-        expect(await commandRow(order.id)).toMatchObject({ status: 'in_progress' })
-        const pids = await lockHolders(till.orderId)
-        expect(pids).toHaveLength(1)
-        expect((await knexOf().raw('select pg_terminate_backend(?) as ended', [pids[0]])).rows[0].ended).toBe(true)
+        await terminateHolder(till.orderId)
       } finally {
         pause.release()
       }
       await first
-      expect(await lockHolders(till.orderId)).toEqual([])
-      // The dead run parked its row, but its command park went through the terminated connection and never landed.
       const row = await knexOf()('tally_refund').where({ command_id: order.id }).first()
-      expect(row).toMatchObject({ status: 'needs_admin', received_at: expect.any(Date), medusa_refund_id: null })
-      expect(await commandRow(order.id)).toMatchObject({ status: 'in_progress' })
+      expect(row).toMatchObject({ status: 'in_progress', received_at: expect.any(Date), money_started_at: expect.any(Date), medusa_refund_id: null })
       expect(await medusaRefunds(till.orderId)).toEqual([])
       await ageClaim(order.id)
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
-      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { refundId: row.id,
-        step: 'park', reason: 'park_unrecorded' } })
+      const unconfirmed = { status: 'needs_admin', needs_admin_reason: { refundId: row.id, step: 'refund', reason: 'money_unconfirmed' } }
+      expect(await commandRow(order.id)).toMatchObject(unconfirmed)
       await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject(unconfirmed)
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      await resolve(order.id, 'resume', '--money-not-sent')
       expect(await commandRow(order.id)).toMatchObject({ status: 'applied', result: { status: 'applied', refund: { totalMinor: 1000 } } })
       expect(await knexOf()('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: row.id, status: 'applied' })])
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: row.return_id, status: 'received' })])
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
       expect(await stockA()).toBe(before)
+    })
+
+    it('L4: a zombie\'s park after the retry applied leaves the row applied', async () => {
+      const till = await tillSale()
+      const pause = paused('receiveStep', true)
+      const order = refund(till)
+      const first = post([order])
+      let retry: Row | undefined
+      try {
+        await pause.reached
+        await terminateHolder(till.orderId)
+        await ageClaim(order.id)
+        retry = (await post([order])).data
+      } finally {
+        pause.release()
+      }
+      await first
+      expect(await knexOf()('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ status: 'applied' })])
+      expect(retry?.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+    })
+
+    it('M1: resume --money-not-sent refuses an unrecorded Medusa refund and any other park, writing nothing', async () => {
+      const till = await remainderSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
+      jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+      const order = oneLine(till, 0)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'money_unconfirmed' } })
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
+      const unconfirmed = await bytes(order.id)
+      await expect(resolve(order.id, 'resume', '--money-not-sent')).rejects.toThrow(
+        'Medusa shows a refund this row has not recorded; check it and use tally-ledger-resolve apply <medusaRefundId>; nothing written')
+      expect(await bytes(order.id)).toEqual(unconfirmed)
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 0.01 }])
+      // Intent set, no refund recorded, Medusa shows one: plain resume parks refund_unrecorded.
+      await resolve(order.id, 'resume')
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'refund', reason: 'refund_unrecorded' } })
+      const unrecorded = await bytes(order.id)
+      await expect(resolve(order.id, 'resume', '--money-not-sent')).rejects.toThrow(
+        'is not parked money_unconfirmed; --money-not-sent is only for that; nothing written')
+      expect(await bytes(order.id)).toEqual(unrecorded)
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 0.01 }])
     })
 
     it('W2-takeover-before-row: a run taken over before its row insert parks a released command; the next retry re-parks it and resume finishes once', async () => {
