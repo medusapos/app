@@ -107,6 +107,29 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await expect(noteField(page)).toHaveValue('x'.repeat(1000));
     });
 
+    test('the Order details Form and JSON tabs sit side by side', async ({ page }) => {
+      await signIn(page);
+      await addE2E1(page);
+      await openCart(page);
+      await openOrderDetails(page);
+      await expect(page.getByTestId('cart-order-tab-json')).toBeVisible();
+      // One frame: the sheet slides in on translateX, which cancels out between boxes read together.
+      const [form, json, list] = await page.evaluate(() => {
+        const sheet = document.querySelector('[data-testid="cart-note-sheet"]')!;
+        return ['[data-testid="cart-order-tab-form"]', '[data-testid="cart-order-tab-json"]', '[role="tablist"]']
+          .map((sel) => sheet.querySelector(sel)!.getBoundingClientRect().toJSON() as DOMRect);
+      });
+      expect(Math.abs(json.y - form.y)).toBeLessThanOrEqual(1);
+      expect(json.x).toBeGreaterThanOrEqual(form.x + form.width - 1);
+      for (const tab of [form, json]) {
+        expect(tab.x).toBeGreaterThanOrEqual(list.x - 1);
+        expect(tab.y).toBeGreaterThanOrEqual(list.y - 1);
+        expect(tab.x + tab.width).toBeLessThanOrEqual(list.x + list.width + 1);
+        expect(tab.y + tab.height).toBeLessThanOrEqual(list.y + list.height + 1);
+      }
+      await page.getByTestId('cart-note-close').click();
+    });
+
     test('a sale with no note goes at its base version, with no note', async ({ page }) => {
       await signIn(page);
       await addE2E1(page);
