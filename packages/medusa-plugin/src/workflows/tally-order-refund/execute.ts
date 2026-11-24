@@ -16,6 +16,7 @@ import { refundPayloadErrors } from './payload-shape'
 import { connectorSplit, medusaSumMinor, priceRefund, type PricedLine, type RefundableLine } from './price'
 import { splitRefund, type SplitEntry, type TillTender } from './split'
 import { beginReturn, cancelReturn, moneyStep, receiveStep, requestReturn } from './workflow'
+import { moveOrderRefund } from './admin'
 
 type Raw = { value: string }
 type RefundRow = { id: string; client_refund_id: string; command_id: string; order_id: string; session_id: string
@@ -188,7 +189,11 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
     const fresh = await loadRefundOrder(container, order.id)
     if (!fresh?.payment) throw new Error(`Order ${order.id} has no payment to refund`)
     const [{ sum }] = await knex('tally_refund').where({ order_id: order.id }).whereNotNull('medusa_refund_id').sum({ sum: 'total_minor' })
-    const recorded = Number(sum ?? 0)
+    const { metadata } = await knex('order').where({ id: order.id }).first('metadata')
+    const baselines = await knex('refund').where({ payment_id: fresh.payment.id }).whereNull('deleted_at')
+      .whereIn('id', (metadata?.tally_refund_baselines ?? []).map((entry: { refundId: string }) => entry.refundId))
+      .whereNotIn('id', knex('tally_refund').whereNotNull('medusa_refund_id').select('medusa_refund_id')).select('raw_amount')
+    const recorded = Number(sum ?? 0) + medusaSumMinor(order.decimals, baselines.map(refund => refund.raw_amount.value))
     return { paymentId: fresh.payment.id, message: fresh.payment.refundedMinor > recorded
       ? `refund_unrecorded: payment ${fresh.payment.id} shows ${fresh.payment.refundedMinor} refunded, tally_refund records ${recorded}` : null }
   }
@@ -293,10 +298,11 @@ export async function executeOrderRefund(container: MedusaContainer, command: Co
 
 /**
  * The resolve script's order.refund actions (ADR 0026 decision 2), for a command parked needs_admin: `resume` runs the
- * missing steps (the never-twice check included), `apply` records the admin's own Medusa refund. There is no reject.
+ * missing steps (the never-twice check included), `apply` records the admin's own Medusa refund, `move` changes session first. There is no reject.
  */
 export async function resolveOrderRefund(container: MedusaContainer, commandId: string, action: string,
   medusaRefundId?: string): Promise<ExecuteOutcome> {
+  if (action === 'move') return moveOrderRefund(container, commandId, medusaRefundId)
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const row: RefundRow | undefined = await knex('tally_refund').where({ command_id: commandId }).first()
   if (!row) throw new Error(`Command ${commandId} has no refund row`)
