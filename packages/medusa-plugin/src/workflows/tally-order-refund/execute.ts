@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import { ContainerRegistrationKeys, MedusaError, generateEntityId } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, OrderRefundPayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
