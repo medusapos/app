@@ -148,6 +148,20 @@ export default class TallyLedgerModuleService extends MedusaService({ TallyComma
     return rows.length > 0
   }
 
+  /** By command id, for the order.refund run that holds the order's lock (#543 window 2): a lease takeover cannot stop it. */
+  @InjectManager()
+  async completeByCommand(id: string, result: CommandResult, @MedusaContext() sharedContext: Context = {}): Promise<boolean> {
+    const parsed = parseCommandResult(result)
+    return (await (sharedContext.manager as EntityManager).execute(`update "tally_command" set "status" = ?, "result" = ?::jsonb,
+      "updated_at" = now() where "id" = ? and "status" = 'in_progress' returning "id"`, [parsed.status, JSON.stringify(parsed), id])).length > 0
+  }
+
+  @InjectManager()
+  async markNeedsAdminByCommand(id: string, reason: Record<string, unknown>, @MedusaContext() sharedContext: Context = {}): Promise<boolean> {
+    return (await (sharedContext.manager as EntityManager).execute(`update "tally_command" set "status" = 'needs_admin',
+      "needs_admin_reason" = ?::jsonb, "updated_at" = now() where "id" = ? and "status" = 'in_progress' returning "id"`, [JSON.stringify(reason), id])).length > 0
+  }
+
   @InjectManager()
   async retrieveCommandState(
     id: string,

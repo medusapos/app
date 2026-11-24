@@ -27,6 +27,9 @@ type RefundRow = { id: string; client_refund_id: string; command_id: string; ord
 type Run = { outcome: ExecuteOutcome; keepClaim: boolean }
 // A refund that failed before its money left no row (undo deletes it), so it is never counted.
 const COUNTED_REFUND_STATUSES = ['in_progress', 'applied', 'needs_admin'] as const
+/** The per-order refund lock (ADR 0026 decision 2), held to the end of `trx`. Re-entrant: the holder taking it again gets true. */
+const takeOrderLock = async (trx: Knex.Transaction, orderId: string): Promise<boolean> =>
+  (await trx.raw("select pg_try_advisory_xact_lock(hashtext('tally_refund'), hashtext(?)) as locked", [orderId])).rows[0].locked
 const sessionClosedMessage = (id: string) =>
   `session_closed: refund ${id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.`
 
@@ -105,6 +108,8 @@ function failedOutcome(container: MedusaContainer, id: string, error: Error): Ex
  * Runs a refund under the per-order lock and the session row lock (ADR 0026 decisions 2 and 6), held to the end so no
  * other refund of the order and no close of the session interleaves. With a payload it starts or resumes that
  * clientRefundId; without one (the resolve script) it resumes the command's own row.
+ * #543 window 2: a started run's command row survives a lease takeover (a till retry that finds the order locked and the
+ * command's refund row begun keeps it); only the lock holder writes the outcome, by command id, so its result still lands.
  */
 async function runLocked(container: MedusaContainer, ctx: { id: string; claimToken: string; actorId?: string
   order: RefundOrder; payload?: OrderRefundPayload; row?: RefundRow }): Promise<Run> {
@@ -113,8 +118,11 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
   const busy: Run = { outcome: { kind: 'in_progress', id }, keepClaim: false }
   return knex.transaction(async trx => {
-    const { rows: [{ locked }] } = await trx.raw("select pg_try_advisory_xact_lock(hashtext('tally_refund'), hashtext(?)) as locked", [order.id])
-    if (!locked) return busy
+    if (!await takeOrderLock(trx, order.id)) {
+      // Read without the lock: the row is inserted outside the transaction, so a started run's row is visible.
+      const started = payload && await trx('tally_refund').where({ command_id: id }).first('id')
+      return started ? { ...busy, keepClaim: true } : busy
+    }
     try {
       await ledger.assertClaim(id, claimToken)
     } catch (error) {
@@ -131,14 +139,19 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       if (row.status !== 'applied') return busy
       return { outcome: rejected(id, 'invalid_payload', `clientRefundId: ${payload.clientRefundId} is already refund ${row.id}`), keepClaim: false }
     }
+    // A parked row whose command park never landed (a takeover before the row insert, or a crash between the two parks) is
+    // parked again by command id. No money step runs here: it returns before sessionTakesMoney, pricing, the insert and runSteps.
+    if (row?.status === 'needs_admin' && row.command_id === id) {
+      return parkRefund(container, { id, row, trx }, 'park', "This refund was parked, but the park did not reach the ledger. Check the order's Medusa refunds, then use tally-ledger-resolve resume or apply.", 'park_unrecorded')
+    }
     if (row?.status === 'needs_admin') return busy
     if (row?.status === 'applied') {
       const result = refundResult(id, row)
-      await ledger.complete(id, claimToken, result)
+      if (await takeOrderLock(trx, order.id)) await ledger.completeByCommand(id, result)
       return { outcome: { kind: 'result', result }, keepClaim: true }
     }
     const takesMoney = await sessionTakesMoney(session, async (sql, params) => (await trx.raw(sql, params)).rows)
-    if (row && !takesMoney) return parkRefund(container, { id, claimToken, row }, 'session', sessionClosedMessage(row.id), 'session_closed')
+    if (row && !takesMoney) return parkRefund(container, { id, row, trx }, 'session', sessionClosedMessage(row.id), 'session_closed')
     if (!row && payload) {
       if (!takesMoney || session.status !== 'open' || session.register_id !== payload.registerId) {
         return { outcome: rejected(id, 'no_open_session', 'This refund needs an open session of its register.', { sessionId: payload.sessionId }), keepClaim: false }
@@ -168,25 +181,25 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       row = { ...fields, return_id: null, received_at: null, medusa_refund_id: null }
     }
     if (!row) throw new Error(`No refund row for command ${id}`)
-    return runSteps(container, { ...ctx, row })
+    return runSteps(container, { ...ctx, row, trx })
   })
 }
 
-async function parkRefund(container: MedusaContainer, { id, claimToken, row }: { id: string; claimToken: string; row: RefundRow },
-  step: string, message: string, reason?: 'refund_unrecorded' | 'session_closed'): Promise<Run> {
+async function parkRefund(container: MedusaContainer, { id, row, trx }: { id: string; row: RefundRow; trx: Knex.Transaction },
+  step: string, message: string, reason?: 'refund_unrecorded' | 'session_closed' | 'park_unrecorded'): Promise<Run> {
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   await knex('tally_refund').where({ id: row.id }).update({ status: 'needs_admin', updated_at: knex.fn.now() })
-  const parked = await ledger.markNeedsAdmin(id, claimToken, { orderId: row.order_id, clientRefundId: row.client_refund_id,
-    refundId: row.id, step, message, ...(reason ? { reason } : {}) })
+  const parked = await takeOrderLock(trx, row.order_id) && await ledger.markNeedsAdminByCommand(id, { orderId: row.order_id,
+    clientRefundId: row.client_refund_id, refundId: row.id, step, message, ...(reason ? { reason } : {}) })
   if (parked) logger.error(`tally order.refund needs admin: command ${id}, refund ${row.id}, step ${step}: ${message}`)
   else logger.warn(`tally order.refund: claim lost while parking command ${id} (refund ${row.id}, step ${step}: ${message})`)
   return { outcome: { kind: 'in_progress', id }, keepClaim: true }
 }
 
 async function runSteps(container: MedusaContainer, ctx: { id: string; claimToken: string; actorId?: string; order: RefundOrder
-  row: RefundRow }): Promise<Run> {
+  row: RefundRow; trx: Knex.Transaction }): Promise<Run> {
   const { id, claimToken, actorId, order, row } = ctx
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
@@ -259,7 +272,7 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
     return park(step, error.message)
   }
   const result = refundResult(id, row)
-  await ledger.complete(id, claimToken, result)
+  if (await takeOrderLock(ctx.trx, order.id)) await ledger.completeByCommand(id, result)
   return { outcome: { kind: 'result', result }, keepClaim: true }
 }
 
