@@ -243,7 +243,11 @@ test('released till documents survive the web storage upgrade intact', async ({ 
       await page.reload();
       await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
       await page.getByRole('button', { name: /^Orders(?: \(\d+\))?$/ }).click();
-      await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toHaveCount(4);
+      // Orders lists the whole store: each carried sale's own row, there once, reads Completed.
+      for (const order of OLD.docs.pos_orders) {
+        await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${order.id}-status`)).toHaveText('Completed');
+        await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${order.id}`)).toHaveCount(1);
+      }
       const settled = await ordersByClientId(token);
       expect(OLD.docs.pos_orders.map(order => settled.filter(sent => sent.metadata.tally_client_id === order.id).length))
         .toStrictEqual([1, 1, 1, 1]);

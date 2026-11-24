@@ -4,7 +4,7 @@ import { useState, type ReactNode } from 'react';
 import { BehaviorSubject } from 'rxjs';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
-import { SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
+import { CustomerServiceError, SignInError, type StoreSettings as PricingSettings } from '@tallyui/core';
 import type { StorageHealth as StorageHealthReading } from '@tallyui/database';
 import { createOrderBuilder, DEFAULT_CATALOGUE_VIEW_STATE, finalizeOrder, useOrderOutbox, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -40,7 +40,12 @@ import { cartLine, cartLineCells, pickMethod, take, tenderBalance, tenderEntry }
 const checkout = () => act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
 async function payByCard() { await checkout(); pickMethod('external'); take(); }
 
-vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
+// Orders lists the store's orders; the store has none here unless a test says otherwise.
+const { listOrders } = vi.hoisted(() => ({ listOrders: vi.fn(async () => ({ orders: [], hasMore: false })) }));
+vi.mock('../lib/pos-connector', async (importOriginal) => {
+  const mocked = await (await import('./pos-connector-mock')).mockPosConnector(importOriginal);
+  return { ...mocked, createPosConnector: () => ({ ...mocked.createPosConnector(), listOrders }) };
+});
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: vi.fn(() => '/'),
@@ -969,6 +974,8 @@ function savedSale(): PosOrder {
 
 describe('Orders screen and sync status', () => {
   it('shows no attention table when no orders need attention', async () => {
+    // Every sale this till holds is in the table only while the store is out of reach.
+    listOrders.mockRejectedValueOnce(new CustomerServiceError('network', 'offline'));
     const order = savedSale();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
       order, { ...order, id: 'applied', syncStatus: 'applied', warnings: [] },
@@ -977,11 +984,13 @@ describe('Orders screen and sync status', () => {
     expect(screen.queryByText('Needs attention')).toBeNull();
     expect(screen.queryByTestId('orders-attention')).toBeNull();
     const table = within(screen.getByTestId('orders-table'));
-    expect(table.getByTestId(`orders-table-row-${order.id}`)).toBeTruthy();
-    expect(table.getByTestId('orders-table-row-applied')).toBeTruthy();
+    expect(table.getByTestId(`orders-row-${order.id}`)).toBeTruthy();
+    expect(table.getByTestId('orders-row-applied')).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Send feedback' })).toBeNull();
   });
   it('lists rejected and warned sales under attention with their notices, and every sale in the table with statuses, totals and server display IDs', async () => {
+    // Every sale this till holds is in the table only while the store is out of reach.
+    listOrders.mockRejectedValueOnce(new CustomerServiceError('network', 'offline'));
     const order = savedSale();
     vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent: [
       { ...order, id: 'rejected', syncStatus: 'rejected', error: { code: 'invalid', message: 'Unknown variant' } },
@@ -1005,11 +1014,11 @@ describe('Orders screen and sync status', () => {
       expect(notices('warned').getByText(label)).toBeTruthy();
     }
     expect(screen.getByTestId('orders-attention-row-warned-number').textContent).toContain('#42');
-    const status = (id: string) => screen.getByTestId(`orders-table-row-${id}-status`).textContent;
+    const status = (id: string) => screen.getByTestId(`orders-row-${id}-status`).textContent;
     expect([status('rejected'), status('warned'), status(order.id)]).toEqual(['Cancelled', 'Completed', 'Pending']);
-    expect(screen.getByTestId('orders-table-row-warned-number').textContent).toContain('#42');
+    expect(screen.getByTestId('orders-row-warned-number').textContent).toContain('#42');
     for (const id of ['rejected', 'warned', order.id]) {
-      expect(screen.getByTestId(`orders-table-row-${id}-total`).textContent).toBe('€12.00');
+      expect(screen.getByTestId(`orders-row-${id}-total`).textContent).toBe('€12.00');
     }
   });
 

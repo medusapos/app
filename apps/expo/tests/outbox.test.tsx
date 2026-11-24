@@ -24,7 +24,11 @@ import { terminateWebStorage } from '../lib/web-storage';
 import { openTestRegister } from './register-fixture';
 import { setWindowWidth } from './window-width';
 
-vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
+// Orders lists the store's orders; this suite's fetch stub is for the outbox, so the store answers with none.
+vi.mock('../lib/pos-connector', async (importOriginal) => {
+  const mocked = await (await import('./pos-connector-mock')).mockPosConnector(importOriginal);
+  return { ...mocked, createPosConnector: () => ({ ...mocked.createPosConnector(), listOrders: async () => ({ orders: [], hasMore: false }) }) };
+});
 // The outbox's two live-tab hooks, observed where they live (TV7 review): markBusy still runs for real;
 // reportStorageStartFailure only records, since the real one latches the blocked screen for the whole run.
 vi.mock('../lib/live-tab', async (importOriginal) => {

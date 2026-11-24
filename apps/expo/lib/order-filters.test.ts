@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PosOrder } from '@tallyui/pos';
-import { filterOrders, medusaOrderStatus, orderFilterOptions } from './order-filters';
+import { filterOrders, medusaOrderStatus, orderFilterOptions, ordersScreenFilterFields } from './order-filters';
 
 function order(overrides: Partial<PosOrder> = {}): PosOrder {
   return {
@@ -103,5 +103,15 @@ describe('order filters', () => {
     expect(orderFilterOptions([named]).paymentMethod).toEqual([cashOption]);
     expect(orderFilterOptions([emailed]).paymentMethod).toEqual([cardOption]);
     expect(orderFilterOptions([])).toEqual({ status, paymentMethod: [], customer: [] });
+  });
+});
+
+describe('ordersScreenFilterFields', () => {
+  it('shows the fields the connector advertises, in the bar\'s order, and none without the capability', () => {
+    expect(ordersScreenFilterFields(['status', 'customerId', 'dateRange'])).toEqual(['status', 'customerId', 'dateRange']);
+    expect(ordersScreenFilterFields(['dateRange', 'paymentMethod', 'customerId', 'status']))
+      .toEqual(['status', 'paymentMethod', 'customerId', 'dateRange']);
+    expect(ordersScreenFilterFields(['status', 'cashierId', 'registerId', 'storeId', 'createdVia'])).toEqual(['status']);
+    expect(ordersScreenFilterFields(undefined)).toEqual([]);
   });
 });

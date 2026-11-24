@@ -55,6 +55,13 @@ function pendingE2E1Order(variantId: string) {
   };
 }
 
+// Orders lists the whole store, so a sale is found by its own row (the till's, even once the store lists it): there
+// exactly once, with this status.
+async function expectSaleRow(page: Page, id: string, status: 'Pending' | 'Completed', options: { timeout?: number } = {}) {
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${id}-status`)).toHaveText(status, options);
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${id}`)).toHaveCount(1);
+}
+
 test('cold open, offline sale, and reload keep the SQLite catalogue and carry the sale forward', async ({ page }) => {
   const token = await adminToken();
   const before = await stockBySku(token);
@@ -73,14 +80,15 @@ test('cold open, offline sale, and reload keep the SQLite catalogue and carry th
   await openArea(page, 'Orders');
   // Scoped to the orders table: its status cell, not the "Sync status" banner,
   // which also (lowercase, case-insensitively the same) contains "waiting to sync".
-  await expect(page.getByTestId('orders-table').getByText('Pending', { exact: true })).toBeVisible();
+  await expect.poll(() => sales.size).toBe(1);
+  const [clientId] = sales.keys();
+  await expectSaleRow(page, clientId, 'Pending');
 
   await page.unroute('**/tally/v1/commands');
   await page.unroute('**/admin/products**');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expectSaleRow(page, clientId, 'Completed', { timeout: 30_000 });
 
   expect(sales.size).toBe(1);
-  const [clientId] = sales.keys();
   const orders = (await ordersByClientId(token)).filter((order) => order.metadata.tally_client_id === clientId);
   expect(orders).toHaveLength(1);
 
@@ -130,11 +138,12 @@ test('signing out and in again in the same tab rebuilds the SQLite catalogue und
   await page.unroute('**/admin/products**');
 
   await openArea(page, 'Orders');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toHaveCount(1, { timeout: 30_000 });
+  await expect.poll(() => sales.size, { timeout: 30_000 }).toBe(1);
+  const [clientId] = sales.keys();
+  await expectSaleRow(page, clientId, 'Completed', { timeout: 30_000 });
   await expect(blocked).toHaveCount(0);
 
   expect(sales.size).toBe(1);
-  const [clientId] = sales.keys();
   const orders = (await ordersByClientId(token)).filter((order) => order.metadata.tally_client_id === clientId);
   expect(orders).toHaveLength(1);
   const after = await stockBySku(token);
@@ -160,10 +169,10 @@ async function olderSqliteSaleSyncsOnce(page: Page, version: 0 | 1) {
   await page.route('**/tally/v1/commands', (route) => route.abort());
   await signIn(page, 'Europe', 'unsynced');
   await openArea(page, 'Orders');
-  await expect(page.getByTestId('orders-table').getByText('Pending', { exact: true })).toBeVisible();
+  await expectSaleRow(page, order.id, 'Pending');
 
   await page.unroute('**/tally/v1/commands');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expectSaleRow(page, order.id, 'Completed', { timeout: 30_000 });
   expect(sales.has(order.id)).toBe(true);
   const orders = (await ordersByClientId(token)).filter((o) => o.metadata.tally_client_id === order.id);
   expect(orders).toHaveLength(1);
@@ -194,9 +203,9 @@ test('a pending order left in the legacy Dexie store carries over on sign-in and
   await page.route('**/tally/v1/commands', (route) => route.abort());
   await signIn(page, 'Europe', 'unsynced');
   await openArea(page, 'Orders');
-  await expect(page.getByTestId('orders-table').getByText('Pending', { exact: true })).toBeVisible();
+  await expectSaleRow(page, order.id, 'Pending');
   await page.unroute('**/tally/v1/commands');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expectSaleRow(page, order.id, 'Completed', { timeout: 30_000 });
 
   expect(sales.has(order.id)).toBe(true);
   const orders = (await ordersByClientId(token)).filter((o) => o.metadata.tally_client_id === order.id);
@@ -247,10 +256,10 @@ test('a legacy sale is carried over once and synced once; the legacy database is
   await page.reload();
   await openArea(page, 'Orders');
   // The marker prevents the late sale from being carried over.
-  await expect(page.getByTestId('orders-table').getByText('Pending', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${second.id}`)).toHaveCount(0);
   await page.unroute('**/tally/v1/commands');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toHaveCount(1, { timeout: 30_000 });
-  await expect(page.getByTestId('orders-table').getByText('Pending', { exact: true })).toHaveCount(0);
+  await expectSaleRow(page, first.id, 'Completed', { timeout: 30_000 });
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${second.id}`)).toHaveCount(0);
 
   expect(sales.has(second.id)).toBe(false);
   for (const order of [first, second]) {
@@ -344,6 +353,7 @@ test('the opfs-sahpool pool held by another worker blocks the app with Reload', 
 // worker start failure.
 test('a non-worker order-store open failure blocks with Reload and Report, and Reload recovers the app', async ({ page }) => {
   await signIn(page);
+  const sales = captureSales(page);
   await page.evaluate((code) => (window as unknown as {
     __medusaposFailNextOrderStoreOpen: (code: string) => void;
   }).__medusaposFailNextOrderStoreOpen(code), 'DM4');
@@ -362,5 +372,7 @@ test('a non-worker order-store open failure blocks with Reload and Report, and R
 
   await sellBySku(page, ['E2E-1'], 'exact');
   await openArea(page, 'Orders');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect.poll(() => sales.size).toBe(1);
+  const [clientId] = sales.keys();
+  await expectSaleRow(page, clientId, 'Completed', { timeout: 30_000 });
 });

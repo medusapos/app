@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { openArea, sellBySku, signIn, test } from './helpers';
+import { captureSales, openArea, sellBySku, signIn, test } from './helpers';
 
 // The password used by the e2e fixture account (mirrors the fallback in helpers.ts's `signIn`).
 const password = process.env.E2E_PASSWORD ?? 'e2e-password';
@@ -22,6 +22,7 @@ test('a product pull refused with 401 signs the till out', async ({ page }) => {
 });
 
 test('sign-in strip: outbox pauses after three 401s, resumes once signed in again', async ({ page }) => {
+  const sales = captureSales(page);
   await signIn(page);
   await routeCommands(page, 401, {});
   await sellBySku(page, ['E2E-1'], 'exact');
@@ -43,10 +44,14 @@ test('sign-in strip: outbox pauses after three 401s, resumes once signed in agai
   await expect(page.getByText('saved, waiting to send', { exact: false })).not.toBeVisible();
 
   await openArea(page, 'Orders');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible();
+  // Orders lists the whole store: the sale's own row, there once, reads Completed.
+  const [clientId] = sales.keys();
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${clientId}-status`)).toHaveText('Completed');
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${clientId}`)).toHaveCount(1);
 });
 
 test('refused strip: shows the store\'s refusal reason and recovers via Try again', async ({ page }) => {
+  const sales = captureSales(page);
   await signIn(page);
   await routeCommands(page, 400, { code: 'unsupported_protocol', message: 'Unsupported protocol' });
   await sellBySku(page, ['E2E-2'], 'exact');
@@ -68,5 +73,8 @@ test('refused strip: shows the store\'s refusal reason and recovers via Try agai
   await expect(page.getByText('not accepted', { exact: false })).not.toBeVisible();
 
   await openArea(page, 'Orders');
-  await expect(page.getByTestId('orders-table').getByText('Completed', { exact: true })).toBeVisible();
+  // Orders lists the whole store: the sale's own row, there once, reads Completed.
+  const [clientId] = sales.keys();
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${clientId}-status`)).toHaveText('Completed');
+  await expect(page.getByTestId('orders-table').getByTestId(`orders-row-${clientId}`)).toHaveCount(1);
 });

@@ -1,9 +1,15 @@
 import type { OrderFilterBarProps, OrderFilterOption } from '@tallyui/components';
-import type { OrderFilterField } from '@tallyui/core';
+import { ORDER_FILTER_FIELDS, type OrderFilterField, type StoreOrder } from '@tallyui/core';
 import { inRange, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
 
-// These are one till's own sales; cashier names are not on local orders, so omit cashier/register/store.
-export const ORDERS_SCREEN_FILTER_FIELDS: readonly OrderFilterField[] = ['status', 'paymentMethod', 'customerId', 'dateRange'];
+// The bar's candidate fields, in the bar's order (cashier, register, store and channel are left out of the bar).
+const ORDERS_SCREEN_CANDIDATE_FIELDS: readonly OrderFilterField[] = ['status', 'paymentMethod', 'customerId', 'dateRange'];
+
+// The fields the bar shows: only those the connector's listOrders honours (its `orderFilters` capability), since it
+// refuses any other. A connector without the capability filters nothing, so it gets none. Medusa drops payment method.
+export function ordersScreenFilterFields(supported: readonly OrderFilterField[] | undefined): OrderFilterField[] {
+  return ORDERS_SCREEN_CANDIDATE_FIELDS.filter((field) => ORDER_FILTER_FIELDS.includes(field) && !!supported?.includes(field));
+}
 
 export type MedusaOrderStatus = 'completed' | 'pending' | 'canceled';
 
@@ -24,14 +30,15 @@ export function medusaOrderStatus(order: PosOrder): MedusaOrderStatus {
   }
 }
 
-export function orderFilterOptions(orders: PosOrder[]): Required<Pick<NonNullable<OrderFilterBarProps['options']>,
+// Customers come from the till's sales and the store orders on screen; the till's sales name them first.
+export function orderFilterOptions(orders: PosOrder[], storeOrders: StoreOrder[] = []): Required<Pick<NonNullable<OrderFilterBarProps['options']>,
   'status' | 'paymentMethod' | 'customer'>> {
   const methods = new Set(orders.flatMap((order) => order.payments.map((payment) => payment.method)));
   const paymentMethod: NonNullable<OrderFilterBarProps['options']>['paymentMethod'] = [];
   if (methods.has('cash')) paymentMethod.push({ value: 'cash', label: 'Cash', kind: 'cash' });
   if (methods.has('external')) paymentMethod.push({ value: 'external', label: 'Card', kind: 'card' });
   const customers = new Map<string, string>();
-  for (const { customer } of orders) {
+  for (const { customer } of [...orders, ...storeOrders]) {
     if (customer?.id && !customers.has(customer.id)) {
       customers.set(customer.id, customer.name || customer.email || customer.id);
     }
