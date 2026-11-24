@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, FeatureFlag, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, FeatureFlag, MedusaError, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import tallyPosRoles from '../../src/scripts/tally-pos-roles'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
@@ -581,7 +581,7 @@ medusaIntegrationTestRunner({
       expect(await stockA()).toBe(before)
     })
 
-    it('W1-not-reused: confirmed: a tagged return already requested is not reused; the retry refuses as today', async () => {
+    it('W1-not-reused: not open: a tagged return whose status is no longer open is not reused; the retry refuses as today', async () => {
       const { till, order, knex, row, begun } = await crashed()
       await knex('return').where({ id: begun.id }).update({ status: 'requested' })
       expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
@@ -599,6 +599,53 @@ medusaIntegrationTestRunner({
         message: 'lookup probe' } })
       expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', return_id: null })
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+    })
+
+    // #543 round 2: an open tagged return is reused only while its active request change is empty.
+    const activeChanges = (knex: any, returnId: string) => knex('order_change')
+      .where({ return_id: returnId }).whereIn('status', ['pending', 'requested']).whereNull('deleted_at')
+    it('R2-no-change: a tagged return left without an active change (death inside the begin) is not reused; a second return finishes the refund', async () => {
+      const { before, till, order, knex, row, begun } = await crashed()
+      const ids = await activeChanges(knex, begun.id).pluck('id')
+      expect(ids).toHaveLength(1)
+      await knex('order_change_action').whereIn('order_change_id', ids).delete()
+      await knex('order_change').whereIn('id', ids).delete()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      const recorded = await knex('tally_refund').where({ id: row.id }).first()
+      expect(recorded).toMatchObject({ status: 'applied' })
+      expect(recorded.return_id).not.toBe(begun.id)
+      expect(await returns(till.orderId)).toEqual(expect.arrayContaining([expect.objectContaining({ id: begun.id, status: 'open' }),
+        expect.objectContaining({ id: recorded.return_id, status: 'received' })]))
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('R2-actions: a tagged return whose request holds an Admin\'s items is not reused; the retry refuses and leaves them', async () => {
+      const { till, order, knex, row, begun } = await crashed()
+      const stock = await stockA()
+      const { requestItemReturnWorkflow } = require('@medusajs/medusa/core-flows')
+      await requestItemReturnWorkflow(container).run({ input: { return_id: begun.id, items: [{ id: till.lineId, quantity: 1 }] } })
+      const [changeId] = await activeChanges(knex, begun.id).pluck('id')
+      const actions = async () => (await knex('order_change_action').where({ order_change_id: changeId }).whereNull('deleted_at')).length
+      expect(await actions()).toBe(1)
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+      expect(await actions()).toBe(1)
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+    })
+
+    it('R2-reuse-request-fails: a reused return whose request fails is cancelled and the row deleted, as for a begun one', async () => {
+      const { till, workflow, order, knex, row, begun } = await crashed()
+      const stock = await stockA()
+      jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new MedusaError(MedusaError.Types.NOT_ALLOWED, 'request probe'))
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error',
+        message: expect.stringContaining('request probe') } })
+      expect(await knex('return').where({ id: begun.id }).first()).toMatchObject({ deleted_at: expect.any(Date) })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
     })
 
     it('N3-double-subtraction (deliberate, conservative): a refund_unrecorded row whose money moved is held back twice from the cap', async () => {
