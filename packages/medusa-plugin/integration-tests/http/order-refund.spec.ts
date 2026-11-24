@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import path from 'node:path'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, FeatureFlag, Modules } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, FeatureFlag, MedusaError, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import tallyPosRoles from '../../src/scripts/tally-pos-roles'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
@@ -521,6 +521,130 @@ medusaIntegrationTestRunner({
         medusa_refund_id: null })
       expect(await medusaRefunds(till.orderId)).toEqual([])
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+      expect(await stockA()).toBe(stock)
+    })
+
+    // #543 window 1: a run that died between beginReturn and recording its id. The row is in_progress with no return_id,
+    // its open return carries the row's tag, and the command's claim is past its lease.
+    async function crashed() {
+      const before = await stockA()
+      const till = await tillSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new Error('request probe'))
+      jest.spyOn(workflow, 'cancelReturn').mockRejectedValueOnce(new Error('cancel probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const row = await knex('tally_refund').where({ command_id: order.id }).first()
+      const begun = await knex('return').where({ order_id: till.orderId }).first()
+      expect(begun).toMatchObject({ id: row.return_id, status: 'open', metadata: { tally_refund_id: row.id } })
+      await knex('tally_refund').where({ id: row.id }).update({ status: 'in_progress', return_id: null })
+      await knex('tally_command').where({ id: order.id }).update({ status: 'in_progress', needs_admin_reason: null,
+        updated_at: knex.raw("now() - interval '1 hour'") })
+      return { before, till, workflow, order, knex, row, begun }
+    }
+
+    it('W1-reuse: a retry records the open return its row began instead of beginning a second: one return, one refund', async () => {
+      const { before, till, order, knex, row, begun } = await crashed()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'applied', return_id: begun.id })
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'received' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    for (const [name, metadata] of [['untagged', null], ['other row', { tally_refund_id: 'tref_someone_else' }]] as const) {
+      it(`W1-foreign: ${name}: an open return that is not this row's is never reused; the retry refuses and leaves it open`, async () => {
+        const { till, order, knex, row, begun } = await crashed()
+        await knex('return').where({ id: begun.id }).update({ metadata })
+        expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+        expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+        expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id,
+          status: 'open', metadata })])
+        expect(await medusaRefunds(till.orderId)).toEqual([])
+      })
+    }
+
+    it('W1-not-reused: cancelled: a cancelled tagged return stays cancelled; the retry begins a new one and finishes', async () => {
+      const { before, till, workflow, order, knex, begun } = await crashed()
+      await workflow.cancelReturn(container, begun.id)
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      // Medusa cancels a return request by soft-deleting the return; it stays so, and the refund has a second return.
+      expect(await knex('return').where({ id: begun.id }).first()).toMatchObject({ deleted_at: expect.any(Date) })
+      const after = await returns(till.orderId)
+      expect(after).toEqual([expect.objectContaining({ status: 'received' })])
+      const second = after[0]
+      expect(second.id).not.toBe(begun.id)
+      expect(await knex('tally_refund').where({ command_id: order.id }).first()).toMatchObject({ status: 'applied',
+        return_id: second.id })
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('W1-not-reused: not open: a tagged return whose status is no longer open is not reused; the retry refuses as today', async () => {
+      const { till, order, knex, row, begun } = await crashed()
+      await knex('return').where({ id: begun.id }).update({ status: 'requested' })
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id,
+        status: 'requested', metadata: { tally_refund_id: row.id } })])
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+    })
+
+    it('W1-lookup-fails-parks: a lookup that throws parks at the return step and never deletes the row', async () => {
+      const { till, workflow, order, knex, row, begun } = await crashed()
+      jest.spyOn(workflow, 'findOwnOpenReturn').mockRejectedValueOnce(new Error('lookup probe'))
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'return',
+        message: 'lookup probe' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', return_id: null })
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+    })
+
+    // #543 round 2: an open tagged return is reused only while its active request change is empty.
+    const activeChanges = (knex: any, returnId: string) => knex('order_change')
+      .where({ return_id: returnId }).whereIn('status', ['pending', 'requested']).whereNull('deleted_at')
+    it('R2-no-change: a tagged return left without an active change (death inside the begin) is not reused; a second return finishes the refund', async () => {
+      const { before, till, order, knex, row, begun } = await crashed()
+      const ids = await activeChanges(knex, begun.id).pluck('id')
+      expect(ids).toHaveLength(1)
+      await knex('order_change_action').whereIn('order_change_id', ids).delete()
+      await knex('order_change').whereIn('id', ids).delete()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      const recorded = await knex('tally_refund').where({ id: row.id }).first()
+      expect(recorded).toMatchObject({ status: 'applied' })
+      expect(recorded.return_id).not.toBe(begun.id)
+      expect(await returns(till.orderId)).toEqual(expect.arrayContaining([expect.objectContaining({ id: begun.id, status: 'open' }),
+        expect.objectContaining({ id: recorded.return_id, status: 'received' })]))
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('R2-actions: a tagged return whose request holds an Admin\'s items is not reused; the retry refuses and leaves them', async () => {
+      const { till, order, knex, row, begun } = await crashed()
+      const stock = await stockA()
+      const { requestItemReturnWorkflow } = require('@medusajs/medusa/core-flows')
+      await requestItemReturnWorkflow(container).run({ input: { return_id: begun.id, items: [{ id: till.lineId, quantity: 1 }] } })
+      const [changeId] = await activeChanges(knex, begun.id).pluck('id')
+      const actions = async () => (await knex('order_change_action').where({ order_change_id: changeId }).whereNull('deleted_at')).length
+      expect(await actions()).toBe(1)
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+      expect(await actions()).toBe(1)
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+    })
+
+    it('R2-reuse-request-fails: a reused return whose request fails is cancelled and the row deleted, as for a begun one', async () => {
+      const { till, workflow, order, knex, row, begun } = await crashed()
+      const stock = await stockA()
+      jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new MedusaError(MedusaError.Types.NOT_ALLOWED, 'request probe'))
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error',
+        message: expect.stringContaining('request probe') } })
+      expect(await knex('return').where({ id: begun.id }).first()).toMatchObject({ deleted_at: expect.any(Date) })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await medusaRefunds(till.orderId)).toEqual([])
       expect(await stockA()).toBe(stock)
     })
 
