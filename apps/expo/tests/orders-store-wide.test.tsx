@@ -3,9 +3,11 @@ import { act, cleanup, fireEvent, render, screen, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderReference } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
-import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type StoreOrder, type StoreOrderPage } from '@tallyui/core';
+import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type OrderFilterField, type ServerCapabilities,
+  type StoreOrder, type StoreOrderPage } from '@tallyui/core';
 import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
-import type { Session } from '../lib/session';
+import { REGISTER_ID_KEY, type Session } from '../lib/session';
+import { saveTillName } from '../lib/till-name';
 import { useOutboxContext } from '../lib/outbox-context';
 import { formatDate } from '../lib/format-date';
 import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEXT, ORDERS_NO_MATCH_TEXT, ORDERS_OFFLINE_TEXT }
@@ -14,17 +16,22 @@ import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEX
 const { listOrders, sessionState, connector } = vi.hoisted(() => ({
   listOrders: vi.fn(),
   sessionState: { session: null as Session | null, reportUnauthorized: vi.fn() },
-  connector: { orderFilters: [] as string[] },
+  connector: { orderFilters: null as OrderFilterField[] | null },
 }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/orders',
   Stack: { Screen: () => null },
 }));
-vi.mock('../lib/pos-connector', () => ({
-  createPosConnector: () => ({ id: 'medusa', listOrders, orderFilters: connector.orderFilters }),
-  authHeaders: () => ({ Authorization: 'Bearer t' }),
-}));
+vi.mock('../lib/pos-connector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/pos-connector')>();
+  return {
+    createPosConnector: () => ({ id: 'medusa', listOrders }),
+    authHeaders: () => ({ Authorization: 'Bearer t' }),
+    // A test may stand in its own filter list; otherwise the real plugin-contract gate decides.
+    storeOrderFilters: (capabilities?: ServerCapabilities) => connector.orderFilters ?? actual.storeOrderFilters(capabilities),
+  };
+});
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
@@ -67,11 +74,18 @@ const openButtons = () => within(screen.getByTestId('orders-table')).getAllByRol
 beforeEach(() => {
   vi.useFakeTimers();
   listOrders.mockReset().mockResolvedValue(page([]));
-  connector.orderFilters = ['status', 'customerId', 'dateRange'];
+  connector.orderFilters = null;
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't' };
   withSales();
+  // This till's device id, the one its sales carry (getDeviceId reads it from here); no till name saved.
+  const data = new Map<string, string>([[REGISTER_ID_KEY, 'till-a']]);
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, value); },
+    removeItem: (key: string) => { data.delete(key); },
+  });
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Orders lists the whole store (row 10)', () => {
   it('lists the store\'s orders in the store\'s order with their cells; a guest reads Guest, the cashier —', async () => {
@@ -171,6 +185,57 @@ describe('Orders lists the whole store (row 10)', () => {
     connector.orderFilters = ['status', 'paymentMethod', 'customerId', 'dateRange'];
     await mount();
     expect(screen.getByTestId('order-filter-payment-method')).toBeTruthy();
+  });
+
+  it('plugin contract 3: the Register pill lists this till\'s sales and hides another till\'s', async () => {
+    const capabilities = { orderCreate: 1, pluginContract: 3 };
+    sessionState.session = { ...sessionState.session!, capabilities };
+    const mine = { ...sale('Red hat', 'pending'), registerId: 'till-a' };
+    const theirs = { ...sale('Green hat', 'pending'), registerId: 'till-b' };
+    withSales(mine, theirs);
+    // The store answers the register query with this till's order only.
+    listOrders.mockImplementation((_context, query: { registerId?: string }) => Promise.resolve(page(
+      query.registerId === undefined ? [storeOrder(2), storeOrder(1)] : query.registerId === 'till-a' ? [storeOrder(2)] : [])));
+    await mount();
+    expect(openButtons()).toHaveLength(4);
+    fireEvent.click(screen.getByTestId('order-filter-register'));
+    const menu = screen.getByTestId('order-filter-register-menu');
+    expect(Array.from(menu.querySelectorAll('[data-testid^="order-filter-register-"]'), (item) => item.getAttribute('data-testid')))
+      .toEqual(['order-filter-register-till-a']);
+    expect(screen.getByTestId('order-filter-register-till-a').textContent).toBe('This till');
+    fireEvent.click(screen.getByTestId('order-filter-register-till-a'));
+    await settle();
+    expect(listOrders).toHaveBeenLastCalledWith({ ...context, capabilities }, { page: 1, perPage: 25, registerId: 'till-a' });
+    expect(openButtons()).toEqual([`Open order ${orderReference(mine)}`, 'Open order #1002']);
+    expect(screen.queryByTestId(`orders-row-${theirs.id}`)).toBeNull();
+  });
+
+  it('the Register pill\'s one option is labelled with the till name from Settings', async () => {
+    sessionState.session = { ...sessionState.session!, capabilities: { orderCreate: 1, pluginContract: 3 } };
+    saveTillName(localStorage, 'https://store.test', 'Front counter');
+    await mount();
+    fireEvent.click(screen.getByTestId('order-filter-register'));
+    expect(screen.getByTestId('order-filter-register-till-a').textContent).toBe('Front counter');
+  });
+
+  it('plugin contract 3: a 1-6 digit search without a register filter keeps the old /admin/orders path', async () => {
+    sessionState.session = { ...sessionState.session!, capabilities: { orderCreate: 1, pluginContract: 3 } };
+    await mount();
+    fireEvent.change(screen.getByTestId('orders-search'), { target: { value: '1042' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(listOrders).toHaveBeenLastCalledWith(context, { page: 1, perPage: 25, search: '1042' });
+    // No capabilities in the context: listOrders sends the search to /admin/orders, as before contract 3.
+    expect(listOrders.mock.lastCall![0]).not.toHaveProperty('capabilities');
+  });
+
+  it('below plugin contract 3 there is no Register pill', async () => {
+    for (const capabilities of [{ orderCreate: 1, pluginContract: 2 }, { orderCreate: 1 }]) {
+      sessionState.session = { ...sessionState.session!, capabilities };
+      const view = await mount();
+      expect(screen.getByTestId('order-filter-status')).toBeTruthy();
+      expect(screen.queryByTestId('order-filter-register')).toBeNull();
+      view.unmount();
+    }
   });
 
   it('opens an order only the store has in its own read-only sheet, and the till\'s own sale in the till\'s sheet', async () => {

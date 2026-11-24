@@ -42,6 +42,12 @@ describe('order filters', () => {
     expect(filterOrders([other, selected, order()], '', { customerId: 'customer-a' }, 'UTC')).toEqual([selected]);
   });
 
+  it('keeps only the selected register\'s orders', () => {
+    const mine = order({ registerId: 'till-a' });
+    const other = order({ id: 'other', registerId: 'till-b' });
+    expect(filterOrders([other, mine], '', { registerId: 'till-a' }, 'UTC')).toEqual([mine]);
+  });
+
   it('searches order references, customer details and lines, ignoring case and surrounding whitespace', () => {
     const matching = order({
       customer: { id: 'customer-a', name: 'Alice Smith', email: 'alice@example.test' },
@@ -74,7 +80,7 @@ describe('order filters', () => {
     expect(filterOrders(orders, '', { status: 'completed', customerId: 'customer-a' }, 'UTC')).toEqual([selected]);
     expect(filterOrders(orders, '', {}, 'UTC')).toEqual(orders);
     expect(filterOrders(orders, '', {
-      cashierId: 'ignored', registerId: 'ignored', storeId: 'ignored', createdVia: 'ignored',
+      cashierId: 'ignored', storeId: 'ignored', createdVia: 'ignored',
     }, 'UTC')).toEqual(orders);
   });
 
@@ -111,7 +117,7 @@ describe('ordersScreenFilterFields', () => {
     expect(ordersScreenFilterFields(['status', 'customerId', 'dateRange'])).toEqual(['status', 'customerId', 'dateRange']);
     expect(ordersScreenFilterFields(['dateRange', 'paymentMethod', 'customerId', 'status']))
       .toEqual(['status', 'paymentMethod', 'customerId', 'dateRange']);
-    expect(ordersScreenFilterFields(['status', 'cashierId', 'registerId', 'storeId', 'createdVia'])).toEqual(['status']);
+    expect(ordersScreenFilterFields(['status', 'cashierId', 'registerId', 'storeId', 'createdVia'])).toEqual(['status', 'registerId']);
     expect(ordersScreenFilterFields(undefined)).toEqual([]);
   });
 });

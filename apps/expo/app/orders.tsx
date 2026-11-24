@@ -2,7 +2,7 @@ import { useContext, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { Redirect, Stack } from 'expo-router';
 import { Button, OrderFilterBar, SearchInput, Text as ButtonText } from '@tallyui/components';
-import { needsAttention, type OrderFilterValue } from '@tallyui/pos';
+import { getDeviceId, needsAttention, type OrderFilterValue } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
 import { OrdersTable } from '../components/orders-table';
@@ -10,7 +10,8 @@ import { StoreOrderDetailSheet } from '../components/store-order-detail-sheet';
 import { StripHeightContext } from '../components/store-refused';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useSession } from '../lib/session-context';
-import type { Session } from '../lib/session';
+import { defaultStorage, REGISTER_ID_KEY, type Session } from '../lib/session';
+import { useTillName } from '../lib/till-name';
 import { formatDate } from '../lib/format-date';
 import { refundsCollection } from '../lib/order-store';
 import { filterOrders, orderFilterOptions } from '../lib/order-filters';
@@ -38,7 +39,11 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   // A sale reaching the store changes this count, and the store's first page is read again to list it.
   const appliedCount = useMemo(() => recent.filter((order) => order.syncStatus === 'applied').length, [recent]);
   const store = useStoreOrders(session, search, filters, appliedCount, onUnauthorized);
-  const options = useMemo(() => orderFilterOptions(recent, store.orders), [recent, store.orders]);
+  // The Register pill's one option is this till: its sales carry its device id (outbox-context.tsx), as tally_register_id.
+  const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
+  const tillName = useTillName(defaultStorage(), session.baseUrl).tillName?.trim() || 'This till';
+  const options = useMemo(() => ({ ...orderFilterOptions(recent, store.orders),
+    register: [{ value: registerId, label: tillName }] }), [recent, store.orders, registerId, tillName]);
   const orders = useMemo(() => filterOrders(recent, search, filters, 'device'), [recent, search, filters]);
   // OrdersList's own rule: the stuck pending sales need attention too.
   const attention = useMemo(() => needsAttention(orders, { stuckCommandIds: state.stuck?.commandIds }), [orders, state.stuck]);

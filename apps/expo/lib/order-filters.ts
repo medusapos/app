@@ -2,8 +2,9 @@ import type { OrderFilterBarProps, OrderFilterOption } from '@tallyui/components
 import { ORDER_FILTER_FIELDS, type OrderFilterField, type StoreOrder } from '@tallyui/core';
 import { inRange, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
 
-// The bar's candidate fields, in the bar's order (cashier, register, store and channel are left out of the bar).
-const ORDERS_SCREEN_CANDIDATE_FIELDS: readonly OrderFilterField[] = ['status', 'paymentMethod', 'customerId', 'dateRange'];
+// The bar's candidate fields, in the bar's order (cashier, store and channel are left out of the bar). Register
+// is a candidate; Medusa advertises it from plugin contract 3.
+const ORDERS_SCREEN_CANDIDATE_FIELDS: readonly OrderFilterField[] = ['status', 'paymentMethod', 'customerId', 'registerId', 'dateRange'];
 
 // The fields the bar shows: only those the connector's listOrders honours (its `orderFilters` capability), since it
 // refuses any other. A connector without the capability filters nothing, so it gets none. Medusa drops payment method.
@@ -60,6 +61,7 @@ export function filterOrders(orders: PosOrder[], search: string, value: OrderFil
     if (value.status && medusaOrderStatus(order) !== value.status) return false;
     if (value.paymentMethod && !order.payments.some((payment) => payment.method === value.paymentMethod)) return false;
     if (value.customerId && order.customer?.id !== value.customerId) return false;
+    if (value.registerId && order.registerId !== value.registerId) return false;
     if (value.dateRange && !inRange(order.createdAt, value.dateRange, timezone)) return false;
     return true;
   });

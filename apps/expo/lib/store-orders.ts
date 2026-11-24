@@ -3,7 +3,7 @@ import type { OrderDetailLineItem, OrderDetailTaxLine, OrderStatus } from '@tall
 import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type StoreOrder, type SyncContext } from '@tallyui/core';
 import { buildReceiptDataFromStoreOrder, orderFiltersQuery, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
 import { ordersScreenFilterFields } from './order-filters';
-import { authHeaders, createPosConnector } from './pos-connector';
+import { authHeaders, createPosConnector, storeOrderFilters } from './pos-connector';
 import type { Session } from './session';
 
 // listOrders' own default page size (its max is 100); WCPOS v2 pages its Orders list the same way.
@@ -68,9 +68,13 @@ export type StoreOrdersFailure = 'network' | 'other';
 export function useStoreOrders(session: Session, search: string, filters: OrderFilterValue, appliedCount: number,
   onUnauthorized: () => void) {
   const connector = useMemo(() => createPosConnector(), []);
-  const filterFields = useMemo(() => ordersScreenFilterFields(connector.orderFilters), [connector]);
+  const filterFields = useMemo(() => ordersScreenFilterFields(storeOrderFilters(session.capabilities)), [session.capabilities]);
   const context = useMemo<SyncContext>(() => ({ connectorId: connector.id, baseUrl: session.baseUrl,
     headers: authHeaders(session.token) }), [connector.id, session.baseUrl, session.token]);
+  // The capabilities let listOrders route and accept the register filter (plugin contract 3). Only a register query
+  // carries them, so a search without one (1-6 digits too) stays on /admin/orders as before (desk, 2026-11-24).
+  const registerContext = useMemo<SyncContext>(() => ({ ...context, capabilities: session.capabilities }),
+    [context, session.capabilities]);
   const [debounced, setDebounced] = useState(search.trim());
   useEffect(() => {
     const timer = setTimeout(() => setDebounced(search.trim()), STORE_ORDERS_SEARCH_DEBOUNCE_MS);
@@ -96,7 +100,7 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
       setLoading(false);
       return;
     }
-    listOrders(context, { page, perPage: STORE_ORDERS_PER_PAGE, ...(debounced ? { search: debounced } : {}),
+    listOrders(filters.registerId ? registerContext : context, { page, perPage: STORE_ORDERS_PER_PAGE, ...(debounced ? { search: debounced } : {}),
       ...orderFiltersQuery(filters, 'device') }).then((answer) => {
       if (current !== request.current) return;
       setResult((before) => page === 1 || !before
@@ -116,7 +120,7 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
     });
     // A late answer after a newer request, or after the screen closes, is dropped.
     return () => { ++request.current; };
-  }, [connector, context, debounced, filters, page, appliedCount, attempt]);
+  }, [connector, context, registerContext, debounced, filters, page, appliedCount, attempt]);
 
   const loadMore = useCallback(() => setPaging({ query, page: page + 1, attempt }), [query, page, attempt]);
   const retry = useCallback(() => setPaging({ query, page: 1, attempt: attempt + 1 }), [query, attempt]);
