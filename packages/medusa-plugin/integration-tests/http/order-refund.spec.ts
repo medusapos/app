@@ -284,7 +284,8 @@ medusaIntegrationTestRunner({
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       const lines = [till.full.payload.lines[0]]
-      const returnId = await workflow.beginReturn(container, { orderId: till.orderId, locationId: data.berlinId, note: 'return in Admin' })
+      const returnId = await workflow.beginReturn(container, { orderId: till.orderId, locationId: data.berlinId, note: 'return in Admin',
+        refundRowId: 'tref_admin_return' })
       await workflow.requestReturn(container, { returnId, lines })
       await workflow.receiveStep(container, { returnId, lines })
       const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
