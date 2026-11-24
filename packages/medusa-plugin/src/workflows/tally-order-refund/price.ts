@@ -29,6 +29,19 @@ export function connectorSplit(gross: string | number, tax: string | number, dec
   return { netMinor, taxMinor: medusaSumMinor(decimals, [gross]) - netMinor }
 }
 
+/**
+ * The order's line money and gross shipping (ADR 0026 decision 5). The till sees each shipping method's and fee item's own
+ * rounded gross (connector-medusa 4.1.0 toMedusaStoreOrder, dist/index.js:1089 and 1082), so they are rounded per item here
+ * too: one rounding over their raw sum would refuse a correct refund. Line money is null when the order has no payment.
+ */
+export function refundMoneyMinor(decimals: number, paymentRaw: string | number | null, shippingRaws: (string | number)[],
+  feeRaws: (string | number)[]): { linesMoneyMinor: number | null; shippingMinor: number } {
+  const perItem = (raws: (string | number)[]) => raws.reduce<number>((sum, raw) => sum + medusaSumMinor(decimals, [raw]), 0)
+  const shippingMinor = perItem(shippingRaws)
+  const linesMoneyMinor = paymentRaw === null ? null : medusaSumMinor(decimals, [paymentRaw]) - shippingMinor - perItem(feeRaws)
+  return { linesMoneyMinor, shippingMinor }
+}
+
 /** @tallyui/pos 4.1.0 roundRatio(n, d, 'half_up') (dist/index.js:319). */
 function roundHalfUp(n: bigint, d: bigint): bigint {
   const a = 2n * n + d, b = 2n * d
