@@ -112,10 +112,13 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       await addE2E1(page);
       await openCart(page);
       await openOrderDetails(page);
-      const formTab = page.getByTestId('cart-order-tab-form');
-      const form = (await formTab.boundingBox())!;
-      const json = (await page.getByTestId('cart-order-tab-json').boundingBox())!;
-      const list = (await formTab.locator('..').boundingBox())!;
+      await expect(page.getByTestId('cart-order-tab-json')).toBeVisible();
+      // One frame: the sheet slides in on translateX, which cancels out between boxes read together.
+      const [form, json, list] = await page.evaluate(() => {
+        const sheet = document.querySelector('[data-testid="cart-note-sheet"]')!;
+        return ['[data-testid="cart-order-tab-form"]', '[data-testid="cart-order-tab-json"]', '[role="tablist"]']
+          .map((sel) => sheet.querySelector(sel)!.getBoundingClientRect().toJSON() as DOMRect);
+      });
       expect(Math.abs(json.y - form.y)).toBeLessThanOrEqual(1);
       expect(json.x).toBeGreaterThanOrEqual(form.x + form.width - 1);
       for (const tab of [form, json]) {
