@@ -50,6 +50,6 @@ export default function OrdersScreen() {
     </ScrollView>
     {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. */}
     <OrderDetailSheet order={recent.find((order) => order.id === openId) ?? null} onClose={() => setOpenId(null)}
-      formatDate={formatDate} onRetry={requeue} onFlush={flush} />
+      formatDate={formatDate} onRetry={requeue} onFlush={flush} stuck={state.stuck} />
   </View>;
 }

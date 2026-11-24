@@ -324,6 +324,21 @@ describe('orders table (row 10.1)', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
+  it('opening a stuck pending sale from the all-sales table shows its stuck-since notice in the sheet', async () => {
+    const stuck = sale('Green scarf', 'pending');
+    const waiting = sale('Blue shirt', 'pending');
+    const firstFailedAt = new Date('2026-11-22T09:05:00').getTime();
+    const entry = { commandId: stuck.commandId, since: firstFailedAt, firstFailedAt, reason: 'platform_error' };
+    vi.mocked(useOutboxContext).mockReturnValue({
+      ...useOutboxContext(), recent: [stuck, waiting], stuckCommandIds: [stuck.commandId],
+      state: { pending: 2, sending: false, stuck: { commandIds: [stuck.commandId], since: firstFailedAt, firstFailedAt,
+        reason: 'platform_error', orders: [entry] } },
+    });
+    mount();
+    fireEvent.click(openButton('orders-table', stuck));
+    expect((await screen.findByTestId('order-detail-notices')).textContent).toContain("Hasn't reached the online store since");
+  });
+
   it('shows the empty state only when the search filters every sale out', () => {
     withSales(sold());
     mount();

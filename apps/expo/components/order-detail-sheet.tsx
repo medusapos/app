@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Platform, ScrollView, View } from 'react-native';
 import {
-  Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, OrderDetail, orderReference, Receipt, Text, XIcon,
+  Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, OrderDetail, orderReference, OrderSyncNotices, Receipt, Text, XIcon,
 } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
-import { buildReceiptDataFromPosOrder, type PosOrder } from '@tallyui/pos';
+import { buildReceiptDataFromPosOrder, type PosOrder, type UseOrderOutboxResult } from '@tallyui/pos';
 import {
   canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
 } from '../lib/order-detail';
@@ -30,9 +30,10 @@ export function injectReceiptPrintStyle() {
 }
 
 // One stored sale, read-only, in a right-hand sheet as WCPOS v2 opens an order.
-export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush }: {
+export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush, stuck }: {
   order: PosOrder | null; onClose: () => void; formatDate: (iso: string) => string;
   onRetry: (orderIds: string[]) => Promise<number>; onFlush: () => Promise<void>;
+  stuck?: UseOrderOutboxResult['state']['stuck'];
 }) {
   const { session } = useSession();
   const [reprint, setReprint] = useState(false);
@@ -61,6 +62,8 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush 
         customerSlot={<View className="gap-1">
           <Text className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</Text>
           <Text className="text-sm text-foreground">{order.customer?.name || order.customer?.email || 'Guest'}</Text>
+          {/* The notices OrdersList showed under each sale. */}
+          <View testID="order-detail-notices" className="gap-1"><OrderSyncNotices order={order} stuck={stuck} /></View>
         </View>}
         paymentSlot={<View className="gap-1">
           <Text className="text-xs font-semibold text-muted-foreground">Payment</Text>

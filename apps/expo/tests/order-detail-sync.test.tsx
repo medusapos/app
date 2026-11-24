@@ -40,6 +40,19 @@ describe('order detail Sync (row 10.3)', () => {
   }
   const disabled = (element: HTMLElement) => element.getAttribute('aria-disabled') === 'true';
 
+  describe('order detail sync notices', () => {
+    it('shows the closure notice for an applied sale counted in a closed register', async () => {
+      render(sheet({ ...sale('applied'), countedInClosureOf: 'reg_1' }));
+      expect((await screen.findByTestId('order-detail-notices')).textContent)
+        .toBe("Recorded after the register closed. Its payment is in that register's closure.");
+    });
+
+    it('has no notice text for an applied sale without notice fields', async () => {
+      render(sheet(sale('applied')));
+      expect((await screen.findByTestId('order-detail-notices')).textContent).toBe('');
+    });
+  });
+
   it('a pending sale shows Sync first in the footer, and pressing it flushes', async () => {
     const onRetry = vi.fn(async () => 1);
     const onFlush = vi.fn(async () => {});
