@@ -156,6 +156,12 @@ So a refund that leaves every product line fully refunded prices its lines at th
 
 **The overall cap.** A refund's total may not exceed the payment's amount less Medusa's refunds, less the totals of earlier rows that have not yet reached Medusa.
 
+**Refund all after goodwill** (2026-11-24, #547, desk ruling). Let T be the request's priced total and C the money left (the cap). Refund all passes at C when the overrun O = T − C is at most the goodwill G that earlier recorded rows refunded without lines or shipping. An overrun beyond G is line or shipping money already taken, or a dropped N1 difference, and still refuses.
+- Guards: the request has priced lines; O ≤ the lines' sum; every earlier row has its Medusa refund; Medusa's returned quantity on each line ≤ the tally rows'.
+- The split: each line takes the floor of O × gross ÷ Σ gross, and the units left go one each by largest remainder, then larger gross, then the later line; net and tax split within a line.
+- A refund made outside the till (on no `tally_refund` row and not baselined) is refused up front, `order_state` with `{ reason: 'refunded_outside_till', outsideMinor }`, before any row or return. The recorded figure is the receive check's own (decision 2), so the clamp serves till-recorded or baselined goodwill only.
+- The app offers Refund all at `min(full, paid − Σ refunds)`.
+
 **Medusa credit lines.** Medusa 2.21's `refundPaymentWorkflow` records any refund above the order's pending difference as an order credit line. So a shipping-only refund, an adjustment, or a line priced up by rounding shows in Admin as a credit line on the order.
 
 **Required tests.**

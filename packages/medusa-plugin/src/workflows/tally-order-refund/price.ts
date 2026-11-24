@@ -68,6 +68,8 @@ export interface PriceRefundInput {
   earlier: { lines: PricedLine[]; shippingMinor: number; medusaRefundId: string | null }[]
   /** The payment's amount; null when the order has no payment. */
   paidMinor: number | null
+  /** Medusa's refunds beyond what the tally rows and baselines record (made outside the till); 0 when there is no payment. */
+  outsideRefundsMinor: number
   /** The payment less Medusa's refunds and earlier refunds not yet sent; null when the order has no payment. */
   refundableMoneyMinor: number | null
   request: Pick<OrderRefundPayload, 'lines' | 'shippingMinor' | 'adjustmentMinor' | 'totalMinor'>
@@ -76,6 +78,10 @@ export interface PriceRefundInput {
 /** Prices an order.refund the store's way (ADR 0026 decision 5) and refuses what ADR-080 refuses. Pure. */
 export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedLine[]; totalMinor: number } | { ok: false; error: RefundRefusal } {
   const { request } = input
+  // #547 (desk 2026-11-24): refused before any pricing, so the clamp serves recorded goodwill only and no return is requested.
+  if (input.outsideRefundsMinor > 0) return { ok: false, error: { code: 'order_state', message:
+    'This order has a refund made outside the till (Medusa shows more refunded than the till recorded). Finish it in Medusa Admin.',
+    data: { reason: 'refunded_outside_till', outsideMinor: input.outsideRefundsMinor } } }
   const nothing = { ok: false as const, error: { code: 'nothing_to_refund' as const, message: 'There is nothing to refund on this order.' } }
   if (input.refundableMoneyMinor === null || input.linesMoneyMinor === null) return nothing
   if (request.lines.length === 0 && request.shippingMinor === 0 && request.adjustmentMinor === 0) return nothing

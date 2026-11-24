@@ -4,7 +4,7 @@ const request = (overrides: Partial<PriceRefundInput['request']>): PriceRefundIn
   ({ lines: [], shippingMinor: 0, adjustmentMinor: 0, totalMinor: 0, ...overrides })
 const line = { id: 'ordli_1', quantity: 3, returnedQuantity: 0, netMinor: 1000, taxMinor: 190 }
 // The order's payment: the line's 1190 gross and 500 shipping.
-const base: Omit<PriceRefundInput, 'request'> = { lines: [line], linesMoneyMinor: 1190, shippingMinor: 500, earlier: [], paidMinor: 1690, refundableMoneyMinor: 1690 }
+const base: Omit<PriceRefundInput, 'request'> = { lines: [line], linesMoneyMinor: 1190, shippingMinor: 500, earlier: [], paidMinor: 1690, outsideRefundsMinor: 0, refundableMoneyMinor: 1690 }
 
 describe('priceRefund (pos priceRefund on the connector split, ADR 0026 decision 5)', () => {
   it("P1: prices from the connector's round(gross − tax), not round(gross) − round(tax)", () => {
@@ -77,7 +77,7 @@ describe('priceRefund (pos priceRefund on the connector split, ADR 0026 decision
 // paid 3.53. Each line prices at 1.18, so the per-line sum is 3.54, one more than was paid.
 describe('the last units take the remainder', () => {
   const lines = ['ordli_a', 'ordli_b', 'ordli_c'].map(id => ({ id, quantity: 1, returnedQuantity: 0, ...connectorSplit('1.1781', '0.1881', 2) }))
-  const order = { lines, linesMoneyMinor: 353, shippingMinor: 0, earlier: [] as PriceRefundInput['earlier'], paidMinor: 353, refundableMoneyMinor: 353 }
+  const order = { lines, linesMoneyMinor: 353, shippingMinor: 0, earlier: [] as PriceRefundInput['earlier'], paidMinor: 353, outsideRefundsMinor: 0, refundableMoneyMinor: 353 }
   const take = (...ids: string[]) => ids.map(orderLineId => ({ orderLineId, quantity: 1, restock: true }))
 
   it('R1: refunding all three lines prices at 353, the payment, not the per-line 354', () => {
@@ -242,7 +242,7 @@ describe('the last units take the remainder', () => {
 describe('refundMoneyMinor rounds shipping and fees per item', () => {
   const lines = [{ id: 'ordli_1', quantity: 1, returnedQuantity: 0, ...connectorSplit('11.9', '1.9', 2) }]
   const fullRefund = (money: { linesMoneyMinor: number | null; shippingMinor: number }, paymentMinor: number, totalMinor: number) =>
-    priceRefund({ lines, ...money, earlier: [], paidMinor: paymentMinor, refundableMoneyMinor: paymentMinor,
+    priceRefund({ lines, ...money, earlier: [], paidMinor: paymentMinor, outsideRefundsMinor: 0, refundableMoneyMinor: paymentMinor,
       request: request({ lines: [{ orderLineId: 'ordli_1', quantity: 1, restock: true }], shippingMinor: money.shippingMinor, totalMinor }) })
   // [name, payment, shipping raws, fee raws, linesMoney, shipping, the till's full-refund total (payment less fees)]
   const cases: [string, string, string[], string[], number, number, number][] = [
@@ -279,11 +279,13 @@ describe('the goodwill clamp (#547)', () => {
   const all = lines.map(({ id }) => ({ orderLineId: id, quantity: 1, restock: true }))
   const goodwillRow = (medusaRefundId: string | null = 'refund_g') => ({ lines: [], shippingMinor: 0, medusaRefundId })
   const sale = (goodwillMinor: number, extra: Partial<PriceRefundInput> = {}): Omit<PriceRefundInput, 'request'> => ({ lines,
-    linesMoneyMinor: 353, shippingMinor: 0, paidMinor: 353, earlier: [goodwillRow()], refundableMoneyMinor: 353 - goodwillMinor, ...extra })
+    linesMoneyMinor: 353, shippingMinor: 0, paidMinor: 353, earlier: [goodwillRow()], outsideRefundsMinor: 0, refundableMoneyMinor: 353 - goodwillMinor, ...extra })
   const priced = (net: number[], tax = [19, 19, 19]) => all.map((entry, n) => ({ ...entry, netMinor: net[n], taxMinor: tax[n] }))
   const refused = (message: string, expectedMinor: number, serverMinor: number) => ({ ok: false, error: { code: 'amount_mismatch', message, data: { expectedMinor, serverMinor } } })
   const cap = 'The refund is more than the money the order has left to refund.'
   const differs = "The refund total differs from the store's."
+  const outside = (outsideMinor: number) => ({ ok: false, error: { code: 'order_state', data: { reason: 'refunded_outside_till', outsideMinor },
+    message: 'This order has a refund made outside the till (Medusa shows more refunded than the till recorded). Finish it in Medusa Admin.' } })
   // The order with 5.95 gross shipping, paid 9.48, and 0.01 goodwill refunded.
   const shipped = (earlier = [goodwillRow()], refundableMoneyMinor = 947) => sale(1, { shippingMinor: 595, paidMinor: 948, earlier, refundableMoneyMinor })
 
@@ -353,7 +355,7 @@ describe('the goodwill clamp (#547)', () => {
   const even = (n: number, goodwill: number) => {
     const ids = Array.from({ length: n }, (_, index) => `ordli_${index}`)
     const order = { lines: ids.map(id => ({ id, quantity: 1, returnedQuantity: 0, netMinor: 84, taxMinor: 16 })), linesMoneyMinor: n * 100,
-      shippingMinor: 0, paidMinor: n * 100, earlier: [goodwillRow()], refundableMoneyMinor: n * 100 - goodwill }
+      shippingMinor: 0, paidMinor: n * 100, earlier: [goodwillRow()], outsideRefundsMinor: 0, refundableMoneyMinor: n * 100 - goodwill }
     return { order, take: ids.map(orderLineId => ({ orderLineId, quantity: 1, restock: true })) }
   }
 
@@ -380,13 +382,21 @@ describe('the goodwill clamp (#547)', () => {
   })
 
   it("R2-fee: the app's 472 case: the kept 1.19 fee leaves the cap above the lines, so 353 passes with no clamp", () => {
-    // Paid 4.72 = lines 3.53 + a 1.19 fee the store keeps; 0.01 goodwill refunded, in Medusa Admin (no row) or at a till.
+    // Paid 4.72 = lines 3.53 + a 1.19 fee the store keeps; 0.01 goodwill refunded at a till (a row), or in Medusa Admin (no
+    // row, not baselined), which is refused up front.
     const money = refundMoneyMinor(2, '4.72', [], ['1.19'])
     expect(money).toEqual({ linesMoneyMinor: 353, shippingMinor: 0 })
-    for (const earlier of [[], [goodwillRow()]]) {
-      const order = { lines, ...money, paidMinor: 472, earlier, refundableMoneyMinor: 471 }
-      expect(priceRefund({ ...order, request: request({ lines: all, totalMinor: 353 }) })).toEqual({ ok: true, totalMinor: 353, lines: priced([99, 99, 98]) })
-      expect(priceRefund({ ...order, request: request({ lines: all, totalMinor: 352 }) })).toEqual(refused(differs, 352, 353))
-    }
+    const order = { lines, ...money, paidMinor: 472, earlier: [goodwillRow()], outsideRefundsMinor: 0, refundableMoneyMinor: 471 }
+    expect(priceRefund({ ...order, request: request({ lines: all, totalMinor: 353 }) })).toEqual({ ok: true, totalMinor: 353, lines: priced([99, 99, 98]) })
+    expect(priceRefund({ ...order, request: request({ lines: all, totalMinor: 352 }) })).toEqual(refused(differs, 352, 353))
+    expect(priceRefund({ ...order, earlier: [], outsideRefundsMinor: 1, request: request({ lines: all, totalMinor: 353 }) })).toEqual(outside(1))
+  })
+
+  it('R3-unit: a refund made outside the till is refused before any other check; with none the clamp is unchanged', () => {
+    expect(priceRefund({ ...sale(1, { outsideRefundsMinor: 1 }), request: request({ lines: all, totalMinor: 352 }) })).toEqual(outside(1))
+    // Refused first: even a request that would otherwise be nothing_to_refund or quantity_exceeds.
+    expect(priceRefund({ ...sale(1, { outsideRefundsMinor: 1 }), request: request({}) })).toEqual(outside(1))
+    expect(priceRefund({ ...sale(1, { outsideRefundsMinor: 1 }), request: request({ lines: [{ orderLineId: 'ordli_x', quantity: 1, restock: true }], totalMinor: 1 }) })).toEqual(outside(1))
+    expect(priceRefund({ ...sale(1, { outsideRefundsMinor: 0 }), request: request({ lines: all, totalMinor: 352 }) })).toEqual({ ok: true, totalMinor: 352, lines: priced([99, 98, 98]) })
   })
 })
