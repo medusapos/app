@@ -1,4 +1,4 @@
-import { parseTaxRounding, SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
+import { parseLineTax, parseTaxRounding, SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
 import { medusaAdminUserAuth } from '@tallyui/connector-medusa';
 import { authHeaders } from './pos-connector';
 
@@ -139,20 +139,28 @@ export function parseRegisterApproval(value: unknown): { thresholdMinor: number 
   return typeof thresholdMinor === 'number' && Number.isSafeInteger(thresholdMinor) && thresholdMinor >= 0 ? { thresholdMinor } : undefined;
 }
 
+/** A stored contract version: a safe integer ≥ 1, or `undefined`. */
+function positiveVersion(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1 ? value : undefined;
+}
+
 export function loadSession(storage: SessionStorage | null): Session | null {
   try {
     const value: unknown = JSON.parse(storage?.getItem(STORAGE_KEY) ?? 'null');
     if (!isRecord(value) || typeof value.baseUrl !== 'string' || typeof value.email !== 'string' || typeof value.token !== 'string') return null;
+    const stored = isRecord(value.capabilities) ? value.capabilities : {};
+    const versions = (['register', 'orderRefund', 'orderReopen', 'orderUpdate', 'receiptEmail', 'pluginContract'] as const)
+      .flatMap((key) => positiveVersion(stored[key]) === undefined ? [] : [[key, stored[key]]]);
+    const flags = (['coupons', 'multiplePayments'] as const).flatMap((key) => typeof stored[key] === 'boolean' ? [[key, stored[key]]] : []);
+    // customerDisplay is not restored: the app does not wire it yet, and its shape is still in flight.
     return { baseUrl: value.baseUrl, email: value.email, token: value.token,
       name: typeof value.name === 'string' ? value.name : undefined,
       tokenExpiresAt: typeof value.tokenExpiresAt === 'number' ? value.tokenExpiresAt : undefined,
-      capabilities: isRecord(value.capabilities) && typeof value.capabilities.orderCreate === 'number'
-        ? { orderCreate: value.capabilities.orderCreate,
-          ...(typeof value.capabilities.register === 'number' && Number.isSafeInteger(value.capabilities.register) && value.capabilities.register >= 1
-            ? { register: value.capabilities.register } : {}),
-          ...(parseTaxRounding(value.capabilities.taxRounding) ? { taxRounding: parseTaxRounding(value.capabilities.taxRounding) } : {}),
-          ...(parseRegisterApproval(value.capabilities.registerApproval)
-            ? { registerApproval: parseRegisterApproval(value.capabilities.registerApproval) } : {}),
+      capabilities: typeof stored.orderCreate === 'number'
+        ? { orderCreate: stored.orderCreate, ...Object.fromEntries(versions), ...Object.fromEntries(flags),
+          ...(parseTaxRounding(stored.taxRounding) ? { taxRounding: parseTaxRounding(stored.taxRounding) } : {}),
+          ...(parseLineTax(stored.lineTax) ? { lineTax: parseLineTax(stored.lineTax) } : {}),
+          ...(parseRegisterApproval(stored.registerApproval) ? { registerApproval: parseRegisterApproval(stored.registerApproval) } : {}),
         } : undefined };
   } catch { return null; }
 }

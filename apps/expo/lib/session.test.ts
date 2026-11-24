@@ -322,6 +322,28 @@ describe('session storage', () => {
     storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: 3, register: 3, registerApproval } }));
     expect(loadSession(storage)?.capabilities).toEqual({ orderCreate: 3, register: 3 });
   });
+  it('a saved session keeps every restorable capability across a reload', () => {
+    const storage = memoryStorage();
+    const saved = { ...session, capabilities: { orderCreate: 6, register: 3, coupons: true, multiplePayments: false,
+      lineTax: { none: true, classes: false }, orderRefund: 1, orderReopen: 1, orderUpdate: 1, receiptEmail: 1, pluginContract: 5 } };
+    saveSession(storage, saved);
+    expect(loadSession(storage)).toEqual(saved);
+  });
+  it.each([
+    { coupons: 'true' }, { coupons: 1 }, { multiplePayments: null },
+    { orderRefund: 0 }, { orderRefund: 1.5 }, { orderRefund: '1' }, { pluginContract: Number.MAX_SAFE_INTEGER + 1 },
+    { lineTax: { none: true } }, { lineTax: { none: 'yes', classes: false } }, { lineTax: [true, false] }, { lineTax: null },
+  ])('a malformed capability is dropped (%j)', (malformed) => {
+    const storage = memoryStorage();
+    storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: 6, ...malformed } }));
+    expect(loadSession(storage)?.capabilities).toEqual({ orderCreate: 6 });
+  });
+  it('a stored lineTax comes back without extra keys', () => {
+    const storage = memoryStorage();
+    storage.setItem('medusapos.session', JSON.stringify({ ...session,
+      capabilities: { orderCreate: 6, lineTax: { none: true, classes: true, extra: 1 } } }));
+    expect(loadSession(storage)?.capabilities).toEqual({ orderCreate: 6, lineTax: { none: true, classes: true } });
+  });
   it('drops malformed stored taxRounding', () => {
     const storage = memoryStorage();
     storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: 3, taxRounding: { mode: 'x' } } }));
