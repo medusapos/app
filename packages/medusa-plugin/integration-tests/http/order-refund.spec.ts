@@ -228,6 +228,72 @@ medusaIntegrationTestRunner({
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
     })
 
+    // #547 (desk 2026-11-24): earlier goodwill no row puts on a line lets Refund all pass at what is left.
+    const differsMessage = "The refund total differs from the store's."
+    const capMessage = 'The refund is more than the money the order has left to refund.'
+    const detailFields = ['items.id', 'items.detail.return_requested_quantity', 'items.detail.return_received_quantity',
+      'items.detail.return_dismissed_quantity', 'items.detail.written_off_quantity']
+
+    it('clamp: Admin goodwill, Refund all at what is left', async () => {
+      const till = await remainderSale()
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'goodwill in Admin' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      // An admin's own refund is baselined, or the till refund parks refund_unrecorded (I9).
+      await refundsScript('baseline', till.orderId, hand.id, 'goodwill', 'in', 'Admin')
+      const over = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID() })
+      expect((await post([over])).data.results).toEqual([{ id: over.id, status: 'rejected', error: { code: 'amount_mismatch',
+        message: differsMessage, data: { expectedMinor: 353, serverMinor: 352 } } }])
+      const full = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), totalMinor: 352 })
+      expect((await applied([full]))[0].refund).toMatchObject({ totalMinor: 352, byMethod: { cash: 352 } })
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((a, b) => a - b)).toEqual([0.01, 3.52])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+      expect((await loadSessionFigures(container, till.sessionId))?.refundsTotalMinor).toBe(352)
+      const row = await knex('tally_refund').where({ command_id: full.id }).first()
+      expect(row.lines.map((line: Row) => [line.netMinor, line.taxMinor])).toEqual([[99, 19], [98, 19], [98, 19]])
+    })
+
+    it('clamp: Admin return blocks the clamp', async () => {
+      const till = await remainderSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const lines = [till.full.payload.lines[0]]
+      const returnId = await workflow.beginReturn(container, { orderId: till.orderId, locationId: data.berlinId, note: 'return in Admin' })
+      await workflow.requestReturn(container, { returnId, lines })
+      await workflow.receiveStep(container, { returnId, lines })
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'return in Admin' } })
+      // No row knows the return: two lines price at 236 on a cap of 235, and the 118 looks like goodwill (G = 353 − 235).
+      // Medusa's returned quantity on line a keeps the clamp off. (All three lines stop earlier, at money_drift.)
+      const rest = till.full.payload.lines.slice(1)
+      const two = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines: rest, totalMinor: 236 })
+      expect((await post([two])).data.results).toEqual([{ id: two.id, status: 'rejected', error: { code: 'amount_mismatch',
+        message: capMessage, data: { expectedMinor: 236, serverMinor: 235 } } }])
+      const left = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines: rest, totalMinor: 235 })
+      expect((await post([left])).data.results).toEqual([{ id: left.id, status: 'rejected', error: { code: 'amount_mismatch',
+        message: differsMessage, data: { expectedMinor: 235, serverMinor: 236 } } }])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
+    })
+
+    it('clamp: own returns never block', async () => {
+      const till = await remainderSale()
+      const [a, b, c] = till.full.payload.lines
+      const part = (lines: unknown[], totalMinor: number, adjustmentMinor = 0) => command('order.refund', { ...till.full.payload,
+        clientRefundId: randomUUID(), lines, adjustmentMinor, totalMinor })
+      expect((await applied([part([a], 118)]))[0].refund.totalMinor).toBe(118)
+      expect((await applied([part([{ ...b, restock: false }], 118)]))[0].refund.totalMinor).toBe(118)
+      expect((await applied([part([], 1, 1)]))[0].refund.totalMinor).toBe(1)
+      // Received counts once; a dismiss lands in both return_dismissed and written_off, and only the first is counted.
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order', fields: detailFields,
+        filters: { id: till.orderId } }) as unknown as Rows
+      const detail = (id: string) => { const found = (order.items as Row[]).find(item => item.id === id)!.detail
+        return [found.return_requested_quantity, found.return_received_quantity, found.return_dismissed_quantity, found.written_off_quantity].map(Number) }
+      expect([detail(a.orderLineId), detail(b.orderLineId), detail(c.orderLineId)]).toEqual([[0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 0]])
+      // C = 353 − 118 − 118 − 1 = 116; the last line prices at the 117 left and the clamp takes the goodwill off it.
+      expect((await applied([part([c], 116)]))[0].refund.totalMinor).toBe(116)
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([0.01, 1.16, 1.18, 1.18])
+    })
+
     it('F3-parked: a received row holds back 118 from the cap and its line money leaves 235 for the last two', async () => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')

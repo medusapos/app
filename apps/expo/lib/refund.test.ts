@@ -57,8 +57,17 @@ describe('fullRefundOffer', () => {
     expect(fullRefundOffer(order({ paid: 358 }), cash, true)).toEqual({ offered: false, reason: 'money_drift' });
   });
 
-  it('already refunded', () => {
-    expect(fullRefundOffer(order({ paid: 353, refunds: [{ id: 'refund_1', amountMinor: 100 }] }), cash, true)).toEqual({ offered: false, reason: 'refunded' });
+  it('already refunded (#547): Refund all at min(full, paid − refunds); nothing left is refunded', () => {
+    const refunds = (...amounts: number[]) => amounts.map((amountMinor, index) => ({ id: `refund_${index}`, amountMinor }));
+    // 0.01 goodwill on the 3.53 sale: all three lines at 352, the figure the plugin's clamp accepts.
+    const goodwill = fullRefundOffer(order({ paid: 353, refunds: refunds(1) }), cash, true);
+    expect(goodwill).toMatchObject({ offered: true, totalMinor: 352, shippingMinor: 0, adjustmentMinor: 0, methodLabel: 'Cash' });
+    expect(goodwill.offered && goodwill.lines.map((entry) => entry.orderLineId)).toEqual(['a', 'b', 'c']);
+    expect(fullRefundOffer(order({ paid: 353, refunds: refunds(100, 50) }), cash, true)).toMatchObject({ offered: true, totalMinor: 203 });
+    // The min does not bind when the fee kept by the store is more than the refunds.
+    const fee = { id: 'fee', clientLineId: undefined, name: 'Bag fee', quantity: 1, subtotalMinor: 100, subtotalTaxMinor: 19, totalMinor: 100, taxMinor: 19 };
+    expect(fullRefundOffer(order({ paid: 472, lines: [...threeLines(), fee], refunds: refunds(1) }), cash, true)).toMatchObject({ offered: true, totalMinor: 353 });
+    for (const taken of [refunds(353), refunds(200, 200)]) expect(fullRefundOffer(order({ paid: 353, refunds: taken }), cash, true)).toEqual({ offered: false, reason: 'refunded' });
   });
 
   it('nothing to refund', () => {

@@ -43,7 +43,8 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     'id', 'status', 'is_draft_order', 'currency_code', 'metadata', 'total', 'items.id', 'items.quantity', 'items.raw_total',
     'items.raw_tax_total', 'items.metadata', 'shipping_methods.raw_total', 'fulfillments.location_id', 'fulfillments.canceled_at',
     'payment_collections.payments.id', 'payment_collections.payments.raw_amount', 'payment_collections.payments.canceled_at',
-    'payment_collections.payments.refunds.raw_amount',
+    'payment_collections.payments.refunds.raw_amount', 'items.detail.return_requested_quantity',
+    'items.detail.return_received_quantity', 'items.detail.return_dismissed_quantity',
   ], filters: { id: orderId } })
   if (!order) return null
   const decimals = currencyDecimals(order.currency_code)
@@ -59,7 +60,9 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     locationId: fulfillment?.location_id ?? undefined,
     // The till's own payment id is clientPaymentId (order.create's payload).
     tenders: tenders.map(tender => ({ ...tender, id: tender.clientPaymentId ?? tender.id }) as TillTender),
+    // A dismiss also adds to written_off_quantity (Medusa's receive-damaged action), so that field is not added again.
     lines: (order.items ?? []).filter(item => item !== null).filter(item => !item.metadata?.tally_fee_uuid).map(item => ({ id: item.id, quantity: Number(item.quantity),
+      returnedQuantity: Number(item.detail?.return_requested_quantity ?? 0) + Number(item.detail?.return_received_quantity ?? 0) + Number(item.detail?.return_dismissed_quantity ?? 0),
       ...connectorSplit((item.raw_total as unknown as Raw).value, (item.raw_tax_total as unknown as Raw).value, decimals) })),
     ...refundMoneyMinor(decimals, payment ? (payment.raw_amount as unknown as Raw).value : null,
       (order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value),
@@ -135,7 +138,8 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
         .select('lines', 'shipping_minor', 'refunds', 'total_minor', 'medusa_refund_id') as RefundRow[]
       const current = await loadRefundOrder(container, order.id) ?? order
       const price = priceRefund({ lines: current.lines, linesMoneyMinor: current.linesMoneyMinor, shippingMinor: current.shippingMinor,
-        earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor) })),
+        earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor), medusaRefundId: entry.medusa_refund_id })),
+        paidMinor: current.payment?.amountMinor ?? null,
         refundableMoneyMinor: current.payment ? current.payment.amountMinor - current.payment.refundedMinor
           - earlier.filter(entry => entry.medusa_refund_id === null).reduce((sum, entry) => sum + Number(entry.total_minor), 0) : null, request: payload })
       if (price.ok === false) return { outcome: rejected(id, price.error.code, price.error.message, price.error.data), keepClaim: false }
