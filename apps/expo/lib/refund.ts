@@ -15,14 +15,13 @@ const gross = (charge: { totalMinor: number; taxMinor: number }) => charge.total
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
 
 /**
- * Mirrors the plugin's priceRefund for a whole order with no earlier refund (ADR 0026 rulings A, B, N1): the lines get
+ * Mirrors the plugin's priceRefund for a whole order (ADR 0026 rulings A, B, N1, and #547's goodwill clamp): the lines get
  * what was paid less every shipping and fee gross, so the total is exactly the figure the plugin computes. The
  * connector reads fee items as lines; only product lines carry a till line id (order-create writes tally_line_uuid on
  * them and tally_fee_uuid on fees), so a line without one is a fee and stays with the store.
  */
 export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments'], restock: boolean): FullRefundOffer {
   if (order.status === 'canceled') return { offered: false, reason: 'canceled' };
-  if (order.refunds.length > 0) return { offered: false, reason: 'refunded' };
   // The plugin reads one payment; a split store payment is summed here (a NOTES gap, not a pricing rule).
   const paidMinor = sum(order.payments.map((payment) => payment.amountMinor));
   if (order.paymentRecordUnreadable || paidMinor === 0) return { offered: false, reason: 'no_payment' };
@@ -40,8 +39,11 @@ export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments']
   const largest = products.reduce<(typeof products)[number] | null>(
     (best, line) => (!best || gross(line) >= gross(best) ? line : best), null);
   if (covered || (largest && largest.taxMinor + difference >= 0)) linesMinor = remainderMinor;
-  const totalMinor = linesMinor + shippingMinor;
-  if (totalMinor === 0) return { offered: false, reason: 'nothing' };
+  if (linesMinor + shippingMinor === 0) return { offered: false, reason: 'nothing' };
+  // #547: earlier refunds carry no lines here, so the offer is capped at what is left; the plugin accepts that figure when
+  // the overrun is earlier goodwill and refuses lines or shipping already taken.
+  const totalMinor = Math.min(linesMinor + shippingMinor, paidMinor - sum(order.refunds.map((entry) => entry.amountMinor)));
+  if (totalMinor <= 0) return { offered: false, reason: 'refunded' };
   // Decision 4: a sale paid only in cash refunds to cash; any other refunds to the sale's own method, non-cash first,
   // and a sale that also took cash gets back in cash only what the non-cash tenders cannot take (fees stay with the store).
   const nonCash = tenders.filter((tender) => tender.method !== 'cash');
