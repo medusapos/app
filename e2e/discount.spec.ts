@@ -1,5 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, captureCommands, cartLineRow, cartTaxRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
+import { addE2E1, adminToken, backend, captureCommands, cartLineRow, cartTaxRow, cartTotalRow, discount, ordersByClientId, sellBySku, signIn, tenderCash, test } from './helpers';
 import { appliedResponse, saleResults } from './helpers';
 
 // Discounts in the cart: the plugin reports order.create [1, 2, 3, 4, 5, 6, 7] at GET /tally/v1/info,
@@ -15,9 +15,11 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   // The plugin advertises order.create [1, 2, 3, 4, 5, 6, 7] (ADR 0021), register 1, 2 and 3 (ADR 0022, ADR 0023) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0)
   // and its registerApproval, the plugin's default approvalThresholdMinor of 500 (ADR 0023; parsed since TallyUI 3.13.0, ADR-082).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
-  // The plugin's contract 4 (#516) is read into the capabilities since @tallyui/core 4.0.0 (TallyUI #1114).
-  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 4,
+  // The plugin's contract 5 (#540) adds order.refund v1.
+  // The plugin advertises a customer display (ADR-085) with its default STUN servers (PR #538).
+  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 5, orderRefund: 1,
     coupons: true,
+    customerDisplay: { iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: true },
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
     registerApproval: { thresholdMinor: 500 } });
   await addE2E1(page);
@@ -25,22 +27,24 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   await discount(page, 'line', 'Percent', '10');
   await expect(page.getByRole('button', { name: /^Remove discount 10% −\D*0\.40$/ })).toBeVisible();
   await discount(page, 'order', 'Amount', '0.50');
-  await expect(page.getByRole('button', { name: /^Remove discount .*0\.50/ })).toBeVisible();
-  // The totals are TallyUI's order.display (ADR-063): Subtotal − Discount + VAT = Total (4.00 − 0.90 + 0.78 = 3.88).
-  // The line reads before its discounts (4.00, adding up to the Subtotal); each chip carries its amount. No
+  // v2's order discount is a "Discount −€0.50 ✕" row in the totals, not a chip under the lines (DEMO 05c).
+  await expect(page.getByTestId('order-discount-row-0')).toHaveText(/^Discount−\D*0\.50$/);
+  // The totals are TallyUI's order.display (ADR-063): Subtotal − Discount + VAT = Total (4.00 − 0.40 − 0.50 + 0.78 = 3.88).
+  // The line reads before its discounts (4.00, adding up to the Subtotal); its chip carries its amount. No
   // cart-scroll testID with CartPanel (TallyUI #136): the line's own Remove button scopes to the cart's copy.
   // TallyUI 3.14.0's line is columns (quantity, name, unit price, total), no longer "2.00 × 2".
   await expect(cartLineRow(page, 'E2E product 1')).toHaveText(/^2E2E product 1\D*2\.00\D*4\.00$/);
   await expect(page.getByText(/^10% −\D*0\.40$/)).toBeVisible();
-  await expect(page.getByText(/^Order discount −.*0\.50$/)).toBeVisible();
-  // The last "Discount" is the totals row; the first is the line's action. The VAT row is read by its testID (TallyUI
+  await expect(page.getByText(/^Order discount/)).toHaveCount(0);
+  // The last "Discount" is Cart's totals row, the line's 0.40 alone: the order's 0.50 is its own row above it. The
+  // first is the line's action. The VAT row is read by its testID (TallyUI
   // 4.0.0 sets its label and Excluding tax tag apart from the amount).
   const amountOf = async (locator: Locator) => Number((await locator.textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
   const row = (label: string) => amountOf(page.getByText(label, { exact: true }).last().locator('..'));
   // v2's cart has no Total row: the total is on the Checkout button.
   const total = Number((await page.getByTestId('cart-checkout').textContent())!.match(/(\d+\.\d{2})\D*$/)![1]);
   await expect(cartTaxRow(page)).toHaveText(/^VAT 25%Excluding tax/);
-  expect([await row('Subtotal'), await row('Discount'), await amountOf(cartTaxRow(page)), total]).toEqual([4, 0.9, 0.78, 3.88]);
+  expect([await row('Subtotal'), await row('Discount'), await amountOf(cartTaxRow(page)), total]).toEqual([4, 0.4, 0.78, 3.88]);
   const applied = appliedResponse(page);
   // Exact cash, as sellBySku pays it, stopping on the receipt to read its rows.
   await page.getByTestId('cart-checkout').click();
@@ -73,6 +77,33 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   const adjustments = items.flatMap((item: { adjustments: { description: string; amount: number }[] }) => item.adjustments);
   expect(adjustments).toEqual([expect.objectContaining({ description: 'POS discount' })]);
   expect(Math.round(adjustments[0].amount * 100)).toBe(payload.lines[0].discountMinor);
+});
+
+// DEMO 05c: v2 shows an order discount once, as a removable "Discount (10%) ✕" row in the totals, never as a chip
+// under the lines too. 2 × E2E-1 (€2.00) and E2E-2 (€3.50): €7.50 and 25% VAT, rounded per order.
+test('a 10% order discount reads once, as the totals\' "Discount (10%)" row, and its ✕ removes it', async ({ page }) => {
+  await signIn(page);
+  await addE2E1(page);
+  await addE2E1(page);
+  const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
+  await search.fill('E2E-2');
+  await search.press('Enter');
+  const checkout = page.getByTestId('cart-checkout');
+  // €7.50 + €1.88 VAT (€1.875 rounded half away from zero).
+  await expect(checkout).toHaveText(/\D9\.38$/);
+  await discount(page, 'order', 'Percent', '10');
+  const row = page.getByTestId('order-discount-row-0');
+  await expect(row).toHaveText(/^Discount \(10%\)−\D*0\.75$/);
+  await expect(page.getByText('Discount (10%)', { exact: true })).toHaveCount(1);
+  await expect(page.getByText(/^Order discount/)).toHaveCount(0);
+  // Cart's own Discount row leaves the order discount out, so −€0.75 is in the totals once, on the row.
+  await expect(cartTotalRow(page, 'Discount')).toHaveCount(0);
+  await expect(page.getByTestId('cart-footer').getByText(/0\.75$/)).toHaveCount(1);
+  // €7.50 − €0.75 + €1.69 VAT (€1.6875), the figure the cart showed with the chip (05c's shot of 2026-11-18).
+  await expect(checkout).toHaveText(/\D8\.44$/);
+  await page.getByTestId('order-discount-remove-0').click();
+  await expect(row).toHaveCount(0);
+  await expect(checkout).toHaveText(/\D9\.38$/);
 });
 
 test('below order.create v2 the till refuses a discount when it is applied, and the sale completes without it', async ({ page }) => {

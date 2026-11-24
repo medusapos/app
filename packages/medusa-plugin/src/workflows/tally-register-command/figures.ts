@@ -1,4 +1,5 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
+import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import { TALLY_REGISTER_MODULE } from '../../modules/tally-register'
 import type TallyRegisterModuleService from '../../modules/tally-register/service'
@@ -6,11 +7,24 @@ import type TallyRegisterModuleService from '../../modules/tally-register/servic
 // A POS sale stays a received fact after an admin archives or cancels it, so reconciliation never changes after the fact.
 const ORDER_STATUSES_COUNTED = ['completed', 'archived', 'canceled']
 
+// An order row the server's figures count. A rejected sale was never placed. `p` is a table alias prefix such as 'counted.'.
+function countedRow(query: Knex.QueryBuilder, p = '') {
+  return query.whereNull(`${p}deleted_at`).where(`${p}is_draft_order`, false).whereIn(`${p}status`, ORDER_STATUSES_COUNTED)
+    .whereRaw(`${p}metadata->>'tally_rejected' is distinct from 'true'`)
+}
+
+// An order row the server refused: received, never placed.
+function refusedRow(query: Knex.QueryBuilder, p = '') {
+  return query.whereNull(`${p}deleted_at`).where(`${p}is_draft_order`, false).whereRaw(`${p}metadata->>'tally_rejected' = 'true'`)
+}
+
 export function deriveSessionFigures(input: {
   countedFloatMinor: number
   orders: { payments: { method: string; amountMinor: number }[] }[]
   movements: { id: string; type: 'paid_in' | 'paid_out' | 'no_sale' | 'void'; amountMinor: number; voids: string | null }[]
-}): { expected: Record<string, number>; salesCount: number } {
+  // ADR-080 decision 6: the session's applied refunds, as @tallyui/core 4.1.0 deriveSessionFigures takes them.
+  refunds?: { byMethod: Record<string, number> }[]
+}): { expected: Record<string, number>; salesCount: number; refundsTotalMinor?: number } {
   const expected: Record<string, number> = Object.assign(Object.create(null), { cash: input.countedFloatMinor })
   // tally_payments is order metadata an admin could edit, and a malformed row must never make register commands transient.
   for (const order of input.orders) {
@@ -26,7 +40,19 @@ export function deriveSessionFigures(input: {
     if (row.type === 'paid_in') expected.cash += row.amountMinor
     if (row.type === 'paid_out') expected.cash -= row.amountMinor
   }
-  return { expected: { ...expected }, salesCount: input.orders.length }
+  // A method may go below 0; refundsTotalMinor only when refunds is passed, so other callers keep today's result.
+  let refundsTotalMinor = 0
+  for (const refund of input.refunds ?? []) {
+    const byMethod = refund?.byMethod
+    if (typeof byMethod !== 'object' || byMethod === null
+      || (Object.getPrototypeOf(byMethod) !== Object.prototype && Object.getPrototypeOf(byMethod) !== null)) continue
+    for (const [method, amount] of Object.entries(byMethod)) {
+      if (!method.length || !Number.isSafeInteger(amount) || amount < 0) continue
+      expected[method] = (expected[method] ?? 0) - amount
+      refundsTotalMinor += amount
+    }
+  }
+  return { expected: { ...expected }, salesCount: input.orders.length, ...(input.refunds !== undefined ? { refundsTotalMinor } : {}) }
 }
 
 export function deriveVariance(counted: Record<string, number>, expected: Record<string, number>): Record<string, number> {
@@ -38,10 +64,7 @@ export async function loadSessionFigures(container: MedusaContainer, sessionId: 
   const input = await service.figuresInput(sessionId)
   if (!input) return null
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
-  const query = knex('order').select(knex.raw("metadata->'tally_payments' as payments"))
-    .whereNull('deleted_at').whereIn('status', ORDER_STATUSES_COUNTED).where('is_draft_order', false)
-    // A rejected sale was never placed.
-    .whereRaw("metadata->>'tally_rejected' is distinct from 'true'")
+  const query = countedRow(knex('order').select(knex.raw("metadata->'tally_payments' as payments")))
     .whereRaw("metadata->'tally_payments' is not null").orderBy('created_at', 'asc')
   if (input.closure) {
     query.whereRaw("metadata->>'tally_client_id' = any(?)", [input.closure.orderIds])
@@ -51,8 +74,23 @@ export async function loadSessionFigures(container: MedusaContainer, sessionId: 
   const movements = input.closure
     ? input.movements.filter(row => row.type === 'void' || input.closure!.movementIds.includes(row.id))
     : input.movements
-  const figures = deriveSessionFigures({ countedFloatMinor: input.countedFloatMinor, orders: await query, movements })
+  // A refund counts in the session that made it (ADR 0026 decision 6); passed only when there is one, so a session
+  // without refunds keeps today's figures exactly.
+  const refunds = await knex('tally_refund').select('by_method as byMethod').where('status', 'applied')
+    .whereRaw('session_id = any(?)', [input.sessionIds]).orderBy('created_at', 'asc')
+  const figures = deriveSessionFigures({ countedFloatMinor: input.countedFloatMinor, orders: await query, movements,
+    ...(refunds.length ? { refunds } : {}) })
   return { ...figures, ...(input.closure ? { variance: deriveVariance(input.closure.counted, figures.expected) } : {}) }
+}
+
+/** Whether the server's figures have accounted for every client id: a counted order or a refused one. An in-flight or stuck draft is not held, so the till's figures decide. */
+export async function holdsEveryOrder(container: MedusaContainer, clientIds: string[]): Promise<boolean> {
+  const ids = [...new Set(clientIds)]
+  if (!ids.length) return true
+  const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+  const [row] = await knex('order').select(knex.raw("count(distinct metadata->>'tally_client_id')::int as held"))
+    .whereRaw("metadata->>'tally_client_id' = any(?)", [ids]).where(held => held.where(row => countedRow(row)).orWhere(row => refusedRow(row)))
+  return Number(row?.held) === ids.length
 }
 
 export function deriveRejected(orders: { payments: { method: string; amountMinor: number }[] }[]): { count: number; byMethod: Record<string, number> } {
@@ -72,13 +110,9 @@ export async function loadSessionRejected(container: MedusaContainer, sessionId:
   const input = await service.figuresInput(sessionId)
   if (!input) return null
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
-  const query = knex('order as rejected').select(knex.raw("rejected.metadata->'tally_payments' as payments"))
-    .whereNull('rejected.deleted_at').where('rejected.is_draft_order', false)
-    .whereRaw("rejected.metadata->>'tally_rejected' = 'true'")
+  const query = refusedRow(knex('order as rejected').select(knex.raw("rejected.metadata->'tally_payments' as payments")), 'rejected.')
     .whereRaw("rejected.metadata->'tally_payments' is not null")
-    .whereNotExists(knex('order as counted').select(knex.raw('1'))
-      .whereNull('counted.deleted_at').where('counted.is_draft_order', false).whereIn('counted.status', ORDER_STATUSES_COUNTED)
-      .whereRaw("counted.metadata->>'tally_rejected' is distinct from 'true'")
+    .whereNotExists(countedRow(knex('order as counted').select(knex.raw('1')), 'counted.')
       .whereRaw("counted.metadata->>'tally_client_id' = rejected.metadata->>'tally_client_id'"))
   if (input.closure) {
     query.whereRaw("rejected.metadata->>'tally_client_id' = any(?)", [input.closure.orderIds])

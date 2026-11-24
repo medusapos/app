@@ -4,7 +4,7 @@ import { currencyDecimals, minorToMajor } from './money'
 import type { OrderCreateCustomLine, OrderCreateFee, OrderCreateShipping } from './v5'
 
 export type OrderRejectionCode =
-  'unknown_variant' | 'invalid_quantity' | 'underpaid' | 'unsupported_currency'
+  'unknown_variant' | 'invalid_quantity' | 'underpaid' | 'unsupported_currency' | 'tender_mismatch' | 'overpaid'
 
 export type Rejection = { code: OrderRejectionCode; message: string }
 
@@ -38,7 +38,7 @@ export type OrderCreatePlan = {
   currencyCode: string
   decimals: number
   locationId: string
-  /** Exactly totalMinor in major units, even when the POS accepted overpayment. */
+  /** Exactly totalMinor in major units; the payments sum to it, as overpayment is refused (ADR 0004). */
   paymentAmount: string
   draftOrder: {
     status: 'draft'; is_draft_order: true
@@ -107,9 +107,21 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
   if (unknownIds.length > 0) {
     return { ok: false, rejection: { code: 'unknown_variant', message: `Unknown variants: ${unknownIds.join(', ')}` } }
   }
+  for (const [i, { amountMinor, tenderedMinor, changeMinor }] of payload.payments.entries()) {
+    if (tenderedMinor === undefined && (changeMinor ?? 0) > 0) {
+      return { ok: false, rejection: { code: 'tender_mismatch', message: `Invalid payments[${i}].changeMinor: change without tenderedMinor` } }
+    }
+    if (tenderedMinor !== undefined && BigInt(tenderedMinor) - BigInt(changeMinor ?? 0) !== BigInt(amountMinor)) {
+      return { ok: false, rejection: { code: 'tender_mismatch', message: `Invalid payments[${i}]: tenderedMinor less changeMinor differs from amountMinor` } }
+    }
+  }
   const paid = payload.payments.reduce((sum, payment) => sum + BigInt(payment.amountMinor), 0n)
   if (paid < BigInt(payload.totalMinor)) {
     return { ok: false, rejection: { code: 'underpaid', message: 'Payment amounts are less than totalMinor' } }
+  }
+  // If a later TallyUI adds cash roundings (its ADR-094), they are in totalMinor, so the legs must sum to it as sent.
+  if (paid > BigInt(payload.totalMinor)) {
+    return { ok: false, rejection: { code: 'overpaid', message: 'Payment amounts exceed totalMinor' } }
   }
 
   return {

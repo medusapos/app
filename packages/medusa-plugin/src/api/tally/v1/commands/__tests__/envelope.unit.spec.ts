@@ -56,6 +56,10 @@ describe('validateBatch', () => {
     expect(result).toEqual({ ok: false, status: 400, message: expect.stringContaining(`commands[1].${field}`) })
   })
 
+  it('accepts an order.refund envelope (ADR 0026)', () => {
+    expect(validateBatch({ commands: [{ ...command, type: 'order.refund' }] }).ok).toBe(true)
+  })
+
   it('accepts version 2 (ADR-062)', () => {
     expect(validateBatch({ commands: [{ ...command, version: 2 }] })).toEqual({ ok: true, commands: [{ ...command, version: 2 }] })
   })

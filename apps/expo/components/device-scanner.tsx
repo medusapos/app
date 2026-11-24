@@ -1,12 +1,12 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { Platform, Pressable, View } from 'react-native';
 import { AppText as Text } from './app-text';
-import { SettingsRow } from '@tallyui/components';
 import { ScanHubProvider, useDeviceScanControls, type DeviceScannerErrorHandler, type HidLike, type SerialLike } from '@tallyui/pos';
 import { forgetScannerProfile, scannerProfileStoreFor, useScannerProfiles } from '../lib/scanner-profiles';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { SettingsRow } from '../lib/settings-layout';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4 border border-border';
 

@@ -3,7 +3,7 @@ import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, 
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import { Path } from 'react-native-svg';
-import { Card, ChevronDownIcon, createSvgIcon, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsGroup, SettingsLayout, SettingsRow, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { Card, ChevronDownIcon, createSvgIcon, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsLayout, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
@@ -21,6 +21,7 @@ import { medusaAdminUrl, openMedusaAdmin, type MedusaAdminPage } from '../lib/me
 import { defaultStorage, type Session } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { getDeviceName } from '../lib/register-context';
+import { SettingsFlatContext, SettingsGroup, SettingsRow } from '../lib/settings-layout';
 import { DEFAULT_SCANNER_SETTINGS, useScannerSettings } from '../lib/scanner-settings';
 import { usePrintingSettings } from '../lib/printing-settings';
 import { loadCachedSettings, loadCachedPricing } from '../lib/store-settings';
@@ -92,7 +93,8 @@ export default function SettingsScreen() {
             <Text testID="settings-section-title" accessibilityRole="header" className="text-lg font-semibold text-card-foreground">{chosen?.label}</Text>
           </View>
           <View className="gap-6 p-4">
-            {chosen?.element}
+            {/* Its groups are flat, as v2's are: no box of their own, each value beside its label. */}
+            <SettingsFlatContext.Provider value={true}>{chosen?.element}</SettingsFlatContext.Provider>
           </View>
         </Card>
       </ScrollView>
@@ -136,6 +138,8 @@ function AdminLink({ session, label, page, testID }: { session: Session; label: 
 function StoreSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
   const [format] = useState(() => currencyFormat(held.pricing?.currency));
+  // In the wide card's value column a two-line value reads from the left, as v2's do; a phone's keeps it at the right edge.
+  const flat = useContext(SettingsFlatContext);
   return <>
   <SettingsGroup title="Store" description="Read-only. Set in Medusa Admin." testID="settings-store">
     <SettingsRow label="Store name" action={<View className="flex-row items-center gap-3">
@@ -143,18 +147,18 @@ function StoreSection({ session }: { session: Session }) {
       <AdminLink session={session} label="Store name" page="store" testID="settings-store-name-admin" />
     </View>} />
     {/* The till's currency follows its region. */}
-    <SettingsRow label="Currency" className="border-t border-border" action={<View className="flex-row items-center gap-3">
+    <SettingsRow label="Currency" divider action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-currency" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.currency || UNKNOWN}</Text>
       <AdminLink session={session} label="Currency" page="regions" testID="settings-store-currency-admin" />
     </View>} />
-    <SettingsRow label="Stock location" className="border-t border-border" action={<View className="flex-row items-center gap-3">
-      <View className="max-w-40 items-end">
-        <Text testID="settings-store-location" className="max-w-40 text-right text-sm text-foreground">{held.settings?.location.name || UNKNOWN}</Text>
-        {held.settings?.location.addressLine ? <Text testID="settings-store-location-address" className="text-right text-xs text-muted-foreground">{held.settings.location.addressLine}</Text> : null}
+    <SettingsRow label="Stock location" divider action={<View className="flex-row items-center gap-3">
+      <View className={`max-w-40 ${flat ? 'items-start' : 'items-end'}`}>
+        <Text testID="settings-store-location" className={`max-w-40 ${flat ? '' : 'text-right '}text-sm text-foreground`}>{held.settings?.location.name || UNKNOWN}</Text>
+        {held.settings?.location.addressLine ? <Text testID="settings-store-location-address" className={`${flat ? '' : 'text-right '}text-xs text-muted-foreground`}>{held.settings.location.addressLine}</Text> : null}
       </View>
       <AdminLink session={session} label="Stock location" page="locations" testID="settings-store-location-admin" />
     </View>} />
-    <SettingsRow label="Sales channel" className="border-t border-border" action={<View className="flex-row items-center gap-3">
+    <SettingsRow label="Sales channel" divider action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-sales-channel" className="max-w-40 text-right text-sm text-foreground">{held.settings?.salesChannel?.name || UNKNOWN}</Text>
       <AdminLink session={session} label="Sales channel" page="salesChannels" testID="settings-store-sales-channel-admin" />
     </View>} />
@@ -165,19 +169,19 @@ function StoreSection({ session }: { session: Session }) {
     <SettingsRow label="Symbol" action={
       <Text testID="settings-currency-symbol" className="max-w-40 text-right text-sm text-foreground">{format ? format.symbol : UNKNOWN}</Text>
     } />
-    <SettingsRow label="Symbol position" className="border-t border-border" action={
+    <SettingsRow label="Symbol position" divider action={
       <Text testID="settings-currency-position" className="max-w-40 text-right text-sm text-foreground">{format ? (format.symbolPosition === 'left' ? 'Left' : 'Right') : UNKNOWN}</Text>
     } />
-    <SettingsRow label="Thousands separator" className="border-t border-border" action={
+    <SettingsRow label="Thousands separator" divider action={
       <Text testID="settings-currency-thousands" className="max-w-40 text-right text-sm text-foreground">{format ? separatorLabel(format.thousandsSeparator) : UNKNOWN}</Text>
     } />
-    <SettingsRow label="Decimal separator" className="border-t border-border" action={
+    <SettingsRow label="Decimal separator" divider action={
       <Text testID="settings-currency-decimal" className="max-w-40 text-right text-sm text-foreground">{format ? separatorLabel(format.decimalSeparator) : UNKNOWN}</Text>
     } />
-    <SettingsRow label="Number of decimals" className="border-t border-border" action={
+    <SettingsRow label="Number of decimals" divider action={
       <Text testID="settings-currency-decimals" className="max-w-40 text-right text-sm text-foreground">{format ? String(format.decimals) : UNKNOWN}</Text>
     } />
-    <SettingsRow label="Example" className="border-t border-border" action={
+    <SettingsRow label="Example" divider action={
       <Text testID="settings-currency-example" className="max-w-40 text-right text-sm text-foreground">{format ? format.example : UNKNOWN}</Text>
     } />
   </SettingsGroup>
@@ -204,14 +208,14 @@ function TaxSection({ session }: { session: Session }) {
       <Text testID="settings-store-region" className="max-w-40 text-right text-sm text-foreground">{held.settings?.regions?.find((region) => region.id === held.pricing?.pricingContext?.region_id)?.name || UNKNOWN}</Text>
       <AdminLink session={session} label="Region" page="regions" testID="settings-store-region-admin" />
     </View>} />
-    <SettingsRow label="Prices include tax" className="border-t border-border" action={<View className="flex-row items-center gap-3">
+    <SettingsRow label="Prices include tax" divider action={<View className="flex-row items-center gap-3">
       <Text testID="settings-store-prices-include-tax" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.pricesIncludeTax === true ? 'Yes' : held.pricing?.pricesIncludeTax === false ? 'No' : UNKNOWN}</Text>
       <AdminLink session={session} label="Prices include tax" page="regions" testID="settings-store-prices-include-tax-admin" />
     </View>} />
-    {taxRates?.length ? taxRates.map((taxRate, index) => <SettingsRow key={index} label={taxRate.name} className="border-t border-border" action={<View className="flex-row items-center gap-3">
+    {taxRates?.length ? taxRates.map((taxRate, index) => <SettingsRow key={index} label={taxRate.name} divider action={<View className="flex-row items-center gap-3">
       <Text testID={`settings-tax-rate-${index}`} className="max-w-40 text-right text-sm text-foreground">{`${taxRate.rate !== undefined ? `${taxRate.rate}%` : UNKNOWN}${taxRate.isDefault ? ' · Default' : ''}`}</Text>
       <AdminLink session={session} label={taxRate.name} page="taxRegions" testID={`settings-tax-rate-${index}-admin`} />
-    </View>} />) : <SettingsRow label="Tax rates" className="border-t border-border" action={<View className="flex-row items-center gap-3">
+    </View>} />) : <SettingsRow label="Tax rates" divider action={<View className="flex-row items-center gap-3">
       <Text testID="settings-tax-rates-none" className="max-w-40 text-right text-sm text-foreground">{taxRates ? 'None' : UNKNOWN}</Text>
       <AdminLink session={session} label="Tax rates" page="taxRegions" testID="settings-tax-rates-admin" />
     </View>} />}
@@ -288,7 +292,7 @@ function DefaultCustomerSection({ session }: { session: Session }) {
         </ScrollView>
       </DialogContent>
     </Dialog>}
-    {connector.searchCustomers && <SettingsRow label="Default customer is cashier" className="border-t border-border" action={
+    {connector.searchCustomers && <SettingsRow label="Default customer is cashier" divider action={
       // TallyUI's Switch track sets no flex direction and react-native-web defaults to column, so
       // items-center would center the thumb and the "on" translate would push it past the track.
       <Switch accessibilityLabel="Default customer is cashier" testID="settings-default-customer-is-cashier" className="flex-row"
@@ -313,7 +317,7 @@ function PrintingSection({ session }: { session: Session }) {
     <View className="px-4 pb-4">
       <Text className="text-sm text-muted-foreground">The print window opens after each sale.</Text>
     </View>
-    <SettingsRow label="Print method" className="border-t border-border" action={
+    <SettingsRow label="Print method" divider action={
       <Text testID="settings-printing-method" className="max-w-40 text-right text-sm text-foreground">{printMethodLabel()}</Text>
     } />
   </SettingsGroup>
@@ -328,10 +332,10 @@ function CardReadersSection({ session }: { session: Session }) {
       <SettingsRow label="Card method" action={
         <Text testID="settings-card-readers-method" className="max-w-40 text-right text-sm text-foreground">{mode.method}</Text>
       } />
-      <SettingsRow label="Taken on" className="border-t border-border" action={
+      <SettingsRow label="Taken on" divider action={
         <Text testID="settings-card-readers-capture" className="max-w-40 text-right text-sm text-foreground">{mode.capture}</Text>
       } />
-      <SettingsRow label="Readers" className="border-t border-border" action={
+      <SettingsRow label="Readers" divider action={
         <Text testID="settings-card-readers-readers" className="max-w-40 text-right text-sm text-foreground">{mode.readers}</Text>
       } />
       {mode.manual ? <View className="px-4 pb-4">

@@ -138,7 +138,8 @@ blocked screen with Reload; closing the holder page and reloading recovers.
 two `E2E-1` a 10% line discount and a €0.50 order discount, checks that the
 cart and the receipt show TallyUI's `order.display` rows (ADR 0008): the line
 at €4.00 before its discounts, its "10% −€0.40" chip (receipt: "10% off"
-−€0.40), the order discount −€0.50, then Subtotal €4.00, Discount €0.90,
+−€0.40), then Subtotal €4.00, the order discount's "Discount −€0.50" row,
+Discount €0.40 (the line's),
 VAT €0.78 and Total €3.88. It pays exact cash,
 and expects the outbox result `applied` with no warnings, a version 2 command,
 Medusa's total equal to the till's, and one "POS discount" adjustment of the
@@ -148,7 +149,10 @@ line's `discountMinor`. The other route-intercepts `GET /tally/v1/info` to a
 at once, nothing is sent, and the undiscounted sale then goes out as version 1.
 A third gives `E2E-1` 100% off and completes it with cash at €0.00: applied
 with no warnings, a server `totalMinor` of 0 and one Medusa order (the plugin
-needs no payment collection for it). All three sell only `E2E-1`.
+needs no payment collection for it). These three sell only `E2E-1`. A fourth
+gives two `E2E-1` and an `E2E-2` a 10% order discount: one "Discount (10%)
+−€0.75" row in the totals and no chip, Checkout €8.44 as before, and its ✕
+brings back €9.38.
 
 `phone-cart.spec.ts` is the one spec at a phone viewport (360 × 740; the
 others run at Desktop Chrome, 1280 × 720) and proves the phone sale layout
@@ -157,7 +161,7 @@ full width, at least 56 px tall and reads "2 items". It opens the cart, gives
 the line 10% off and the order €0.50 off, and goes back to see the bar's
 €3.88. It reopens the cart and expects the line, the Total row and the
 side-by-side Cash and Card terminal buttons in the viewport, and again after
-scrolling to the order discount chip. A tap on `E2E-2` stays on Products with
+scrolling to the order discount's ✕. A tap on `E2E-2` stays on Products with
 "3 items". With the order discount form open the two lines overflow, so
 scrolling to its Cancel moves the first line out of view while Total and Cash
 stay. It pays exact cash, and the new sale opens on Products with "Cart is
@@ -204,6 +208,16 @@ results and temporary build/pack artifacts are ignored by Git.
 the packed plugin's `tally-pos-roles` script, and `seed-e2e-rbac.ts` adds `pos-cashier@tally.test`
 ("POS cashier" only) and `no-pos@tally.test` (no roles), both with `e2e-password`. `e2e@tally.test` is
 super admin. It uses the same ports and database as `pnpm e2e`, so run the two one after the other.
+
+## Capture
+
+`pnpm capture` (`e2e/capture`) shoots every `docs/v2-parity/DEMO-PARITY.md` row at desktop 1280×800, tablet
+1024×768 and phone 390×844 against the same throwaway store, one row after another from a reset Sale, and writes
+`<row>-<size>.jpg` plus a `README.md` index to `CAPTURE_OUT` (default `e2e/.tmp/capture`). `CAPTURE_ROWS=01,07`
+shoots only those rows and keeps the other rows of the index already in `CAPTURE_OUT`; for a full run, delete the
+folder first. The index names the commit it was taken at, with "dirty" when the tree differed. A row that cannot be reached is marked `failed:` in the index, the rest carry on, and the
+run fails at the end. It refuses `E2E_APP_URL`/`E2E_BACKEND_URL`: it never shoots the shared demo.
+The committed shots: `CAPTURE_OUT=docs/v2-parity/demo-shots/capture pnpm capture`.
 
 ## Against a hosted app and backend
 

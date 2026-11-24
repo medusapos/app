@@ -233,6 +233,17 @@ uncanceled fulfilment), the script logs it, exits non-zero and leaves the row `n
 run `reject` again, not `apply`: an `apply` would leave the cancelled order unmarked, and it would count next to the new one.
 Cancelling the order by hand is fine: `reject` still takes back the plugin's top-up. See the ADR 0003 amendment of 2026-09-29.
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
+**A parked `order.refund`** (ADR 0026) carries `needs_admin_reason` `{ orderId, clientRefundId, refundId, step, message, reason? }`, where
+`step` is the Medusa step that failed (`return`, `receive` or `refund`). Its `tally_refund` row records what already ran
+(`return_id`, `received_at`, `medusa_refund_id`). `tally-ledger-resolve.js <commandId> resume` runs the missing
+steps and applies the command. Before the receive and again before the money step, the plugin checks that Medusa shows no
+more refunded on the payment than `tally_refund` records; if it does, the row parks with `reason: 'refund_unrecorded'`
+before stock or money moves. `tally-ledger-resolve.js <commandId> apply
+<medusaRefundId>` records a refund the admin made by hand on the order's payment and applies the command. There is no
+`reject` for a refund: once a return exists, stock has moved.
+`npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-resolve.js <commandId> move [<sessionId>]` moves a refund whose session stopped taking money to an open session (by default its register's live session), appends a `tally_refund_moves` audit entry without replacing other metadata, then resumes it; a named session on another register logs which drawer pays.
+`npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-refunds.js baseline <orderId> <medusaRefundId> [--hand-made] <reason words...>` records a hand-made refund's id, amount, time and required reason in `tally_refund_baselines` for the never-twice check, preserving other metadata; an equal-amount pending till refund requires `apply` if it is its own money, or `--hand-made` if an admin made it, then the admin runs `resume`.
+`npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-refunds.js list` lists every parked refund, oldest first, with its order, session, amount, step, reason and update time, followed by every move audit entry with its refund's current status.
 **Backfill for rejects made before the marking.** A store needs it only if an admin ran `tally-ledger-resolve reject`
 before the release that added the `tally_rejected` marker (#121): those cancelled orders still count in register figures.
 The script is manual; nothing runs it automatically. On a real store, plan the run with the store's owner, because it changes
@@ -300,6 +311,45 @@ It sends through the Notification Module on channel `email` with template `tally
 Template `data` contains `order` (money in minor units) and `posTotals` (the till's `tally_pos_totals`).
 Responses: 202 accepted; 400 `invalid_payload`; 404 `order_not_found`; 502 `receipt_email_failed`; 503 `receipt_email_unavailable`.
 A store needs a Notification Module provider on channel `email`. For a dev store, add this to `defineConfig` (the local provider logs instead of sending): `modules: [{ resolve: '@medusajs/medusa/notification', options: { providers: [{ resolve: '@medusajs/medusa/notification-local', id: 'local', options: { name: 'Local Notification Provider', channels: ['email'] } }] } }]`
+
+## Customer display
+
+These routes implement TallyUI's customer-display signalling seam (`DisplaySignalling`, TallyUI ADR-085): a second device shows the sale to the customer, paired to one till, with WebRTC signalling and a snapshot fallback carried through the store. TallyUI's `displaySignallingContract` runs against them in `integration-tests/http/display-signalling.spec.ts`. The `tally_display` module keeps the devices, codes, pending pairings, displays, signals, snapshots, failed-claim windows and adoptions; it prunes lazily on every call.
+
+**Till side.** Admin authentication and `tally_pos:use`, CORS from `adminCors`, and the capability `customer_display.pair`, which is the policy `tally_pos:pair_display` (in both POS roles; with RBAC off, every POS user holds it). Every call except the first carries the till device in `X-Tally-Device-Id` and `X-Tally-Device-Key`. A call is refused `forbidden`, then `device_refused`, then `not_found`, and a refused call changes nothing.
+
+| Method | Path | Body → answer |
+|---|---|---|
+| POST | `/tally/v1/display-devices` | `{ deviceId }` → `201 { deviceKey }` (the key is returned this once) |
+| POST | `/tally/v1/display-codes` | → `201 { code, expiresAt }` |
+| GET | `/tally/v1/display-pairings` | → `200 { pairings }` |
+| POST | `/tally/v1/display-pairings/:claimId/confirm` | → `204` |
+| POST | `/tally/v1/display-pairings/:claimId/decline` | → `204` |
+| GET | `/tally/v1/displays` | → `200 { displays }` |
+| DELETE | `/tally/v1/displays/:displayId` | → `204` |
+| POST | `/tally/v1/displays/:displayId/signals` | `{ type, payload }` → `204` |
+| POST | `/tally/v1/display-signals/drain` | → `200 { signals }` |
+| PUT | `/tally/v1/displays/:displayId/snapshot` | `{ snapshot: <any JSON> }` → `204` (body limit 256 kB) |
+
+**Display side.** No login; CORS from `adminCors` (the display page is the app's web origin). The display's token goes only in `X-Tally-Display-Token`, never in a URL.
+
+| Method | Path | Body → answer |
+|---|---|---|
+| POST | `/tally/v1/display/claim` | `{ code, displayName, token? }` → `201 { claimSecret, checkCode }` |
+| POST | `/tally/v1/display/collect` | `{ claimSecret }` → `200 { status: 'pending', checkCode }` or `{ status: 'paired', displayId, token }` |
+| POST | `/tally/v1/display/signals` | `{ type, payload }` → `204` |
+| POST | `/tally/v1/display/signals/drain` | → `200 { signals }` |
+| GET | `/tally/v1/display/snapshot` | → `200 { snapshot }` (`null` when none is held) |
+
+**Errors** are `{ code, message }`, with one fixed message per code that never names a key, token, secret, code or hash: `forbidden` 403, `device_refused` 403, `token_refused` 403, `not_found` 404, `limit` 429, `claim_refused` 403, `collect_refused` 403, `too_large` 413. No plugin refusal is 401: a codeless 401 is Medusa's own missing or expired session. A malformed body is 400 with code `server`; a signal's `type` is `offer`, `answer` or `ice`, and its `payload` a string of at most 65 536 characters.
+
+**Secrets.** Device keys, claim secrets and display tokens are 128 bits from `crypto.randomBytes`, base64url, stored only as SHA-256 hex and compared in constant time. The token is made at a display's first successful collect, so it exists in plaintext only in that answer. Pairing codes are 6 digits from `crypto.randomInt`, single use, live 10 minutes; a device holds at most 5 unspent codes. A snapshot is kept for 60 s, at most 204 800 bytes as `JSON.stringify(snapshot)` gives it. A code is claimable only while unspent and unexpired; the first claim spends it. Displays unseen for 30 days are pruned with their token, snapshot and signals, and devices idle 30 days that own nothing.
+
+**Failed claims** are limited to 10 a minute per source and 100 per 10 minutes store-wide; over either, every claim is refused until the window ends. The source is Express's `req.ip` (an IPv6 address counts by its /64). Medusa sets Express's `trust proxy` to one hop, so `req.ip` is the last `X-Forwarded-For` entry: a store behind exactly one reverse proxy (which sets that header) gets the client's address. A store reached directly, with no proxy in front, lets a client choose its own per-source key with that header, so there the per-source limit is advisory only. What still holds is the store-wide limit and the cashier's confirm of the display's check code on the till. Medusa sets this in its Express loader; the plugin does not change it.
+
+**Advertisement.** `GET /tally/v1/info` carries `customerDisplay: { v: 1, iceServers, snapshot: 1 }`, the shape TallyUI's `parseDisplayAdvertisement` reads. `iceServers` is the plugin option `customerDisplay.iceServers` when it is a valid list (only `stun:`, `stuns:`, `turn:`, `turns:` URLs; a TURN entry needs `username` and `credential`; `[]` means LAN only), else the two default STUN servers, with one warning at start when the option is invalid. The defaults are TallyUI core's: `stun:stun.cloudflare.com:3478` (Cloudflare) and `stun:stun.l.google.com:19302` (Google), so with no option set, the till's and the display's browsers contact those two operators to learn their public addresses. Set `customerDisplay: { iceServers: [] }` to keep display traffic on the local network and contact neither.
+
+**Admin reset.** From the store's directory, `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-display-reset.js <deviceId>` deletes that till device with every display, token, snapshot, code, pending pairing and signal it owns, so the id registers as a new device. Use it for a lost or replaced till; its displays pair again.
 
 ## Experimental sync (G4)
 

@@ -139,3 +139,32 @@ it('drops unknown keys at every level without mutating the input', () => {
   expect(value.serverRefs.extra).toBe(true)
   expect(value.warnings.every(warning => warning.extra)).toBe(true)
 })
+
+describe('order.refund applied result (ADR-080)', () => {
+  const refund = { totalMinor: 5000, byMethod: { card: 3000, cash: 2000 }, refunds: [
+    { id: 'tref_1:0', paymentId: 'pay-card', totalMinor: 3000, state: 'succeeded' },
+    { id: 'tref_1:1', paymentId: 'order_1:1', totalMinor: 2000, state: 'succeeded' },
+  ] }
+
+  it('accepts an applied result carrying refund instead of serverRefs and drops unknown keys', () => {
+    const value = { id: 'c', status: 'applied', refund: { ...refund, extra: 1, refunds: refund.refunds.map(entry => ({ ...entry, extra: 1 })) } }
+    expect(parseCommandResult(value)).toEqual({ id: 'c', status: 'applied', refund })
+    expect(parseCommandResult({ id: 'c', status: 'duplicate', refund })).toEqual({ id: 'c', status: 'duplicate', refund })
+  })
+
+  it.each([
+    [null, 'Invalid refund'],
+    [{ ...refund, totalMinor: -1 }, 'Invalid refund.totalMinor'],
+    [{ ...refund, totalMinor: 1.5 }, 'Invalid refund.totalMinor'],
+    [{ ...refund, byMethod: [] }, 'Invalid refund.byMethod'],
+    [{ ...refund, byMethod: { card: '3000', cash: 2000 } }, 'Invalid refund.byMethod.card'],
+    [{ ...refund, byMethod: { card: 3000 } }, 'Invalid refund.byMethod: expected to sum to totalMinor'],
+    [{ ...refund, refunds: [] }, 'Invalid refund.refunds'],
+    [{ ...refund, refunds: [null] }, 'Invalid refund.refunds[0]'],
+    [{ ...refund, refunds: [{ ...refund.refunds[0], paymentId: '' }, refund.refunds[1]] }, 'Invalid refund.refunds[0].paymentId'],
+    [{ ...refund, refunds: [{ ...refund.refunds[0], state: 1 }, refund.refunds[1]] }, 'Invalid refund.refunds[0].state'],
+    [{ ...refund, refunds: [{ ...refund.refunds[0], totalMinor: 2999 }, refund.refunds[1]] }, 'Invalid refund.refunds: expected to sum to totalMinor'],
+  ])('refuses a bad refund: %j', (value, message) => {
+    expect(() => parseCommandResult({ id: 'c', status: 'applied', refund: value })).toThrow(message)
+  })
+})
