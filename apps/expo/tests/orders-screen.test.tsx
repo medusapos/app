@@ -32,10 +32,6 @@ function AccountPublisher({ open }: { open: () => void }) {
   return null;
 }
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
-vi.mock('../lib/register-context', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../lib/register-context')>();
-  return { ...actual, useRegister: () => ({ registers: actual.DEFAULT_REGISTERS }) };
-});
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 // The store is out of reach here, so Orders shows this till's own sales, which these tests pin; the store-wide
 // list is orders-store-wide.test.tsx.

@@ -6,7 +6,8 @@ import { PortalHost } from '@tallyui/primitives';
 import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type OrderFilterField, type ServerCapabilities,
   type StoreOrder, type StoreOrderPage } from '@tallyui/core';
 import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
-import type { Session } from '../lib/session';
+import { REGISTER_ID_KEY, type Session } from '../lib/session';
+import { saveTillName } from '../lib/till-name';
 import { useOutboxContext } from '../lib/outbox-context';
 import { formatDate } from '../lib/format-date';
 import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEXT, ORDERS_NO_MATCH_TEXT, ORDERS_OFFLINE_TEXT }
@@ -31,7 +32,6 @@ vi.mock('../lib/pos-connector', async (importOriginal) => {
     storeOrderFilters: (capabilities?: ServerCapabilities) => connector.orderFilters ?? actual.storeOrderFilters(capabilities),
   };
 });
-vi.mock('../lib/register-context', () => ({ useRegister: () => ({ registers: [{ id: 'register-1', name: 'Register 1' }] }) }));
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
@@ -77,8 +77,15 @@ beforeEach(() => {
   connector.orderFilters = null;
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't' };
   withSales();
+  // This till's device id, the one its sales carry (getDeviceId reads it from here); no till name saved.
+  const data = new Map<string, string>([[REGISTER_ID_KEY, 'till-a']]);
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => { data.set(key, value); },
+    removeItem: (key: string) => { data.delete(key); },
+  });
 });
-afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.useRealTimers(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe('Orders lists the whole store (row 10)', () => {
   it('lists the store\'s orders in the store\'s order with their cells; a guest reads Guest, the cashier —', async () => {
@@ -180,14 +187,45 @@ describe('Orders lists the whole store (row 10)', () => {
     expect(screen.getByTestId('order-filter-payment-method')).toBeTruthy();
   });
 
-  it('plugin contract 3: the Register pill filters the store\'s orders by register', async () => {
+  it('plugin contract 3: the Register pill lists this till\'s sales and hides another till\'s', async () => {
     const capabilities = { orderCreate: 1, pluginContract: 3 };
     sessionState.session = { ...sessionState.session!, capabilities };
+    const mine = { ...sale('Red hat', 'pending'), registerId: 'till-a' };
+    const theirs = { ...sale('Green hat', 'pending'), registerId: 'till-b' };
+    withSales(mine, theirs);
+    // The store answers the register query with this till's order only.
+    listOrders.mockImplementation((_context, query: { registerId?: string }) => Promise.resolve(page(
+      query.registerId === undefined ? [storeOrder(2), storeOrder(1)] : query.registerId === 'till-a' ? [storeOrder(2)] : [])));
+    await mount();
+    expect(openButtons()).toHaveLength(4);
+    fireEvent.click(screen.getByTestId('order-filter-register'));
+    const menu = screen.getByTestId('order-filter-register-menu');
+    expect(Array.from(menu.querySelectorAll('[data-testid^="order-filter-register-"]'), (item) => item.getAttribute('data-testid')))
+      .toEqual(['order-filter-register-till-a']);
+    expect(screen.getByTestId('order-filter-register-till-a').textContent).toBe('This till');
+    fireEvent.click(screen.getByTestId('order-filter-register-till-a'));
+    await settle();
+    expect(listOrders).toHaveBeenLastCalledWith({ ...context, capabilities }, { page: 1, perPage: 25, registerId: 'till-a' });
+    expect(openButtons()).toEqual([`Open order ${orderReference(mine)}`, 'Open order #1002']);
+    expect(screen.queryByTestId(`orders-row-${theirs.id}`)).toBeNull();
+  });
+
+  it('the Register pill\'s one option is labelled with the till name from Settings', async () => {
+    sessionState.session = { ...sessionState.session!, capabilities: { orderCreate: 1, pluginContract: 3 } };
+    saveTillName(localStorage, 'https://store.test', 'Front counter');
     await mount();
     fireEvent.click(screen.getByTestId('order-filter-register'));
-    fireEvent.click(screen.getByTestId('order-filter-register-register-1'));
-    await settle();
-    expect(listOrders).toHaveBeenLastCalledWith({ ...context, capabilities }, { page: 1, perPage: 25, registerId: 'register-1' });
+    expect(screen.getByTestId('order-filter-register-till-a').textContent).toBe('Front counter');
+  });
+
+  it('plugin contract 3: a 1-6 digit search without a register filter keeps the old /admin/orders path', async () => {
+    sessionState.session = { ...sessionState.session!, capabilities: { orderCreate: 1, pluginContract: 3 } };
+    await mount();
+    fireEvent.change(screen.getByTestId('orders-search'), { target: { value: '1042' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(listOrders).toHaveBeenLastCalledWith(context, { page: 1, perPage: 25, search: '1042' });
+    // No capabilities in the context: listOrders sends the search to /admin/orders, as before contract 3.
+    expect(listOrders.mock.lastCall![0]).not.toHaveProperty('capabilities');
   });
 
   it('below plugin contract 3 there is no Register pill', async () => {

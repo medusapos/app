@@ -61,6 +61,7 @@ export function filterOrders(orders: PosOrder[], search: string, value: OrderFil
     if (value.status && medusaOrderStatus(order) !== value.status) return false;
     if (value.paymentMethod && !order.payments.some((payment) => payment.method === value.paymentMethod)) return false;
     if (value.customerId && order.customer?.id !== value.customerId) return false;
+    if (value.registerId && order.registerId !== value.registerId) return false;
     if (value.dateRange && !inRange(order.createdAt, value.dateRange, timezone)) return false;
     return true;
   });
