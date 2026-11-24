@@ -13,7 +13,7 @@ import { currencyDecimals, minorToMajor } from '../tally-order-create/money'
 import { envelopeErrors, MAX_PAYLOAD_ERRORS } from '../tally-order-create/payload-shape'
 import { clientTimeStageErrors } from '../client-time'
 import { refundPayloadErrors } from './payload-shape'
-import { connectorSplit, medusaSumMinor, priceRefund, type PricedLine, type RefundableLine } from './price'
+import { connectorSplit, medusaSumMinor, priceRefund, refundMoneyMinor, type PricedLine, type RefundableLine } from './price'
 import { splitRefund, type SplitEntry, type TillTender } from './split'
 import { beginReturn, cancelReturn, moneyStep, receiveStep, requestReturn } from './workflow'
 import { moveOrderRefund } from './admin'
@@ -61,11 +61,9 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     tenders: tenders.map(tender => ({ ...tender, id: tender.clientPaymentId ?? tender.id }) as TillTender),
     lines: (order.items ?? []).filter(item => item !== null).filter(item => !item.metadata?.tally_fee_uuid).map(item => ({ id: item.id, quantity: Number(item.quantity),
       ...connectorSplit((item.raw_total as unknown as Raw).value, (item.raw_tax_total as unknown as Raw).value, decimals) })),
-    linesMoneyMinor: payment ? medusaSumMinor(decimals, [(payment.raw_amount as unknown as Raw).value], [
-      ...(order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value),
-      ...(order.items ?? []).filter(item => item?.metadata?.tally_fee_uuid).map(item => (item!.raw_total as unknown as Raw).value),
-    ]) : null,
-    shippingMinor: medusaSumMinor(decimals, (order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value)),
+    ...refundMoneyMinor(decimals, payment ? (payment.raw_amount as unknown as Raw).value : null,
+      (order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value),
+      (order.items ?? []).filter(item => item?.metadata?.tally_fee_uuid).map(item => (item!.raw_total as unknown as Raw).value)),
     payment: payment ? { id: payment.id, amountMinor: medusaSumMinor(decimals, [(payment.raw_amount as unknown as Raw).value]),
       refundedMinor: medusaSumMinor(decimals, (payment.refunds ?? []).map(refund => (refund?.raw_amount as unknown as Raw).value)) } : null,
   }

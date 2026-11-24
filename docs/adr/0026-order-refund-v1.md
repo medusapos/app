@@ -130,12 +130,14 @@ The plugin prices the refund with ADR-080's cumulative-share rule, net and tax s
 
 Each line's net is `round(gross − tax)`, the connector's split, never `round(gross) − round(tax)`. The till prices from the connector's figures, so any other split would refuse a correct refund by one minor unit.
 
+Shipping methods and fee items are rounded per item for the same reason (amended 2026-11-24): the order's shipping is the sum of each method's rounded gross, and ruling A's lines' money is the rounded payment less each shipping method's and each fee's rounded gross, not one rounding over their raw sum.
+
 **The last units take the remainder** (amended 2026-11-23, desk ruling). Per-line rounding can ask for more than the till took. Take three one-unit lines at 0.99 ex 19%: each line is 1.18, which sums to 3.54, but the sale was paid 3.53.
 
 So a refund that leaves every product line fully refunded prices its lines at the money left for the lines. The difference from the per-line sum goes on one of the request's lines. The till prices the same way. TallyUI 4.1.0's `priceRefund` does not, so the app sends the remainder for its full-order refund.
 
 **Desk rulings of 2026-11-23 on the money review of #540 (A to E).**
-- **A. The lines' money.** For the last units, the lines' money is: payment amount − the order's shipping (gross) − the order's till fees (gross) − Σ the line money (net + tax) of every earlier `tally_refund` row of the order. It is summed exactly and rounded once.
+- **A. The lines' money.** For the last units, the lines' money is: payment amount − the order's shipping (gross) − the order's till fees (gross) − Σ the line money (net + tax) of every earlier `tally_refund` row of the order. The payment and each shipping method and fee are rounded on their own (decision 5, amended 2026-11-24).
   - **Earlier rows.** Rows count when they have moved money or still can: `in_progress`, `applied` and `needs_admin`. A refund that fails before its money moves deletes its row, so it never counts.
   - **Fees.** Fee items (`metadata.tally_fee_uuid`) are not lines here. They are not in the "every line refunded" set, and they are not in the bound's line count. A fee goes back only as `adjustmentMinor`, under the overall cap.
   - **Never in the remainder.** Adjustments and shipping refunds.

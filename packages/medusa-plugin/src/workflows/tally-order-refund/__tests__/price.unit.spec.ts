@@ -1,4 +1,4 @@
-import { connectorSplit, medusaSumMinor, priceRefund, type PriceRefundInput } from '../price'
+import { connectorSplit, medusaSumMinor, priceRefund, refundMoneyMinor, type PriceRefundInput } from '../price'
 
 const request = (overrides: Partial<PriceRefundInput['request']>): PriceRefundInput['request'] =>
   ({ lines: [], shippingMinor: 0, adjustmentMinor: 0, totalMinor: 0, ...overrides })
@@ -215,5 +215,40 @@ describe('the last units take the remainder', () => {
     // Shipping kept for a later refund: the lines take 853 less the 500 still unrefunded.
     expect(priceRefund({ ...shipped, request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 353 }) }))
       .toMatchObject({ ok: true, totalMinor: 353 })
+  })
+})
+
+// ADR 0026 decision 5 (2026-11-24): the till sees each shipping method's and fee's own rounded gross, so the store rounds
+// them per item. Every case has one product line at 10.00 ex 19% (gross 11.90, tax 1.90: net 1000, tax 190).
+describe('refundMoneyMinor rounds shipping and fees per item', () => {
+  const lines = [{ id: 'ordli_1', quantity: 1, ...connectorSplit('11.9', '1.9', 2) }]
+  const fullRefund = (money: { linesMoneyMinor: number | null; shippingMinor: number }, paymentMinor: number, totalMinor: number) =>
+    priceRefund({ lines, ...money, earlier: [], refundableMoneyMinor: paymentMinor,
+      request: request({ lines: [{ orderLineId: 'ordli_1', quantity: 1, restock: true }], shippingMinor: money.shippingMinor, totalMinor }) })
+  // [name, payment, shipping raws, fee raws, linesMoney, shipping, the till's full-refund total (payment less fees)]
+  const cases: [string, string, string[], string[], number, number, number][] = [
+    ['one 4.50 ex 19% shipping (5.355), paid 17.26: lines 1726 − 536', '17.26', ['5.355'], [], 1190, 536, 1726],
+    ['two 1.02 ex 19% shippings (1.2138 each), paid 14.33: lines 1433 − 121 − 121', '14.33', ['1.2138', '1.2138'], [], 1191, 242, 1433],
+    ['a 1.02 ex 19% shipping and a 1.02 ex 19% fee, paid 14.33: lines 1433 − 121 − 121', '14.33', ['1.2138'], ['1.2138'], 1191, 121, 1312],
+    ['a 4.50 ex 19% fee (5.355), paid 17.26: lines 1726 − 536', '17.26', [], ['5.355'], 1190, 0, 1190],
+    ['whole-cent raws are unchanged: two 2.50 shippings and a 1.19 fee, paid 18.09', '18.09', ['2.5', '2.5'], ['1.19'], 1190, 500, 1690],
+  ]
+
+  it.each(cases)('%s', (_name, payment, shipping, fees, linesMoneyMinor, shippingMinor, totalMinor) => {
+    const money = refundMoneyMinor(2, payment, shipping, fees)
+    expect(money).toEqual({ linesMoneyMinor, shippingMinor })
+    // The till's full refund: every line at full quantity, all the shipping, adjustment 0; fees stay with the store.
+    expect(totalMinor).toBe(medusaSumMinor(2, [payment]) - fees.reduce((sum, fee) => sum + medusaSumMinor(2, [fee]), 0))
+    expect(fullRefund(money, medusaSumMinor(2, [payment]), totalMinor)).toMatchObject({ ok: true, totalMinor })
+  })
+
+  it("the 17.26 sale's full refund was refused under one rounding over the raw sum (1191 + 536 = 1727 > 1726 paid)", () => {
+    const oneRounding = { linesMoneyMinor: 1191, shippingMinor: 536 }
+    expect(fullRefund(oneRounding, 1726, 1726)).toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { serverMinor: 1727 } } })
+    expect(fullRefund(oneRounding, 1726, 1727)).toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { serverMinor: 1726 } } })
+  })
+
+  it('an order with no payment has no line money', () => {
+    expect(refundMoneyMinor(2, null, ['5.355'], ['1.19'])).toEqual({ linesMoneyMinor: null, shippingMinor: 536 })
   })
 })
