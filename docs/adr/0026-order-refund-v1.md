@@ -56,10 +56,24 @@ The plugin still accepts and prices ADR-080's general payload: any line quantiti
 - **A crash or timeout.** The ledger claim stays `in_progress`. After the stale-claim window, the till's retry takes the claim over, as order.create's does, and resumes.
 - **A failure that will not clear on retry.** The workflow parks the command as `needs_admin`, with the failing step in `needs_admin_reason`. Until an admin resolves it, the till's retry is answered `in_progress`, as for order.create. The admin uses `tally-ledger-resolve` with one of two actions:
   - `resume` runs the missing steps;
-  - `apply` records a refund the admin made by hand, with its Medusa refund id.
+  - `apply` records a refund the admin made by hand, with its Medusa refund id;
+  - `move [<sessionId>]` (#542, desk ruling 2026-11-24) changes a parked refund whose session no longer takes money to an open session, then resumes it.
+    - By default the target is the sale register's own open session. Another register's session must be named, because the cash then leaves a different drawer, and the log line says so.
+    - It refuses while the old session still takes money (use `resume`), once the row records its Medusa refund, and for a target that is not open.
+    - Each move appends `{ refundId, commandId, fromSessionId, toSessionId, at }` to the order's metadata `tally_refund_moves`, in the same transaction, merged into the metadata. No migration.
 
   There is no `reject` once stock has moved.
-- **Never refund twice.** Before step 3, the workflow compares the payment's refunded amount in Medusa with the sum of the `medusa_refund_id` amounts that `tally_refund` already records for it. If Medusa shows more, a refund happened without being recorded. Step 3 then does not run, and the command goes to `needs_admin` with the reason `refund_unrecorded`.
+
+  Two more admin actions live in `tally-refunds` (#542):
+  - `baseline <orderId> <medusaRefundId> [--hand-made] <reason>` records a Medusa refund made outside the plugin, so the never-twice check stops counting it as unrecorded.
+    - The entry is `{ refundId, amountMinor, at, reason }` in the order's metadata `tally_refund_baselines`, merged into the metadata. A reason is required.
+    - The check reads each baselined refund's amount live from Medusa. A lost or cleared key fails closed: the refund counts as unrecorded again and the check refuses.
+    - A refund whose amount equals a pending till refund's needs `--hand-made`, because it may be that refund's own money, which `apply` records instead.
+  - `list` prints the parked refunds, then the moved ones with their current status. It is a script only, with no Admin route.
+- **Never refund twice.** The workflow compares the payment's refunded amount in Medusa with the sum of the `medusa_refund_id` amounts that `tally_refund` already records for it. If Medusa shows more, a refund happened without being recorded, and the command goes to `needs_admin` with the reason `refund_unrecorded`.
+  - The check runs before step 2, so stock never moves when the money won't (amended 2026-11-23, desk ruling).
+  - It runs again before step 3, for a resume whose receive is already recorded.
+  - A refund with no lines runs it once, before step 3.
 
 **Required tests.** The plugin PR tests these rows explicitly:
 - Fail after the receive confirms and before the money moves, then retry with the same command and `clientRefundId`: exactly one Medusa refund, and stock received once.
@@ -116,10 +130,47 @@ The plugin prices the refund with ADR-080's cumulative-share rule, net and tax s
 
 Each line's net is `round(gross − tax)`, the connector's split, never `round(gross) − round(tax)`. The till prices from the connector's figures, so any other split would refuse a correct refund by one minor unit.
 
-**Required test.** A line where `round(gross) − round(tax)` and `round(gross − tax)` differ by one minor unit: the refund is accepted, and its amounts are the connector's.
+**The last units take the remainder** (amended 2026-11-23, desk ruling). Per-line rounding can ask for more than the till took. Take three one-unit lines at 0.99 ex 19%: each line is 1.18, which sums to 3.54, but the sale was paid 3.53.
+
+So a refund that leaves every product line fully refunded prices its lines at the money left for the lines. The difference from the per-line sum goes on one of the request's lines. The till prices the same way. TallyUI 4.1.0's `priceRefund` does not, so the app sends the remainder for its full-order refund.
+
+**Desk rulings of 2026-11-23 on the money review of #540 (A to E).**
+- **A. The lines' money.** For the last units, the lines' money is: payment amount − the order's shipping (gross) − the order's till fees (gross) − Σ the line money (net + tax) of every earlier `tally_refund` row of the order. It is summed exactly and rounded once.
+  - **Earlier rows.** Rows count when they have moved money or still can: `in_progress`, `applied` and `needs_admin`. A refund that fails before its money moves deletes its row, so it never counts.
+  - **Fees.** Fee items (`metadata.tally_fee_uuid`) are not lines here. They are not in the "every line refunded" set, and they are not in the bound's line count. A fee goes back only as `adjustmentMinor`, under the overall cap.
+  - **Never in the remainder.** Adjustments and shipping refunds.
+- **B. Which line takes the difference.** The request's last line whose net covers the difference (net ≥ |difference|). If no line does, the line with the largest net, with ties going to the later line. A net is never negative. The till applies the same rule.
+  - **Ruling N1** (desk, 2026-11-23, review 2). A negative difference that no net in the request covers goes on the tax of the request's line with the largest gross (net + tax); ties go to the later line. The tax takes it only if it covers it.
+  - Otherwise, within D's bound, the difference is dropped and the lines price at their own figures; no net or tax is ever negative. Beyond the bound it is money drift. The till applies the same rule.
+  - **Accepted limit:** a dropped difference over-refunds the lines by at most one minor unit per line; the payment cap still bounds the order's refunds.
+    - Example: 3 × 0.99 ex 19% plus a free line z, with 5.95 of shipping (paid 9.48). Refunding a, b and c singly takes 1.18 each, 3.54 against 3.53 of line money.
+    - z alone then prices at 0 and is refused `nothing_to_refund`.
+    - A stock-only return of a free line is not in v1.
+- **C. A resume or takeover after the session has closed.** The refund parks again as `needs_admin`, reason `session_closed`, with no money and no stock moved. The closed session's figures never move.
+  - On the till, the refund reads as in progress, never as paid. TallyUI's wire has no message for a parked command; the plain "not paid" wording on the till is a TallyUI contract change: TallyUI/tallyui#1280.
+  - The admin finishes such a refund with `move` (decision 2, #542).
+- **D. Money drift.** A difference of more than one minor unit per product line means the payment and the order disagree by more than rounding. It is refused `order_state` with `{ state: 'money_drift' }`, for an admin. `amount_mismatch`, which carries `serverMinor`, is only for a till total that differs from the server's price.
+- **E. Shipping basis.** `shippingMinor` is gross: net + tax, the orders list's two shipping figures added.
+
+**The overall cap.** A refund's total may not exceed the payment's amount less Medusa's refunds, less the totals of earlier rows that have not yet reached Medusa.
+
+**Medusa credit lines.** Medusa 2.21's `refundPaymentWorkflow` records any refund above the order's pending difference as an order credit line. So a shipping-only refund, an adjustment, or a line priced up by rounding shows in Admin as a credit line on the order.
+
+**Required tests.**
+- **Per-line rounding.** A line where `round(gross) − round(tax)` and `round(gross − tax)` differ by one minor unit: the refund is accepted, and its amounts are the connector's.
+- **Per-order rounding.** Refunding all three lines of the 3.53 sale above gives 3.53. Refunding two of them gives 2.36, and the last line then gets 1.17.
+- **The rulings' cases** (2026-11-23):
+  - The 3.53 sale with a 1.19 fee, paid 4.72: refunding all three lines gives 3.53.
+  - +1 goodwill first: the last units still get 3.53. −3 withheld on the first line: the last two get 2.35.
+  - A parked earlier refund does not block the last units.
+  - A free last line keeps a net ≥ 0.
+  - Money drift answers `order_state` `money_drift`, with no `serverMinor`.
+  - A resume after the session closed parks `session_closed` with nothing moved.
 
 ### 6. Register figures follow ADR-080 decision 6
-- **The session.** A refund counts in its own `sessionId`, which must be open, not counting. Anything else is refused `no_open_session`. The check holds the session row lock, as the register commands do (`lockSession`), so a close cannot interleave with a refund.
+- **The session.** A refund counts in its own `sessionId`, which must be open, not counting, and have no filed closure. Anything else is refused `no_open_session`.
+  - A refund already started may finish (resume or `apply`) while its session is counting, as cash movements may, until a closure is filed (ruling F3, 2026-11-23).
+  - A till that counted before it finished shows the difference as a variance at the gate. The check holds the session row lock, as the register commands do (`lockSession`), so a close cannot interleave with a refund.
 - **Expected per tender.** `deriveSessionFigures` takes the session's applied refunds, `[{ byMethod }]`, and each tender's expected figure falls by that refund's `byMethod`.
 - **Closure totals.**
   - `periodRefundsTotalMinor` is the sum of the session's applied refunds.

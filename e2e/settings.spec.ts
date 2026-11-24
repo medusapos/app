@@ -265,4 +265,54 @@ test.describe('at 1280 × 800', () => {
       await expectSwitchThumbInTrack(sw);
     }
   });
+
+  // Row 15a: v2's General, flat rows in the one section card, each value in a column right after its label.
+  test('General\'s groups are flat in the section card, each value starting within 320 px of its label', async ({ page }) => {
+    await signIn(page);
+    await openArea(page, 'Settings');
+    await page.getByTestId('settings-nav-store').click();
+    const card = page.getByTestId('settings-section-card');
+    const rows = [['Store name', 'settings-store-name'], ['Currency', 'settings-store-currency'],
+      ['Stock location', 'settings-store-location'], ['Sales channel', 'settings-store-sales-channel'],
+      ['Default customer', 'settings-default-customer-field'], ['Default customer is cashier', 'settings-default-customer-is-cashier'],
+      ['Symbol', 'settings-currency-symbol'], ['Symbol position', 'settings-currency-position'],
+      ['Thousands separator', 'settings-currency-thousands'], ['Decimal separator', 'settings-currency-decimal'],
+      ['Number of decimals', 'settings-currency-decimals'], ['Example', 'settings-currency-example'], ['Send feedback', 'settings-feedback-link']];
+    for (const [label, value] of rows) {
+      const labelBox = (await card.getByText(label, { exact: true }).boundingBox())!;
+      const valueBox = (await card.getByTestId(value).boundingBox())!;
+      expect(valueBox.x, `${label}: the value starts after its label`).toBeGreaterThanOrEqual(labelBox.x + labelBox.width);
+      expect(valueBox.x - labelBox.x, `${label}: the value sits beside its label`).toBeLessThanOrEqual(320);
+    }
+    // The "Open ↗" follows its value on the same line.
+    const value = (await card.getByTestId('settings-store-name').boundingBox())!;
+    const open = (await card.getByTestId('settings-store-name-admin').boundingBox())!;
+    expect(open.x).toBeGreaterThanOrEqual(value.x + value.width);
+    expect(Math.abs((open.y + open.height / 2) - (value.y + value.height / 2))).toBeLessThan(4);
+    // No box inside the card: nothing in it but an input or button draws a border (TallyUI's box is an inner View).
+    const bordered = await card.evaluate((root) => Array.from(root.querySelectorAll('*')).filter((el) => {
+      if (el.closest('input, textarea, button, [role="button"], [role="switch"]')) return false;
+      const style = getComputedStyle(el);
+      return parseFloat(style.borderTopWidth) > 0 && style.borderTopStyle !== 'none' && style.borderTopColor !== 'rgba(0, 0, 0, 0)';
+    }).map((el) => el.getAttribute('data-testid') ?? el.className));
+    expect(bordered).toEqual([]);
+  });
+
+  // Desktop Chromium has WebHID and Web Serial, so "Direct connection" renders; its value sits in the switch's column.
+  test('Barcode Scanning\'s "Direct connection" value starts in the same column as "Play a sound on scan"\'s switch', async ({ page }) => {
+    await signIn(page);
+    await openArea(page, 'Settings');
+    await page.getByTestId('settings-nav-scanner').click();
+    const direct = page.getByTestId('settings-section-card').getByTestId('settings-scanner-direct');
+    await direct.scrollIntoViewIfNeeded();
+    const label = (await direct.getByText('Direct connection', { exact: true }).boundingBox())!;
+    const button = direct.getByRole('button', { name: 'Connect a scanner directly (advanced)' });
+    const buttonBox = (await button.boundingBox())!;
+    expect(buttonBox.x, 'the button starts after its label').toBeGreaterThanOrEqual(label.x + label.width);
+    expect(buttonBox.x - label.x, 'the button sits beside its label').toBeLessThanOrEqual(320);
+    // The value (the "None" note, then the button) starts where the switch above it does.
+    const value = (await button.locator('xpath=..').boundingBox())!;
+    const sound = (await page.getByTestId('settings-scanner-sound').boundingBox())!;
+    expect(Math.abs(value.x - sound.x), 'the value starts in the switch\'s column').toBeLessThanOrEqual(4);
+  });
 });

@@ -209,6 +209,16 @@ the packed plugin's `tally-pos-roles` script, and `seed-e2e-rbac.ts` adds `pos-c
 ("POS cashier" only) and `no-pos@tally.test` (no roles), both with `e2e-password`. `e2e@tally.test` is
 super admin. It uses the same ports and database as `pnpm e2e`, so run the two one after the other.
 
+## Capture
+
+`pnpm capture` (`e2e/capture`) shoots every `docs/v2-parity/DEMO-PARITY.md` row at desktop 1280×800, tablet
+1024×768 and phone 390×844 against the same throwaway store, one row after another from a reset Sale, and writes
+`<row>-<size>.jpg` plus a `README.md` index to `CAPTURE_OUT` (default `e2e/.tmp/capture`). `CAPTURE_ROWS=01,07`
+shoots only those rows and keeps the other rows of the index already in `CAPTURE_OUT`; for a full run, delete the
+folder first. The index names the commit it was taken at, with "dirty" when the tree differed. A row that cannot be reached is marked `failed:` in the index, the rest carry on, and the
+run fails at the end. It refuses `E2E_APP_URL`/`E2E_BACKEND_URL`: it never shoots the shared demo.
+The committed shots: `CAPTURE_OUT=docs/v2-parity/demo-shots/capture pnpm capture`.
+
 ## Against a hosted app and backend
 
 Set `E2E_APP_URL` and `E2E_BACKEND_URL` (both, or the config refuses to load),

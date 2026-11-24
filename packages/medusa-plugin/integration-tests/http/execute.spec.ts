@@ -89,7 +89,7 @@ medusaIntegrationTestRunner({
       const sale = command()
       const first = result(await executeOrderCreate(container, sale))
       expect(first.status).toBe('applied')
-      const changed = { ...sale, payload: { ...sale.payload, totalMinor: 999 } }
+      const changed = { ...sale, payload: { ...sale.payload, totalMinor: 999, payments: [{ ...sale.payload.payments[0], amountMinor: 999 }] } }
       expect(result(await executeOrderCreate(container, changed))).toEqual({
         id: sale.id, status: 'rejected', error: {
           code: 'idempotency_mismatch', message: `Command ${sale.id} was already used for a different payload.`,

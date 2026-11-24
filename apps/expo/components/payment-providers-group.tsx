@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { SettingsGroup, SettingsRow, Text } from '@tallyui/components';
+import { Text } from '@tallyui/components';
+import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
 import { fetchPaymentProviders, type PaymentProvider } from '../lib/payment-providers';
 import type { Session } from '../lib/session';
 
@@ -14,7 +15,7 @@ export function PaymentProvidersGroup({ session }: { session: Session }) {
   if (!providers?.length) return null;
   return <SettingsGroup title="Payment providers" testID="settings-payment-providers" description="The store's payment providers in Medusa. Read-only.">
     {providers.map((provider, index) => <SettingsRow key={provider.id} label={provider.name} testID={`settings-payment-provider-${provider.id}`}
-      className={index > 0 ? 'border-t border-border' : undefined} action={
+      divider={index > 0} action={
         <Text testID={`settings-payment-provider-${provider.id}-state`}
           className={`max-w-40 text-right text-sm ${provider.tillCanTake ? 'text-foreground' : 'text-muted-foreground'}`}>
           {provider.tillCanTake ? 'Taken at this till' : 'Not at this till'}

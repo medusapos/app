@@ -1,8 +1,9 @@
 import { Fragment, useRef, useState } from 'react';
 import { Platform, useWindowDimensions, View } from 'react-native';
 import {
-  Badge, Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, SettingsGroup, SettingsRow, Text, XIcon,
+  Badge, Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, Text, XIcon,
 } from '@tallyui/components';
+import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
 import { printReceiptPage, RECEIPT_TEMPLATES, receiptTemplatePage, sampleReceipt } from '../lib/receipt-templates';
 import { defaultStorage, type Session } from '../lib/session';
 import { loadCachedSettings } from '../lib/store-settings';
@@ -60,7 +61,7 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
       </>;
       return <Fragment key={template.id}>
         <SettingsRow label={template.name} testID={`settings-receipt-template-${template.id}`}
-          className={index > 0 ? 'border-t border-border' : undefined}
+          divider={index > 0}
           action={phone ? undefined : <View className="flex-row flex-wrap items-center justify-end gap-3">{actions}</View>} />
         {phone ? <View testID={`settings-receipt-template-${template.id}-actions`}
           className="flex-row flex-wrap items-center gap-3 px-4 pb-3">{actions}</View> : null}

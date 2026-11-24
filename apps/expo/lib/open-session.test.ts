@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { RegisterSession } from '@tallyui/pos';
-import { openSessionOf } from './open-session';
+import { openerName, openSessionOf } from './open-session';
 
 function register(status: RegisterSession['status'] | null, overrides: { blind?: boolean; terms?: null } = {}) {
   return {
@@ -30,5 +30,18 @@ describe('openSessionOf', () => {
   it('a session without an opener reads openedBy null', () => {
     const value = register('open');
     expect(openSessionOf({ ...value, session: { ...value.session!, opened_by: undefined } })?.openedBy).toBeNull();
+  });
+});
+
+describe('openerName', () => {
+  it('names the signed-in cashier\'s own session by their display name', () => {
+    expect(openerName('admin@store.test', 'admin@store.test', 'Alex Shopkeeper')).toBe('Alex Shopkeeper');
+  });
+  it('names another opener by the stored id', () => {
+    expect(openerName('ana@store.test', 'admin@store.test', 'Alex Shopkeeper')).toBe('ana@store.test');
+  });
+  it('is null without an opener', () => {
+    for (const openedBy of [undefined, null, ''])
+      expect(openerName(openedBy, 'admin@store.test', 'Alex Shopkeeper')).toBeNull();
   });
 });

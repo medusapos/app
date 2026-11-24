@@ -107,22 +107,35 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
         await expect(page.getByTestId('catalogue-status-row').getByRole('button', { name: 'Open register panel' })).toHaveCount(0);
         await shot(page, 'products-open');
       }
-      await openRegisterPanel(page);
+      // The way openRegisterPanel goes, reading the signed-in cashier's display name off the user sheet on the way.
+      await (phone ? page.getByTestId('user-menu') : page.getByRole('button', { name: 'Open register panel', exact: true })).click();
+      const displayName = (await page.getByTestId('user-sheet-name').textContent())!;
+      await page.getByTestId('user-sheet-register').click();
       const panel = page.getByTestId('register-panel');
       await expect(panel.getByTestId('register-panel-session-sales')).toHaveText(/1 sale$/);
+      // v2's opener (09c.5): the header line ends with whoever opened the session, here the signed-in cashier, not "Cashier".
+      const header = panel.getByTestId('register-panel-description');
+      await expect(header).toHaveText(new RegExp(` · ${displayName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`));
+      await expect(header).not.toHaveText(/ · Cashier$/);
+      await expect(panel.getByTestId('register-panel-opened-by')).toHaveText(/^opened \d{2}:\d{2} by/);
+      await expect(page.getByTestId('user-sheet')).toHaveCount(0);
+      await shot(page, 'panel-opener');
       const expectedCash = panel.getByTestId('register-panel-expected').getByText(/\d/);
       await expect(expectedCash).toHaveText(money(100 + total));
 
+      // v2's pay in (09d.3, 09d.4): a reason chip, and the button names the amount.
       await panel.getByTestId('register-panel-paid-in').click();
       const sheet = page.getByTestId('movement-sheet');
+      await sheet.getByTestId('movement-reason-float').click();
       await sheet.getByTestId('movement-amount').fill('5.00');
-      await sheet.getByTestId('movement-reason').fill('Change for the float');
+      await expect(sheet.getByTestId('movement-reason')).toHaveValue('Float');
+      await expect(sheet.getByTestId('movement-confirm')).toHaveText(/^Put €5[.,]00 in$/);
       await shot(page, 'movement-sheet');
       await sheet.getByTestId('movement-confirm').click();
       await expect(sheet).toHaveCount(0);
       await expect(expectedCash).toHaveText(money(105 + total));
       await panel.getByTestId('register-panel-movements').click();
-      const row = panel.getByText(/^Paid in · .*5[.,]00.* · Change for the float$/);
+      const row = panel.getByText(/^Paid in · .*5[.,]00.* · Float$/);
       await expect(row).toBeVisible();
       await shot(page, 'panel');
 

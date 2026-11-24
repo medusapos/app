@@ -6,6 +6,7 @@ import { formatClosureDate, presetRange, switchWarnings, watchFresh, type PosOrd
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { medusaAdminUrl, openMedusaAdmin } from '../lib/medusa-admin';
+import { openerName } from '../lib/open-session';
 import { localDayStartIso, salesRoomFigures } from '../lib/reports';
 import { formatShiftDuration, SHIFT_TICK_MS } from '../lib/shift-duration';
 import type { Session } from '../lib/session';
@@ -58,9 +59,7 @@ export function UserSheet({ session, displayName, initials, storeName, currency,
     return () => clearInterval(timer);
   }, [ticking]);
   const duration = since && register.session ? formatShiftDuration(register.session.opened_at_gmt, now) : null;
-  const openedBy = register.session?.opened_by;
-  // opened_by is the opener's cashier id, which this app records as the cashier's email.
-  const opener = !openedBy ? null : openedBy === session.email ? displayName : openedBy;
+  const opener = openerName(register.session?.opened_by, session.email, displayName);
   // The signed-in cashier's own sales: the app records every local order with cashierRef = session.email.
   const totals = salesRoomFigures(sales.filter((order) => order.cashierRef === session.email), filters, currency).figures.totals;
   // On a phone, as v2: Close on top and Sign out under it, both full width; from 600 px Sign out left, Close right.

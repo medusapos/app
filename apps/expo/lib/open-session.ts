@@ -26,3 +26,12 @@ export function openSessionOf(register: Pick<RegisterContextValue['register'],
     floatMinor: session.counted_float_minor,
   };
 }
+
+/**
+ * The session opener's name as the app shows it: `opened_by` is the opener's cashier id, which this app records as the
+ * cashier's email, so the signed-in cashier's own session reads as their display name. `null` without an opener.
+ */
+export function openerName(openedBy: string | null | undefined, signedInEmail: string, displayName: string): string | null {
+  if (!openedBy) return null;
+  return openedBy === signedInEmail ? displayName : openedBy;
+}

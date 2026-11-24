@@ -30,3 +30,7 @@ It needs:
 - an npm organisation or scope for `@medusapos`, which Paul creates;
 - the package linked to this repository's workflow as a trusted publisher;
 - QUICKSTART and the release note switched to install by name.
+
+## Register contract 4
+
+- The server counts a closure's unsynced sales itself: it lists the session's sales by `tally_session_id` against the closure's `orderIds`, and order intake records its refusals per client id, so a refused sale is not mistaken for an unsynced one. This closes the limit of ADR 0023's 2026-11-23 cross-check. It ships with the next change that needs a register contract version anyway (desk, 2026-11-23).
