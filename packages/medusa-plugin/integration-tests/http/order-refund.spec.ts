@@ -5,6 +5,7 @@ import { ContainerRegistrationKeys, FeatureFlag, MedusaError, Modules } from '@m
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
 import tallyPosRoles from '../../src/scripts/tally-pos-roles'
 import { loadSessionFigures } from '../../src/workflows/tally-register-command/figures'
+import { Migration20261124120000 } from '../../src/modules/tally-register/migrations/Migration20261124120000'
 import { seed } from './seed'
 
 jest.setTimeout(240000)
@@ -62,8 +63,8 @@ medusaIntegrationTestRunner({
      * An open session and a 10.00 EUR sale of variant A in it, paid card 6.00 + cash 4.00 (or all cash). A till discount
      * (gross, as v3 sends it) comes off the line and the cash, with the sale's tax after it.
      */
-    async function tillSale(cashOnly = false, discount?: { minor: number; taxMinor: number }) {
-      const session = { sessionId: randomUUID(), registerId: randomUUID() }
+    async function tillSale(cashOnly = false, discount?: { minor: number; taxMinor: number }, registerId: string = randomUUID()) {
+      const session = { sessionId: randomUUID(), registerId }
       const cardId = randomUUID()
       const cashId = randomUUID()
       const clientLineId = randomUUID()
@@ -178,6 +179,16 @@ medusaIntegrationTestRunner({
       return { ...session, orderId, paymentId: payment.id as string, full,
         feeId: (order.items as Row[]).find(item => item.metadata?.tally_fee_uuid)?.id as string | undefined }
     }
+    /** An Admin refund made once the next till command is priced (after its return is requested), so the receive parks it. */
+    function refundAfterPricing(paymentId: string, amount: number) {
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const original = workflow.requestReturn
+      jest.spyOn(workflow, 'requestReturn').mockImplementationOnce(async (...args) => {
+        await original(...args)
+        const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+        await refundPaymentWorkflow(container).run({ input: { payment_id: paymentId, amount, note: 'by hand' } })
+      })
+    }
     async function stockOf(inventoryItemId: string) {
       const { data: [level] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'inventory_level',
         fields: ['stocked_quantity'], filters: { inventory_item_id: inventoryItemId, location_id: data.berlinId } }) as unknown as Rows
@@ -228,6 +239,90 @@ medusaIntegrationTestRunner({
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
     })
 
+    // #547 (desk 2026-11-24): earlier goodwill no row puts on a line lets Refund all pass at what is left.
+    const differsMessage = "The refund total differs from the store's."
+    const capMessage = 'The refund is more than the money the order has left to refund.'
+    const detailFields = ['items.id', 'items.detail.return_requested_quantity', 'items.detail.return_received_quantity',
+      'items.detail.return_dismissed_quantity', 'items.detail.written_off_quantity']
+
+    it('clamp: Admin goodwill, Refund all at what is left', async () => {
+      const till = await remainderSale()
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'goodwill in Admin' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      // An admin's own refund is baselined, or the till refund parks refund_unrecorded (I9).
+      await refundsScript('baseline', till.orderId, hand.id, 'goodwill', 'in', 'Admin')
+      const over = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID() })
+      expect((await post([over])).data.results).toEqual([{ id: over.id, status: 'rejected', error: { code: 'amount_mismatch',
+        message: differsMessage, data: { expectedMinor: 353, serverMinor: 352 } } }])
+      const full = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), totalMinor: 352 })
+      expect((await applied([full]))[0].refund).toMatchObject({ totalMinor: 352, byMethod: { cash: 352 } })
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((a, b) => a - b)).toEqual([0.01, 3.52])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+      expect((await loadSessionFigures(container, till.sessionId))?.refundsTotalMinor).toBe(352)
+      const row = await knex('tally_refund').where({ command_id: full.id }).first()
+      expect(row.lines.map((line: Row) => [line.netMinor, line.taxMinor])).toEqual([[99, 19], [98, 19], [98, 19]])
+    })
+
+    const outsideMessage = 'This order has a refund made outside the till (Medusa shows more refunded than the till recorded). Finish it in Medusa Admin.'
+    it('R3-outside: an Admin refund with no baseline refuses Refund all up front: no row, no return, no stock moved', async () => {
+      const till = await remainderSale()
+      const stock = [await stockOf(data.inventoryA), await stockOf(data.inventoryC)]
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'goodwill in Admin' } })
+      const full = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), totalMinor: 352 })
+      expect((await post([full])).data.results).toEqual([{ id: full.id, status: 'rejected', error: { code: 'order_state',
+        message: outsideMessage, data: { reason: 'refunded_outside_till', outsideMinor: 1 } } }])
+      expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_refund').where({ order_id: till.orderId })).toEqual([])
+      expect(await returns(till.orderId)).toEqual([])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 0.01 }])
+      expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual(stock)
+    })
+
+    it('clamp: Admin return blocks the clamp', async () => {
+      const till = await remainderSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const lines = [till.full.payload.lines[0]]
+      const returnId = await workflow.beginReturn(container, { orderId: till.orderId, locationId: data.berlinId, note: 'return in Admin',
+        refundRowId: 'tref_admin_return' })
+      await workflow.requestReturn(container, { returnId, lines })
+      await workflow.receiveStep(container, { returnId, lines })
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'return in Admin' } })
+      const hand = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('refund').where({ payment_id: till.paymentId }).first('id')
+      await refundsScript('baseline', till.orderId, hand.id, 'return', 'in', 'Admin')
+      // No row knows the return: two lines price at 236 on a cap of 235, and the 118 looks like goodwill (G = 353 − 235).
+      // Medusa's returned quantity on line a keeps the clamp off. (All three lines stop earlier, at money_drift.)
+      const rest = till.full.payload.lines.slice(1)
+      const two = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines: rest, totalMinor: 236 })
+      expect((await post([two])).data.results).toEqual([{ id: two.id, status: 'rejected', error: { code: 'amount_mismatch',
+        message: capMessage, data: { expectedMinor: 236, serverMinor: 235 } } }])
+      const left = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines: rest, totalMinor: 235 })
+      expect((await post([left])).data.results).toEqual([{ id: left.id, status: 'rejected', error: { code: 'amount_mismatch',
+        message: differsMessage, data: { expectedMinor: 235, serverMinor: 236 } } }])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
+    })
+
+    it('clamp: own returns never block', async () => {
+      const till = await remainderSale()
+      const [a, b, c] = till.full.payload.lines
+      const part = (lines: unknown[], totalMinor: number, adjustmentMinor = 0) => command('order.refund', { ...till.full.payload,
+        clientRefundId: randomUUID(), lines, adjustmentMinor, totalMinor })
+      expect((await applied([part([a], 118)]))[0].refund.totalMinor).toBe(118)
+      expect((await applied([part([{ ...b, restock: false }], 118)]))[0].refund.totalMinor).toBe(118)
+      expect((await applied([part([], 1, 1)]))[0].refund.totalMinor).toBe(1)
+      // Received counts once; a dismiss lands in both return_dismissed and written_off, and only the first is counted.
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order', fields: detailFields,
+        filters: { id: till.orderId } }) as unknown as Rows
+      const detail = (id: string) => { const found = (order.items as Row[]).find(item => item.id === id)!.detail
+        return [found.return_requested_quantity, found.return_received_quantity, found.return_dismissed_quantity, found.written_off_quantity].map(Number) }
+      expect([detail(a.orderLineId), detail(b.orderLineId), detail(c.orderLineId)]).toEqual([[0, 1, 0, 0], [0, 0, 1, 1], [0, 0, 0, 0]])
+      // C = 353 − 118 − 118 − 1 = 116; the last line prices at the 117 left and the clamp takes the goodwill off it.
+      expect((await applied([part([c], 116)]))[0].refund.totalMinor).toBe(116)
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([0.01, 1.16, 1.18, 1.18])
+    })
+
     it('F3-parked: a received row holds back 118 from the cap and its line money leaves 235 for the last two', async () => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
@@ -263,20 +358,17 @@ medusaIntegrationTestRunner({
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 3.53 }])
     })
 
-    it('I9: a Medusa refund made outside the plugin parks refund_unrecorded before the receive: no stock moves, no refund', async () => {
+    it('I9: a Medusa refund made outside the plugin is refused up front (#547): no row, no return, no stock moves, no refund', async () => {
       const till = await remainderSale()
       const stock = [await stockOf(data.inventoryA), await stockOf(data.inventoryC)]
       const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
       await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
-      // All lines still cost 353 and exceed the 352 cap; one line at 118 reaches the unrecorded-refund receive guard.
+      // The receive park for a refund made while a command runs is F5-apply (received=false), B1 and B3.
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      const response = await post([order])
-      expect(response.status).toBe(409)
-      expect(response.data).toEqual({ code: 'in_progress', id: order.id })
-      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin',
-        needs_admin_reason: { orderId: till.orderId, step: 'receive', reason: 'refund_unrecorded' } })
-      const row = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_refund').where({ command_id: order.id }).first()
-      expect(row).toMatchObject({ status: 'needs_admin', received_at: null, medusa_refund_id: null })
+      expect((await post([order])).data.results).toEqual([{ id: order.id, status: 'rejected', error: { code: 'order_state',
+        message: outsideMessage, data: { reason: 'refunded_outside_till', outsideMinor: 1 } } }])
+      expect(await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_refund').where({ command_id: order.id }).first()).toBeUndefined()
+      expect(await returns(till.orderId)).toEqual([])
       expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual(stock)
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 0.01 }])
     })
@@ -754,7 +846,7 @@ medusaIntegrationTestRunner({
       expect((await medusaRefunds(till.orderId)).map(entry => entry.amount)).toEqual([1.18, 1.18])
     })
 
-    it('N3-double-subtraction (deliberate, conservative): a refund_unrecorded row whose money moved is held back twice from the cap', async () => {
+    it('N3-double-subtraction: a refund_unrecorded row whose money moved is refused up front, never priced against the cap (#547)', async () => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       const original = workflow.moneyStep
@@ -769,11 +861,11 @@ medusaIntegrationTestRunner({
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       expect(await knex('tally_refund').where({ command_id: first.id }).first()).toMatchObject({ medusa_refund_id: null })
       const beforeReturns = await returns(till.orderId)
-      // 353 − 118 = 235 is truly left, and the last two lines price at 235; the cap takes the 118 off twice and allows 117.
+      // Medusa shows 118 the rows do not record, so the last two lines are refused before the cap (which held the 118 back twice).
       const last = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(),
         lines: till.full.payload.lines.slice(1), totalMinor: 235 })
-      expect((await post([last])).data.results).toEqual([{ id: last.id, status: 'rejected', error: { code: 'amount_mismatch',
-        message: expect.any(String), data: { expectedMinor: 235, serverMinor: 117 } } }])
+      expect((await post([last])).data.results).toEqual([{ id: last.id, status: 'rejected', error: { code: 'order_state',
+        message: outsideMessage, data: { reason: 'refunded_outside_till', outsideMinor: 118 } } }])
       expect(await knex('tally_refund').where({ command_id: last.id }).first()).toBeUndefined()
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
       expect(await returns(till.orderId)).toEqual(beforeReturns)
@@ -825,7 +917,7 @@ medusaIntegrationTestRunner({
       const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       if (received) jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
-      else await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
+      else refundAfterPricing(till.paymentId, 0.01)
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
       if (received) await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
@@ -974,13 +1066,12 @@ medusaIntegrationTestRunner({
 
     it.each(['B1-baseline', 'B4-baseline-fails-closed'])('%s: a hand refund baseline preserves metadata and is required on resume', async tag => {
       const till = await remainderSale()
-      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
-      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
-      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
-      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      refundAfterPricing(till.paymentId, 0.01)
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
       expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { reason: 'refund_unrecorded' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
       const service = container.resolve(Modules.ORDER)
       const { metadata } = await service.retrieveOrder(till.orderId)
       expect(metadata?.tally_payments).toBeDefined()
@@ -1044,13 +1135,12 @@ medusaIntegrationTestRunner({
 
     it('B3-hand-made: only the explicit flag baselines a hand refund equal to the parked row', async () => {
       const till = await remainderSale()
-      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
-      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'by hand' } })
-      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
-      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      refundAfterPricing(till.paymentId, 1.18)
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
       expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { reason: 'refund_unrecorded' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
       await expect(refundsScript('baseline', till.orderId, hand.id, 'test reason')).rejects.toThrow('nothing written')
       await refundsScript('baseline', till.orderId, hand.id, '--hand-made', 'test', 'reason')
       expect((await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)).metadata?.tally_refund_baselines).toEqual([{
@@ -1169,6 +1259,178 @@ medusaIntegrationTestRunner({
       expect(await loadSessionFigures(container, till.sessionId)).toEqual({ expected: { cash: 1100 }, salesCount: 1 })
       expect(await loadSessionFigures(container, other.sessionId)).toEqual({ expected: { cash: 1000 }, salesCount: 0,
         refundsTotalMinor: 1000 })
+    })
+
+    describe("C544: a closure stores the server's period refunds and keeps the till's when they differ", () => {
+      const knex = () => container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      type Till = Awaited<ReturnType<typeof tillSale>>
+      // The register's refunds counter starts at 5000, and the till's perpetual refunds are 5000 plus its period figure.
+      const submit = (till: Till, refundsMinor: number, cash = 1100, extra: Record<string, unknown> = {}, version = 3) =>
+        command('register.closure.submit', { closureId: randomUUID(), sessionId: till.sessionId, registerId: till.registerId,
+          number: 1, openedAt, closedAt, tillExpected: { cash }, counted: { cash }, periodSalesTotalMinor: 1000,
+          periodRefundsTotalMinor: refundsMinor, perpetualSalesTotalMinor: 1000, perpetualRefundsTotalMinor: 5000 + refundsMinor,
+          unsyncedCount: 0, unsyncedTotalMinor: 0, softwareVersion: '1.0', orderIds: [till.sale.payload.clientOrderId],
+          movementIds: [], ...extra }, version)
+      const closureRow = (id: string) => knex()('tally_register_closure').where({ id }).first()
+      const registerRow = (id: string) => knex()('tally_register').where({ id }).first()
+      async function close(till: Till, submission: ReturnType<typeof submit>, cash = 1100) {
+        const [, { register }] = await applied([command('register.session.transition', { sessionId: till.sessionId,
+          status: 'closed', at: closedAt, counted: { cash } }), submission])
+        const row = await closureRow(submission.payload.closureId)
+        return { register, row, stored: { period: Number(row.period_refunds_total_minor), perpetual: Number(row.perpetual_refunds_total_minor),
+          till: row.till_period_refunds_total_minor === null ? null : Number(row.till_period_refunds_total_minor),
+          register: Number((await registerRow(till.registerId)).perpetual_refunds_total_minor) } }
+      }
+      async function sale(registerId?: string) {
+        const till = await tillSale(true, undefined, registerId)
+        if (!registerId) expect(await knex()('tally_register').where({ id: till.registerId }).update({ perpetual_refunds_total_minor: 5000 })).toBe(1)
+        return till
+      }
+      async function refunded(registerId?: string) {
+        const till = await sale(registerId)
+        expect((await post([refund(till)])).data.results[0]).toMatchObject({ status: 'applied', refund: { byMethod: { cash: 1000 } } })
+        return till
+      }
+
+      it.each([0, 1000])('C544-equal: till and server both %d: stored as sent, no till column, no refunds', async minor => {
+        const till = minor ? await refunded() : await sale()
+        const { register, stored } = await close(till, submit(till, minor, 1100 - minor), 1100 - minor)
+        expect(stored).toEqual({ period: minor, perpetual: 5000 + minor, till: null, register: 5000 + minor })
+        expect(register.closure).not.toHaveProperty('refunds')
+      })
+
+      it('C544-till-over: till 1000, server 0: stores 0, keeps 1000, shifts perpetual down, warns', async () => {
+        const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
+        const till = await sale()
+        const { register, stored } = await close(till, submit(till, 1000))
+        expect(stored).toEqual({ period: 0, perpetual: 5000, till: 1000, register: 5000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 1000, serverMinor: 0 })
+        expect(register.counters.perpetualRefundsTotalMinor).toBe(5000)
+        expect(warn).toHaveBeenCalledWith(expect.stringMatching(new RegExp(`${till.sessionId}.*refunds 1000 .*server's 0`)))
+      })
+
+      it('C544-till-under: a refund applied in the session, till sends 0: stores 1000, keeps 0, shifts perpetual up', async () => {
+        const till = await refunded()
+        const { register, stored } = await close(till, submit(till, 0, 100), 100)
+        expect(stored).toEqual({ period: 1000, perpetual: 6000, till: 0, register: 6000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 0, serverMinor: 1000 })
+      })
+
+      it.each([
+        ['C544-unsynced', 3, (till: Till) => ({ unsyncedCount: 1, unsyncedTotalMinor: 500, orderIds: [till.sale.payload.clientOrderId, randomUUID()] })],
+        ['C544-v2', 2, () => ({})],
+        ['C544-unsynced-base', 3, (till: Till) => ({ unsyncedCount: 1, unsyncedTotalMinor: 500, perpetualRefundsTotalMinor: 7000,
+          orderIds: [till.sale.payload.clientOrderId, randomUUID()] })],
+      ] as const)("%s: the till's figures are stored as sent", async (_tag, version, extra) => {
+        const till = await sale()
+        const { register, stored } = await close(till, submit(till, 1000, 1100, extra(till), version))
+        const perpetual = 'perpetualRefundsTotalMinor' in extra(till) ? 7000 : 6000
+        expect(stored).toEqual({ period: 1000, perpetual, till: null, register: perpetual })
+        expect(register.closure).not.toHaveProperty('refunds')
+      })
+
+      it('C544-unsynced-claim: an unsynced claim the server disproves stores the server\'s figure, as till-over', async () => {
+        const till = await sale()
+        const { register, stored } = await close(till, submit(till, 1000, 1100, { unsyncedCount: 1, unsyncedTotalMinor: 500 }))
+        expect(stored).toEqual({ period: 0, perpetual: 5000, till: 1000, register: 5000 })
+        expect(register.closure.refunds).toEqual({ tillMinor: 1000, serverMinor: 0 })
+      })
+
+      it('C544-chain: after a till-over closure the till keeps its high base, and the next closure stays on the counter', async () => {
+        const first = await sale()
+        const one = await close(first, submit(first, 1000))
+        expect(one.stored).toEqual({ period: 0, perpetual: 5000, till: 1000, register: 5000 })
+        const second = await sale(first.registerId)
+        const two = await close(second, submit(second, 0, 1100, { number: 2, perpetualRefundsTotalMinor: 6000 }))
+        expect(two.stored).toEqual({ period: 0, perpetual: 5000, till: null, register: 5000 })
+        expect(two.stored.perpetual - one.stored.perpetual).toBe(two.stored.period)
+      })
+
+      it('C544-race: two closures of one register queued on its lock each store the counter at insert plus their period', async () => {
+        const transition = (till: Till) => applied([command('register.session.transition', { sessionId: till.sessionId,
+          status: 'closed', at: closedAt, counted: { cash: 100 } })])
+        const first = await refunded()
+        await transition(first)
+        const second = await refunded(first.registerId)
+        await transition(second)
+        const waiting = async (n: number) => {
+          for (let i = 0; i < 200; i++) {
+            const { rows: [{ count }] } = await knex().raw(`select count(*)::int as count from pg_stat_activity
+              where datname = current_database() and wait_event_type = 'Lock'`)
+            if (count >= n) return
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+          throw new Error(`fewer than ${n} commands wait on the register lock`)
+        }
+        // Hold the register row so both closures pass their gates first and then queue on its lock in order.
+        const hold = await knex().transaction()
+        const submissions = [submit(first, 1000, 100), submit(second, 1000, 100, { number: 2, perpetualRefundsTotalMinor: 7000 })]
+        let responses: Promise<Awaited<ReturnType<typeof post>>>[]
+        try {
+          await hold('tally_register').where({ id: first.registerId }).forUpdate().first()
+          responses = [post([submissions[0]])]
+          await waiting(1)
+          responses.push(post([submissions[1]]))
+          await waiting(2)
+        } finally { await hold.commit() }
+        expect((await Promise.all(responses)).map(response => response.data.results[0].status)).toEqual(['applied', 'applied'])
+        const rows = await Promise.all(submissions.map(submission => closureRow(submission.payload.closureId)))
+        expect(rows.map(row => [Number(row.period_refunds_total_minor), Number(row.perpetual_refunds_total_minor)]))
+          .toEqual([[1000, 6000], [1000, 7000]])
+        expect(Number((await registerRow(first.registerId)).perpetual_refunds_total_minor)).toBe(7000)
+      })
+
+      it.each([
+        ['C544-resend', false, 1000, 1100, { period: 0, perpetual: 5000, till: 1000, register: 5000 }],
+        ['C544-resend-under', true, 0, 100, { period: 1000, perpetual: 6000, till: 0, register: 6000 }],
+      ] as const)('%s: a resend returns the same refunds and changes neither the closure nor the register', async (_tag, refund, minor, cash, expected) => {
+        const till = refund ? await refunded() : await sale()
+        const submission = submit(till, minor, cash)
+        const { register, row, stored } = await close(till, submission, cash)
+        expect(stored).toEqual(expected)
+        const counters = await registerRow(till.registerId)
+        const [resent] = await applied([{ ...submission, id: randomUUID() }])
+        expect(resent.register.closure).toEqual(register.closure)
+        expect((await post([submission])).data.results[0]).toMatchObject({ status: 'duplicate', register: { closure: register.closure } })
+        expect(await closureRow(submission.payload.closureId)).toEqual(row)
+        expect(await registerRow(till.registerId)).toEqual(counters)
+      })
+
+      it("C544-history: closure history reads both figures, and leaves the till's out when it is null", async () => {
+        const over = await sale(), equal = await sale()
+        await close(over, submit(over, 1000))
+        await close(equal, submit(equal, 0))
+        const read = async (till: Till) => (await api.get(`/tally/v1/registers/${till.registerId}/closures`, { headers })).data.closures[0]
+        expect(await read(over)).toMatchObject({ periodRefundsTotalMinor: 0, tillPeriodRefundsTotalMinor: 1000 })
+        const plain = await read(equal)
+        expect(plain.periodRefundsTotalMinor).toBe(0)
+        expect(plain).not.toHaveProperty('tillPeriodRefundsTotalMinor')
+      })
+
+      it('C544-migration: down then up on a database holding a closure keeps the row and brings the column back null', async () => {
+        const till = await sale()
+        const submission = submit(till, 0)
+        await close(till, submission)
+        const before = await closureRow(submission.payload.closureId)
+        const migration = new Migration20261124120000(undefined as never, undefined as never)
+        const columns = async () => Object.keys(await knex()('tally_register_closure').columnInfo())
+        const run = async (step: 'up' | 'down') => {
+          migration.reset()
+          await migration[step]()
+          for (const sql of migration.getQueries()) await knex().raw(sql as string)
+        }
+        try {
+          await run('down')
+          expect(await columns()).not.toContain('till_period_refunds_total_minor')
+          const { till_period_refunds_total_minor: _dropped, ...rest } = before
+          expect(await closureRow(submission.payload.closureId)).toEqual(rest)
+          await run('up')
+          expect(await columns()).toContain('till_period_refunds_total_minor')
+          expect(await closureRow(submission.payload.closureId)).toEqual({ ...before, till_period_refunds_total_minor: null })
+        } finally {
+          if (!(await columns()).includes('till_period_refunds_total_minor')) await run('up')
+        }
+      })
     })
   },
 })

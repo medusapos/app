@@ -54,7 +54,8 @@ export function shareMinor(total: number, quantity: number, refunded: number, no
   return Number(at(refunded + now) - at(refunded))
 }
 
-export interface RefundableLine { id: string; quantity: number; netMinor: number; taxMinor: number }
+/** returnedQuantity: Medusa's return requested + received + dismissed on the item (#547's Medusa-returned guard). */
+export interface RefundableLine { id: string; quantity: number; netMinor: number; taxMinor: number; returnedQuantity: number }
 export interface PricedLine { orderLineId: string; quantity: number; restock: boolean; netMinor: number; taxMinor: number }
 export interface RefundRefusal { code: 'nothing_to_refund' | 'quantity_exceeds' | 'amount_mismatch' | 'order_state'; message: string; data?: Record<string, unknown> }
 
@@ -63,8 +64,12 @@ export interface PriceRefundInput {
   linesMoneyMinor: number | null
   /** The order's shipping, gross, in minor units. */
   shippingMinor: number
-  /** What earlier refunds of this order took back. */
-  earlier: { lines: PricedLine[]; shippingMinor: number }[]
+  /** What earlier refunds of this order took back; medusaRefundId null when the row recorded no Medusa refund. */
+  earlier: { lines: PricedLine[]; shippingMinor: number; medusaRefundId: string | null }[]
+  /** The payment's amount; null when the order has no payment. */
+  paidMinor: number | null
+  /** Medusa's refunds beyond what the tally rows and baselines record (made outside the till); 0 when there is no payment. */
+  outsideRefundsMinor: number
   /** The payment less Medusa's refunds and earlier refunds not yet sent; null when the order has no payment. */
   refundableMoneyMinor: number | null
   request: Pick<OrderRefundPayload, 'lines' | 'shippingMinor' | 'adjustmentMinor' | 'totalMinor'>
@@ -73,6 +78,10 @@ export interface PriceRefundInput {
 /** Prices an order.refund the store's way (ADR 0026 decision 5) and refuses what ADR-080 refuses. Pure. */
 export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedLine[]; totalMinor: number } | { ok: false; error: RefundRefusal } {
   const { request } = input
+  // #547 (desk 2026-11-24): refused before any pricing, so the clamp serves recorded goodwill only and no return is requested.
+  if (input.outsideRefundsMinor > 0) return { ok: false, error: { code: 'order_state', message:
+    'This order has a refund made outside the till (Medusa shows more refunded than the till recorded). Finish it in Medusa Admin.',
+    data: { reason: 'refunded_outside_till', outsideMinor: input.outsideRefundsMinor } } }
   const nothing = { ok: false as const, error: { code: 'nothing_to_refund' as const, message: 'There is nothing to refund on this order.' } }
   if (input.refundableMoneyMinor === null || input.linesMoneyMinor === null) return nothing
   if (request.lines.length === 0 && request.shippingMinor === 0 && request.adjustmentMinor === 0) return nothing
@@ -127,7 +136,36 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
       }
     }
   }
-  const totalMinor = linesMinor + request.shippingMinor + request.adjustmentMinor
+  let totalMinor = linesMinor + request.shippingMinor + request.adjustmentMinor
+  // #547 (desk 2026-11-24): an overrun no larger than the goodwill already refunded (money no row puts on a line or the
+  // shipping) comes off the lines. O ≤ G is the bound because an overrun beyond G is line or shipping money an earlier row
+  // already took, or a dropped N1 difference, and that must still refuse. The split is by gross: each line takes the floor
+  // of O × gross ÷ Σ gross and the units left (0..n−1) go one each by largest remainder, then larger gross, then the later
+  // line, so the parts add up to O exactly and none passes its gross; then net/tax within a line.
+  const overMinor = totalMinor - input.refundableMoneyMinor
+  const goodwillMinor = (input.paidMinor ?? 0) - input.refundableMoneyMinor - input.earlier.reduce((sum, earlier) =>
+    sum + earlier.shippingMinor + earlier.lines.reduce((total, line) => total + line.netMinor + line.taxMinor, 0), 0)
+  if (input.paidMinor !== null && overMinor > 0 && overMinor <= goodwillMinor && priced.length && overMinor <= linesMinor
+    && input.earlier.every(earlier => earlier.medusaRefundId !== null)
+    && input.lines.every(line => line.returnedQuantity <= (refunded.get(line.id) ?? 0))) {
+    const grossOf = (line: PricedLine) => line.netMinor + line.taxMinor
+    const shares = priced.map((line, n) => {
+      const scaled = BigInt(overMinor) * BigInt(grossOf(line))
+      return { n, gross: grossOf(line), part: Number(scaled / BigInt(linesMinor)), rest: scaled % BigInt(linesMinor) }
+    })
+    const left = overMinor - shares.reduce((sum, share) => sum + share.part, 0)
+    const byRemainder = [...shares].sort((a, b) => (a.rest === b.rest ? 0 : a.rest < b.rest ? 1 : -1) || b.gross - a.gross || b.n - a.n)
+    for (const share of byRemainder.slice(0, left)) share.part += 1
+    const clamped = priced.map((line, n) => {
+      const part = shares[n].part
+      const taxMinor = grossOf(line) === 0 ? 0 : Number(roundHalfUp(BigInt(part) * BigInt(line.taxMinor), BigInt(grossOf(line))))
+      return { netMinor: line.netMinor - (part - taxMinor), taxMinor: line.taxMinor - taxMinor }
+    })
+    if (shares.every(share => share.part <= share.gross) && clamped.every(line => line.netMinor >= 0 && line.taxMinor >= 0)) {
+      clamped.forEach((line, n) => Object.assign(priced[n], line))
+      totalMinor -= overMinor
+    }
+  }
   if (totalMinor !== request.totalMinor) return mismatch(totalMinor, "The refund total differs from the store's.")
   if (totalMinor === 0) return nothing
   if (totalMinor > input.refundableMoneyMinor) {

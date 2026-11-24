@@ -50,6 +50,8 @@ export interface ClosureHistoryRow {
   tillExpected: Record<string, number>; counted: Record<string, number>
   periodSalesTotalMinor: number; periodRefundsTotalMinor: number
   perpetualSalesTotalMinor: number; perpetualRefundsTotalMinor: number
+  /** Only when the server's period refunds replaced the till's (#544): the till's submitted figure. */
+  tillPeriodRefundsTotalMinor?: number
   unsyncedCount: number; unsyncedTotalMinor: number; softwareVersion: string
   orderIds: string[]; movementIds: string[]
 }
@@ -68,6 +70,7 @@ export function toClosureHistoryRow(stored: StoredClosure): ClosureHistoryRow {
     tillExpected: stored.till_expected, counted: stored.counted,
     periodSalesTotalMinor: stored.period_sales_total_minor, periodRefundsTotalMinor: stored.period_refunds_total_minor,
     perpetualSalesTotalMinor: stored.perpetual_sales_total_minor, perpetualRefundsTotalMinor: stored.perpetual_refunds_total_minor,
+    ...(stored.till_period_refunds_total_minor === null ? {} : { tillPeriodRefundsTotalMinor: stored.till_period_refunds_total_minor }),
     unsyncedCount: stored.unsynced_count, unsyncedTotalMinor: stored.unsynced_total_minor, softwareVersion: stored.software_version,
     orderIds: stored.order_ids, movementIds: stored.movement_ids,
   }

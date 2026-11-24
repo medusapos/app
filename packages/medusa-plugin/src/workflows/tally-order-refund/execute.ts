@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import { ContainerRegistrationKeys, MedusaError, generateEntityId } from '@medusajs/framework/utils'
@@ -47,7 +48,8 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     'id', 'status', 'is_draft_order', 'currency_code', 'metadata', 'total', 'items.id', 'items.quantity', 'items.raw_total',
     'items.raw_tax_total', 'items.metadata', 'shipping_methods.raw_total', 'fulfillments.location_id', 'fulfillments.canceled_at',
     'payment_collections.payments.id', 'payment_collections.payments.raw_amount', 'payment_collections.payments.canceled_at',
-    'payment_collections.payments.refunds.raw_amount',
+    'payment_collections.payments.refunds.raw_amount', 'items.detail.return_requested_quantity',
+    'items.detail.return_received_quantity', 'items.detail.return_dismissed_quantity',
   ], filters: { id: orderId } })
   if (!order) return null
   const decimals = currencyDecimals(order.currency_code)
@@ -63,7 +65,9 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     locationId: fulfillment?.location_id ?? undefined,
     // The till's own payment id is clientPaymentId (order.create's payload).
     tenders: tenders.map(tender => ({ ...tender, id: tender.clientPaymentId ?? tender.id }) as TillTender),
+    // A dismiss also adds to written_off_quantity (Medusa's receive-damaged action), so that field is not added again.
     lines: (order.items ?? []).filter(item => item !== null).filter(item => !item.metadata?.tally_fee_uuid).map(item => ({ id: item.id, quantity: Number(item.quantity),
+      returnedQuantity: Number(item.detail?.return_requested_quantity ?? 0) + Number(item.detail?.return_received_quantity ?? 0) + Number(item.detail?.return_dismissed_quantity ?? 0),
       ...connectorSplit((item.raw_total as unknown as Raw).value, (item.raw_tax_total as unknown as Raw).value, decimals) })),
     ...refundMoneyMinor(decimals, payment ? (payment.raw_amount as unknown as Raw).value : null,
       (order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value),
@@ -77,6 +81,16 @@ export function refundResult(id: string, row: Pick<RefundRow, 'id' | 'total_mino
   return { id, status: 'applied', refund: { totalMinor: Number(row.total_minor), byMethod: row.by_method,
     refunds: row.refunds.map((entry, n) => ({ id: `${row.id}:${n}`, paymentId: entry.paymentId, totalMinor: entry.totalMinor, state: 'succeeded' })) },
   } as CommandResult
+}
+
+/** Medusa refunds the plugin records (rows with their refund, live baselines): one figure for the up-front refusal and the parks (#547). */
+async function recordedRefundsMinor(db: Knex, order: Pick<RefundOrder, 'id' | 'decimals'>, paymentId: string): Promise<number> {
+  const [{ sum }] = await db('tally_refund').where({ order_id: order.id }).whereNotNull('medusa_refund_id').sum({ sum: 'total_minor' })
+  const { metadata } = await db('order').where({ id: order.id }).first('metadata')
+  const baselines = await db('refund').where({ payment_id: paymentId }).whereNull('deleted_at')
+    .whereIn('id', (metadata?.tally_refund_baselines ?? []).map((entry: { refundId: string }) => entry.refundId))
+    .whereNotIn('id', db('tally_refund').whereNotNull('medusa_refund_id').select('medusa_refund_id')).select('raw_amount')
+  return Number(sum ?? 0) + medusaSumMinor(order.decimals, baselines.map(refund => refund.raw_amount.value))
 }
 
 /** ADR-038's refusal for a failure that left nothing in Medusa: platform_error for Medusa's own errors, internal_error for a
@@ -143,8 +157,11 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       const earlier = await trx('tally_refund').where({ order_id: order.id }).whereIn('status', COUNTED_REFUND_STATUSES)
         .select('lines', 'shipping_minor', 'refunds', 'total_minor', 'medusa_refund_id') as RefundRow[]
       const current = await loadRefundOrder(container, order.id) ?? order
+      const recorded = current.payment ? await recordedRefundsMinor(trx, order, current.payment.id) : 0
       const price = priceRefund({ lines: current.lines, linesMoneyMinor: current.linesMoneyMinor, shippingMinor: current.shippingMinor,
-        earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor) })),
+        earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor), medusaRefundId: entry.medusa_refund_id })),
+        paidMinor: current.payment?.amountMinor ?? null,
+        outsideRefundsMinor: current.payment ? Math.max(0, current.payment.refundedMinor - recorded) : 0,
         refundableMoneyMinor: current.payment ? current.payment.amountMinor - current.payment.refundedMinor
           - earlier.filter(entry => entry.medusa_refund_id === null).reduce((sum, entry) => sum + Number(entry.total_minor), 0) : null, request: payload })
       if (price.ok === false) return { outcome: rejected(id, price.error.code, price.error.message, price.error.data), keepClaim: false }
@@ -195,12 +212,7 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
   const unrecorded = async (): Promise<{ paymentId: string; message: string | null }> => {
     const fresh = await loadRefundOrder(container, order.id)
     if (!fresh?.payment) throw new Error(`Order ${order.id} has no payment to refund`)
-    const [{ sum }] = await knex('tally_refund').where({ order_id: order.id }).whereNotNull('medusa_refund_id').sum({ sum: 'total_minor' })
-    const { metadata } = await knex('order').where({ id: order.id }).first('metadata')
-    const baselines = await knex('refund').where({ payment_id: fresh.payment.id }).whereNull('deleted_at')
-      .whereIn('id', (metadata?.tally_refund_baselines ?? []).map((entry: { refundId: string }) => entry.refundId))
-      .whereNotIn('id', knex('tally_refund').whereNotNull('medusa_refund_id').select('medusa_refund_id')).select('raw_amount')
-    const recorded = Number(sum ?? 0) + medusaSumMinor(order.decimals, baselines.map(refund => refund.raw_amount.value))
+    const recorded = await recordedRefundsMinor(knex, order, fresh.payment.id)
     return { paymentId: fresh.payment.id, message: fresh.payment.refundedMinor > recorded
       ? `refund_unrecorded: payment ${fresh.payment.id} shows ${fresh.payment.refundedMinor} refunded, tally_refund records ${recorded}` : null }
   }
