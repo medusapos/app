@@ -11,13 +11,24 @@ import {
 
 export interface RefundStepLine { orderLineId: string; quantity: number; restock: boolean }
 
-/** Step 1a: begin a return at the sale's location; returns its id, which execute.ts records before anything else. */
+/**
+ * Step 1a: begin a return at the sale's location, tagged with the refund row's id; returns its id, which execute.ts records
+ * before anything else.
+ */
 export async function beginReturn(container: MedusaContainer, input: { orderId: string; locationId: string; actorId?: string
-  note: string }): Promise<string> {
+  note: string; refundRowId: string }): Promise<string> {
   const { result: change } = await beginReturnOrderWorkflow(container).run({ input: {
     order_id: input.orderId, location_id: input.locationId, created_by: input.actorId, internal_note: input.note,
+    metadata: { tally_refund_id: input.refundRowId },
   } })
   return change.return_id as string
+}
+
+/** The open return this refund row began, if a run died before recording it; a return with any other status or tag is not ours. */
+export async function findOwnOpenReturn(container: MedusaContainer, input: { orderId: string; refundRowId: string }): Promise<string | null> {
+  const { data } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'return',
+    fields: ['id', 'status', 'metadata'], filters: { order_id: input.orderId } })
+  return data.find(found => found.status === 'open' && found.metadata?.tally_refund_id === input.refundRowId)?.id ?? null
 }
 
 /**

@@ -524,6 +524,83 @@ medusaIntegrationTestRunner({
       expect(await stockA()).toBe(stock)
     })
 
+    // #543 window 1: a run that died between beginReturn and recording its id. The row is in_progress with no return_id,
+    // its open return carries the row's tag, and the command's claim is past its lease.
+    async function crashed() {
+      const before = await stockA()
+      const till = await tillSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new Error('request probe'))
+      jest.spyOn(workflow, 'cancelReturn').mockRejectedValueOnce(new Error('cancel probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const row = await knex('tally_refund').where({ command_id: order.id }).first()
+      const begun = await knex('return').where({ order_id: till.orderId }).first()
+      expect(begun).toMatchObject({ id: row.return_id, status: 'open', metadata: { tally_refund_id: row.id } })
+      await knex('tally_refund').where({ id: row.id }).update({ status: 'in_progress', return_id: null })
+      await knex('tally_command').where({ id: order.id }).update({ status: 'in_progress', needs_admin_reason: null,
+        updated_at: knex.raw("now() - interval '1 hour'") })
+      return { before, till, workflow, order, knex, row, begun }
+    }
+
+    it('W1-reuse: a retry records the open return its row began instead of beginning a second: one return, one refund', async () => {
+      const { before, till, order, knex, row, begun } = await crashed()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'applied', return_id: begun.id })
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'received' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    for (const [name, metadata] of [['untagged', null], ['other row', { tally_refund_id: 'tref_someone_else' }]] as const) {
+      it(`W1-foreign: ${name}: an open return that is not this row's is never reused; the retry refuses and leaves it open`, async () => {
+        const { till, order, knex, row, begun } = await crashed()
+        await knex('return').where({ id: begun.id }).update({ metadata })
+        expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+        expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+        expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id,
+          status: 'open', metadata })])
+        expect(await medusaRefunds(till.orderId)).toEqual([])
+      })
+    }
+
+    it('W1-not-reused: cancelled: a cancelled tagged return stays cancelled; the retry begins a new one and finishes', async () => {
+      const { before, till, workflow, order, knex, begun } = await crashed()
+      await workflow.cancelReturn(container, begun.id)
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      // Medusa cancels a return request by soft-deleting the return; it stays so, and the refund has a second return.
+      expect(await knex('return').where({ id: begun.id }).first()).toMatchObject({ deleted_at: expect.any(Date) })
+      const after = await returns(till.orderId)
+      expect(after).toEqual([expect.objectContaining({ status: 'received' })])
+      const second = after[0]
+      expect(second.id).not.toBe(begun.id)
+      expect(await knex('tally_refund').where({ command_id: order.id }).first()).toMatchObject({ status: 'applied',
+        return_id: second.id })
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    it('W1-not-reused: confirmed: a tagged return already requested is not reused; the retry refuses as today', async () => {
+      const { till, order, knex, row, begun } = await crashed()
+      await knex('return').where({ id: begun.id }).update({ status: 'requested' })
+      expect((await post([order])).data.results[0]).toMatchObject({ status: 'rejected', error: { code: 'platform_error' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toBeUndefined()
+      expect(await knex('return').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: begun.id,
+        status: 'requested', metadata: { tally_refund_id: row.id } })])
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+    })
+
+    it('W1-lookup-fails-parks: a lookup that throws parks at the return step and never deletes the row', async () => {
+      const { till, workflow, order, knex, row, begun } = await crashed()
+      jest.spyOn(workflow, 'findOwnOpenReturn').mockRejectedValueOnce(new Error('lookup probe'))
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'return',
+        message: 'lookup probe' } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', return_id: null })
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+    })
+
     it('N3-double-subtraction (deliberate, conservative): a refund_unrecorded row whose money moved is held back twice from the cap', async () => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
