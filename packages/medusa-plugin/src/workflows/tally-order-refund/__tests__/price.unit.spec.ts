@@ -118,9 +118,15 @@ describe('the last units take the remainder', () => {
   })
 
   it('A-fee: the three product lines take 353 of the 472 payment, excluding the gross 119 fee', () => {
-    expect(priceRefund({ ...order, refundableMoneyMinor: 472,
+    // The line money comes from the order's raw figures, so a fee left in it (472 against 354) would be money drift.
+    const money = refundMoneyMinor(2, '4.72', [], ['1.19'])
+    expect(money).toEqual({ linesMoneyMinor: 353, shippingMinor: 0 })
+    expect(priceRefund({ ...order, ...money, refundableMoneyMinor: 472,
       request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c'), totalMinor: 353 }) }))
-      .toMatchObject({ ok: true, totalMinor: 353 })
+      .toEqual({ ok: true, totalMinor: 353, lines: [
+        { ...take('ordli_a')[0], netMinor: 99, taxMinor: 19 }, { ...take('ordli_b')[0], netMinor: 99, taxMinor: 19 },
+        { ...take('ordli_c')[0], netMinor: 98, taxMinor: 19 },
+      ] })
   })
 
   it('A-goodwill: an earlier adjustment of 1 never enters the lines remainder', () => {
@@ -206,6 +212,19 @@ describe('the last units take the remainder', () => {
         { ...take('ordli_a')[0], netMinor: 1, taxMinor: 0 }, { ...take('ordli_b')[0], netMinor: 1, taxMinor: 0 },
         { ...take('ordli_c')[0], netMinor: 1, taxMinor: 0 },
       ] })
+  })
+
+  it('N1-dropped-cap: four 0.006 lines drop -2 (4 against a cap of 2); the total is refused, never above the money left', () => {
+    const tiny = ['ordli_a', 'ordli_b', 'ordli_c', 'ordli_d'].map(id => ({ id, quantity: 1, ...connectorSplit('0.006', '0.00096', 2) }))
+    expect(tiny[0]).toMatchObject({ netMinor: 1, taxMinor: 0 })
+    const money = refundMoneyMinor(2, '0.024', [], [])
+    expect(money).toEqual({ linesMoneyMinor: 2, shippingMinor: 0 })
+    const price = (totalMinor: number) => priceRefund({ ...order, lines: tiny, ...money, refundableMoneyMinor: 2,
+      request: request({ lines: take('ordli_a', 'ordli_b', 'ordli_c', 'ordli_d'), totalMinor }) })
+    // The dropped difference prices the lines at 4; the cap refuses 4, and the cap's 2 is not the price (#547).
+    expect(price(4)).toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { expectedMinor: 4, serverMinor: 2 } } })
+    expect(price(2)).toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { expectedMinor: 2, serverMinor: 4 } } })
+    for (let totalMinor = 0; totalMinor <= 6; totalMinor++) expect(price(totalMinor)).toMatchObject({ ok: false })
   })
 
   it('a full refund that also takes the shipping prices the lines at the money left less the shipping left', () => {
