@@ -97,4 +97,8 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
   await expect(row.getByTestId(`orders-attention-row-${shortSale.clientOrderId}-status`)).toHaveText('Completed');
   await expect(page.getByTestId(`orders-attention-row-${shortSale.clientOrderId}-notices`)
     .getByText('1 sold without stock: E2E product 5', { exact: true })).toBeVisible();
+  // This is the item count the old row showed.
+  await row.getByRole('button', { name: `Open order ${shortSale.clientOrderId.slice(-8)} · #${shortOrder.display_id}`, exact: true }).click();
+  await expect(page.getByTestId('order-detail-sheet')
+    .getByText('E2E product 5 x3', { exact: true })).toBeVisible();
 });
