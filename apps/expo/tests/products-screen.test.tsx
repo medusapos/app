@@ -329,7 +329,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'view-toggle-table', 'product-settings-button', 'catalogue-sync', 'cart-settings-button', 'cart-add-menu', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'Switch to table view', 'In Stock', 'Sync products', 'Product settings', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings']);
+      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'Switch to table view', 'Product settings', 'In Stock', 'Sync products', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -504,14 +504,20 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText(`Cashier: ${name ?? 'admin@store.test'}`)).toBeTruthy();
   });
 
-  it('puts the sync arrow on the status row before the product settings; a tap syncs', async () => {
+  it('puts the sync arrow on the status row and the product settings at the end of the search row; a tap syncs', async () => {
     const syncNow = vi.fn();
     vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ syncNow }));
     await mount();
+    const searchRow = screen.getByTestId('catalogue-search-row');
+    const statusRow = screen.getByTestId('catalogue-status-row');
     const sync = screen.getByTestId('catalogue-sync');
     const settingsButton = screen.getByTestId('product-settings-button');
-    expect(sync.parentElement).toBe(settingsButton.parentElement);
-    expect(sync.compareDocumentPosition(settingsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(statusRow.contains(sync)).toBe(true);
+    expect(searchRow.contains(sync)).toBe(false);
+    expect(searchRow.contains(settingsButton)).toBe(true);
+    expect(statusRow.contains(settingsButton)).toBe(false);
+    // v2's order: the field, the view icon, then the sliders.
+    expect(within(searchRow).getByTestId('view-toggle').compareDocumentPosition(settingsButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(sync);
     expect(syncNow).toHaveBeenCalledTimes(1);
     expect(screen.queryByTestId('catalogue-clear-refresh')).toBeNull();
