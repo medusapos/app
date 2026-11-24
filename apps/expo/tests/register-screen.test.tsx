@@ -197,6 +197,9 @@ describe('the register on the sale screen', () => {
     await act(async () => { fireEvent.click(button('New sale')); });
     const panel = await openPanel();
     expect(panel.getByTestId('register-panel-title').textContent).toBe('Register 1');
+    // v2's opener ends the header line in place of "Cashier": the session's opener, here the signed-in cashier.
+    expect(panel.getByTestId('register-panel-description').textContent).toMatch(/ · admin@store\.test$/);
+    expect(panel.getByTestId('register-panel-opened-by').textContent).toMatch(/^opened \d{2}:\d{2} by/);
     await waitFor(() => expect(panel.getByTestId('register-panel-session-sales').textContent).toMatch(/1 sale$/));
     await act(async () => { fireEvent.click(panel.getByTestId('register-panel-print')); });
     expect(printXReport).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ session, salesCount: 1 }));
@@ -210,6 +213,7 @@ describe('the register on the sale screen', () => {
     const sheet = within(await screen.findByTestId('movement-sheet'));
     fireEvent.change(sheet.getByTestId('movement-amount'), { target: { value: '5.00' } });
     fireEvent.change(sheet.getByTestId('movement-reason'), { target: { value: 'Change' } });
+    expect(sheet.getByTestId('movement-confirm').textContent).toBe('Put €5.00 in');
     await act(async () => { fireEvent.click(sheet.getByTestId('movement-confirm')); });
     await waitFor(() => expect(screen.queryByTestId('movement-sheet')).toBeNull());
     const { movements } = registerCollections(store.orders);
