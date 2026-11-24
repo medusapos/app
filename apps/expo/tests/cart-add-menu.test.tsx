@@ -184,7 +184,9 @@ it('applies an order discount and closes the dialog', async () => {
   click('Percent');
   fireEvent.change(screen.getByLabelText('Discount value'), { target: { value: '10' } });
   click('Apply');
-  expect(screen.getByRole('button', { name: /^Remove discount Order discount 10%/ })).toBeTruthy();
+  // v2's "Discount (10%) ✕" row in the totals, not a chip under the lines.
+  expect(screen.getByTestId('order-discount-row-0').textContent).toMatch(/^Discount \(10%\)−/);
+  expect(screen.queryByRole('button', { name: /^Remove discount Order discount/ })).toBeNull();
   expect(screen.queryByTestId('cart-add-dialog')).toBeNull();
 });
 it('below order.create 5 offers only Add new customer and a discount, on an empty cart too', async () => {

@@ -28,6 +28,7 @@ import { CustomerSavedToast, useCustomerSavedToast } from '../components/custome
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { OfflineToast, useOfflineToast } from '../components/offline-toast';
 import { OpenOrdersList, OpenOrdersStrip } from '../components/open-orders';
+import { OrderDiscountRow, orderDiscountInRowMinor } from '../components/order-discount-row';
 import { ScanToast, scanAddedDescription, useScanToast } from '../components/scan-toast';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
 import { EmailReceipt } from '../components/email-receipt';
@@ -393,10 +394,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     {noteSet && !hasLines && <View className="px-3">{noteRow}</View>}
     {/* v2's cart has no Total row: the total is on the Checkout button. */}
-    <Cart sale={sortedCartSale} orderActions={false} showTotal={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
+    {/* A single order discount's amount moves to its removable "Discount (10%) ✕" row in the totals;
+        several order discounts keep their combined amount in Cart's Discount row. */}
+    <Cart sale={sortedCartSale} orderActions={false} orderDiscountChips={false} showTotal={false} taxLabel={taxLabel} canEditPrice lineEditor="popover" checkout={checkout}
       quickDiscounts={cartSettings.settings.quickDiscounts} columns={cartSettings.settings.columns}
-      afterSubtotal={couponField || noteInTotals ? <>{couponField}{noteInTotals && noteRow}</> : undefined}
-      couponDiscountMinor={couponDiscountMinor(sale.order)}
+      afterSubtotal={<><OrderDiscountRow sale={cartSale} />{couponField}{noteInTotals && noteRow}</>}
+      couponDiscountMinor={couponDiscountMinor(sale.order) + orderDiscountInRowMinor(sale.order)}
       onPriceChange={(change) => saleLogger.info('Price changed', change)} />
     </>}
     {cartSettings.settings.openOrders === 'bottom' && openOrdersRow}
