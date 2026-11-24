@@ -34,7 +34,7 @@ const takeOrderLock = async (trx: Knex.Transaction, orderId: string): Promise<bo
 class LockLost extends Error {}
 const probe = async (trx: Knex.Transaction, orderId: string) => { if (!await takeOrderLock(trx, orderId).catch((error: Error) => {
   throw new LockLost(`order lock lost: ${error.message}`) })) throw new LockLost(`order lock lost: order ${orderId}`) }
-const moneyUnconfirmedMessage = "An earlier attempt at this refund's money may have reached the payment provider. Check the provider: if it paid, use tally-ledger-resolve apply <medusaRefundId>; if it did not, use tally-ledger-resolve resume --money-not-sent."
+const moneyUnconfirmedMessage = "An earlier attempt at this refund's money may have reached the payment provider. Check the provider: if it paid, use tally-ledger-resolve apply <medusaRefundId>; if it did not, use tally-ledger-resolve resume money-not-sent."
 const sessionClosedMessage = (id: string) =>
   `session_closed: refund ${id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.`
 
@@ -389,7 +389,7 @@ export async function resolveOrderRefund(container: MedusaContainer, commandId: 
     return { kind: 'result', result }
   }
   if (moneyNotSent && (await knex('tally_command').where({ id: commandId }).first('needs_admin_reason'))?.needs_admin_reason?.reason !== 'money_unconfirmed') {
-    throw new Error(`Refund ${row.id} is not parked money_unconfirmed; --money-not-sent is only for that; nothing written`)
+    throw new Error(`Refund ${row.id} is not parked money_unconfirmed; resume money-not-sent is only for that; nothing written`)
   }
   if (moneyNotSent) await knex.transaction(async trx => {
     if (!await takeOrderLock(trx, order.id)) throw new Error(`A refund of order ${order.id} is in progress; try again`)

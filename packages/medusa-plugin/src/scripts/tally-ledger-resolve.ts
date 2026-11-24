@@ -7,20 +7,22 @@ import { takeBackStockWorkflow } from '../workflows/tally-order-create/workflow'
 import { resolveOrderRefund } from '../workflows/tally-order-refund/execute'
 
 // npx medusa exec <built path>/tally-ledger-resolve.js <commandId> apply|reject [message]
-// npx medusa exec <built path>/tally-ledger-resolve.js <commandId> resume [--money-not-sent]|apply <medusaRefundId>|move [<sessionId>]   (an order.refund)
+// npx medusa exec <built path>/tally-ledger-resolve.js <commandId> resume [money-not-sent]|apply <medusaRefundId>|move [<sessionId>]   (an order.refund)
 // Resolves an order.create or order.refund the ledger parked as needs_admin (see the plugin README).
 export default async function tallyLedgerResolve({ container, args }: ExecArgs) {
   const [id, action, ...words] = args
   const message = words.join(' ') || (action === 'reject' ? 'Rejected by an admin.' : 'Fixed by an admin.')
-  if (!id || (action !== 'apply' && action !== 'reject' && action !== 'resume' && action !== 'move')) {
-    throw new Error('Usage: medusa exec tally-ledger-resolve.js <commandId> apply|reject [message], or <commandId> resume [--money-not-sent]|apply <medusaRefundId>|move [<sessionId>] for an order.refund')
+  // medusa exec's strict yargs refuses a dashed word, so the flag is the plain word; any other word after resume is a typo.
+  if (!id || (action !== 'apply' && action !== 'reject' && action !== 'resume' && action !== 'move')
+    || (action === 'resume' && words.length > 0 && message !== 'money-not-sent')) {
+    throw new Error('Usage: medusa exec tally-ledger-resolve.js <commandId> apply|reject [message], or <commandId> resume [money-not-sent]|apply <medusaRefundId>|move [<sessionId>] for an order.refund')
   }
   const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   const row = await knex('tally_command').where({ id }).first()
   if (row?.status !== 'needs_admin') throw new Error(`Command ${id} is ${row?.status ?? 'missing'}, not needs_admin; nothing written`)
   if (row.type === 'order.refund') {
-    const outcome = await resolveOrderRefund(container, id, action, words[0], action === 'resume' && words[0] === '--money-not-sent')
+    const outcome = await resolveOrderRefund(container, id, action, words[0], action === 'resume' && words[0] === 'money-not-sent')
     logger.info(`tally_ledger_resolve: refund command ${id} ${action}: ${outcome.kind === 'result' ? outcome.result.status : outcome.kind}`)
     return
   }
