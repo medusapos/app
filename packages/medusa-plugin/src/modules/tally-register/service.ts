@@ -274,7 +274,7 @@ export default class TallyRegisterModuleService extends MedusaService({
         if (session.status === 'superseded') return this.supersededOutcome(session, em)
         if (closure) return { kind: 'conflict', code: 'register_closure_exists', data: { closureId: closure.id } }
         let approval: { id: string; approved_by: string } | undefined
-        let refunds = { period: p.periodRefundsTotalMinor, perpetual: p.perpetualRefundsTotalMinor, till: null as number | null }
+        let server: number | undefined
         if (v3) {
           // ADR 0023 amendment (2026-11-22): with every sale synced the server's own expected figures decide; else the till's.
           const expected = (await p.serverExpected?.()) ?? p.tillExpected
@@ -295,11 +295,12 @@ export default class TallyRegisterModuleService extends MedusaService({
             approval = { id: row.id as string, approved_by: row.approved_by as string }
           }
           // #544: with every sale held, the session's applied refunds are the period's; the till's differing figure is kept.
-          const server = await p.serverRefundsTotalMinor?.()
-          if (server !== undefined && server !== p.periodRefundsTotalMinor) refunds = { period: server,
-            perpetual: p.perpetualRefundsTotalMinor + (server - p.periodRefundsTotalMinor), till: p.periodRefundsTotalMinor }
+          server = await p.serverRefundsTotalMinor?.()
         }
         let [{ counters }] = await em.execute(`${COUNTER_STATE} for update`, [p.registerId])
+        // #544: the till adopts the counters raise-only, so its own base can stay high; the locked register counter is the chain.
+        const refunds = server === undefined ? { period: p.periodRefundsTotalMinor, perpetual: p.perpetualRefundsTotalMinor, till: null }
+          : { period: server, perpetual: counters.perpetualRefundsTotalMinor + server, till: server === p.periodRefundsTotalMinor ? null : p.periodRefundsTotalMinor }
         const inserted = p.number === counters.lastClosureNumber + 1
           ? await em.execute(`insert into tally_register_closure
             (id, session_id, register_id, number, business_day, opened_at, closed_at, closed_by, approved_by,
