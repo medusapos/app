@@ -124,6 +124,28 @@ async function cameraOn(page: Page, size: Size, id: string) {
   }, `capture-${id}-camera-off`);
 }
 
+// Row 02a.2's sale price list on E2E-3. The Sale pulls a product again only once its updated_at moves, so a metadata
+// touch on product 3 brings the sale into the cached catalogue, and a second one (an empty value deletes the key) takes
+// it back out on the next row's reload, once the list is gone.
+async function saleOnE2E3(): Promise<() => Promise<void>> {
+  const token = await adminToken();
+  const admin = async (method: string, route: string, body?: object) => {
+    const response = await fetch(`${backend}${route}`, { method, body: body && JSON.stringify(body),
+      headers: { Authorization: `Bearer ${token}`, ...(body && { 'Content-Type': 'application/json' }) } });
+    expect(response.ok, await response.clone().text()).toBeTruthy();
+    return response.json();
+  };
+  const [variant] = (await admin('GET', '/admin/product-variants?limit=1&sku[]=E2E-3&fields=id,product_id')).variants;
+  const touch = (value: string) => admin('POST', `/admin/products/${variant.product_id}`, { metadata: { capture_sale: value } });
+  const { price_list } = await admin('POST', '/admin/price-lists', { title: 'Capture sale', description: 'Capture row 02a.2',
+    type: 'sale', status: 'active', prices: [{ variant_id: variant.id, currency_code: 'eur', amount: 3 }] });
+  await touch('1');
+  return async () => {
+    await admin('DELETE', `/admin/price-lists/${price_list.id}`);
+    await touch('');
+  };
+}
+
 async function customer(email: string) {
   await createAdminCustomer(await adminToken(), email, 'Ada', 'Lovelace');
 }
@@ -138,6 +160,27 @@ export const rows: CaptureRow[] = [
   { id: '02a', title: 'Product tiles, search', state: 'Search box holding "product 4", grid filtered', reach: async (page) => {
     await search(page).fill('product 4');
     await expect(tiles(page)).toHaveCount(1);
+  } },
+  // The seed tags products 1 and 3 Organic and puts product 2 in the Featured collection; a sale list makes On Sale show.
+  { id: '02a.2', title: 'Filter pills', state: 'In Stock, On Sale, Tag and Collection pills; Tag → Organic leaves products 1 and 3', reach: async (page) => {
+    const undo = await saleOnE2E3();
+    try {
+      await page.getByTestId('catalogue-sync').click();
+      await expect(page.getByTestId('filter-chip-onSale')).toBeVisible();
+      await page.getByTestId('filter-chip-tag').click();
+      await page.getByTestId('filter-chip-tag-menu').getByText('Organic', { exact: true }).click();
+      await expect(page.getByTestId('filter-chip-tag')).toHaveText('Organic');
+      for (const chip of ['inStock', 'onSale', 'tag', 'group-collection']) await expect(page.getByTestId(`filter-chip-${chip}`)).toBeVisible();
+      await expect(tiles(page)).toHaveCount(2);
+    } finally {
+      // The cached catalogue keeps the sale for the shot; the next load (the next row's reset) drops the pick once.
+      await undo();
+      await page.addInitScript(() => {
+        if (sessionStorage.getItem('capture-02a.2-dropped')) return;
+        sessionStorage.setItem('capture-02a.2-dropped', '1');
+        for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.sale-filters.')) localStorage.removeItem(key);
+      });
+    }
   } },
   { id: '02b', title: 'Product table', state: 'Table view (a phone has no table view)', only: ['desktop', 'tablet'], reach: async (page) => {
     await page.getByTestId('view-toggle-table').click();
