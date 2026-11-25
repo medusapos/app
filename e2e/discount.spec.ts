@@ -11,15 +11,18 @@ const capabilities = (page: Page) => page.evaluate(() => JSON.parse(localStorage
 test('a discounted sale is applied as order.create v4, with a "POS discount" adjustment of the line\'s discount', async ({ page }) => {
   const token = await adminToken();
   const commands = captureCommands<Sale>(page);
+  const info = page.waitForResponse(response => new URL(response.url()).pathname === '/tally/v1/info' && response.request().method() === 'GET');
   await signIn(page);
   // The plugin advertises order.create [1, 2, 3, 4, 5, 6, 7] (ADR 0021), register 1, 2 and 3 (ADR 0022, ADR 0023) and its tax rounding (TallyUI #322); the till stores the plugin's lineTax (TallyUI 3.3.0)
   // and its registerApproval, the plugin's default approvalThresholdMinor of 500 (ADR 0023; parsed since TallyUI 3.13.0, ADR-082).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
   // The plugin's contract 5 (#540) adds order.refund v1.
-  // The plugin advertises a customer display (ADR-085) with its default STUN servers (PR #538).
+  // The session leaves the customer display out (#554); the plugin still advertises it (ADR-085) at /info,
+  // with its default STUN servers (PR #538).
+  expect((await (await info).json()).customerDisplay).toEqual({ v: 1,
+    iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 });
   expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 5, orderRefund: 1,
     coupons: true,
-    customerDisplay: { iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: true },
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
     registerApproval: { thresholdMinor: 500 } });
   await addE2E1(page);
