@@ -1318,8 +1318,31 @@ medusaIntegrationTestRunner({
       await pendingRefusal(true)
     })
 
-    it('N3-crashed: a row whose run crashed after its money moved names that refund, not Admin (#571)', async () => {
+    it('N3-money-unconfirmed: a row parked money_unconfirmed is named for tally-ledger-resolve, not Admin (#571)', async () => {
       await pendingRefusal(false)
+    })
+
+    it('N3-not-started: a row parked before its money step, with an Admin refund of the same amount, is refunded_outside_till (#571)', async () => {
+      const till = await remainderSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const spy = jest.spyOn(workflow, 'receiveStep').mockRejectedValueOnce(new Error('receive probe'))
+      const first = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
+      try {
+        expect((await post([first])).data).toEqual({ code: 'in_progress', id: first.id })
+      } finally {
+        spy.mockRestore()
+      }
+      expect(await commandRow(first.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'receive' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      expect(await knex('tally_refund').where({ command_id: first.id }).first()).toMatchObject({ money_started_at: null, medusa_refund_id: null })
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'goodwill in Admin' } })
+      // Medusa shows 118 no row records, but the parked row's money never started, so the refusal sends the operator to Admin.
+      const last = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(),
+        lines: till.full.payload.lines.slice(1), totalMinor: 235 })
+      expect((await post([last])).data.results).toEqual([{ id: last.id, status: 'rejected', error: { code: 'order_state',
+        message: outsideMessage, data: { reason: 'refunded_outside_till', outsideMinor: 118 } } }])
+      expect(await knex('tally_refund').where({ command_id: last.id }).first()).toBeUndefined()
     })
 
     it('T-counting-apply: apply in a counting session without a closure records one Medusa refund and counts it', async () => {

@@ -70,7 +70,7 @@ export interface PriceRefundInput {
   paidMinor: number | null
   /** Medusa's refunds beyond what the tally rows and baselines record (made outside the till); 0 when there is no payment. */
   outsideRefundsMinor: number
-  /** Earlier till refunds of this order with no medusa_refund_id and a total above 0: their money may be in Medusa's refunded figure. */
+  /** Earlier till refunds of this order whose money step started (money_started_at set) with no medusa_refund_id yet and a total above 0: their money may be in Medusa's refunded figure. */
   unrecorded: { commandId: string; totalMinor: number }[]
   /** The payment less Medusa's refunds and earlier refunds not yet sent; null when the order has no payment. */
   refundableMoneyMinor: number | null
