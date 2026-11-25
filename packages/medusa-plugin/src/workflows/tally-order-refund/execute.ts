@@ -10,6 +10,7 @@ import { sessionTakesMoney } from '../../modules/tally-register/session-open'
 import { mayApproveVariance } from '../../policies/manager'
 import type { ExecuteOutcome } from '../tally-order-create/execute'
 import { commandFingerprint } from '../tally-order-create/fingerprint'
+import { SYSTEM_PROVIDER_ID } from '../tally-order-create/resume'
 import { currencyDecimals, minorToMajor } from '../tally-order-create/money'
 import { envelopeErrors, MAX_PAYLOAD_ERRORS } from '../tally-order-create/payload-shape'
 import { clientTimeStageErrors } from '../client-time'
@@ -34,14 +35,16 @@ const takeOrderLock = async (trx: Knex.Transaction, orderId: string): Promise<bo
 class LockLost extends Error {}
 const probe = async (trx: Knex.Transaction, orderId: string) => { if (!await takeOrderLock(trx, orderId).catch((error: Error) => {
   throw new LockLost(`order lock lost: ${error.message}`) })) throw new LockLost(`order lock lost: order ${orderId}`) }
-const moneyUnconfirmedMessage = "An earlier attempt at this refund's money may have reached the payment provider. Wait a few minutes so that attempt has finished, then check the provider and the order's refunds in Medusa. If Medusa shows the refund, use tally-ledger-resolve apply <medusaRefundId>. If the provider paid but Medusa shows no refund, do not refund again: leave this parked (see medusapos/app#576). If the provider did not pay, use tally-ledger-resolve resume money-not-sent."
+const moneyUnconfirmedMessage = "An earlier attempt at this refund may still be running: wait a few minutes, then look at the order's refunds in Medusa. A till sale is paid through Medusa's manual payment, so Medusa only records a refund and sends no money; the till hands the money back. If Medusa shows this refund, use tally-ledger-resolve apply <medusaRefundId>. If it does not, use tally-ledger-resolve resume money-not-sent to record it. Do this before the register session closes: until then the session's figures leave this refund out, so its drawer shows short by this refund."
+const providerResumeMessage = (providerId: string) =>
+  `This sale's payment uses provider ${providerId}, not Medusa's manual payment, so a refund through Medusa would go to that provider and could pay twice. Refund it in Medusa Admin, then use tally-ledger-resolve apply <medusaRefundId>. See medusapos/app#576.`
 const sessionClosedMessage = (id: string) =>
   `session_closed: refund ${id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.`
 
 /** What a refund needs of a Medusa order, in minor units. */
 export interface RefundOrder {
   id: string; state?: string; tillId?: string; decimals: number; locationId?: string; tenders: TillTender[]
-  lines: RefundableLine[]; linesMoneyMinor: number | null; shippingMinor: number; payment: { id: string; amountMinor: number; refundedMinor: number } | null
+  lines: RefundableLine[]; linesMoneyMinor: number | null; shippingMinor: number; payment: { id: string; providerId: string; amountMinor: number; refundedMinor: number } | null
 }
 
 const rejected = (id: string, code: string, message: string, data?: Record<string, unknown>): ExecuteOutcome =>
@@ -51,7 +54,7 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
   const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order', fields: [
     'id', 'status', 'is_draft_order', 'currency_code', 'metadata', 'total', 'items.id', 'items.quantity', 'items.raw_total',
     'items.raw_tax_total', 'items.metadata', 'shipping_methods.raw_total', 'fulfillments.location_id', 'fulfillments.canceled_at',
-    'payment_collections.payments.id', 'payment_collections.payments.raw_amount', 'payment_collections.payments.canceled_at',
+    'payment_collections.payments.id', 'payment_collections.payments.provider_id', 'payment_collections.payments.raw_amount', 'payment_collections.payments.canceled_at',
     'payment_collections.payments.refunds.raw_amount', 'items.detail.return_requested_quantity',
     'items.detail.return_received_quantity', 'items.detail.return_dismissed_quantity',
   ], filters: { id: orderId } })
@@ -76,7 +79,7 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     ...refundMoneyMinor(decimals, payment ? (payment.raw_amount as unknown as Raw).value : null,
       (order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value),
       (order.items ?? []).filter(item => item?.metadata?.tally_fee_uuid).map(item => (item!.raw_total as unknown as Raw).value)),
-    payment: payment ? { id: payment.id, amountMinor: medusaSumMinor(decimals, [(payment.raw_amount as unknown as Raw).value]),
+    payment: payment ? { id: payment.id, providerId: payment.provider_id, amountMinor: medusaSumMinor(decimals, [(payment.raw_amount as unknown as Raw).value]),
       refundedMinor: medusaSumMinor(decimals, (payment.refunds ?? []).map(refund => (refund?.raw_amount as unknown as Raw).value)) } : null,
   }
 }
@@ -312,6 +315,7 @@ export async function executeOrderRefund(container: MedusaContainer, command: Co
     const order = await loadRefundOrder(container, payload.orderId)
     if (!order?.tillId) return rejected(id, 'not_till_order', 'This order was not taken at a till.')
     if (order.state) return rejected(id, 'order_state', `This order is ${order.state}.`, { state: order.state })
+    if (order.payment && order.payment.providerId !== SYSTEM_PROVIDER_ID) return rejected(id, 'order_state', `This sale was paid through ${order.payment.providerId}, not the till's manual payment, so the till cannot refund it. Refund it in Medusa Admin.`, { paymentProvider: order.payment.providerId })
     const ledger = container.resolve<TallyLedgerModuleService>(TALLY_LEDGER_MODULE)
     const fingerprint = commandFingerprint(command)
     let claim: Awaited<ReturnType<TallyLedgerModuleService['claim']>>
@@ -392,6 +396,12 @@ export async function resolveOrderRefund(container: MedusaContainer, commandId: 
     })
     if (sessionClosed) throw new Error(`Refund ${row.id}'s register session is closed; moved no money and no stock; it stays parked (session_closed)`)
     return { kind: 'result', result }
+  }
+  if (order.payment && order.payment.providerId !== SYSTEM_PROVIDER_ID) {
+    const message = providerResumeMessage(order.payment.providerId)
+    await knex('tally_command').where({ id: commandId, status: 'needs_admin' }).update({ needs_admin_reason: JSON.stringify({ orderId: row.order_id,
+      clientRefundId: row.client_refund_id, refundId: row.id, step: 'payment', reason: 'payment_provider', message }), updated_at: knex.fn.now() })
+    throw new Error(`Refund ${row.id}: ${message} Moved no money and no stock; it stays parked (payment_provider)`)
   }
   if (moneyNotSent && (await knex('tally_command').where({ id: commandId }).first('needs_admin_reason'))?.needs_admin_reason?.reason !== 'money_unconfirmed') {
     throw new Error(`Refund ${row.id} is not parked money_unconfirmed; resume money-not-sent is only for that. Use tally-ledger-resolve resume, or apply <medusaRefundId>; nothing written`)
