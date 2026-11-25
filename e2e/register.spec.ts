@@ -146,16 +146,16 @@ for (const viewport of [{ width: 1280, height: 800 }, { width: 360, height: 780 
       // v2's No sale (09d.5): reason chips and no amount; TallyUI 4.1.0's MovementSheet records €0 under "Record".
       const movements = captureCommands<{ type: string; amountMinor: number }>(page, 'register.movement.record');
       await panel.getByTestId('register-panel-no-sale').click();
-      await expect(sheet.getByTestId('movement-amount')).toHaveCount(0);
       await sheet.getByTestId('movement-reason-drawer-check').click();
       await expect(sheet.getByTestId('movement-reason')).toHaveValue('Drawer check');
+      await expect(sheet.getByTestId('movement-amount')).toHaveCount(0);
       await expect(sheet.getByTestId('movement-confirm')).toHaveText('Record');
       await shot(page, 'no-sale-sheet');
       await sheet.getByTestId('movement-confirm').click();
       await expect(sheet).toHaveCount(0);
       await expect(expectedCash).toHaveText(money(100 + total));
       // The movements list is still open from the paid in; the side ledger counts it.
-      await expect(panel.getByText(/^No sale · .*0[.,]00.* · Drawer check$/)).toBeVisible();
+      await expect(panel.getByText(/^No sale · €?\s?0[.,]00\s?€? · Drawer check$/)).toBeVisible();
       await expect(panel.getByTestId('register-panel-ledger').getByText('No sale · 1', { exact: true })).toBeVisible();
       await shot(page, 'panel-no-sale');
       await expect.poll(() => movements.filter(({ payload }) => payload.type === 'no_sale' && payload.amountMinor === 0)
