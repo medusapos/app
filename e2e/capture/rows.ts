@@ -124,17 +124,17 @@ async function cameraOn(page: Page, size: Size, id: string) {
   }, `capture-${id}-camera-off`);
 }
 
+async function admin(method: string, route: string, body?: object) {
+  const response = await fetch(`${backend}${route}`, { method, body: body && JSON.stringify(body),
+    headers: { Authorization: `Bearer ${await adminToken()}`, ...(body && { 'Content-Type': 'application/json' }) } });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  return response.json();
+}
+
 // Row 02a.2's sale price list on E2E-3. A price list moves no updated_at, so the till sees it at its 30-minute price
 // check; a metadata touch on product 3 brings it into the cached catalogue at the next sync, and a second one (an empty
 // value) takes it back out on the next row's reload, once the list is gone.
 async function saleOnE2E3(): Promise<() => Promise<void>> {
-  const token = await adminToken();
-  const admin = async (method: string, route: string, body?: object) => {
-    const response = await fetch(`${backend}${route}`, { method, body: body && JSON.stringify(body),
-      headers: { Authorization: `Bearer ${token}`, ...(body && { 'Content-Type': 'application/json' }) } });
-    expect(response.ok, await response.clone().text()).toBeTruthy();
-    return response.json();
-  };
   const [variant] = (await admin('GET', '/admin/product-variants?limit=1&sku[]=E2E-3&fields=id,product_id')).variants;
   const touch = (value: string) => admin('POST', `/admin/products/${variant.product_id}`, { metadata: { capture_sale: value } });
   const { price_list } = await admin('POST', '/admin/price-lists', { title: 'Capture sale', description: 'Capture row 02a.2',
@@ -144,6 +144,23 @@ async function saleOnE2E3(): Promise<() => Promise<void>> {
     await admin('DELETE', `/admin/price-lists/${price_list.id}`);
     await touch('');
   };
+}
+
+// Row 02a.3's pictures, one plain shape each on a light ground, served by Playwright (nothing leaves localhost). A
+// thumbnail moves updated_at, so the sync brings them in; taking them off takes them out on the next row's reload.
+const SHAPES: Record<string, string> = {
+  'E2E-2': '<circle cx="40" cy="40" r="24" fill="#e8892b"/>',
+  'E2E-3': '<polygon points="40,14 66,62 14,62" fill="#2f8f6b"/>',
+  'E2E-5': '<rect x="18" y="18" width="44" height="44" rx="6" fill="#4c5fd5"/>',
+};
+async function picturesOn(page: Page): Promise<() => Promise<void>> {
+  await page.route('https://images.e2e.test/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">'
+    + `<rect width="80" height="80" fill="#eef2f7"/>${SHAPES[route.request().url().split('/').pop()!.replace('.svg', '')]}</svg>` }));
+  const query = Object.keys(SHAPES).map(sku => `sku[]=${sku}`).join('&');
+  const { variants } = await admin('GET', `/admin/product-variants?${query}&fields=sku,product_id`);
+  const set = (sku: string, thumbnail: string | null) => admin('POST', `/admin/products/${variants.find((v: { sku: string }) => v.sku === sku).product_id}`, { thumbnail });
+  for (const sku of Object.keys(SHAPES)) await set(sku, `https://images.e2e.test/${sku}.svg`);
+  return async () => { for (const sku of Object.keys(SHAPES)) await set(sku, null); };
 }
 
 async function customer(email: string) {
@@ -180,6 +197,18 @@ export const rows: CaptureRow[] = [
         sessionStorage.setItem('capture-02a.2-dropped', '1');
         for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.sale-filters.')) localStorage.removeItem(key);
       });
+    }
+  } },
+  // Products 2, 3 and 5 get a picture and 1 and 4 none, so both kinds of tile show; the cached catalogue keeps them for the shot.
+  { id: '02a.3', title: 'Tile images', state: 'Medusa thumbnails on products 2, 3 and 5; products 1 and 4 have none', only: ['desktop', 'phone'], reach: async (page) => {
+    const undo = await picturesOn(page);
+    try {
+      await page.getByTestId('catalogue-sync').click();
+      for (const n of [2, 3, 5]) await expect.poll(() => page.getByTestId(`product-tile-E2E product ${n}`).locator('img')
+        .evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0).catch(() => 0)).toBeGreaterThan(0);
+      for (const n of [1, 4]) await expect(page.getByTestId(`product-tile-E2E product ${n}`).locator('img')).toHaveCount(0);
+    } finally {
+      await undo();
     }
   } },
   { id: '02b', title: 'Product table', state: 'Table view (a phone has no table view)', only: ['desktop', 'tablet'], reach: async (page) => {
