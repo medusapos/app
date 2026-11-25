@@ -148,10 +148,10 @@ describe('SettingsScreen', () => {
     try {
       await mount();
       expect(within(screen.getByTestId('settings-nav')).getAllByRole('button').map((item) => item.textContent))
-        .toEqual(['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Danger zone']);
+        .toEqual(['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Health', 'Danger zone']);
       expect(within(screen.getByTestId('settings-nav')).getAllByRole('button').map((item) => item.dataset.testid))
         .toEqual(['settings-nav-store', 'settings-nav-tax', 'settings-nav-printing', 'settings-nav-card-readers', 'settings-nav-scanner',
-          'settings-nav-theme', 'settings-nav-register', 'settings-nav-danger']);
+          'settings-nav-theme', 'settings-nav-register', 'settings-nav-health', 'settings-nav-danger']);
       expect(screen.getByTestId('settings-store')).toBeTruthy();
       expect(screen.queryByLabelText('Minimum characters')).toBeNull();
       fireEvent.click(screen.getByTestId('settings-nav-scanner'));

@@ -511,6 +511,10 @@ export const rows: CaptureRow[] = [
   { id: '15f', title: 'Settings, barcode scanning', state: 'Settings › Barcode Scanning', reach: (page, size) => settings(page, size, 'scanner') },
   { id: '15f.2', title: 'Settings, barcode scanning: Use camera', state: 'Settings › Barcode Scanning, Use camera on', only: ['desktop'], reach: (page, size) => cameraOn(page, size, '15f.2') },
   { id: '15g', title: 'Settings, theme', state: 'Settings › Theme', reach: (page, size) => settings(page, size, 'theme') },
+  { id: '15h', title: 'Settings, health', state: 'Settings › Health', reach: async (page, size) => {
+    await settings(page, size, 'health');
+    await expect(page.getByTestId('settings-health-plugin-contract')).toHaveText(/^\d+$/);
+  } },
   { id: '16', title: 'Sign-in / connect', state: 'Sign-in screen after Sign out', reach: signOut },
   { id: '17a', title: 'Phone, POS', state: 'The Sale with a line in the cart', only: ['phone'], reach: async (page) => {
     await addE2E1(page);

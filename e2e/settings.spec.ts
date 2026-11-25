@@ -1,11 +1,11 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, captureCommands, cartLineQuantity, cartTab, closeStoreRegister, expectSwitchThumbInTrack, openArea, openRegister, productsTab, refusedStoreOpen, signIn, test } from './helpers';
+import { addE2E1, backend, captureCommands, cartLineQuantity, cartTab, closeStoreRegister, expectSwitchThumbInTrack, openArea, openRegister, productsTab, refusedStoreOpen, signIn, test } from './helpers';
 
 // Settings → Scanner (ADR 0016): minChars gates the phone-cart wedge listener, and the test-scan
 // field judges a scan the same way, against the currently saved settings.
 test.use({ viewport: { width: 360, height: 740 } });
 
-const SECTION_LABELS = ['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Danger zone'];
+const SECTION_LABELS = ['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Health', 'Danger zone'];
 
 // A phone's Settings lists the sections; `section` (its label) opens that section's own page from the list.
 async function openSettings(page: Page, section?: string) {
@@ -315,4 +315,17 @@ test.describe('at 1280 × 800', () => {
     const sound = (await page.getByTestId('settings-scanner-sound').boundingBox())!;
     expect(Math.abs(value.x - sound.x), 'the value starts in the switch\'s column').toBeLessThanOrEqual(4);
   });
+});
+
+// Settings › Health (AUDIT 27): what this till talks to, what it holds, and its recent warnings and errors.
+test('Health shows the store URL, plugin contract, storage used, waiting sales and the log view', async ({ page }) => {
+  await signIn(page);
+  await openSettings(page, 'Health');
+  await expect(page.getByTestId('settings-health-store-url')).toHaveText(backend);
+  await expect(page.getByTestId('settings-health-plugin-contract')).toHaveText(/^\d+$/);
+  // Chromium has navigator.storage.estimate.
+  await expect(page.getByTestId('settings-health-storage')).toHaveText(/^\d+(\.\d)? (B|KB|MB|GB)$/);
+  await expect(page.getByTestId('settings-health-sales-pending')).toHaveText('0');
+  await expect(page.getByTestId('settings-health-logs-empty').or(page.getByTestId('settings-health-log-line').first())).toBeVisible();
+  await expect(page.getByTestId('settings-health-copy')).toBeVisible();
 });
