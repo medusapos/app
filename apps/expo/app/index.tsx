@@ -359,7 +359,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       onSelect={add} statusText={statusText} statusAccessory={statusAccessory}
       searchAccessory={productSettingsButton} showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
-      viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
+      viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
       onViewStateError={onViewStateError} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
