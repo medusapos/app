@@ -61,17 +61,30 @@ type SaleStage = ReturnType<typeof useSale>['stage'];
 const tookCash = (order: PosOrder) => order.payments.some((payment) =>
   payment.method === 'cash' && payment.storePaymentId === undefined && payment.amountMinor > 0);
 
-// The last finished sale this tab has looked at (one till, one tab). Module-level, as printing-settings' seenSaleId,
-// so StrictMode's second effect run, a re-render or a remount never kicks the drawer for that sale again.
-let seenSaleId: string | undefined;
+// Every finished sale this tab has looked at (one till, one tab). Module-level, as printing-settings' seenSaleId,
+// so StrictMode's second effect run, a re-render, a remount or a late isStored never kicks the drawer for that sale again.
+const seenSaleIds = new Set<string>();
+
+/** Opens the drawer once per finished sale (`posOrder.id`) that took cash into this till's drawer. Never waits or throws. */
+export function openCashDrawerForSale(posOrder: PosOrder, orders: RxCollection<PosOrder> | null): void {
+  if (seenSaleIds.has(posOrder.id)) return;
+  seenSaleIds.add(posOrder.id);
+  if (tookCash(posOrder)) void openCashDrawer(orders);
+}
+
+/** The outbox's `isStored`, answering as it does; a yes also opens the drawer, as Continue never reaches the receipt. */
+export function isStoredOpensDrawer(isStored: (posOrder: PosOrder) => Promise<boolean>, orders: RxCollection<PosOrder> | null) {
+  return async (posOrder: PosOrder): Promise<boolean> => {
+    const stored = await isStored(posOrder);
+    if (stored === true) openCashDrawerForSale(posOrder, orders);
+    return stored;
+  };
+}
 
 /** Opens the drawer once for each finished sale that took cash into this till's drawer. */
 export function useCashDrawerOnSale(stage: SaleStage, orders: RxCollection<PosOrder> | null): void {
-  const saleId = stage.kind === 'receipt' ? stage.order.id : undefined;
-  const cash = stage.kind === 'receipt' && tookCash(stage.posOrder);
+  const posOrder = stage.kind === 'receipt' ? stage.posOrder : undefined;
   useEffect(() => {
-    if (!saleId || saleId === seenSaleId) return;
-    seenSaleId = saleId;
-    if (cash) void openCashDrawer(orders);
-  }, [saleId, cash, orders]);
+    if (posOrder) openCashDrawerForSale(posOrder, orders);
+  }, [posOrder, orders]);
 }

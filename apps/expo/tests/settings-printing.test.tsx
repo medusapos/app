@@ -8,7 +8,7 @@ import { addRxPlugin, createRxDatabase, randomToken, type RxCollection, type RxD
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
-import { addPrinterProfileCollection, type PosOrder, type PrinterProfile, type PrinterProfileCollection } from '@tallyui/pos';
+import { addPrinterProfileCollection, PrintError, type PosOrder, type PrinterProfile, type PrinterProfileCollection } from '@tallyui/pos';
 import { useOutboxOrders } from '../lib/outbox-context';
 import { loadPrintingSettings } from '../lib/printing-settings';
 import { BUILT_IN_PRINTER, PRINTER_REFUSALS, printTestPage } from '../lib/printers';
@@ -488,6 +488,22 @@ describe('Settings › Printing › Printers, network printers', () => {
       .toBe("Couldn't print. Check the printer's address and that it is on."));
     expect(screen.getByTestId('printer-dialog')).toBeTruthy();
     expect(await saved()).toEqual([]);
+  });
+
+  // The #597 review: a draft no browser can print to says why, not "is it on?"; any other failure keeps that text.
+  it.each([
+    ['a Generic vendor', 'printer-form-vendor-generic', PRINTER_REFUSALS.vendor],
+    ['a System connection', 'printer-form-connection-system', PRINTER_REFUSALS.system],
+  ])("the form's Test Print to %s that is refused as unsupported says what to choose", async (_, pick, text) => {
+    const dialog = await addPrinterForm();
+    fireEvent.click(dialog.getByTestId(pick));
+    vi.mocked(printTestReceipt).mockRejectedValueOnce(new PrintError('unsupported', 'not an Epson or Star network printer'));
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-test')); });
+    await waitFor(() => expect(dialog.getByTestId('printer-form-test-status').textContent).toBe(text));
+    vi.mocked(printTestReceipt).mockRejectedValueOnce(new PrintError('failed', 'unreachable'));
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-test')); });
+    await waitFor(() => expect(dialog.getByTestId('printer-form-test-status').textContent)
+      .toBe("Couldn't print. Check the printer's address and that it is on."));
   });
 
   it("an earlier opening's pending form Test Print never shows its outcome in a later opening", async () => {

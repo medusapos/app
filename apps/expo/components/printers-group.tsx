@@ -6,9 +6,9 @@ import {
   Badge, Button, createSvgIcon, Dialog, DialogContent, DialogTitle, PrinterForm, Text, type PrinterFormDraft,
 } from '@tallyui/components';
 import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
-import type { PrinterProfile } from '@tallyui/pos';
+import { PrintError, type PrinterProfile } from '@tallyui/pos';
 import { useOutboxOrders } from '../lib/outbox-context';
-import { deletePrinter, printerProfilesOf, printerTestPage, printTestPage, savePrinter, usePrinterProfiles } from '../lib/printers';
+import { deletePrinter, PRINTER_REFUSALS, printerProfilesOf, printerTestPage, printTestPage, savePrinter, usePrinterProfiles } from '../lib/printers';
 import { defaultStorage, type Session } from '../lib/session';
 import { loadCachedSettings } from '../lib/store-settings';
 import { printTestReceipt } from '../lib/thermal-printing';
@@ -33,7 +33,7 @@ export function PrintersGroup({ session }: { session: Session }) {
   const [status, setStatus] = useState<Record<string, PrintStatus>>({});
   const pending = useRef(new Set<string>());
   const [editing, setEditing] = useState<{ printer?: PrinterProfile } | null>(null);
-  const [formTest, setFormTest] = useState<{ status: PrintStatus; name: string } | null>(null);
+  const [formTest, setFormTest] = useState<{ status: PrintStatus; name: string; failure?: string } | null>(null);
   // Each opening of the form is its own; a test print from an earlier opening never shows its outcome here.
   const opening = useRef(0);
   const [deleting, setDeleting] = useState<PrinterProfile | null>(null);
@@ -66,8 +66,10 @@ export function PrintersGroup({ session }: { session: Session }) {
   const formTestPrint = (draft: PrinterFormDraft) => {
     const mine = opening.current;
     setFormTest({ status: 'printing', name: draft.name });
-    const settle = (next: PrintStatus) => { if (opening.current === mine) setFormTest({ status: next, name: draft.name }); };
-    printTestReceipt({ ...draft, id: 'draft' }, store()).then(() => settle('sent'), () => settle('failed'));
+    const settle = (next: PrintStatus, failure?: string) => { if (opening.current === mine) setFormTest({ status: next, name: draft.name, failure }); };
+    const failure = (error: unknown) => !(error instanceof PrintError && error.code === 'unsupported') ? NETWORK_FAILED
+      : draft.connectionType === 'system' ? PRINTER_REFUSALS.system : PRINTER_REFUSALS.vendor;
+    printTestReceipt({ ...draft, id: 'draft' }, store()).then(() => settle('sent'), (error: unknown) => settle('failed', failure(error)));
   };
   const remove = (profile: PrinterProfile) => {
     setDeleting(null);
@@ -123,7 +125,7 @@ export function PrintersGroup({ session }: { session: Session }) {
           <PrinterForm printer={editing.printer} onSave={save} onCancel={closeForm} onTest={formTestPrint} />
           {formTest && formTest.status !== 'printing' ? <Text testID="printer-form-test-status"
             className={formTest.status === 'sent' ? 'text-sm text-muted-foreground' : 'text-sm text-destructive'}>
-            {formTest.status === 'sent' ? `Sent to ${formTest.name}` : NETWORK_FAILED}
+            {formTest.status === 'sent' ? `Sent to ${formTest.name}` : formTest.failure}
           </Text> : null}
         </ScrollView>
       </DialogContent>

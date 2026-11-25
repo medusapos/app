@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useContext } from 'react';
+import { createRxDatabase, randomToken, type RxCollection } from 'rxdb';
+import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
-import { catalogueEntries, countsTowardPaid, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
+import { addPrinterProfileCollection, catalogueEntries, countsTowardPaid, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
 import { Cart, Receipt, Tender } from '@tallyui/components';
 import { OutboxStrip, StripHeightContext } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
@@ -32,8 +34,10 @@ vi.mock('../lib/outbox-context', () => ({
 vi.mock('../lib/register-context', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
+// No products, unless a test puts some on the shelf.
+const shelf = vi.hoisted(() => ({ products: [] as unknown[] }));
 vi.mock('../lib/use-replicated-products', () => ({
-  useReplicatedProducts: () => ({ products: [], state: 'synced', error: null, pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn() }),
+  useReplicatedProducts: () => ({ products: shelf.products, state: 'synced', error: null, pullNotice: undefined, resumePull: vi.fn(), syncNow: vi.fn(), clearAndRefresh: vi.fn() }),
 }));
 // store-settings-flow.test.tsx covers the settings states; here the store settings are ready.
 vi.mock('@tallyui/pos', async (importOriginal) => ({
@@ -384,5 +388,42 @@ describe('store settings on the POS screen', () => {
     expect(await screen.findByText('Tap a product to start a sale')).toBeTruthy();
     expect(fetchStoreSettings).toHaveBeenCalledTimes(2);
     expect(loadCachedSettings(localStorage, session.baseUrl)).toEqual(settings);
+  });
+});
+
+// The #597 review: a cash sale whose save threw, then confirmed stored, finishes by Continue, which starts a new sale
+// and never shows the receipt; the outbox's yes opens the drawer instead, through app/index.tsx's own wiring.
+describe('the cash drawer on Continue', () => {
+  const EPOS_URL = 'http://10.0.0.5:8008/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000';
+  it('a cash sale whose save threw opens the drawer once when the outbox confirms it stored, and Continue opens no more', async () => {
+    const db = await createRxDatabase({ name: `continue${randomToken(8)}`, storage: getRxStorageMemory() });
+    try {
+      await (await addPrinterProfileCollection(db)).insert({ id: 'counter', name: 'Counter', connectionType: 'network',
+        vendor: 'epson', address: '10.0.0.5', port: 9100, language: 'esc-pos', autoOpenDrawer: true });
+      const pulses = vi.fn(async (_url: string) => ({ ok: true, status: 200, text: async () => '<response success="true" code="" status="0"/>' }));
+      vi.stubGlobal('fetch', pulses);
+      setWindowWidth(1280, 800);
+      shelf.products = [{ ...product, variants: [product.variants[0]] }];
+      const record = vi.fn().mockRejectedValue(new Error('Storage full'));
+      const isStored = vi.fn().mockResolvedValue(true);
+      vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: { database: db } as unknown as RxCollection<PosOrder>, record, isStored });
+      saveCachedSettings(localStorage, session.baseUrl, settings);
+      await act(async () => { render(<ProductsScreen />); });
+      fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
+      await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+      take();
+      await act(async () => { click('Complete sale'); });
+      const continueButton = await screen.findByRole('button', { name: 'Continue' });
+      expect(isStored).toHaveBeenCalledExactlyOnceWith(record.mock.calls[0][0]);
+      expect(record.mock.calls[0][0]).toMatchObject({ payments: [{ method: 'cash' }] });
+      fireEvent.click(continueButton);
+      expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      // Only the printer's ePOS calls: the till makes its own requests too.
+      expect(pulses.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('/epos/'))).toEqual([EPOS_URL]);
+    } finally {
+      shelf.products = [];
+      await db.close();
+    }
   });
 });

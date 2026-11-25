@@ -11,7 +11,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAutoPrintReceipt } from './printing-settings';
 import { BUILT_IN_PRINTER } from './printers';
-import { drawerPrinter, openCashDrawer, printTestReceipt, printToNetwork, useCashDrawerOnSale } from './thermal-printing';
+import { drawerPrinter, isStoredOpensDrawer, openCashDrawer, printTestReceipt, printToNetwork, useCashDrawerOnSale } from './thermal-printing';
 
 addRxPlugin(RxDBDevModePlugin);
 
@@ -212,5 +212,65 @@ describe('useCashDrawerOnSale', () => {
     renderHook(() => useCashDrawerOnSale(receipt([cash(1000)]), orders));
     await settle();
     expect(warn).toHaveBeenCalledOnce();
+  });
+});
+
+// The #597 review: Continue after a failed or hung save the outbox has stored starts a new sale, never the receipt, so
+// the outbox's yes opens the drawer instead, once per sale, with the receipt's own memory of the sales it has seen.
+describe('isStoredOpensDrawer', () => {
+  const posOrder = (payments: PosOrderPayment[], id = `stored-${++saleCount}-${randomToken(4)}`) =>
+    ({ id, payments }) as unknown as PosOrder;
+
+  it('opens the drawer on a yes for a cash sale, and its answer passes through', async () => {
+    const orders = await ordersWith(epson);
+    const isStored = vi.fn(async () => true);
+    const order = posOrder([cash(1000)]);
+    await expect(isStoredOpensDrawer(isStored, orders)(order)).resolves.toBe(true);
+    await settle();
+    expect(isStored).toHaveBeenCalledExactlyOnceWith(order);
+    expect(sentHex()).toEqual(['1014010003']);
+  });
+
+  it('opens nothing on a no, passes a rejection on, and opens nothing for an external sale', async () => {
+    const orders = await ordersWith(epson);
+    await expect(isStoredOpensDrawer(async () => false, orders)(posOrder([cash(1000)]))).resolves.toBe(false);
+    const refused = new Error('storage closed');
+    await expect(isStoredOpensDrawer(async () => { throw refused; }, orders)(posOrder([cash(1000)]))).rejects.toBe(refused);
+    await expect(isStoredOpensDrawer(async () => true, orders)(posOrder([cash(1000, { method: 'external' as const })]))).resolves.toBe(true);
+    await settle();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a hung save confirmed stored and then shown on the receipt, or a yes twice, opens it once', async () => {
+    const orders = await ordersWith(epson);
+    const isStored = isStoredOpensDrawer(async () => true, orders);
+    const order = posOrder([cash(1000)]);
+    await isStored(order);
+    await isStored(order);
+    renderHook(() => useCashDrawerOnSale({ kind: 'receipt', order: { id: order.id }, posOrder: order } as unknown as SaleStage, orders));
+    await settle();
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('remembers every sale: A by isStored, B by its receipt, then a late yes for A opens it twice in all', async () => {
+    const orders = await ordersWith(epson);
+    const isStored = isStoredOpensDrawer(async () => true, orders);
+    const a = posOrder([cash(1000)]);
+    await isStored(a);
+    renderHook(() => useCashDrawerOnSale(receipt([cash(500)]), orders));
+    await settle();
+    await isStored(a);
+    await settle();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('answers yes at once when the printer never answers', async () => {
+    fetchMock.mockReturnValue(new Promise(() => {}));
+    const orders = await ordersWith({ ...epson, id: 'silent', name: 'Silent' });
+    const answered = isStoredOpensDrawer(async () => true, orders)(posOrder([cash(1000)]));
+    const late = new Promise((resolve) => { setTimeout(() => resolve('waited on the printer'), 500); });
+    await expect(Promise.race([answered, late])).resolves.toBe(true);
+    await settle();
+    expect(fetchMock).toHaveBeenCalledOnce();
   });
 });

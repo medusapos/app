@@ -116,13 +116,13 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
   const { orders } = useOutboxContext();
   // A recorded No sale opens the cash drawer, without waiting on the printer; a refused one opens nothing and its error
   // still reaches the sheet. RegisterPanel does not pass MovementSheet's onOpenDrawer through, hence the wrapper.
-  const { recordMovement } = register.actions;
+  // Its actions are read when a movement is recorded, not while rendering, so a register without them still renders.
   const drawerRegister = useMemo(() => ({ ...register, actions: { ...register.actions,
-    recordMovement: async (input: Parameters<typeof recordMovement>[0]) => {
-      const row = await recordMovement(input);
+    recordMovement: async (input: Parameters<typeof register.actions.recordMovement>[0]) => {
+      const row = await register.actions.recordMovement(input);
       if (input.type === 'no_sale') void openCashDrawer(orders);
       return row;
-    } } }), [register, recordMovement, orders]);
+    } } }), [register, orders]);
   if (!register.session && register.lastClosure && !register.approvalNeeded) {
     return <LastClosureSheet register={register} currency={currency} store={store} open={open} onOpenChange={onOpenChange} />;
   }
