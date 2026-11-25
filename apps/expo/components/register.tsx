@@ -10,6 +10,7 @@ import {
 } from '@tallyui/pos';
 import { printXReport } from '../lib/closure-print';
 import { openerName } from '../lib/open-session';
+import { openCashDrawer } from '../lib/thermal-printing';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
@@ -112,6 +113,16 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
   // Desk, 2026-11-23: the re-approval lists the refused sales behind the store's variance.
   const refused = useRefusedSales(register.approvalNeeded?.sessionId);
   const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online, refused);
+  const { orders } = useOutboxContext();
+  // A recorded No sale opens the cash drawer, without waiting on the printer; a refused one opens nothing and its error
+  // still reaches the sheet. RegisterPanel does not pass MovementSheet's onOpenDrawer through, hence the wrapper.
+  const { recordMovement } = register.actions;
+  const drawerRegister = useMemo(() => ({ ...register, actions: { ...register.actions,
+    recordMovement: async (input: Parameters<typeof recordMovement>[0]) => {
+      const row = await recordMovement(input);
+      if (input.type === 'no_sale') void openCashDrawer(orders);
+      return row;
+    } } }), [register, recordMovement, orders]);
   if (!register.session && register.lastClosure && !register.approvalNeeded) {
     return <LastClosureSheet register={register} currency={currency} store={store} open={open} onOpenChange={onOpenChange} />;
   }
@@ -125,7 +136,7 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
   // (the signed-in cashier by the sale screen's display name). None without one: the header then reads "Cashier".
   const opener = signedIn ? openerName(register.session?.opened_by, signedIn.email, signedIn.name || signedIn.email) : null;
   return <>
-    <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
+    <RegisterPanel register={drawerRegister} currency={currency} registerName={registerName ?? undefined} open={open}
       presentation="side" storeName={store.name} openedBy={opener ? { name: opener } : undefined}
       onPrintXReport={Platform.OS === 'web' && register.session?.status === 'open'
         ? () => printXReport({ session: register.session!, expected: register.expected,

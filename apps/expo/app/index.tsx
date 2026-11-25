@@ -63,6 +63,7 @@ import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
 import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
 import { usePrinterProfiles } from '../lib/printers';
+import { useCashDrawerOnSale } from '../lib/thermal-printing';
 import { useProductSettings } from '../lib/product-settings';
 import { RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
@@ -298,6 +299,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
   useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
     undefined, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
+  // A cash sale opens the drawer of a network printer with Open Cash Drawer on, once per sale, never from a reprint.
+  useCashDrawerOnSale(sale.stage, orders);
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);

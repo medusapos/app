@@ -422,6 +422,18 @@ export const rows: CaptureRow[] = [
   { id: '15a', title: 'Settings, general', state: 'Settings › General', reach: (page, size) => settings(page, size, 'store') },
   skip('15b', 'Settings, tax', 'N/A: Medusa sets tax per region in Medusa Admin'),
   { id: '15c', title: 'Settings, printing', state: 'Settings › Printing', reach: (page, size) => settings(page, size, 'printing') },
+  { id: '15c.4', title: 'Settings, printing: printer form', state: 'Add printer open, an Epson with Open Cash Drawer on; nothing saved', only: ['desktop', 'phone'], reach: async (page, size) => {
+    await settings(page, size, 'printing');
+    await page.getByTestId('settings-add-printer').click();
+    const form = page.getByTestId('printer-form');
+    await form.getByTestId('printer-form-name').fill('Counter');
+    await form.getByTestId('printer-form-vendor-epson').click();
+    await form.getByTestId('printer-form-address').fill('192.168.1.50');
+    await form.getByRole('switch', { name: 'Open Cash Drawer' }).click();
+    // The form scrolls inside its dialog; the shot shows the drawer switch and its connector.
+    await form.getByTestId('printer-form-drawer-pin2').scrollIntoViewIfNeeded();
+    await expect(form.getByTestId('printer-form-drawer-pin2')).toBeInViewport();
+  } },
   { id: '15d', title: 'Settings, card readers', state: 'Settings › Card readers', reach: (page, size) => settings(page, size, 'card-readers') },
   skip('15e', 'Settings, customer display', 'gap, no section: no customer-facing display'),
   { id: '15f', title: 'Settings, barcode scanning', state: 'Settings › Barcode Scanning', reach: (page, size) => settings(page, size, 'scanner') },

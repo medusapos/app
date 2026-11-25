@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { RxCollection } from 'rxdb';
+import type { PrinterFormDraft } from '@tallyui/components';
 import {
-  PRINTER_PROFILES_COLLECTION, PrintError, SYSTEM_PRINTER_ID,
+  mintUuid, PRINTER_PROFILES_COLLECTION, PrintError, SYSTEM_PRINTER_ID,
   type PosOrder, type PrinterProfile, type PrinterProfileCollection, type PrintTransport,
 } from '@tallyui/pos';
 import { printReceiptPage } from './receipt-templates';
@@ -52,8 +53,53 @@ export function printerTestPage({ printerName, storeName, now = new Date() }: { 
     + `<p>${escapeHtml(now.toLocaleString())}</p><p>If you can read this, the printer works.</p></body></html>`;
 }
 
-/** The system printer prints through the print dialog's queue; no other printer has a transport yet. */
+/** The system printer's test page, through the print dialog's queue. A network printer's goes through thermal-printing's printTestReceipt. */
 export function printTestPage(profile: PrinterProfile, html: string, transport?: PrintTransport): Promise<void> {
   if (profile.connectionType === 'system') return printReceiptPage(html, transport);
   return Promise.reject(new PrintError('unsupported', `No transport for ${profile.connectionType} printers yet`));
+}
+
+// v2's printer form, kept to what a browser till can reach: an Epson or Star network printer speaking ESC/POS.
+export const PRINTER_REFUSALS = {
+  system: 'The built-in Print dialog already prints through this browser. Choose Network.',
+  vendor: 'A browser can reach Epson and Star printers only. Choose Epson or Star.',
+  language: 'This till prints ESC/POS. Choose ESC/POS as the printer language.',
+  name: 'Another printer has this name.',
+  builtIn: 'The built-in printer cannot be changed.',
+  failed: 'The printer was not saved. Try again.',
+} as const;
+
+const isBuiltInId = (id: string | undefined, docs: PrinterProfile[]) =>
+  id === SYSTEM_PRINTER_ID || docs.some((doc) => doc.id === id && doc.isBuiltIn);
+
+/**
+ * Adds a printer, or replaces printer `id` whole (a key the form dropped leaves no stale value). Returns the refusal
+ * the form shows, or null once saved. Set as default clears it on the others; the built-in keeps its own flag.
+ */
+export async function savePrinter(collection: PrinterProfileCollection, draft: PrinterFormDraft, id?: string): Promise<string | null> {
+  if (draft.connectionType === 'system') return PRINTER_REFUSALS.system;
+  if (draft.vendor !== 'epson' && draft.vendor !== 'star') return PRINTER_REFUSALS.vendor;
+  if ((draft.language ?? 'esc-pos') !== 'esc-pos') return PRINTER_REFUSALS.language;
+  try {
+    const docs = (await collection.find().exec()).map((doc) => doc.toJSON() as PrinterProfile);
+    if (draft.isBuiltIn || isBuiltInId(id, docs)) return PRINTER_REFUSALS.builtIn;
+    const name = draft.name.trim();
+    if (docs.some((doc) => doc.id !== id && doc.name.trim().toLowerCase() === name.toLowerCase())) return PRINTER_REFUSALS.name;
+    const profile: PrinterProfile = { ...draft, name, id: id ?? mintUuid() };
+    const cleared = profile.isDefault
+      ? docs.filter((doc) => doc.id !== profile.id && !doc.isBuiltIn && doc.isDefault).map((doc) => ({ ...doc, isDefault: false }))
+      : [];
+    // One write for the printer and the defaults it clears.
+    const { error } = await collection.bulkUpsert([profile, ...cleared]);
+    return error.length > 0 ? PRINTER_REFUSALS.failed : null;
+  } catch {
+    return PRINTER_REFUSALS.failed;
+  }
+}
+
+/** Removes printer `id`; the built-in printer is never removed. */
+export async function deletePrinter(collection: PrinterProfileCollection, id: string): Promise<void> {
+  const doc = await collection.findOne(id).exec();
+  if (!doc || doc.isBuiltIn || id === SYSTEM_PRINTER_ID) return;
+  await doc.remove();
 }

@@ -4,8 +4,15 @@ import type { ReactNode } from 'react';
 import { Platform } from 'react-native';
 import { PortalHost } from '@tallyui/primitives';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { addRxPlugin, createRxDatabase, randomToken, type RxCollection, type RxDatabase } from 'rxdb';
+import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
+import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
+import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
+import { addPrinterProfileCollection, type PosOrder, type PrinterProfile, type PrinterProfileCollection } from '@tallyui/pos';
+import { useOutboxOrders } from '../lib/outbox-context';
 import { loadPrintingSettings } from '../lib/printing-settings';
-import { BUILT_IN_PRINTER, printTestPage } from '../lib/printers';
+import { BUILT_IN_PRINTER, PRINTER_REFUSALS, printTestPage } from '../lib/printers';
+import { printTestReceipt } from '../lib/thermal-printing';
 import { printReceiptPage } from '../lib/receipt-templates';
 import { saveSession } from '../lib/session';
 import { saveCachedSettings } from '../lib/store-settings';
@@ -37,6 +44,14 @@ vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' 
 vi.mock('../lib/printers', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/printers')>(),
   printTestPage: vi.fn(),
+}));
+// No order store unless a test opens one; then the printers are this till's own, in a memory database.
+vi.mock('../lib/outbox-context', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/outbox-context')>(), useOutboxOrders: vi.fn(() => null),
+}));
+// A network printer's Test print, observed; the drawer and the queue stay real.
+vi.mock('../lib/thermal-printing', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../lib/thermal-printing')>(), printTestReceipt: vi.fn(),
 }));
 // Test print goes to the print dialog; the rest of the module (templates, sample, page) stays real.
 vi.mock('../lib/receipt-templates', async (importOriginal) => ({
@@ -285,7 +300,7 @@ describe('Settings › Printing › Printers', () => {
     return screen.getByTestId('settings-printers');
   }
 
-  it('on a wide window lists the built-in print dialog between Printing and Receipt templates, with no Add printer', async () => {
+  it('on a wide window lists the built-in print dialog between Printing and Receipt templates, with no Add printer until the till\'s store opens', async () => {
     const group = await openPrinting();
     expect(follows(screen.getByTestId('settings-printing'), group)).toBe(true);
     expect(follows(group, screen.getByTestId('settings-receipt-templates'))).toBe(true);
@@ -347,6 +362,159 @@ describe('Settings › Printing › Printers', () => {
       expect(screen.getByTestId('settings-printer-system-status').textContent).toBe('Not available on this device');
       expect(screen.queryByTestId('settings-printer-system-test-print')).toBeNull();
       expect(screen.queryByRole('button', { name: /^Test print/ })).toBeNull();
+    } finally { Platform.OS = original; }
+  });
+});
+
+describe('Settings › Printing › Printers, network printers', () => {
+  addRxPlugin(RxDBDevModePlugin);
+  let db: RxDatabase;
+  let printers: PrinterProfileCollection;
+  beforeEach(async () => {
+    db = await createRxDatabase({ name: `settings${randomToken(8)}`, storage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }) });
+    printers = await addPrinterProfileCollection(db);
+    await printers.insert(BUILT_IN_PRINTER);
+    vi.mocked(useOutboxOrders).mockReturnValue({ database: db } as unknown as RxCollection<PosOrder>);
+  });
+  afterEach(async () => { vi.mocked(useOutboxOrders).mockReturnValue(null); await db.close(); });
+
+  const counter: PrinterProfile = {
+    id: 'counter', name: 'Counter', connectionType: 'network', vendor: 'epson', address: '10.0.0.5', port: 9100, language: 'esc-pos',
+    columns: 42, autoCut: true, autoOpenDrawer: true, drawerConnector: 'pin2', isDefault: true,
+  };
+  async function openPrinting() {
+    setWindowWidth(1280, 800);
+    await mount(<><SettingsScreen /><PortalHost /></>);
+    fireEvent.click(screen.getByTestId('settings-nav-printing'));
+    return screen.getByTestId('settings-printers');
+  }
+  const saved = async () => (await printers.find().exec()).map((doc) => doc.toJSON() as PrinterProfile).filter((doc) => !doc.isBuiltIn);
+
+  it('Add printer saves an Epson printer with Open Cash Drawer on, and lists it', async () => {
+    const group = await openPrinting();
+    expect(screen.queryByTestId('settings-printers-note')).toBeNull();
+    fireEvent.click(within(group).getByRole('button', { name: 'Add printer' }));
+    const dialog = within(await screen.findByTestId('printer-dialog'));
+    expect(dialog.getByText('Add printer')).toBeTruthy();
+    fireEvent.change(dialog.getByTestId('printer-form-name'), { target: { value: 'Counter' } });
+    fireEvent.click(dialog.getByTestId('printer-form-vendor-epson'));
+    fireEvent.change(dialog.getByTestId('printer-form-address'), { target: { value: '10.0.0.5' } });
+    fireEvent.click(dialog.getByRole('switch', { name: 'Open Cash Drawer' }));
+    expect(dialog.getByTestId('printer-form-drawer-pin2')).toBeTruthy();
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-save')); });
+    await waitFor(() => expect(screen.queryByTestId('printer-dialog')).toBeNull());
+    const [profile] = await saved();
+    expect(profile).toMatchObject({ name: 'Counter', connectionType: 'network', vendor: 'epson', address: '10.0.0.5', port: 9100,
+      language: 'esc-pos', autoOpenDrawer: true, drawerConnector: 'pin2', isDefault: false });
+    const row = within(await screen.findByTestId(`settings-printer-${profile!.id}`));
+    expect(row.getByText('Epson · 10.0.0.5 · Opens cash drawer')).toBeTruthy();
+    expect(row.getByRole('button', { name: 'Edit Counter' })).toBeTruthy();
+    expect(screen.getByTestId('settings-printers-note').textContent)
+      .toBe('Receipts still print through the print dialog. Network printers open the cash drawer.');
+  });
+
+  it('shows a refusal in the form and saves nothing', async () => {
+    const group = await openPrinting();
+    fireEvent.click(within(group).getByRole('button', { name: 'Add printer' }));
+    const dialog = within(await screen.findByTestId('printer-dialog'));
+    fireEvent.change(dialog.getByTestId('printer-form-name'), { target: { value: 'Back' } });
+    fireEvent.change(dialog.getByTestId('printer-form-address'), { target: { value: '10.0.0.9' } });
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-save')); });
+    expect((await dialog.findByTestId('printer-form-error')).textContent).toBe(PRINTER_REFUSALS.vendor);
+    expect(screen.getByTestId('printer-dialog')).toBeTruthy();
+    expect(await saved()).toEqual([]);
+  });
+
+  it('Edit saves the printer whole, and Delete asks first', async () => {
+    await printers.insert(counter);
+    await openPrinting();
+    const row = within(await screen.findByTestId('settings-printer-counter'));
+    expect(row.getByText('Epson · 10.0.0.5 · Opens cash drawer · Default')).toBeTruthy();
+    fireEvent.click(row.getByRole('button', { name: 'Edit Counter' }));
+    const dialog = within(await screen.findByTestId('printer-dialog'));
+    expect(dialog.getByText('Edit printer')).toBeTruthy();
+    fireEvent.click(dialog.getByTestId('printer-form-drawer-pin5'));
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-save')); });
+    await waitFor(() => expect(screen.queryByTestId('printer-dialog')).toBeNull());
+    expect(await saved()).toEqual([{ ...counter, drawerConnector: 'pin5' }]);
+
+    fireEvent.click(row.getByRole('button', { name: 'Delete Counter' }));
+    const ask = within(await screen.findByTestId('printer-delete-dialog'));
+    expect(ask.getByText('Delete Counter?')).toBeTruthy();
+    await act(async () => { fireEvent.click(ask.getByTestId('printer-delete-cancel')); });
+    expect(await saved()).toHaveLength(1);
+    fireEvent.click(row.getByRole('button', { name: 'Delete Counter' }));
+    const confirm = within(await screen.findByTestId('printer-delete-dialog')).getByTestId('printer-delete-confirm');
+    await act(async () => { fireEvent.click(confirm); });
+    await waitFor(() => expect(screen.queryByTestId('settings-printer-counter')).toBeNull());
+    expect(await saved()).toEqual([]);
+    expect(screen.getByTestId('settings-printer-system')).toBeTruthy();
+  });
+
+  it('Test print sends the sample receipt to the network printer and says how it went', async () => {
+    await printers.insert(counter);
+    await openPrinting();
+    vi.mocked(printTestReceipt).mockResolvedValueOnce(undefined);
+    const testPrint = await screen.findByTestId('settings-printer-counter-test-print');
+    await act(async () => { fireEvent.click(testPrint); });
+    expect(printTestReceipt).toHaveBeenCalledExactlyOnceWith(counter, { name: 'Your store', currency: 'USD' });
+    expect((await screen.findByTestId('settings-printer-counter-print-status')).textContent).toBe('Sent to Counter');
+    vi.mocked(printTestReceipt).mockRejectedValueOnce(new Error('unreachable'));
+    await act(async () => { fireEvent.click(screen.getByTestId('settings-printer-counter-test-print')); });
+    await waitFor(() => expect(screen.getByTestId('settings-printer-counter-print-status').textContent)
+      .toBe("Couldn't print. Check the printer's address and that it is on."));
+  });
+
+  async function addPrinterForm() {
+    const group = await openPrinting();
+    fireEvent.click(within(group).getByRole('button', { name: 'Add printer' }));
+    const dialog = within(await screen.findByTestId('printer-dialog'));
+    fireEvent.change(dialog.getByTestId('printer-form-name'), { target: { value: 'Counter' } });
+    fireEvent.click(dialog.getByTestId('printer-form-vendor-epson'));
+    fireEvent.change(dialog.getByTestId('printer-form-address'), { target: { value: '10.0.0.5' } });
+    return dialog;
+  }
+
+  it("the form's Test Print sends the draft and says how it went, saving nothing", async () => {
+    const dialog = await addPrinterForm();
+    vi.mocked(printTestReceipt).mockResolvedValueOnce(undefined);
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-test')); });
+    expect(printTestReceipt).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ id: 'draft', name: 'Counter', vendor: 'epson', address: '10.0.0.5' }), { name: 'Your store', currency: 'USD' });
+    expect((await dialog.findByTestId('printer-form-test-status')).textContent).toBe('Sent to Counter');
+    vi.mocked(printTestReceipt).mockRejectedValueOnce(new Error('unreachable'));
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-test')); });
+    await waitFor(() => expect(dialog.getByTestId('printer-form-test-status').textContent)
+      .toBe("Couldn't print. Check the printer's address and that it is on."));
+    expect(screen.getByTestId('printer-dialog')).toBeTruthy();
+    expect(await saved()).toEqual([]);
+  });
+
+  it("an earlier opening's pending form Test Print never shows its outcome in a later opening", async () => {
+    let settle!: () => void;
+    vi.mocked(printTestReceipt).mockReturnValueOnce(new Promise<void>((resolve) => { settle = resolve; }));
+    let dialog = await addPrinterForm();
+    await act(async () => { fireEvent.click(dialog.getByTestId('printer-form-test')); });
+    fireEvent.click(dialog.getByTestId('printer-form-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('printer-dialog')).toBeNull());
+    fireEvent.click(screen.getByRole('button', { name: 'Add printer' }));
+    dialog = within(await screen.findByTestId('printer-dialog'));
+    await act(async () => { settle(); });
+    expect(dialog.queryByTestId('printer-form-test-status')).toBeNull();
+  });
+
+  it('on a native till offers no Add printer, Edit or Delete', async () => {
+    await printers.insert(counter);
+    const original = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      setWindowWidth(390, 844);
+      params.section = 'printing';
+      await mount();
+      expect(await screen.findByTestId('settings-printer-counter-status')).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Add printer' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Edit Counter' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Delete Counter' })).toBeNull();
     } finally { Platform.OS = original; }
   });
 });
