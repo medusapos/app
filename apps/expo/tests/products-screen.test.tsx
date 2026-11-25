@@ -2829,6 +2829,71 @@ describe('ProductsScreen sale filter pills', () => {
     expect(tiles()).toEqual(['Apple']);
   });
 
+  // Catalogue's box goes with it when it unmounts; the picked list must not stay searched by a text no longer shown.
+  const escape = () => act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+  const pickAndSearch = () => {
+    pick('filter-chip-tag', 'ptag_organic');
+    type('ap');
+    expect(tiles()).toEqual(['Apple']);
+  };
+  const searchGone = () => {
+    expect(search().value).toBe('');
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Organic');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+  };
+
+  it('a tender opened and cancelled (wide) empties the search and keeps the pick', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Date'));
+    pickAndSearch();
+    await checkout();
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    escape();
+    searchGone();
+  });
+
+  it('a sale paid, then New sale from the receipt (wide), empties the search and keeps the pick', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Date'));
+    pickAndSearch();
+    await payByCard();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
+    fireEvent.click(screen.getByRole('button', { name: 'New sale' }));
+    searchGone();
+  });
+
+  it('on the phone, Products, Cart and Products again empties the search and keeps the pick', async () => {
+    setWindowWidth(360);
+    await mount();
+    pickAndSearch();
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Products' }));
+    searchGone();
+  });
+
+  it('a phone window widened empties the search and keeps the pick', async () => {
+    setWindowWidth(360);
+    await mount();
+    pickAndSearch();
+    act(() => setWindowWidth(1280));
+    expect(screen.queryByRole('tab', { name: 'Products' })).toBeNull();
+    searchGone();
+  });
+
+  it('a search typed with no pick, then a tender opened and cancelled, leaves a later pick unsearched', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Date'));
+    type('ap');
+    expect(tiles()).toEqual(['Apple']);
+    await checkout();
+    escape();
+    expect(search().value).toBe('');
+    expect(tiles()).toEqual(all);
+    pick('filter-chip-tag', 'ptag_organic');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+  });
+
   it('opens with no pick on a corrupt stored value', async () => {
     localStorage.setItem(key, '{"onSale": tru');
     await mount();

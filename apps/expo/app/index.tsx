@@ -102,6 +102,13 @@ const ROW_BREAKPOINT = 900;
 // The rate arrives in parts per million (10 000 ppm = 1%).
 const taxLabel = receiptTaxLabel;
 
+// Rendered with one Catalogue instance: when it goes (a stage, a tab, a width, a new key) its search box goes with it,
+// so the app's tracked copy of the text is emptied too.
+function QueryReset({ setQuery }: { setQuery: (text: string) => void }) {
+  useEffect(() => () => setQuery(''), [setQuery]);
+  return null;
+}
+
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
   const lastEmail = useRef<string | undefined>(undefined);
@@ -173,7 +180,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     clearAndRefresh();
     setFilters({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
     setCatalogueKey((key) => key + 1);
-    setQuery('');
   }, [clearAndRefresh]);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
@@ -425,6 +431,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
       onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn && !counting}
       cameraScanner={{ onDetected: camera.offer, onOpen: camera.reset, scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />
+    <QueryReset key={`query-${catalogueKey}`} setQuery={setQuery} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
