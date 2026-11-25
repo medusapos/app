@@ -53,6 +53,17 @@ export function ProductSettingsButton({ viewState, onViewStateChange, showOutOfS
               </Pressable>;
             })}
           </View>
+          <Text>Browse by</Text>
+          <View className="flex-row gap-2">
+            {(['chips', 'tiles'] as const).map((browse) => {
+              const selected = settings.browse === browse;
+              return <Pressable key={browse} testID={`product-settings-browse-${browse}`} accessibilityRole="button"
+                accessibilityState={{ selected }} aria-selected={selected} onPress={() => save({ ...settings, browse })}
+                className={`min-h-11 flex-1 items-center justify-center rounded-lg border-2 px-2 py-2 ${selected ? 'border-primary bg-muted' : 'border-border bg-card'}`}>
+                <Text>{browse === 'chips' ? 'All products' : 'Categories'}</Text>
+              </Pressable>;
+            })}
+          </View>
           <View className="flex-row items-center justify-between gap-2">
             <Label nativeID="product-settings-out-of-stock-label">Show out-of-stock products</Label>
             {/* TallyUI's Switch track sets no flex direction and react-native-web defaults to column, so

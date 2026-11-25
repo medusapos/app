@@ -643,7 +643,7 @@ describe('Product settings sheet', () => {
     fireEvent.click(screen.getByTestId('category-nav-fruit'));
     click('button');
     click('variations-popover');
-    expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS });
+    expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
     expect(screen.getByTestId('product-settings-variations-popover').getAttribute('aria-selected')).toBe('true');
     click('columns-4');
     expect(JSON.parse(localStorage.getItem(viewKey)!).gridColumns).toBe(4);
@@ -653,7 +653,7 @@ describe('Product settings sheet', () => {
     click('out-of-stock');
     click('restore');
     expect(JSON.parse(localStorage.getItem(viewKey)!)).toEqual({ ...DEFAULT_CATALOGUE_VIEW_STATE, categoryId: 'fruit', sort: nameAsc });
-    expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS });
+    expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
     expect(screen.getByRole('switch', { name: 'Show out-of-stock products', checked: true })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
     for (const id of ['view-grid', 'columns-auto', 'variations-list']) {
@@ -741,7 +741,7 @@ describe('Product settings sheet', () => {
       expect(apple().getByText('Apple')).toBeTruthy();
       expect(apple().getByText('SKU APL-1')).toBeTruthy();
       expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list',
-        tileFields: { ...DEFAULT_TILE_FIELDS, price: false, sku: true } });
+        tileFields: { ...DEFAULT_TILE_FIELDS, price: false, sku: true }, browse: 'chips' });
     });
 
     it('keeps the tile fields when Variations changes to Popover', async () => {
@@ -754,7 +754,7 @@ describe('Product settings sheet', () => {
       expect(apple().queryByText(/€/)).toBeNull();
       expect(apple().getByText('SKU APL-1')).toBeTruthy();
       expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'popover',
-        tileFields: { ...DEFAULT_TILE_FIELDS, price: false, sku: true } });
+        tileFields: { ...DEFAULT_TILE_FIELDS, price: false, sku: true }, browse: 'chips' });
     });
 
     it("keeps the choice across a remount for the same store, and never takes another store's", async () => {
@@ -783,7 +783,81 @@ describe('Product settings sheet', () => {
       for (const [name, on] of Object.entries(DEFAULT_TILE_FIELDS)) {
         expect(field(name).getAttribute('aria-checked')).toBe(String(on));
       }
-      expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS });
+      expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
+    });
+  });
+
+  describe('Browse by', () => {
+    const browse = (choice: 'chips' | 'tiles') => screen.getByTestId(`product-settings-browse-${choice}`).getAttribute('aria-selected');
+
+    it('starts on product tiles under the category chips, with All products selected', async () => {
+      await mount();
+      expect(screen.queryByTestId('category-tile-all')).toBeNull();
+      expect(screen.getByTestId('category-nav-fruit')).toBeTruthy();
+      expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+      click('button');
+      expect(screen.getByTestId('product-settings-browse-chips').textContent).toBe('All products');
+      expect(screen.getByTestId('product-settings-browse-tiles').textContent).toBe('Categories');
+      expect([browse('chips'), browse('tiles')]).toEqual(['true', 'false']);
+    });
+
+    it('opens on category tiles with Categories, opens a category from its tile, and goes back with All products', async () => {
+      await mount();
+      click('button');
+      click('browse-tiles');
+      expect(browse('tiles')).toBe('true');
+      click('close');
+      expect(screen.getByTestId('category-tile-all')).toBeTruthy();
+      expect(screen.getByTestId('category-tile-fruit')).toBeTruthy();
+      expect(screen.queryByTestId('category-nav-fruit')).toBeNull();
+      expect(tiles()).toEqual([]);
+      fireEvent.click(screen.getByTestId('category-tile-fruit'));
+      expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+      expect(screen.queryByTestId('category-tile-all')).toBeNull();
+      click('button');
+      click('browse-chips');
+      click('close');
+      expect(screen.getByTestId('category-nav-fruit')).toBeTruthy();
+      expect(screen.queryByTestId('category-tile-all')).toBeNull();
+      expect(JSON.parse(localStorage.getItem(settingsKey)!).browse).toBe('chips');
+    });
+
+    it("keeps Categories across a remount for the same store, and never takes another store's", async () => {
+      localStorage.setItem('medusapos.product-settings.https://other.test', JSON.stringify({ browse: 'tiles' }));
+      await mount();
+      expect(screen.queryByTestId('category-tile-all')).toBeNull();
+      click('button');
+      click('browse-tiles');
+      cleanup();
+      await mount();
+      expect(screen.getByTestId('category-tile-all')).toBeTruthy();
+      click('button');
+      expect(browse('tiles')).toBe('true');
+      expect(JSON.parse(localStorage.getItem('medusapos.product-settings.https://other.test')!)).toEqual({ browse: 'tiles' });
+    });
+
+    it('keeps the tile fields and variations already picked when Categories is pressed', async () => {
+      await mount();
+      click('button');
+      click('tile-field-price');
+      click('variations-popover');
+      click('browse-tiles');
+      expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'popover',
+        tileFields: { ...DEFAULT_TILE_FIELDS, price: false }, browse: 'tiles' });
+      expect(screen.getByTestId('product-settings-tile-field-price').getAttribute('aria-checked')).toBe('false');
+    });
+
+    it('Restore Default Settings brings the chips back and selects All products', async () => {
+      await mount();
+      click('button');
+      click('browse-tiles');
+      expect(screen.getByTestId('category-tile-all')).toBeTruthy();
+      click('restore');
+      expect([browse('chips'), browse('tiles')]).toEqual(['true', 'false']);
+      expect(screen.queryByTestId('category-tile-all')).toBeNull();
+      expect(screen.getByTestId('category-nav-fruit')).toBeTruthy();
+      expect(tiles()).toEqual(['product-tile-Apple', 'product-tile-Zebra']);
+      expect(JSON.parse(localStorage.getItem(settingsKey)!)).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
     });
   });
 });

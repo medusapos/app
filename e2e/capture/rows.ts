@@ -167,11 +167,29 @@ async function customer(email: string) {
   await createAdminCustomer(await adminToken(), email, 'Ada', 'Lovelace');
 }
 
+// Picks Browse by: Categories in the sheet. Rows share this page's storage and the shot is taken after reach
+// returns, so the next load (the next row's reset) drops this store's product settings once, as 02d.4 does.
+async function browseByCategories(page: Page, id: string) {
+  await page.getByTestId('product-settings-button').click();
+  await page.getByTestId('product-settings-browse-tiles').click();
+  await expect(page.getByTestId('product-settings-browse-tiles')).toHaveAttribute('aria-selected', 'true');
+  await page.addInitScript((flag) => {
+    if (sessionStorage.getItem(flag)) return; sessionStorage.setItem(flag, '1');
+    for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.product-settings.')) localStorage.removeItem(key);
+  }, `capture-${id}-browse-restored`);
+}
+
 const skip = (id: string, title: string, reason: string): CaptureRow => ({ id, title, state: '—', skip: reason, reach: nothing });
 
 export const rows: CaptureRow[] = [
   { id: '01', title: 'POS main, empty cart', state: 'Empty Sale', reach: async (page) => {
     await expect(tiles(page).first()).toBeVisible();
+  } },
+  { id: '01.2', title: 'Browse by categories', state: 'Empty Sale opening on category tiles (Browse by: Categories)', reach: async (page) => {
+    await browseByCategories(page, '01.2');
+    await page.getByTestId('product-settings-close').click();
+    await expect(page.getByTestId('category-tile-all')).toBeVisible();
+    await expect(page.getByTestId('category-browse-footer')).toBeVisible();
   } },
   // The e2e catalogue has no shirt; "product 4" filters the grid to one tile.
   { id: '02a', title: 'Product tiles, search', state: 'Search box holding "product 4", grid filtered', reach: async (page) => {
@@ -224,6 +242,11 @@ export const rows: CaptureRow[] = [
     await expect(page.getByTestId('product-settings-sheet')).toBeVisible();
     await page.getByTestId('product-settings-tile-field-stock').scrollIntoViewIfNeeded();
     await expect(page.getByText('Tile Fields', { exact: true })).toBeInViewport();
+  } },
+  { id: '02d.1', title: 'Browse by', state: 'Product settings open with Browse by: Categories selected', reach: async (page) => {
+    await browseByCategories(page, '02d.1');
+    await page.getByTestId('product-settings-browse-tiles').scrollIntoViewIfNeeded();
+    await expect(page.getByText('Browse by', { exact: true })).toBeInViewport();
   } },
   { id: '02d.4', title: 'Tile fields', state: 'Price off and SKU on in Product settings; grid tiles show name, SKU and stock', reach: async (page) => {
     const field = (name: string) => page.getByTestId(`product-settings-tile-field-${name}`);

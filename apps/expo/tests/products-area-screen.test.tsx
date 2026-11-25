@@ -1278,7 +1278,7 @@ describe('the Variations choice', () => {
     expect(screen.getByTestId('products-settings-variations-list').getAttribute('aria-selected')).toBe('true');
     press('products-settings-variations-popover');
     expect(screen.getByTestId('products-settings-variations-popover').getAttribute('aria-selected')).toBe('true');
-    expect(JSON.parse(data.get('medusapos.product-settings.https://store.test')!)).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS });
+    expect(JSON.parse(data.get('medusapos.product-settings.https://store.test')!)).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
     press('products-settings-close');
     expect(screen.queryByTestId('products-place')).toBeNull();
     expect(rowIds()).toEqual(['v1', 'p4']);
@@ -1291,12 +1291,12 @@ describe('the Variations choice', () => {
     storage();
     show();
     const { result } = renderHook(() => useProductSettings(localStorage, session.baseUrl));
-    expect(result.current.settings).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS });
-    act(() => result.current.save({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS }));
+    expect(result.current.settings).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
+    act(() => result.current.save({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' }));
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     press('products-settings-button');
     press('products-settings-variations-list');
-    expect(result.current.settings).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS });
+    expect(result.current.settings).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
     expect(toggle().hasAttribute('aria-expanded')).toBe(false);
   });
 
