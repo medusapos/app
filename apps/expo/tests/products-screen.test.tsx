@@ -24,7 +24,8 @@ import { capabilities } from './pos-connector-mock';
 import { SessionProvider, useSession } from '../lib/session-context';
 import { watchStorageHealth } from '../lib/storage-health';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
-import { fetchStoreSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
+import { fetchStoreSettings, saveCachedPricing, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
+import { loadSaleFilters } from '../lib/sale-filters';
 import ProductsScreen from '../app/index';
 import { AppFrame } from '../components/app-frame';
 import OrdersScreen from '../app/orders';
@@ -334,7 +335,7 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByText('Test shop · Offline · cached catalogue · 2 products · Failed to fetch')).toBeTruthy();
     expect(screen.getAllByRole('button').map((button) => button.getAttribute('data-testid')?.startsWith('product-tile-')
       ? within(button).getByText(/^(Apple|Zebra)$/).textContent : ['user-menu', 'view-toggle-table', 'product-settings-button', 'catalogue-sync', 'cart-settings-button', 'cart-add-menu', 'customer-chip'].includes(button.dataset.testid ?? '') ? button.getAttribute('aria-label') : button.textContent))
-      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'Switch to table view', 'Product settings', 'In Stock', 'Sync products', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings']);
+      .toEqual(['Offline', 'Register ›', 'Account: admin@store.test', 'Switch to table view', 'Product settings', 'Sync products', 'In Stock', 'Apple', 'Zebra', 'Customer: Guest', 'Add to cart', 'Cart settings']);
     expect(screen.queryByTestId('cart-checkout')).toBeNull(); // the empty cart draws no foot (TallyUI 3.19.0)
     expect(screen.getByLabelText('Sales are up to date.').textContent).toBe('Sales are up to date.');
     fireEvent.click(screen.getByTestId('product-tile-Apple'));
@@ -2570,5 +2571,334 @@ describe('ProductsScreen user sheet opened from an area', () => {
     expect(fixture.unbind).toHaveBeenCalledTimes(2);
     expect(router.dismissTo).not.toHaveBeenCalled();
     expect(tab(/^Cart/).getAttribute('aria-selected')).toBe('true');
+  });
+});
+
+// v2's pills beside In Stock, Medusa's way (ready item 17, AUDIT 3): On Sale (sale price lists), Tag and Collection,
+// kept per store on this device and applied by the app through Catalogue's `items`; `products` stays whole for codes.
+describe('ProductsScreen sale filter pills', () => {
+  const key = 'medusapos.sale-filters.https://store.test';
+  const organic = { id: 'ptag_organic', value: 'Organic' };
+  const seasonal = { id: 'ptag_seasonal', value: 'Seasonal' };
+  const fruit = { id: 'fruit', name: 'Fruit' };
+  const variant = (id: string, sku: string, more: Record<string, unknown> = {}) => ({ id: `${id}-one`, title: 'One size', sku,
+    manage_inventory: true, inventory_quantity: 5, prices: [{ amount: 10, currency_code: 'eur' }], ...more });
+  const doc = (id: string, title: string, sku: string, more: Record<string, unknown> = {}, variantMore: Record<string, unknown> = {}) =>
+    ({ id, title, status: 'published', variants: [variant(id, sku, variantMore)], ...more });
+  // A Medusa sale price list's calculated price: €8 from €10.
+  const onSale = { calculated_price: { currency_code: 'eur', original_amount: 10, calculated_amount: 8,
+    calculated_price: { price_list_type: 'sale' } } };
+  // Apple: Organic, Fruit, Featured, on sale. Banana: Organic, out of stock. Cherry: Seasonal, Fruit. Date: Organic.
+  // Elder: Featured, no tag.
+  const catalogue = [
+    doc('apple', 'Apple', 'APL-1', { tags: [organic], categories: [fruit], collection_id: 'pcol_featured' }, onSale),
+    doc('banana', 'Banana', 'BAN-1', { tags: [organic] }, { inventory_quantity: 0 }),
+    doc('cherry', 'Cherry', 'CHR-1', { tags: [seasonal], categories: [fruit] }),
+    doc('date', 'Date', 'DAT-1', { tags: [organic] }),
+    doc('elder', 'Elder', 'ELD-1', { collection_id: 'pcol_featured' }),
+  ];
+  const tiles = () => screen.queryAllByTestId(/^product-tile-/).map((tile) => tile.dataset.testid!.slice('product-tile-'.length));
+  const all = ['Apple', 'Banana', 'Cherry', 'Date', 'Elder'];
+  const pills = () => Array.from(screen.getByTestId('catalogue-rows').querySelectorAll('[data-testid^="filter-chip-"]'))
+    .map((el) => (el as HTMLElement).dataset.testid).filter((id) => !/-(remove|menu|search)$/.test(id!));
+  const pick = (chip: string, value: string) => {
+    fireEvent.click(screen.getByTestId(chip));
+    fireEvent.click(screen.getByTestId(`${chip}-${value}`));
+  };
+  const search = () => screen.getByRole('searchbox') as HTMLInputElement;
+  const type = (text: string) => fireEvent.change(search(), { target: { value: text } });
+  const stored = () => loadSaleFilters(localStorage, 'https://store.test');
+  // The collection titles come from Medusa's store API, read with the cached publishable key.
+  function stubCollections() {
+    saveCachedPricing(localStorage, 'https://store.test', pricing);
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => String(url).includes('/store/collections')
+      ? { ok: true, status: 200, json: async () => ({ collections: [{ id: 'pcol_featured', title: 'Featured' }] }) }
+      : Promise.reject(new TypeError('Failed to fetch'))));
+  }
+  const products = (list: unknown[]) => vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: list }));
+  beforeEach(() => { products(catalogue); });
+
+  it('draws In Stock once, then On Sale, Tag and Collection, under the header and above the grid', async () => {
+    stubCollections();
+    await mount();
+    await screen.findByTestId('filter-chip-group-collection');
+    expect(pills()).toEqual(['filter-chip-inStock', 'filter-chip-onSale', 'filter-chip-tag', 'filter-chip-group-collection']);
+    expect(screen.getAllByRole('button', { name: 'In Stock' })).toHaveLength(1);
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Tag');
+    expect(screen.getByTestId('filter-chip-group-collection').textContent).toBe('Collection');
+    expect(tiles()).toEqual(all);
+  });
+
+  it('draws only In Stock with no tag, no read collection and nothing on sale', async () => {
+    products([doc('plain', 'Plain', 'PLN-1', { collection_id: 'pcol_featured' })]);
+    await mount();
+    expect(pills()).toEqual(['filter-chip-inStock']);
+  });
+
+  it('draws Tag but not On Sale or Collection when only tags are there', async () => {
+    products([doc('date', 'Date', 'DAT-1', { tags: [organic] })]);
+    await mount();
+    expect(pills()).toEqual(['filter-chip-inStock', 'filter-chip-tag']);
+  });
+
+  it('On Sale narrows the grid to products on a sale price list, and a second press brings everything back', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('filter-chip-onSale'));
+    expect(screen.getByTestId('filter-chip-onSale').getAttribute('aria-pressed')).toBe('true');
+    expect(tiles()).toEqual(['Apple']);
+    expect(stored()).toEqual({ onSale: true, tag: null, collection: null });
+    fireEvent.click(screen.getByTestId('filter-chip-onSale'));
+    expect(tiles()).toEqual(all);
+    expect(stored().onSale).toBe(false);
+  });
+
+  it('a tag narrows the grid; its cross, or picking it again, brings everything back', async () => {
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Organic');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+    expect(stored().tag).toBe('ptag_organic');
+    fireEvent.click(screen.getByTestId('filter-chip-tag-remove'));
+    expect(tiles()).toEqual(all);
+    expect(stored().tag).toBeNull();
+    pick('filter-chip-tag', 'ptag_seasonal');
+    expect(tiles()).toEqual(['Cherry']);
+    pick('filter-chip-tag', 'ptag_seasonal');
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Tag');
+    expect(tiles()).toEqual(all);
+    expect(stored().tag).toBeNull();
+  });
+
+  it('a collection narrows the grid; its cross, or picking it again, brings everything back; it ANDs with a tag', async () => {
+    stubCollections();
+    await mount();
+    await screen.findByTestId('filter-chip-group-collection');
+    pick('filter-chip-group-collection', 'pcol_featured');
+    expect(screen.getByTestId('filter-chip-group-collection').textContent).toBe('Featured');
+    expect(tiles()).toEqual(['Apple', 'Elder']);
+    pick('filter-chip-tag', 'ptag_organic');
+    expect(tiles()).toEqual(['Apple']);
+    fireEvent.click(screen.getByTestId('filter-chip-tag-remove'));
+    expect(tiles()).toEqual(['Apple', 'Elder']);
+    fireEvent.click(screen.getByTestId('filter-chip-group-collection-remove'));
+    expect(tiles()).toEqual(all);
+    pick('filter-chip-group-collection', 'pcol_featured');
+    pick('filter-chip-group-collection', 'pcol_featured');
+    expect(tiles()).toEqual(all);
+    expect(stored()).toEqual({ onSale: false, tag: null, collection: null });
+  });
+
+  it('ANDs a tag with In Stock and with a category', async () => {
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    fireEvent.click(screen.getByRole('button', { name: 'In Stock', pressed: false }));
+    expect(tiles()).toEqual(['Apple', 'Date']);
+    fireEvent.click(screen.getByRole('button', { name: 'In Stock', pressed: true }));
+    fireEvent.click(screen.getByTestId('category-nav-fruit'));
+    expect(tiles()).toEqual(['Apple']);
+    fireEvent.click(screen.getByTestId('filter-chip-tag-remove'));
+    expect(tiles()).toEqual(['Apple', 'Cherry']);
+  });
+
+  it('keeps a search typed before a pick, and one typed after narrows further', async () => {
+    await mount();
+    type('e');
+    expect(tiles()).toEqual(['Apple', 'Cherry', 'Date', 'Elder']);
+    pick('filter-chip-tag', 'ptag_organic');
+    expect(search().value).toBe('e');
+    expect(tiles()).toEqual(['Apple', 'Date']);
+    type('ap');
+    expect(tiles()).toEqual(['Apple']);
+    type('');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+  });
+
+  it('keeps the picks across a remount, per store', async () => {
+    localStorage.setItem('medusapos.sale-filters.https://other.test', JSON.stringify({ onSale: true, tag: 'ptag_seasonal', collection: null }));
+    await mount();
+    expect(tiles()).toEqual(all);
+    pick('filter-chip-tag', 'ptag_organic');
+    cleanup();
+    await mount();
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Organic');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+    expect(JSON.parse(localStorage.getItem('medusapos.sale-filters.https://other.test')!))
+      .toEqual({ onSale: true, tag: 'ptag_seasonal', collection: null });
+    expect(JSON.parse(localStorage.getItem(key)!)).toEqual({ onSale: false, tag: 'ptag_organic', collection: null });
+  });
+
+  it('Clear and Refresh empties the search and keeps the picks', async () => {
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    fireEvent.click(screen.getByTestId('filter-chip-onSale'));
+    type('zzz');
+    expect(tiles()).toEqual([]);
+    fireEvent.contextMenu(screen.getByTestId('catalogue-sync'));
+    fireEvent.click(screen.getByTestId('catalogue-clear-refresh'));
+    expect(search().value).toBe('');
+    expect(tiles()).toEqual(['Apple']);
+    expect(stored()).toEqual({ onSale: true, tag: 'ptag_organic', collection: null });
+    fireEvent.click(screen.getByTestId('filter-chip-onSale'));
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+  });
+
+  it('keeps a stored tag no product has without applying it, and applies it once a product with it arrives', async () => {
+    localStorage.setItem(key, JSON.stringify({ onSale: true, tag: 'ptag_new', collection: 'pcol_gone' }));
+    const list = [doc('cherry', 'Cherry', 'CHR-1', { tags: [seasonal] }), doc('elder', 'Elder', 'ELD-1')];
+    products(list);
+    const view = await mount();
+    expect(tiles()).toEqual(['Cherry', 'Elder']);
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Tag');
+    expect(screen.queryByTestId('filter-chip-onSale')).toBeNull();
+    expect(stored()).toEqual({ onSale: true, tag: 'ptag_new', collection: 'pcol_gone' });
+    products([...list, doc('fig', 'Fig', 'FIG-1', { tags: [{ id: 'ptag_new', value: 'New' }] })]);
+    await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('New');
+    expect(tiles()).toEqual(['Fig']);
+  });
+
+  it('Enter on the code of a product the pick hides adds it once, and the grid goes back to the picked list', async () => {
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    type('CHR-1');
+    expect(tiles()).toEqual([]);
+    fireEvent.keyDown(search(), { key: 'Enter' });
+    expect(cartLineCells('Cherry')).toEqual(['1', 'Cherry', '€10.00', '€10.00']);
+    expect(screen.getAllByRole('button', { name: /^Edit quantity of / })).toHaveLength(1);
+    expect(search().value).toBe('');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+  });
+
+  it('a code below the scanner\'s minimum length stays a search', async () => {
+    saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars: 6 });
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    type('APL-1');
+    fireEvent.keyDown(search(), { key: 'Enter' });
+    expect(screen.queryByRole('button', { name: /^Edit quantity of / })).toBeNull();
+    expect(search().value).toBe('APL-1');
+    expect(tiles()).toEqual(['Apple']);
+  });
+
+  it('a tile tapped mid-search (a text of the scanner\'s length that is no code) adds it once and keeps the search', async () => {
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    type('appl');
+    expect(tiles()).toEqual(['Apple']);
+    fireEvent.click(screen.getByTestId('product-tile-Apple'));
+    expect(screen.getAllByRole('button', { name: /^Edit quantity of / })).toHaveLength(1);
+    expect(search().value).toBe('appl');
+    expect(tiles()).toEqual(['Apple']);
+  });
+
+  it('a tile tapped while its full code below the scanner\'s minimum length is searched keeps the search', async () => {
+    saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars: 6 });
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    type('APL-1');
+    expect(tiles()).toEqual(['Apple']);
+    fireEvent.click(screen.getByTestId('product-tile-Apple'));
+    expect(screen.getAllByRole('button', { name: /^Edit quantity of / })).toHaveLength(1);
+    expect(search().value).toBe('APL-1');
+    expect(tiles()).toEqual(['Apple']);
+  });
+
+  it('the table view takes the picks', async () => {
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    fireEvent.click(screen.getByTestId('view-toggle-table'));
+    expect(screen.queryAllByTestId(/^product-row-/).map((row) => row.dataset.testid))
+      .toEqual(['product-row-apple', 'product-row-banana', 'product-row-date']);
+  });
+
+  it('says no product matches the picked filters while the picks leave nothing and the search is empty', async () => {
+    await mount();
+    const note = 'No products match the picked filters.';
+    expect(screen.queryByText(note)).toBeNull();
+    fireEvent.click(screen.getByTestId('filter-chip-onSale'));
+    pick('filter-chip-tag', 'ptag_seasonal');
+    expect(tiles()).toEqual([]);
+    const shown = screen.getByText(note);
+    expect(screen.getByTestId('catalogue-rows').contains(shown)).toBe(true);
+    expect(shown.getAttribute('aria-live')).toBe('polite');
+    type('zzz');
+    expect(screen.queryByText(note)).toBeNull();
+    type('');
+    fireEvent.click(screen.getByTestId('filter-chip-tag-remove'));
+    expect(screen.queryByText(note)).toBeNull();
+    expect(tiles()).toEqual(['Apple']);
+  });
+
+  // Catalogue's box goes with it when it unmounts; the picked list must not stay searched by a text no longer shown.
+  const escape = () => act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+  const pickAndSearch = () => {
+    pick('filter-chip-tag', 'ptag_organic');
+    type('ap');
+    expect(tiles()).toEqual(['Apple']);
+  };
+  const searchGone = () => {
+    expect(search().value).toBe('');
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Organic');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+  };
+
+  it('a tender opened and cancelled (wide) empties the search and keeps the pick', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Date'));
+    pickAndSearch();
+    await checkout();
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    escape();
+    searchGone();
+  });
+
+  it('a sale paid, then New sale from the receipt (wide), empties the search and keeps the pick', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Date'));
+    pickAndSearch();
+    await payByCard();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
+    fireEvent.click(screen.getByRole('button', { name: 'New sale' }));
+    searchGone();
+  });
+
+  it('on the phone, Products, Cart and Products again empties the search and keeps the pick', async () => {
+    setWindowWidth(360);
+    await mount();
+    pickAndSearch();
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
+    expect(screen.queryByRole('searchbox')).toBeNull();
+    fireEvent.click(screen.getByRole('tab', { name: 'Products' }));
+    searchGone();
+  });
+
+  it('a phone window widened empties the search and keeps the pick', async () => {
+    setWindowWidth(360);
+    await mount();
+    pickAndSearch();
+    act(() => setWindowWidth(1280));
+    expect(screen.queryByRole('tab', { name: 'Products' })).toBeNull();
+    searchGone();
+  });
+
+  it('a search typed with no pick, then a tender opened and cancelled, leaves a later pick unsearched', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Date'));
+    type('ap');
+    expect(tiles()).toEqual(['Apple']);
+    await checkout();
+    escape();
+    expect(search().value).toBe('');
+    expect(tiles()).toEqual(all);
+    pick('filter-chip-tag', 'ptag_organic');
+    expect(tiles()).toEqual(['Apple', 'Banana', 'Date']);
+  });
+
+  it('opens with no pick on a corrupt stored value', async () => {
+    localStorage.setItem(key, '{"onSale": tru');
+    await mount();
+    expect(tiles()).toEqual(all);
+    expect(screen.getByTestId('filter-chip-onSale').getAttribute('aria-pressed')).toBe('false');
+    expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Tag');
   });
 });
