@@ -6,8 +6,8 @@ import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  Catalogue, CustomerDropdown, IconButton, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
-  DEFAULT_PRODUCT_FILTERS, type ProductFilters,
+  Catalogue, CustomerDropdown, IconButton, ProductFilterBar, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
+  DEFAULT_PRODUCT_FILTERS, type ProductFilterChip, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
 import {
@@ -65,6 +65,9 @@ import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settin
 import { usePrinterProfiles } from '../lib/printers';
 import { isStoredOpensDrawer, useCashDrawerOnSale } from '../lib/thermal-printing';
 import { useProductSettings } from '../lib/product-settings';
+import { useProductCollections } from '../lib/product-collections';
+import { listProductCollections, listProductTags, productCollectionIds } from '../lib/products-area';
+import { isOnSale, loadSaleFilters, saleFilterItems, saveSaleFilters, type SaleFilters } from '../lib/sale-filters';
 import { RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
@@ -163,11 +166,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
   // Clear and Refresh (v2): the search is Catalogue's own state, so a new key empties it; the filters go back to the start.
   const [catalogueKey, setCatalogueKey] = useState(0);
+  // Catalogue's search text, tracked so the app's own pick filtering keeps it (Catalogue does not report a cleared box).
+  const [query, setQuery] = useState('');
   // Stable, so the published snapshot (the Products area's sync arrow) does not change every render.
   const clearCatalogue = useCallback(() => {
     clearAndRefresh();
     setFilters({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
     setCatalogueKey((key) => key + 1);
+    setQuery('');
   }, [clearAndRefresh]);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
@@ -358,6 +364,47 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const openRegister = () => { if (registerStatus === 'open') openUserSheet(); else setPanelOpen(true); };
   // v2's phone has no register row (row 17a): every state the wide header names shows in the phone header instead.
   const headerRegisterState = phone && sale.stage.kind !== 'tender' ? wideRegisterState(boundRegisterId, online, register) : null;
+  // v2's pills beside In Stock, Medusa's way: sale price lists, product tags and product collections (no Featured or
+  // Brand). Kept per store on this device; Catalogue cannot apply or seed them (TallyUI#1352, #1238), so the app passes
+  // `items` while one applies. A stored pick with no pill to show it is kept but not applied, as a stored category is.
+  const [saleFilters, setSaleFilters] = useState(() => loadSaleFilters(defaultStorage(), session.baseUrl));
+  const changeSaleFilters = (change: Partial<SaleFilters>) => {
+    const next = { ...saleFilters, ...change };
+    setSaleFilters(next);
+    saveSaleFilters(defaultStorage(), session.baseUrl, next);
+  };
+  const tags = useMemo(() => listProductTags(sorted), [sorted]);
+  const collectionIds = useMemo(() => productCollectionIds(sorted), [sorted]);
+  const collectionTitles = useProductCollections(session.baseUrl, collectionIds);
+  const collections = useMemo(() => listProductCollections(sorted, collectionTitles), [sorted, collectionTitles]);
+  const anyOnSale = useMemo(() => sorted.some((doc) => isOnSale(doc, traits, pricing.currency)), [sorted, traits, pricing.currency]);
+  const onSale = anyOnSale && saleFilters.onSale;
+  const tag = tags.some(({ id }) => id === saleFilters.tag) ? saleFilters.tag : null;
+  const collection = collections.some(({ id }) => id === saleFilters.collection) ? saleFilters.collection : null;
+  const items = useMemo(() => onSale || tag !== null || collection !== null
+    ? saleFilterItems(sorted, { traits, currency: pricing.currency, picks: { onSale, tag, collection },
+      categoryId: viewState.categoryId, query, inStock: filters.inStock, sort: viewState.sort }) : undefined,
+  [sorted, traits, pricing.currency, onSale, tag, collection, viewState.categoryId, query, filters.inStock, viewState.sort]);
+  // Picking the picked term again takes it off, as its cross does.
+  const toggled = (current: string | null, next: string | undefined) => (next === undefined || next === current ? null : next);
+  const chips: ProductFilterChip[] = ['inStock', ...anyOnSale ? ['onSale' as const] : [], ...tags.length ? ['tag' as const] : []];
+  const filterRow = <>
+    <ProductFilterBar value={{ ...filters, onSale }} chips={chips} onChange={(next) => {
+      if (next.inStock !== filters.inStock) setFilters({ ...filters, inStock: next.inStock });
+      if (next.onSale !== onSale) changeSaleFilters({ onSale: next.onSale });
+    }} terms={{ tag: { options: tags.map(({ id, value }) => ({ value: id, label: value })), value: tag ?? undefined,
+      onChange: (next) => changeSaleFilters({ tag: toggled(tag, next) }) } }}
+      termGroups={collections.length ? [{ id: 'collection', label: 'Collection', searchPlaceholder: 'Search collections',
+        options: collections.map(({ id, value }) => ({ value: id, label: value })), value: collection ?? undefined,
+        onChange: (next) => changeSaleFilters({ collection: toggled(collection, next) }) }] : undefined} />
+    {items?.length === 0 && !query.trim() ? <Text accessibilityLiveRegion="polite" className="text-sm text-muted-foreground">
+      No products match the picked filters.</Text> : null}
+  </>;
+  // Enter on a code (from the scanner's minimum length) adds it and empties Catalogue's box without reporting it.
+  const selectEntry = (entry: Parameters<typeof add>[0]) => {
+    if (query.trim().length >= scannerSettings.minChars && findEntryByCode(entries, query)?.variant.id === entry.variant.id) setQuery('');
+    return add(entry);
+  };
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
     showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
@@ -372,9 +419,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       aria-disabled={dimmed} style={{ opacity: dimmed ? 0.5 : 1 }}>
     <Catalogue key={catalogueKey} products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={statusAccessory}
+      onSelect={selectEntry} onQueryChange={setQuery} items={items} rowsSlot={filterRow} statusText={statusText} statusAccessory={statusAccessory}
       searchAccessory={productSettingsButton} showViewToggle={!phone} showCategoryNav
-      showFilterBar filters={filters} onFiltersChange={setFilters}
+      showFilterBar filterChips={[]} filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
       onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn && !counting}
       cameraScanner={{ onDetected: camera.offer, onOpen: camera.reset, scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />

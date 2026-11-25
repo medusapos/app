@@ -92,7 +92,7 @@ export function listProductTags(products: readonly unknown[]): ProductTag[] {
 }
 
 /** The Medusa product's `collection_id`, or null when it is missing, empty or not a string. */
-function productCollectionId(doc: unknown): string | null {
+export function productCollectionId(doc: unknown): string | null {
   const id = (doc as { collection_id?: unknown } | null)?.collection_id;
   return typeof id === 'string' && id !== '' ? id : null;
 }
