@@ -168,13 +168,15 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       // Every refund of the order already started counts, so a refund still running or parked is never priced twice. The
       // order is read again under the lock, so its refunded money includes a refund that finished while this one waited.
       const earlier = await trx('tally_refund').where({ order_id: order.id }).whereIn('status', COUNTED_REFUND_STATUSES)
-        .select('lines', 'shipping_minor', 'refunds', 'total_minor', 'medusa_refund_id') as RefundRow[]
+        .select('command_id', 'lines', 'shipping_minor', 'refunds', 'total_minor', 'medusa_refund_id') as RefundRow[]
       const current = await loadRefundOrder(container, order.id) ?? order
       const recorded = current.payment ? await recordedRefundsMinor(trx, order, current.payment.id) : 0
       const price = priceRefund({ lines: current.lines, linesMoneyMinor: current.linesMoneyMinor, shippingMinor: current.shippingMinor,
         earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor), medusaRefundId: entry.medusa_refund_id })),
         paidMinor: current.payment?.amountMinor ?? null,
         outsideRefundsMinor: current.payment ? Math.max(0, current.payment.refundedMinor - recorded) : 0,
+        unrecorded: earlier.filter(entry => entry.medusa_refund_id === null && Number(entry.total_minor) > 0)
+          .map(entry => ({ commandId: entry.command_id, totalMinor: Number(entry.total_minor) })),
         refundableMoneyMinor: current.payment ? current.payment.amountMinor - current.payment.refundedMinor
           - earlier.filter(entry => entry.medusa_refund_id === null).reduce((sum, entry) => sum + Number(entry.total_minor), 0) : null, request: payload })
       if (price.ok === false) return { outcome: rejected(id, price.error.code, price.error.message, price.error.data), keepClaim: false }

@@ -41,7 +41,7 @@ export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments']
   if (covered || (largest && largest.taxMinor + difference >= 0)) linesMinor = remainderMinor;
   if (linesMinor + shippingMinor === 0) return { offered: false, reason: 'nothing' };
   // #547: earlier refunds carry no lines here, so the offer is capped at what is left; the plugin accepts that figure when
-  // the overrun is earlier goodwill and refuses lines or shipping already taken.
+  // the overrun is earlier goodwill recorded at a till or baselined and refuses lines or shipping already taken.
   const leftMinor = paidMinor - sum(order.refunds.map((entry) => entry.amountMinor));
   const totalMinor = Math.min(linesMinor + shippingMinor, leftMinor);
   // #569: the plugin takes an overrun off the lines only while overMinor <= linesMinor; a bigger one is refused every time.

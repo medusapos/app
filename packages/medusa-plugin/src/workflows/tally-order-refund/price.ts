@@ -70,6 +70,8 @@ export interface PriceRefundInput {
   paidMinor: number | null
   /** Medusa's refunds beyond what the tally rows and baselines record (made outside the till); 0 when there is no payment. */
   outsideRefundsMinor: number
+  /** Earlier till refunds of this order with no medusa_refund_id and a total above 0: their money may be in Medusa's refunded figure. */
+  unrecorded: { commandId: string; totalMinor: number }[]
   /** The payment less Medusa's refunds and earlier refunds not yet sent; null when the order has no payment. */
   refundableMoneyMinor: number | null
   request: Pick<OrderRefundPayload, 'lines' | 'shippingMinor' | 'adjustmentMinor' | 'totalMinor'>
@@ -79,6 +81,13 @@ export interface PriceRefundInput {
 export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedLine[]; totalMinor: number } | { ok: false; error: RefundRefusal } {
   const { request } = input
   // #547 (desk 2026-11-24): refused before any pricing, so the clamp serves recorded goodwill only and no return is requested.
+  // #571: when the till's own unrecorded refunds cover the figure, the operator finishes those with tally-ledger-resolve instead.
+  const commandIds = input.unrecorded.map(entry => entry.commandId)
+  if (input.outsideRefundsMinor > 0 && input.outsideRefundsMinor <= input.unrecorded.reduce((sum, entry) => sum + entry.totalMinor, 0)) {
+    return { ok: false, error: { code: 'order_state', message: `An earlier refund of this order moved money but is not recorded yet (command ${
+      commandIds.join(', ')}). Finish it with tally-ledger-resolve <command> apply <medusaRefundId>, or resume, then refund again.`,
+      data: { reason: 'refund_pending_resolve', outsideMinor: input.outsideRefundsMinor, commandIds } } }
+  }
   if (input.outsideRefundsMinor > 0) return { ok: false, error: { code: 'order_state', message:
     'This order has a refund made outside the till (Medusa shows more refunded than the till recorded). Finish it in Medusa Admin.',
     data: { reason: 'refunded_outside_till', outsideMinor: input.outsideRefundsMinor } } }

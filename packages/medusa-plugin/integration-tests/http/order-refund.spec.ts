@@ -252,7 +252,7 @@ medusaIntegrationTestRunner({
       await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'goodwill in Admin' } })
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
-      // An admin's own refund is baselined, or the till refund parks refund_unrecorded (I9).
+      // An admin's own refund is baselined; one with no baseline is refused up front (I9).
       await refundsScript('baseline', till.orderId, hand.id, 'goodwill', 'in', 'Admin')
       const over = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID() })
       expect((await post([over])).data.results).toEqual([{ id: over.id, status: 'rejected', error: { code: 'amount_mismatch',
@@ -1285,7 +1285,8 @@ medusaIntegrationTestRunner({
       expect((await medusaRefunds(till.orderId)).map(entry => entry.amount)).toEqual([1.18, 1.18])
     })
 
-    it('N3-double-subtraction: a refund_unrecorded row whose money moved is refused up front, never priced against the cap (#547)', async () => {
+    // #571: a till refund whose money moved but has no medusa_refund_id is named for tally-ledger-resolve, not sent to Admin.
+    const pendingRefusal = async (resumeFirst: boolean) => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       const original = workflow.moneyStep
@@ -1295,8 +1296,10 @@ medusaIntegrationTestRunner({
       })
       const first = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
       expect((await post([first])).data).toEqual({ code: 'in_progress', id: first.id })
-      await resolve(first.id, 'resume')
-      expect(await commandRow(first.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'refund_unrecorded' } })
+      if (resumeFirst) {
+        await resolve(first.id, 'resume')
+        expect(await commandRow(first.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'refund_unrecorded' } })
+      }
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       expect(await knex('tally_refund').where({ command_id: first.id }).first()).toMatchObject({ medusa_refund_id: null })
       const beforeReturns = await returns(till.orderId)
@@ -1304,10 +1307,19 @@ medusaIntegrationTestRunner({
       const last = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(),
         lines: till.full.payload.lines.slice(1), totalMinor: 235 })
       expect((await post([last])).data.results).toEqual([{ id: last.id, status: 'rejected', error: { code: 'order_state',
-        message: outsideMessage, data: { reason: 'refunded_outside_till', outsideMinor: 118 } } }])
+        message: `An earlier refund of this order moved money but is not recorded yet (command ${first.id}). Finish it with tally-ledger-resolve <command> apply <medusaRefundId>, or resume, then refund again.`,
+        data: { reason: 'refund_pending_resolve', outsideMinor: 118, commandIds: [first.id] } } }])
       expect(await knex('tally_refund').where({ command_id: last.id }).first()).toBeUndefined()
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
       expect(await returns(till.orderId)).toEqual(beforeReturns)
+    }
+
+    it('N3-double-subtraction: a refund_unrecorded row whose money moved is refused up front, never priced against the cap (#547, #571)', async () => {
+      await pendingRefusal(true)
+    })
+
+    it('N3-crashed: a row whose run crashed after its money moved names that refund, not Admin (#571)', async () => {
+      await pendingRefusal(false)
     })
 
     it('T-counting-apply: apply in a counting session without a closure records one Medusa refund and counts it', async () => {
