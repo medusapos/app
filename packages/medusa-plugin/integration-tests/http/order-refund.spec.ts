@@ -698,12 +698,47 @@ medusaIntegrationTestRunner({
     // #543 round 2: an open tagged return is reused only while its active request change is empty.
     const activeChanges = (knex: any, returnId: string) => knex('order_change')
       .where({ return_id: returnId }).whereIn('status', ['pending', 'requested']).whereNull('deleted_at')
-    it('R2-no-change: a tagged return left without an active change (death inside the begin) is not reused; a second return finishes the refund', async () => {
+    it('R2-no-change: a tagged return left without an active change (death inside the begin) is cancelled; a second return finishes the refund', async () => {
       const { before, till, order, knex, row, begun } = await crashed()
       const ids = await activeChanges(knex, begun.id).pluck('id')
       expect(ids).toHaveLength(1)
       await knex('order_change_action').whereIn('order_change_id', ids).delete()
       await knex('order_change').whereIn('id', ids).delete()
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      const recorded = await knex('tally_refund').where({ id: row.id }).first()
+      expect(recorded).toMatchObject({ status: 'applied' })
+      expect(recorded.return_id).not.toBe(begun.id)
+      expect(await returns(till.orderId)).toEqual(expect.arrayContaining([expect.objectContaining({ id: begun.id, status: 'canceled' }),
+        expect.objectContaining({ id: recorded.return_id, status: 'received' })]))
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
+    })
+
+    // #565b: the orphan of R2-no-change, made by crashed() with its active change deleted.
+    async function orphaned() {
+      const crash = await crashed()
+      const ids = await activeChanges(crash.knex, crash.begun.id).pluck('id')
+      await crash.knex('order_change_action').whereIn('order_change_id', ids).delete()
+      await crash.knex('order_change').whereIn('id', ids).delete()
+      return crash
+    }
+
+    it('O1-cancel-fails-parks: an orphan whose cancel throws parks at the return step; no second return, no money, no stock', async () => {
+      const { till, workflow, order, knex, row, begun } = await orphaned()
+      const stock = await stockA()
+      jest.spyOn(workflow, 'cancelOrphanReturn').mockRejectedValueOnce(new Error('orphan cancel probe'))
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'return',
+        message: expect.stringMatching(new RegExp(`${begun.id}.*orphan cancel probe`)) } })
+      expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', return_id: null })
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'open' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+    })
+
+    it('O2-other-tag: an open return with no items and no change tagged with another row is never cancelled; the retry behaves as today', async () => {
+      const { before, till, order, knex, row, begun } = await orphaned()
+      await knex('return').where({ id: begun.id }).update({ metadata: { tally_refund_id: 'tref_someone_else' } })
       expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
       const recorded = await knex('tally_refund').where({ id: row.id }).first()
       expect(recorded).toMatchObject({ status: 'applied' })
