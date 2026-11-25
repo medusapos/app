@@ -33,9 +33,9 @@ export function takeLeg(method: 'cash' | 'external', amount: string) {
   take();
 }
 
-/** The ledger's payment legs as "<method title> <amount>", e.g. "Card terminal €15.00" (each leg's status left out). */
+/** The ledger's payment legs as "<method title> <amount>", e.g. "Card terminal €15.00" (each leg's status and time left out). */
 export function tenderLegs() {
-  return screen.queryAllByTestId(/^tender-leg-/).filter((row) => !/-(status|void)$/.test(row.getAttribute('data-testid')!))
+  return screen.queryAllByTestId(/^tender-leg-/).filter((row) => !/-(status|void|time)$/.test(row.getAttribute('data-testid')!))
     .map((row) => Array.from(row.children[0].children).slice(0, 2).map((cell) => cell.textContent).join(' '));
 }
 
