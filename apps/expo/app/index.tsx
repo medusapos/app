@@ -11,7 +11,7 @@ import {
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
 import {
-  capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, useParkedSales, useSale,
+  capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, REGISTER_CLOSING, saleLogger, SALE_SAVING, summarizeOutboxHealth, useParkedSales, useSale,
   normalizeCatalogueViewState, useCameraScan, type CatalogueViewState,
 } from '@tallyui/pos';
 
@@ -50,6 +50,7 @@ import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
 import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
 import { sortCartLines, useCartSettings } from '../lib/cart-settings';
+import { changeDueMinor } from '../lib/change-due';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { loadCustomerAddresses } from '../lib/customer-billing';
@@ -166,7 +167,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { parked } = useParkedSales(drafts);
   const [ordersListOpen, setOrdersListOpen] = useState(false);
   const [switchRefusal, setSwitchRefusal] = useState<string | null>(null);
-  const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
+  // TallyUI refuses a switch during a close by useSale's registerId, this till's device id, never the register's: so the
+  // app's own guard, or a sale parked mid-close is in neither the close's drafts read nor its live-sale read.
+  const switchTo = (id: string | null) => register.closing ? setSwitchRefusal(REGISTER_CLOSING) : void sale.switchSale(id).then(setSwitchRefusal);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
@@ -497,7 +500,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
   const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
   const wide = width >= ROW_BREAKPOINT;
-  const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || sale.stage.order.changeDueMinor > 0);
+  const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || changeDueMinor(sale.stage.order) > 0);
   // Settings shows printers only in a browser, so the paid screen's pickers are there alone (and a thermal choice with them).
   const pickers = Platform.OS === 'web';
   const paper = pickers ? RECEIPT_TEMPLATES.find((t) => t.id === receiptTemplateId)?.paper : undefined;

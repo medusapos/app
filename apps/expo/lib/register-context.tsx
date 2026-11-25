@@ -1,16 +1,16 @@
-import { createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 import type { RxCollection } from 'rxdb';
 import type { AnyCommandEnvelope } from '@tallyui/core';
 import {
   bindRegister, createHttpCommandTransport, getBoundRegisterId, observeRegister$, unbindRegister, useRegisterOutbox, useRegisterSession, type CommandTransport, type PosOrder,
-  type UseRegisterOutboxResult,
+  type UseRegisterOutboxResult, type useSale,
 } from '@tallyui/pos';
 import { version as appVersion } from '../package.json';
 import { loadApprovers, VARIANCE_THRESHOLD_MINOR } from './approval';
 import { storeConfig } from './config';
 import { demoRegisterFor, isDemoAccount } from './demo';
-import { refundsCollection, registerCollections, type RegisterCollections } from './order-store';
+import { draftsCollection, refundsCollection, registerCollections, type RegisterCollections } from './order-store';
 import { refusedForPosAccess } from './pos-access';
 import { authHeaders } from './pos-connector';
 import { defaultStorage } from './session';
@@ -50,6 +50,9 @@ export type RegisterContextValue = {
   unbind(): Promise<void>;
   /** The sale screen reports its tender here: counting and closing refuse while a sale is at tender. */
   setTenderInProgress(inProgress: boolean): void;
+  /** The sale screen registers its live sale's `registerView` here (TallyUI 5.0.0 S3), so its taken legs count in their
+   *  session's expected cash and Z; returns the clean-up, which clears only this registration. */
+  setLiveSale(view: LiveSaleView): () => void;
   /** The app's closes (ADR 0018), kept here so they outlive the cart view that started them (a phone's, #89 review). */
   close: CloseFlow;
 };
@@ -65,6 +68,7 @@ export type CloseFlow = {
   error: string;
 };
 type CloseSession = ReturnType<typeof useRegisterSession>['actions']['closeSession'];
+type LiveSaleView = () => ReturnType<ReturnType<typeof useSale>['registerView']>;
 
 type Bound = { collections: RegisterCollections; storeKey: string; id: string | null; name: string | null };
 
@@ -114,11 +118,19 @@ export function RegisterProvider({ orders, deviceId, demo = storeConfig.demo, ch
   }, [demoRegister?.id, collections, read, storeKey]);
   const [tenderInProgress, setTenderInProgress] = useState(false);
   const { tillName } = useTillName(defaultStorage(), storeKey);
+  // The mounted sale screen's registerView, read when the figures are derived. Not cleared on a change of store: each
+  // leg carries its own sessionId, and a session counts only its own.
+  const liveSale = useRef<LiveSaleView | null>(null);
+  const setLiveSale = useCallback((view: LiveSaleView) => {
+    liveSale.current = view;
+    return () => { if (liveSale.current === view) liveSale.current = null; };
+  }, []);
   const register = useRegisterSession({
     sessions: collections?.sessions ?? null, movements: collections?.movements ?? null, closures: collections?.closures ?? null,
     commands: collections?.commands ?? null, capabilities: session?.capabilities,
     deviceName: tillName ?? getDeviceName(),
-    orders,
+    orders, drafts: draftsCollection(orders) ?? null,
+    liveSale: () => liveSale.current?.() ?? { takenLegs: [], saving: false },
     // ADR 0026 "Expected per tender": applied refunds leave expected cash, the strip's cash refunds and the closure.
     refunds: refundsCollection(orders) ?? null,
     register: collections?.sessions ?? null,
@@ -174,7 +186,7 @@ export function RegisterProvider({ orders, deviceId, demo = storeConfig.demo, ch
     async unbind() {
       if (collections) await unbindRegister(collections.sessions, storeKey);
     },
-    setTenderInProgress,
+    setTenderInProgress, setLiveSale,
     close,
   };
   return <RegisterContext.Provider value={value}>{children}</RegisterContext.Provider>;

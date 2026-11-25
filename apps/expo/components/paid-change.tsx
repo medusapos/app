@@ -5,6 +5,7 @@ import { Path } from 'react-native-svg';
 import { Text, createSvgIcon } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { capturedMinor, type PosOrder, type SentOrder } from '@tallyui/pos';
+import { changeDueMinor } from '../lib/change-due';
 
 const TickIcon = createSvgIcon('TickIcon', () => <Path d="M5 12l5 5l10 -10" />);
 
@@ -23,7 +24,7 @@ export function PaidChange({ order, posOrder }: { order: SentOrder; posOrder: Po
       <TickIcon size={40} strokeWidth={3} />
     </View>
     <Text testID="paid-change-figure" accessibilityRole="header" className="text-5xl font-bold text-foreground">
-      {`Change ${money(order.changeDueMinor)}`}
+      {`Change ${money(changeDueMinor(order))}`}
     </Text>
     <Text testID="paid-change-tendered" className="text-muted-foreground">
       {`Paid ${money(capturedMinor(posOrder.payments))} · tendered ${money(tenderedMinor)} in cash`}

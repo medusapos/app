@@ -42,7 +42,7 @@ export function openCartsWarning(count: number): string | null {
  * #170, #172). Also reports the tender to the register.
  */
 export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null } {
-  const { register, setTenderInProgress } = useRegister();
+  const { register, setTenderInProgress, setLiveSale } = useRegister();
   const latest = useRef(sale);
   latest.current = sale;
   const [refused, setRefused] = useState<string | null>(null);
@@ -53,6 +53,8 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
   const tender = sale.stage.kind === 'tender';
   useEffect(() => setTenderInProgress(tender), [tender, setTenderInProgress]);
   useEffect(() => () => setTenderInProgress(false), [setTenderInProgress]);
+  // TallyUI 5.0.0 S3: the live sale's taken legs count in their session's expected cash and Z, read through `latest`.
+  useEffect(() => setLiveSale(() => latest.current.registerView()), [setLiveSale]);
   const startTender = (method: 'cash' | 'external') => {
     if (checking.current) return;
     // Before the order store opens there is no session to check, nor one to stamp the sale with.

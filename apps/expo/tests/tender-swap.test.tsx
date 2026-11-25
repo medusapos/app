@@ -148,8 +148,8 @@ it('after a cash part payment the tender summary lists it under Payments with To
   expect(cash.textContent).toContain('Cash');
   expect(cash.textContent).toContain('€5.00');
   expect(summary.getByTestId(`${cashId}-status`).textContent).toBe('Captured');
-  // An open sale's cash leg carries no tendered or change until the sale is completed.
-  expect(summary.queryByTestId(`${cashId}-tendered`)).toBeNull();
+  // 5.0.0 stamps tendered and change on a cash leg at Take (pos use-sale.ts:961-993), so an open sale's leg shows them.
+  expect(summary.getByTestId(`${cashId}-tendered`).textContent).toBe('Tendered €5.00 · change €0.00');
   expect(summary.getByTestId('summary-total').textContent).toBe('Total€24.00');
   expect(summary.getByTestId('summary-paid').textContent).toBe('Paid€5.00');
   expect(summary.getByTestId('summary-remaining').textContent).toBe('Remaining€19.00');
@@ -169,7 +169,7 @@ it('after a cash part payment the tender summary lists it under Payments with To
 }, 15000);
 
 // The keypad tender pane's steps exceed the 5 s default on CI runners.
-it('an overpaid cash payment shows Paid above the total, Remaining €0.00 and the Change row', async () => {
+it('an overpaid cash payment shows Paid at the total, Remaining €0.00 and the Change row', async () => {
   await openTender();
   takeLeg('cash', '30.00');
   const summary = within(screen.getByTestId('tender-order-summary'));
@@ -178,7 +178,9 @@ it('an overpaid cash payment shows Paid above the total, Remaining €0.00 and t
   expect(rows[0].textContent).toContain('Cash');
   expect(rows[0].textContent).toContain('€30.00');
   expect(summary.getByTestId(`${rows[0].getAttribute('data-testid')}-status`).textContent).toBe('Captured');
-  expect(summary.getByTestId('summary-paid').textContent).toBe('Paid€30.00');
+  // 5.0.0 nets a cash leg at Take (pos use-sale.ts:961-993): 24.00 applied, tendered 30.00, change 6.00 on the leg.
+  expect(summary.getByTestId(`${rows[0].getAttribute('data-testid')}-tendered`).textContent).toBe('Tendered €30.00 · change €6.00');
+  expect(summary.getByTestId('summary-paid').textContent).toBe('Paid€24.00');
   expect(summary.getByTestId('summary-remaining').textContent).toBe('Remaining€0.00');
   expect(summary.getByTestId('summary-change').textContent).toBe('Change€6.00');
 }, 15000);

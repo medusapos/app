@@ -174,8 +174,9 @@ describe('sale', () => {
     keyIn('50.00');
     expect(tenderEntry()).toBe(money(5000));
     take();
-    expect(sale.order.changeDueMinor).toBe(625);
-    expect(screen.getByTestId('tender-change').textContent).toBe(`Change ${money(sale.order.changeDueMinor)}`);
+    // TallyUI 5.0.0 records a cash leg net at Take, its change on the leg (use-sale.ts addTender: amountMinor = min(entry, due)).
+    expect(sale.order.payments[0]).toMatchObject({ amountMinor: 4375, tenderedMinor: 5000, changeMinor: 625 });
+    expect(screen.getByTestId('tender-change').textContent).toBe(`Change ${money(625)}`);
     await act(async () => { click('Complete sale'); });
     expect(sale.stage.kind).toBe('receipt');
     expect(screen.getByLabelText(`Change: ${money(625)}`)).toBeTruthy();
@@ -232,11 +233,15 @@ describe('sale', () => {
     keyIn('50.00');
     take();
     expect(captured()).toHaveLength(1);
-    expect(captured()[0].amountMinor).toBe(5000);
+    // TallyUI 5.0.0 use-sale.ts addTender: the cash leg is net (the due), the keyed 50.00 is its tenderedMinor.
+    expect(captured()[0]).toMatchObject({ amountMinor: 4375, tenderedMinor: 5000, changeMinor: 625 });
     expect(sale.error).toBeNull();
+    // TallyUI 5.0.0 tender-pane.tsx:328: Back with a taken leg opens the cancel view; Cancel and void voids it
+    // (cancel-payment-view.tsx:75), and a voided leg stays on the ledger.
     click('Back');
+    click('Cancel and void');
     expect(sale.stage.kind).toBe('cart');
-    expect(sale.order.payments).toEqual([]);
+    expect(captured()).toEqual([]);
     expect(sale.order.balanceDueMinor).toBe(sale.order.totalMinor);
   }, 15_000);
 
