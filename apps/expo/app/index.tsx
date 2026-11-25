@@ -63,6 +63,7 @@ import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
 import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
 import { usePrinterProfiles } from '../lib/printers';
+import { isStoredOpensDrawer, useCashDrawerOnSale } from '../lib/thermal-printing';
 import { useProductSettings } from '../lib/product-settings';
 import { RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
@@ -143,7 +144,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useFrameBadge('orders', attentionCount);
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
-  // the outbox confirms the order is stored.
+  // the outbox confirms the order is stored; that yes also opens the cash drawer, as Continue never reaches the receipt.
+  const drawerIsStored = useMemo(() => isStoredOpensDrawer(isStored, orders), [isStored, orders]);
   // `session`: complete() stamps the sale with the register session (ADR 0017). The Cart's tender start
   // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
   // close during the tender still reaches the stamp, which then makes the sale late.
@@ -188,7 +190,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     }
   }, [recent, session.baseUrl, session.email]);
   const sale = useSale(pricing, { defaultCustomer: saleDefaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
-    discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
+    discountCodes, isStored: drawerIsStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
     } });
@@ -298,6 +300,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
   useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
     undefined, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
+  // A cash sale opens the drawer of a network printer with Open Cash Drawer on, once per sale, never from a reprint.
+  useCashDrawerOnSale(sale.stage, orders);
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
