@@ -17,7 +17,8 @@ import { clientTimeStageErrors } from '../client-time'
 import { refundPayloadErrors } from './payload-shape'
 import { connectorSplit, medusaSumMinor, priceRefund, refundMoneyMinor, type PricedLine, type RefundableLine } from './price'
 import { splitRefund, type SplitEntry, type TillTender } from './split'
-import { beginReturn, cancelReturn, findOwnOpenReturn, moneyStep, receiveStep, requestReturn } from './workflow'
+import { beginReturn, cancelOrphanReturn, cancelReturn, findOrphanReturns, findOwnOpenReturn, moneyStep, receiveStep,
+  requestReturn } from './workflow'
 import { moveOrderRefund } from './admin'
 
 type Raw = { value: string }
@@ -238,6 +239,20 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
       // A run that died between the begin and the record left its tagged return open: record that one, never a second.
       await probe(ctx.trx, order.id)
       let returnId = await findOwnOpenReturn(container, { orderId: order.id, refundRowId: row.id })
+      // A death inside the begin left an orphan the request cannot run on: cancel it, so Admin never shows it open.
+      if (!returnId) {
+        await probe(ctx.trx, order.id)
+        for (const orphanId of await findOrphanReturns(container, { orderId: order.id, refundRowId: row.id })) {
+          await probe(ctx.trx, order.id)
+          try {
+            await cancelOrphanReturn(container, { returnId: orphanId, actorId })
+          } catch (error) {
+            if (error instanceof LockLost) throw error
+            return await park('return', `orphan return ${orphanId} could not be cancelled: ${error.message}`)
+          }
+        }
+        await probe(ctx.trx, order.id)
+      }
       try {
         returnId ??= await beginReturn(container, { orderId: order.id, locationId: order.locationId, actorId, note: row.reason,
           refundRowId: row.id })
