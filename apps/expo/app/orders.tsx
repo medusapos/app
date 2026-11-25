@@ -85,7 +85,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
       </View> : null}
       {rows.length > 0
         ? <OrdersTable testID="orders-table" rowTestID="orders-row" rows={rows} formatDate={formatDate} onOpen={setOpenId}
-          onOpenStore={(order) => setOpenStoreId(order.id)} />
+          onOpenStore={(order) => setOpenStoreId(order.id)} billing={store.billing} days />
         : firstLoad ? null : <Text testID="orders-empty" className="text-muted-foreground">
           {narrowed ? ORDERS_NO_MATCH_TEXT : ORDERS_EMPTY_TEXT}</Text>}
       {firstLoad ? <Text testID="orders-loading" className="text-muted-foreground">{ORDERS_LOADING_TEXT}</Text> : null}

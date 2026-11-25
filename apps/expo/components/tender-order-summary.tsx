@@ -4,6 +4,7 @@ import { CartColumnHeads, CartLine, CartTotal } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { buildReceiptData, legStatus, type useSale } from '@tallyui/pos';
 import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
+import { changeDueMinor } from '../lib/change-due';
 import { SummaryPayments } from './summary-payments';
 
 export function TenderOrderSummary({ order, taxLabel }: {
@@ -40,7 +41,7 @@ export function TenderOrderSummary({ order, taxLabel }: {
       {legs.length > 0 && <View className="px-3 pb-3">
         <SummaryPayments testID="tender-summary-payments" currency={order.currency} totalMinor={totals.totalMinor}
           paidMinor={order.paidMinor} remainingMinor={order.balanceDueMinor}
-          changeMinor={order.changeDueMinor}
+          changeMinor={changeDueMinor(order)}
           payments={legs.map((payment) => ({ id: payment.id, amountMinor: payment.amountMinor, tenderedMinor: payment.tenderedMinor,
             changeMinor: payment.changeMinor, status: legStatus(payment),
             label: TILL_PAYMENT_METHODS.find((method) => method.id === payment.method)?.title ?? payment.method }))} />

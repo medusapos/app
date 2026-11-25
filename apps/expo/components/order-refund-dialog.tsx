@@ -27,7 +27,8 @@ function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'applied' }
   switch (outcome.kind) {
     // TallyUI exports no cashier text for refund codes, so the store's own message shows.
     case 'rejected': return outcome.error.message;
-    case 'unknown': return 'The store did not answer. Try again.';
+    // TallyUI 5.0.0 splits needs_admin out of unknown (send-order-refund.ts:27); both resend the same envelope.
+    case 'unknown': case 'needs_admin': return 'The store did not answer. Try again.';
     case 'refused': return `The store refused the refund (${outcome.reason}). Try again.`;
     case 'unauthorized': return 'Sign in again, then try again.';
   }

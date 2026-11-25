@@ -10,7 +10,8 @@ const noCost: Margin = { costedNetMinor: 0, costMinor: 0, profitMinor: 0, margin
 function figures(overrides: Partial<SalesFigures> = {}, margin: Margin = noCost): SalesFigures {
   return {
     range: { from: today, to: today },
-    totals: { grossMinor: 1200, netMinor: 1200, taxMinor: 0, discountMinor: 0, refundsMinor: 0, embeddedRefundsMinor: 0,
+    totals: { grossMinor: 1200, netMinor: 1200, taxMinor: 0, discountMinor: 0, refundsMinor: 0, embeddedRefundsMinor: 0, roundingMinor: 0, refundBasis: 'embedded',
+      grossAfterRefundsMinor: 1200,
       orderCount: 2, averageMinor: 600, items: 5, margin },
     payments: { rows: [], takenMinor: 0 }, products: [], categories: [], taxes: [],
     refunds: { count: 0, amountMinor: 0, orders: 0 }, series: [], ...overrides,

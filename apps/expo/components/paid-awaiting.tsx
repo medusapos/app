@@ -7,6 +7,7 @@ import { Text, createSvgIcon } from '@tallyui/components';
 import { formatMoney } from '@tallyui/core';
 import { capturedMinor, type OutboxState, type PosOrder, type SentOrder } from '@tallyui/pos';
 import { cashTenderedMinor } from './paid-change';
+import { changeDueMinor } from '../lib/change-due';
 
 const ClockIcon = createSvgIcon('ClockIcon', () => <>
   <Path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
@@ -36,7 +37,8 @@ export function useAwaitingStore(entry: Pick<PosOrder, 'id' | 'syncStatus'> | un
 export function PaidAwaiting({ order, posOrder }: { order: SentOrder; posOrder: PosOrder }): JSX.Element {
   const money = (amount: number) => formatMoney({ amount, currency: order.currency });
   const paid = money(capturedMinor(posOrder.payments));
-  const changeDue = order.changeDueMinor > 0;
+  const change = changeDueMinor(order);
+  const changeDue = change > 0;
   // As v2: the change stays the headline, and a sale with more than one payment ends the line with the count.
   const line = changeDue ? `Paid ${paid} · tendered ${money(cashTenderedMinor(posOrder.payments))} in cash`
     : paymentMethodsLabel(posOrder);
@@ -47,7 +49,7 @@ export function PaidAwaiting({ order, posOrder }: { order: SentOrder; posOrder: 
       <ClockIcon size={40} strokeWidth={2} />
     </View>
     <Text testID="paid-awaiting-figure" accessibilityRole="header" className="text-5xl font-bold text-foreground">
-      {changeDue ? `Change ${money(order.changeDueMinor)}` : `Paid ${paid}`}
+      {changeDue ? `Change ${money(change)}` : `Paid ${paid}`}
     </Text>
     <Text testID="paid-awaiting-status" className="text-muted-foreground">
       <Text className="text-warning">Awaiting store</Text>

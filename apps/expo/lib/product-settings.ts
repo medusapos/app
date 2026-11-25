@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
+import { DEFAULT_TILE_FIELDS, normalizeTileFields, type TileFields } from '@tallyui/pos';
 import type { SessionStorage } from './session';
 
-export type ProductSettings = { variations: 'list' | 'popover' };
-export const DEFAULT_PRODUCT_SETTINGS: ProductSettings = { variations: 'list' };
+export type ProductSettings = { variations: 'list' | 'popover'; tileFields: TileFields };
+export const DEFAULT_PRODUCT_SETTINGS: ProductSettings = { variations: 'list', tileFields: DEFAULT_TILE_FIELDS };
 const PREFIX = 'medusapos.product-settings.';
 
 export function loadProductSettings(storage: SessionStorage | null, baseUrl: string): ProductSettings {
   try {
     const value = JSON.parse(storage?.getItem(PREFIX + baseUrl) ?? 'null');
-    return value?.variations === 'list' || value?.variations === 'popover'
-      ? { variations: value.variations } : DEFAULT_PRODUCT_SETTINGS;
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return DEFAULT_PRODUCT_SETTINGS;
+    // Each field on its own: a value saved before Tile Fields ({"variations":"popover"}) keeps its variations.
+    return {
+      variations: value.variations === 'popover' ? 'popover' : 'list',
+      tileFields: normalizeTileFields(value.tileFields) ?? DEFAULT_TILE_FIELDS,
+    };
   } catch { return DEFAULT_PRODUCT_SETTINGS; }
 }
 

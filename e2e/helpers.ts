@@ -182,9 +182,9 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
     }
   }
   if (cash === 'external') {
-    await startTender(page, 'external');
+    await startTender(page, 'external', 'e2e-offline-terminal');
     const pane = await tenderPane(page);
-    await page.getByLabel('Terminal reference', { exact: true }).fill('e2e-offline-terminal');
+    if (!pane) await page.getByLabel('Terminal reference', { exact: true }).fill('e2e-offline-terminal');
     if (pane) await page.getByTestId('tender-complete').click();
     else await page.getByRole('button', { name: 'Payment approved on terminal', exact: true }).click();
   } else {
@@ -203,7 +203,8 @@ export async function sellBySku(page: Page, skus: string[], cash: 'exact' | numb
 // Opens the tender as the loaded build offers it. The current build's cart foot (TallyUI 3.18.0) has one Checkout that
 // opens the pane on Cash, where the Card terminal tile then takes the whole balance; the released build's cart has Cash
 // and Card terminal buttons. Read from the screen, as tenderPane() is.
-export async function startTender(page: Page, method: 'cash' | 'external') {
+// TallyUI 5.0.0 (tender-pane.tsx:154): a taken card leg shows no reference box, so the pane's is filled before Take.
+export async function startTender(page: Page, method: 'cash' | 'external', reference?: string) {
   const checkout = page.getByTestId('cart-checkout');
   const released = page.getByRole('button', { name: method === 'cash' ? 'Cash' : 'Card terminal', exact: true });
   await expect(checkout.or(released).first()).toBeVisible();
@@ -211,6 +212,7 @@ export async function startTender(page: Page, method: 'cash' | 'external') {
   await checkout.click();
   if (method === 'external') {
     await page.getByTestId('tender-method-external').click();
+    if (reference !== undefined) await page.getByLabel('Terminal reference', { exact: true }).fill(reference);
     await page.getByTestId('tender-take').click();
   }
 }
@@ -484,8 +486,10 @@ export async function variantIdBySku(token: string, sku: string): Promise<string
   return variant.id;
 }
 
-// An order the store has that no till rang up, like a web-shop order: a converted admin draft order.
-export async function createStoreOnlyOrder(token: string, sku: string, email: string): Promise<{ id: string; displayId: number }> {
+// An order the store has that no till rang up, like a web-shop order: a converted admin draft order, with the given
+// billing address (Medusa's own field names) when there is one.
+export async function createStoreOnlyOrder(token: string, sku: string, email: string,
+  billingAddress?: Record<string, string>): Promise<{ id: string; displayId: number }> {
   const get = async (path: string) => {
     const response = await fetch(`${backend}${path}`, { headers: { Authorization: `Bearer ${token}` } });
     expect(response.ok, await response.clone().text()).toBeTruthy();
@@ -505,6 +509,7 @@ export async function createStoreOnlyOrder(token: string, sku: string, email: st
   const { draft_order } = await post('/admin/draft-orders', {
     region_id: regionId, sales_channel_id: stores[0].default_sales_channel_id, email,
     items: [{ variant_id: await variantIdBySku(token, sku), quantity: 1 }],
+    ...(billingAddress ? { billing_address: billingAddress } : {}),
   });
   const { order } = await post(`/admin/draft-orders/${draft_order.id}/convert-to-order?fields=id,display_id`);
   return { id: order.id, displayId: order.display_id };

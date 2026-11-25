@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDate, formatPaidDate, formatReceiptDate } from './format-date';
+import { formatDate, formatDayHeader, formatPaidDate, formatReceiptDate } from './format-date';
 
 describe('formatDate', () => {
   it('formats a valid date in the local locale', () => {
@@ -60,5 +60,49 @@ describe('formatReceiptDate', () => {
   });
   it('preserves an invalid value', () => {
     expect(formatReceiptDate('corrupt date')).toBe('corrupt date');
+  });
+});
+
+describe('formatDayHeader', () => {
+  it('reads Today for any time of the local day', () => {
+    const now = new Date(2026, 10, 25, 15, 0);
+    expect(formatDayHeader(new Date(2026, 10, 25, 0, 0).toISOString(), now)).toBe('Today');
+    expect(formatDayHeader(new Date(2026, 10, 25, 23, 59).toISOString(), now)).toBe('Today');
+  });
+  it('reads Yesterday for the previous local calendar day, at both its ends', () => {
+    const now = new Date(2026, 10, 25, 0, 1);
+    expect(formatDayHeader(new Date(2026, 10, 24, 23, 59).toISOString(), now)).toBe('Yesterday');
+    expect(formatDayHeader(new Date(2026, 10, 24, 0, 0).toISOString(), now)).toBe('Yesterday');
+  });
+  it('reads the medium date two days back', () => {
+    const order = new Date(2026, 10, 23, 23, 59);
+    expect(formatDayHeader(order.toISOString(), new Date(2026, 10, 25, 0, 1))).toBe(day(order));
+  });
+  it('reads Yesterday across a month and a year end', () => {
+    expect(formatDayHeader(new Date(2026, 9, 31, 12, 0).toISOString(), new Date(2026, 10, 1, 9, 0))).toBe('Yesterday');
+    expect(formatDayHeader(new Date(2025, 11, 31, 22, 0).toISOString(), new Date(2026, 0, 1, 1, 0))).toBe('Yesterday');
+    expect(formatDayHeader(new Date(2026, 1, 28, 12, 0).toISOString(), new Date(2026, 2, 1, 9, 0))).toBe('Yesterday');
+  });
+  it('reads Yesterday on the morning after a DST change (the local calendar, not 24 hours)', () => {
+    // Whatever the test machine's zone, each pair is one calendar day apart; in a DST zone one of them is 23 or 25 hours.
+    for (const [then, now] of [[new Date(2026, 2, 28, 23, 30), new Date(2026, 2, 29, 23, 0)],
+      [new Date(2026, 9, 24, 23, 30), new Date(2026, 9, 25, 0, 30)], [new Date(2026, 2, 29, 0, 30), new Date(2026, 2, 30, 0, 10)]]) {
+      expect(formatDayHeader(then.toISOString(), now)).toBe('Yesterday');
+    }
+  });
+  it('does not read Today or Yesterday for the same days a year earlier', () => {
+    const now = new Date(2026, 10, 25, 15, 0);
+    for (const order of [new Date(2025, 10, 25, 9, 0), new Date(2025, 10, 24, 9, 0)]) {
+      expect(formatDayHeader(order.toISOString(), now)).toBe(day(order));
+    }
+  });
+  it('reads a future day as its date', () => {
+    const order = new Date(2026, 10, 26, 9, 0);
+    expect(formatDayHeader(order.toISOString(), new Date(2026, 10, 25, 15, 0))).toBe(day(order));
+  });
+  it('preserves an invalid value and reads empty for none', () => {
+    expect(formatDayHeader('corrupt date')).toBe('corrupt date');
+    expect(formatDayHeader(undefined)).toBe('');
+    expect(formatDayHeader('')).toBe('');
   });
 });

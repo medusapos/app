@@ -10,6 +10,7 @@ import {
 } from '@tallyui/pos';
 import { printXReport } from '../lib/closure-print';
 import { openerName } from '../lib/open-session';
+import { openCashDrawer } from '../lib/thermal-printing';
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { useSession } from '../lib/session-context';
@@ -41,7 +42,7 @@ export function openCartsWarning(count: number): string | null {
  * #170, #172). Also reports the tender to the register.
  */
 export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null } {
-  const { register, setTenderInProgress } = useRegister();
+  const { register, setTenderInProgress, setLiveSale } = useRegister();
   const latest = useRef(sale);
   latest.current = sale;
   const [refused, setRefused] = useState<string | null>(null);
@@ -52,6 +53,8 @@ export function useGatedSale(sale: Sale): { sale: Sale; refused: string | null }
   const tender = sale.stage.kind === 'tender';
   useEffect(() => setTenderInProgress(tender), [tender, setTenderInProgress]);
   useEffect(() => () => setTenderInProgress(false), [setTenderInProgress]);
+  // TallyUI 5.0.0 S3: the live sale's taken legs count in their session's expected cash and Z, read through `latest`.
+  useEffect(() => setLiveSale(() => latest.current.registerView()), [setLiveSale]);
   const startTender = (method: 'cash' | 'external') => {
     if (checking.current) return;
     // Before the order store opens there is no session to check, nor one to stamp the sale with.
@@ -112,6 +115,16 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
   // Desk, 2026-11-23: the re-approval lists the refused sales behind the store's variance.
   const refused = useRefusedSales(register.approvalNeeded?.sessionId);
   const { approve, dialog } = useApprove(signedIn?.baseUrl ?? '', online, refused);
+  const { orders } = useOutboxContext();
+  // A recorded No sale opens the cash drawer, without waiting on the printer; a refused one opens nothing and its error
+  // still reaches the sheet. RegisterPanel does not pass MovementSheet's onOpenDrawer through, hence the wrapper.
+  // Its actions are read when a movement is recorded, not while rendering, so a register without them still renders.
+  const drawerRegister = useMemo(() => ({ ...register, actions: { ...register.actions,
+    recordMovement: async (input: Parameters<typeof register.actions.recordMovement>[0]) => {
+      const row = await register.actions.recordMovement(input);
+      if (input.type === 'no_sale') void openCashDrawer(orders);
+      return row;
+    } } }), [register, orders]);
   if (!register.session && register.lastClosure && !register.approvalNeeded) {
     return <LastClosureSheet register={register} currency={currency} store={store} open={open} onOpenChange={onOpenChange} />;
   }
@@ -125,7 +138,7 @@ export function RegisterPanelSheet({ currency, store, online, open, onOpenChange
   // (the signed-in cashier by the sale screen's display name). None without one: the header then reads "Cashier".
   const opener = signedIn ? openerName(register.session?.opened_by, signedIn.email, signedIn.name || signedIn.email) : null;
   return <>
-    <RegisterPanel register={register} currency={currency} registerName={registerName ?? undefined} open={open}
+    <RegisterPanel register={drawerRegister} currency={currency} registerName={registerName ?? undefined} open={open}
       presentation="side" storeName={store.name} openedBy={opener ? { name: opener } : undefined}
       onPrintXReport={Platform.OS === 'web' && register.session?.status === 'open'
         ? () => printXReport({ session: register.session!, expected: register.expected,

@@ -99,6 +99,70 @@ async function settings(page: Page, size: Size, id: string) {
   }
 }
 
+// Playwright Chromium has no camera and Linux CI no BarcodeDetector: getUserMedia gets a blank canvas's stream (or
+// NotAllowedError), kept on window.__cameraStream; the detector sees `code` while window.__cameraCode is set, as a code
+// resting in view.
+export function cameraStub({ code, denied }: { code: string; denied: boolean }) {
+  const w = window as unknown as { BarcodeDetector: unknown; __cameraCode?: boolean; __cameraStream?: MediaStream };
+  navigator.mediaDevices.getUserMedia = async () => denied ? Promise.reject(new DOMException('denied', 'NotAllowedError'))
+    : (w.__cameraStream = Object.assign(document.createElement('canvas'), { width: 640, height: 360 }).captureStream());
+  w.BarcodeDetector = class { async detect() { return w.__cameraCode ? [{ rawValue: code, format: 'ean_13' }] : []; } };
+}
+
+// Stubs the camera before Settings draws the switch, so the host browser's BarcodeDetector never matters, and turns Use
+// camera on; as in 02d.4, the next load (the next row's reset, after the shot) turns it off once.
+async function cameraOn(page: Page, size: Size, id: string) {
+  await page.evaluate(cameraStub, { code: '', denied: false });
+  await settings(page, size, 'scanner');
+  const camera = page.getByRole('switch', { name: 'Use camera to scan barcodes' });
+  await camera.click();
+  await expect(camera).toHaveAttribute('aria-checked', 'true');
+  await page.addInitScript((flag) => {
+    if (sessionStorage.getItem(flag)) return; sessionStorage.setItem(flag, '1');
+    for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.scanner.'))
+      localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key)!), camera: false }));
+  }, `capture-${id}-camera-off`);
+}
+
+async function admin(method: string, route: string, body?: object) {
+  const response = await fetch(`${backend}${route}`, { method, body: body && JSON.stringify(body),
+    headers: { Authorization: `Bearer ${await adminToken()}`, ...(body && { 'Content-Type': 'application/json' }) } });
+  expect(response.ok, await response.clone().text()).toBeTruthy();
+  return response.json();
+}
+
+// Row 02a.2's sale price list on E2E-3. A price list moves no updated_at, so the till sees it at its 30-minute price
+// check; a metadata touch on product 3 brings it into the cached catalogue at the next sync, and a second one (an empty
+// value) takes it back out on the next row's reload, once the list is gone.
+async function saleOnE2E3(): Promise<() => Promise<void>> {
+  const [variant] = (await admin('GET', '/admin/product-variants?limit=1&sku[]=E2E-3&fields=id,product_id')).variants;
+  const touch = (value: string) => admin('POST', `/admin/products/${variant.product_id}`, { metadata: { capture_sale: value } });
+  const { price_list } = await admin('POST', '/admin/price-lists', { title: 'Capture sale', description: 'Capture row 02a.2',
+    type: 'sale', status: 'active', prices: [{ variant_id: variant.id, currency_code: 'eur', amount: 3 }] });
+  await touch('1');
+  return async () => {
+    await admin('DELETE', `/admin/price-lists/${price_list.id}`);
+    await touch('');
+  };
+}
+
+// Row 02a.3's pictures, one plain shape each on a light ground, served by Playwright (nothing leaves localhost). A
+// thumbnail moves updated_at, so the sync brings them in; taking them off takes them out on the next row's reload.
+const SHAPES: Record<string, string> = {
+  'E2E-2': '<circle cx="40" cy="40" r="24" fill="#e8892b"/>',
+  'E2E-3': '<polygon points="40,14 66,62 14,62" fill="#2f8f6b"/>',
+  'E2E-5': '<rect x="18" y="18" width="44" height="44" rx="6" fill="#4c5fd5"/>',
+};
+async function picturesOn(page: Page): Promise<() => Promise<void>> {
+  await page.route('https://images.e2e.test/**', route => route.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="80">'
+    + `<rect width="80" height="80" fill="#eef2f7"/>${SHAPES[route.request().url().split('/').pop()!.replace('.svg', '')]}</svg>` }));
+  const query = Object.keys(SHAPES).map(sku => `sku[]=${sku}`).join('&');
+  const { variants } = await admin('GET', `/admin/product-variants?${query}&fields=sku,product_id`);
+  const set = (sku: string, thumbnail: string | null) => admin('POST', `/admin/products/${variants.find((v: { sku: string }) => v.sku === sku).product_id}`, { thumbnail });
+  for (const sku of Object.keys(SHAPES)) await set(sku, `https://images.e2e.test/${sku}.svg`);
+  return async () => { for (const sku of Object.keys(SHAPES)) await set(sku, null); };
+}
+
 async function customer(email: string) {
   await createAdminCustomer(await adminToken(), email, 'Ada', 'Lovelace');
 }
@@ -114,6 +178,39 @@ export const rows: CaptureRow[] = [
     await search(page).fill('product 4');
     await expect(tiles(page)).toHaveCount(1);
   } },
+  // The seed tags products 1 and 3 Organic and puts product 2 in the Featured collection; a sale list makes On Sale show.
+  { id: '02a.2', title: 'Filter pills', state: 'In Stock, On Sale, Tag and Collection pills; Tag → Organic leaves products 1 and 3', reach: async (page) => {
+    const undo = await saleOnE2E3();
+    try {
+      await page.getByTestId('catalogue-sync').click();
+      await expect(page.getByTestId('filter-chip-onSale')).toBeVisible();
+      await page.getByTestId('filter-chip-tag').click();
+      await page.getByTestId('filter-chip-tag-menu').getByText('Organic', { exact: true }).click();
+      await expect(page.getByTestId('filter-chip-tag')).toHaveText('Organic');
+      for (const chip of ['inStock', 'onSale', 'tag', 'group-collection']) await expect(page.getByTestId(`filter-chip-${chip}`)).toBeVisible();
+      await expect(tiles(page)).toHaveCount(2);
+    } finally {
+      // The cached catalogue keeps the sale for the shot; the next load (the next row's reset) drops the pick once.
+      await undo();
+      await page.addInitScript(() => {
+        if (sessionStorage.getItem('capture-02a.2-dropped')) return;
+        sessionStorage.setItem('capture-02a.2-dropped', '1');
+        for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.sale-filters.')) localStorage.removeItem(key);
+      });
+    }
+  } },
+  // Products 2, 3 and 5 get a picture and 1 and 4 none, so both kinds of tile show; the cached catalogue keeps them for the shot.
+  { id: '02a.3', title: 'Tile images', state: 'Medusa thumbnails on products 2, 3 and 5; products 1 and 4 have none', only: ['desktop', 'phone'], reach: async (page) => {
+    const undo = await picturesOn(page);
+    try {
+      await page.getByTestId('catalogue-sync').click();
+      for (const n of [2, 3, 5]) await expect.poll(() => page.getByTestId(`product-tile-E2E product ${n}`).locator('img')
+        .evaluate((img: HTMLImageElement) => img.complete ? img.naturalWidth : 0).catch(() => 0)).toBeGreaterThan(0);
+      for (const n of [1, 4]) await expect(page.getByTestId(`product-tile-E2E product ${n}`).locator('img')).toHaveCount(0);
+    } finally {
+      await undo();
+    }
+  } },
   { id: '02b', title: 'Product table', state: 'Table view (a phone has no table view)', only: ['desktop', 'tablet'], reach: async (page) => {
     await page.getByTestId('view-toggle-table').click();
     await expect(page.getByTestId('product-table-sort-name')).toBeVisible();
@@ -122,9 +219,29 @@ export const rows: CaptureRow[] = [
     await page.getByText('E2E product 4', { exact: true }).click();
     await expect(page.getByRole('button', { name: /E2E-4B/ })).toBeVisible();
   } },
-  { id: '02d', title: 'Product display settings', state: 'Product display settings open', reach: async (page) => {
+  { id: '02d', title: 'Product display settings', state: 'Product display settings open, scrolled to Tile Fields', reach: async (page) => {
     await page.getByTestId('product-settings-button').click();
     await expect(page.getByTestId('product-settings-sheet')).toBeVisible();
+    await page.getByTestId('product-settings-tile-field-stock').scrollIntoViewIfNeeded();
+    await expect(page.getByText('Tile Fields', { exact: true })).toBeInViewport();
+  } },
+  { id: '02d.4', title: 'Tile fields', state: 'Price off and SKU on in Product settings; grid tiles show name, SKU and stock', reach: async (page) => {
+    const field = (name: string) => page.getByTestId(`product-settings-tile-field-${name}`);
+    await page.getByTestId('product-settings-button').click();
+    for (const [name, on] of [['price', 'false'], ['sku', 'true']] as const) {
+      await field(name).click();
+      await expect(field(name)).toHaveAttribute('aria-checked', on);
+    }
+    await page.getByTestId('product-settings-close').click();
+    // Rows share this page's storage, and the shot is taken after reach returns, so the next load (the next row's
+    // reset) drops this store's product settings once: the defaults that Restore Default Settings would give.
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('capture-02d.4-restored')) return;
+      sessionStorage.setItem('capture-02d.4-restored', '1');
+      for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.product-settings.')) localStorage.removeItem(key);
+    });
+    await expect(tiles(page).first()).toContainText('SKU E2E-1');
+    await expect(tiles(page).first()).not.toContainText('€');
   } },
   { id: '02e', title: 'Category filter', state: 'Drinks chip selected', reach: async (page) => {
     await page.getByRole('radiogroup', { name: 'Categories' }).getByRole('radio', { name: 'Drinks', exact: true }).click();
@@ -135,6 +252,11 @@ export const rows: CaptureRow[] = [
     await page.keyboard.type('E2E-2', { delay: 10 });
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('scan-toast')).toContainText('Added to cart');
+  } },
+  { id: '02.20', title: 'Camera scanner open', state: 'The Sale with the camera scanner open (stubbed camera)', only: ['desktop'], reach: async (page, size) => {
+    await cameraOn(page, size, '02.20');
+    await openArea(page, 'POS'); await page.getByTestId('camera-scan-button').click();
+    await expect(page.getByTestId('camera-scanner-panel')).toBeVisible();
   } },
   { id: '03a', title: 'Cart with items', state: 'Three lines in the cart', reach: async (page, size) => {
     await add(page, 'E2E-1', 'E2E-2', 'E2E-3');
@@ -158,13 +280,13 @@ export const rows: CaptureRow[] = [
     await customer(email);
     await cart(page, size);
     await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-    await page.getByTestId('customer-picker-search').fill(email);
+    await page.getByTestId('customer-dropdown-search').fill(email);
     await expect(page.getByLabel(`Ada Lovelace, ${email}`, { exact: true })).toBeVisible();
   } },
   { id: '04b', title: 'New customer', state: 'New-customer form', reach: async (page, size) => {
     await cart(page, size);
-    await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-    await page.getByRole('button', { name: 'New customer', exact: true }).click();
+    await page.getByTestId('cart-add-menu').click();
+    await page.getByTestId('cart-add-new-customer').click();
     await expect(page.getByPlaceholder('First name')).toBeVisible();
   } },
   { id: '04c', title: 'Order note', state: '⋮ Order details sheet with its Form | JSON tabs (#511)', reach: async (page, size) => {
@@ -310,6 +432,13 @@ export const rows: CaptureRow[] = [
     await page.getByTestId('movement-sheet').getByTestId('movement-amount').fill('5.00');
     await page.getByTestId('movement-sheet').getByTestId('movement-reason').fill('Change for the float');
   } },
+  // Left unconfirmed, so no No sale is recorded for the rows after it.
+  { id: '09d.5', title: 'No sale', state: 'No sale sheet with Drawer check', reach: async (page) => {
+    await openRegisterPanel(page);
+    await page.getByTestId('register-panel').getByTestId('register-panel-no-sale').click();
+    await page.getByTestId('movement-sheet').getByTestId('movement-reason-drawer-check').click();
+    await expect(page.getByTestId('movement-sheet').getByTestId('movement-reason')).toHaveValue('Drawer check');
+  } },
   { id: '09e', title: 'Count / close', state: 'Count screen', reach: async (page) => {
     await openRegisterPanel(page);
     await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
@@ -365,9 +494,22 @@ export const rows: CaptureRow[] = [
   { id: '15a', title: 'Settings, general', state: 'Settings › General', reach: (page, size) => settings(page, size, 'store') },
   skip('15b', 'Settings, tax', 'N/A: Medusa sets tax per region in Medusa Admin'),
   { id: '15c', title: 'Settings, printing', state: 'Settings › Printing', reach: (page, size) => settings(page, size, 'printing') },
+  { id: '15c.4', title: 'Settings, printing: printer form', state: 'Add printer open, an Epson with Open Cash Drawer on; nothing saved', only: ['desktop', 'phone'], reach: async (page, size) => {
+    await settings(page, size, 'printing');
+    await page.getByTestId('settings-add-printer').click();
+    const form = page.getByTestId('printer-form');
+    await form.getByTestId('printer-form-name').fill('Counter');
+    await form.getByTestId('printer-form-vendor-epson').click();
+    await form.getByTestId('printer-form-address').fill('192.168.1.50');
+    await form.getByRole('switch', { name: 'Open Cash Drawer' }).click();
+    // The form scrolls inside its dialog; the shot shows the drawer switch and its connector.
+    await form.getByTestId('printer-form-drawer-pin2').scrollIntoViewIfNeeded();
+    await expect(form.getByTestId('printer-form-drawer-pin2')).toBeInViewport();
+  } },
   { id: '15d', title: 'Settings, card readers', state: 'Settings › Card readers', reach: (page, size) => settings(page, size, 'card-readers') },
   skip('15e', 'Settings, customer display', 'gap, no section: no customer-facing display'),
   { id: '15f', title: 'Settings, barcode scanning', state: 'Settings › Barcode Scanning', reach: (page, size) => settings(page, size, 'scanner') },
+  { id: '15f.2', title: 'Settings, barcode scanning: Use camera', state: 'Settings › Barcode Scanning, Use camera on', only: ['desktop'], reach: (page, size) => cameraOn(page, size, '15f.2') },
   { id: '15g', title: 'Settings, theme', state: 'Settings › Theme', reach: (page, size) => settings(page, size, 'theme') },
   { id: '16', title: 'Sign-in / connect', state: 'Sign-in screen after Sign out', reach: signOut },
   { id: '17a', title: 'Phone, POS', state: 'The Sale with a line in the cart', only: ['phone'], reach: async (page) => {

@@ -1,18 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Platform, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, usePathname } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
-  DEFAULT_PRODUCT_FILTERS, type ProductFilters,
+  Catalogue, CustomerDropdown, IconButton, ProductFilterBar, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
+  DEFAULT_PRODUCT_FILTERS, type ProductFilterChip, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
 import {
-  capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, useParkedSales, useSale,
-  normalizeCatalogueViewState, type CatalogueViewState,
+  capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, REGISTER_CLOSING, saleLogger, SALE_SAVING, summarizeOutboxHealth, useParkedSales, useSale,
+  normalizeCatalogueViewState, useCameraScan, type CatalogueViewState,
 } from '@tallyui/pos';
 
 import { AccountButton } from '../components/account-button';
@@ -23,7 +23,6 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
-import { CustomerChip } from '../components/customer-chip';
 import { CustomerSavedToast, useCustomerSavedToast } from '../components/customer-saved-toast';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { OfflineToast, useOfflineToast } from '../components/offline-toast';
@@ -51,6 +50,7 @@ import { UserSheet } from '../components/user-sheet';
 import { loadCatalogueView, saveCatalogueView, withCatalogueSort } from '../lib/catalogue-view';
 import { TILL_PAYMENT_METHODS } from '../lib/card-payments';
 import { sortCartLines, useCartSettings } from '../lib/cart-settings';
+import { changeDueMinor } from '../lib/change-due';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import { createMedusaDiscountCodes } from '../lib/coupons';
 import { loadCustomerAddresses } from '../lib/customer-billing';
@@ -64,10 +64,15 @@ import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
 import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
 import { usePrinterProfiles } from '../lib/printers';
+import { isStoredOpensDrawer, useCashDrawerOnSale } from '../lib/thermal-printing';
 import { useProductSettings } from '../lib/product-settings';
+import { useProductCollections } from '../lib/product-collections';
+import { listProductCollections, listProductTags, productCollectionIds } from '../lib/products-area';
+import { isOnSale, loadSaleFilters, saleFilterItems, saveSaleFilters, type SaleFilters } from '../lib/sale-filters';
 import { RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { cameraScanSupported } from '../lib/camera-scan';
 import { playScanBeep } from '../lib/scan-beep';
 import { forgetDeletedDefaultCustomer, useDefaultCustomer } from '../lib/default-customer';
 import { forgetDeletedCashierCustomer, useCashierCustomer } from '../lib/cashier-customer';
@@ -97,6 +102,13 @@ const ROW_BREAKPOINT = 900;
 
 // The rate arrives in parts per million (10 000 ppm = 1%).
 const taxLabel = receiptTaxLabel;
+
+// Rendered with one Catalogue instance: when it goes (a stage, a tab, a width, a new key) its search box goes with it,
+// so the app's tracked copy of the text is emptied too.
+function QueryReset({ setQuery }: { setQuery: (text: string) => void }) {
+  useEffect(() => () => setQuery(''), [setQuery]);
+  return null;
+}
 
 export default function ProductsScreen() {
   const { session, signOut, reportUnauthorized, reportNoPosAccess, mergeCapabilities } = useSession();
@@ -143,7 +155,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useFrameBadge('orders', attentionCount);
   // The session's capability, not the held sync context's: a sale checks what the store accepts now (ADR-062).
   // isStored: after a failed save (TallyUI #149), or every 5 s while a save hangs (#161), the tender offers Continue once
-  // the outbox confirms the order is stored.
+  // the outbox confirms the order is stored; that yes also opens the cash drawer, as Continue never reaches the receipt.
+  const drawerIsStored = useMemo(() => isStoredOpensDrawer(isStored, orders), [isStored, orders]);
   // `session`: complete() stamps the sale with the register session (ADR 0017). The Cart's tender start
   // (useGatedSale) refuses until one is open; useSale pins the session in force at tender start (TallyUI #170), so a
   // close during the tender still reaches the stamp, which then makes the sale late.
@@ -154,14 +167,17 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { parked } = useParkedSales(drafts);
   const [ordersListOpen, setOrdersListOpen] = useState(false);
   const [switchRefusal, setSwitchRefusal] = useState<string | null>(null);
-  const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
-  const [customerOpen, setCustomerOpen] = useState(false);
+  // TallyUI refuses a switch during a close by useSale's registerId, this till's device id, never the register's: so the
+  // app's own guard, or a sale parked mid-close is in neither the close's drafts read nor its live-sale read.
+  const switchTo = (id: string | null) => register.closing ? setSwitchRefusal(REGISTER_CLOSING) : void sale.switchSale(id).then(setSwitchRefusal);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
   const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
   // Clear and Refresh (v2): the search is Catalogue's own state, so a new key empties it; the filters go back to the start.
   const [catalogueKey, setCatalogueKey] = useState(0);
+  // Catalogue's search text, tracked so the app's own pick filtering keeps it (Catalogue does not report a cleared box).
+  const [query, setQuery] = useState('');
   // Stable, so the published snapshot (the Products area's sync arrow) does not change every render.
   const clearCatalogue = useCallback(() => {
     clearAndRefresh();
@@ -189,7 +205,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     }
   }, [recent, session.baseUrl, session.email]);
   const sale = useSale(pricing, { defaultCustomer: saleDefaultCustomer, registerId, cashierRef: session.email, capabilities: session.capabilities, onSaleCompleted: isDemoAccount(session.email) ? withDemoSaleEvent(record) : record,
-    discountCodes, isStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
+    discountCodes, isStored: drawerIsStored, session: register.saleSession, drafts, currentPrice: (variantId) => {
       const entry = entriesRef.current.find(({ variant }) => variant.id === variantId);
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
     } });
@@ -243,14 +259,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so do the
-  // customer picker, the new-customer dialog, the address dialog and the note dialog, so leaving the cart closes them and a cancelled
+  // customer dropdown, the new-customer dialog, the address dialog and the note dialog, so leaving the cart closes them and a cancelled
   // tender does not reopen them.
   useEffect(() => {
-    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setCustomerOpen(false); setNewCustomerOpen(false); setNoteOpen(false); }
+    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setNewCustomerOpen(false); setNoteOpen(false); }
   }, [sale.stage.kind]);
-  // Read at pick time: the picker's New customer create can settle after its dialog closed, and that late pick is dropped.
-  const pickerLive = useRef(false);
-  pickerLive.current = customerOpen && sale.stage.kind === 'cart';
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
 
   // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
@@ -277,7 +290,18 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2 scans anywhere in the POS; an editable target (search box, coupon field) keeps its own input, so no double add; off while an area is over the Sale and in tender.
   // Every layout listens in the cart stage, the phone's Products and Cart views alike.
   const wedgeActive = sale.stage.kind === 'cart' && pathname === '/';
-  const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  const { settings: scannerSettings, save: saveScannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  // v2's camera scan (web): decodes go to the scan hub, which useDeviceScans already hands to onScan, so no second
+  // subscription. A code shorter than minChars is dropped, as the wedge drops one.
+  const camera = useCameraScan({ active: wedgeActive, minChars: scannerSettings.minChars });
+  // TU's viewfinder keeps its camera stream while mounted; drawing it only in the Sale's cart stage stops the camera while
+  // an area covers the Sale. Hidden where the browser has no BarcodeDetector, as DirectScannerConnection hides.
+  const cameraOn = useMemo(() => scannerSettings.camera && cameraScanSupported(), [scannerSettings.camera]);
+  const onCameraHeightChange = (height: number) => {
+    const cameraHeight = Math.round(height);
+    if (cameraHeight === scannerSettings.cameraHeight) return;
+    try { saveScannerSettings({ ...scannerSettings, cameraHeight }); } catch { /* keep the saved height */ }
+  };
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
   // Sort items (Cart Settings) is display order only: Cart gets a re-ordered copy, the sale's stored order is untouched.
@@ -291,6 +315,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
   useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
     undefined, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
+  // A cash sale opens the drawer of a network printer with Open Cash Drawer on, once per sale, never from a reprint.
+  useCashDrawerOnSale(sale.stage, orders);
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     const entry = findEntryByCode(entries, code);
@@ -347,6 +373,47 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const openRegister = () => { if (registerStatus === 'open') openUserSheet(); else setPanelOpen(true); };
   // v2's phone has no register row (row 17a): every state the wide header names shows in the phone header instead.
   const headerRegisterState = phone && sale.stage.kind !== 'tender' ? wideRegisterState(boundRegisterId, online, register) : null;
+  // v2's pills beside In Stock, Medusa's way: sale price lists, product tags and product collections (no Featured or
+  // Brand). Kept per store on this device; Catalogue cannot apply or seed them (TallyUI#1352, #1238), so the app passes
+  // `items` while one applies. A stored pick with no pill to show it is kept but not applied, as a stored category is.
+  const [saleFilters, setSaleFilters] = useState(() => loadSaleFilters(defaultStorage(), session.baseUrl));
+  const changeSaleFilters = (change: Partial<SaleFilters>) => {
+    const next = { ...saleFilters, ...change };
+    setSaleFilters(next);
+    saveSaleFilters(defaultStorage(), session.baseUrl, next);
+  };
+  const tags = useMemo(() => listProductTags(sorted), [sorted]);
+  const collectionIds = useMemo(() => productCollectionIds(sorted), [sorted]);
+  const collectionTitles = useProductCollections(session.baseUrl, collectionIds);
+  const collections = useMemo(() => listProductCollections(sorted, collectionTitles), [sorted, collectionTitles]);
+  const anyOnSale = useMemo(() => sorted.some((doc) => isOnSale(doc, traits, pricing.currency)), [sorted, traits, pricing.currency]);
+  const onSale = anyOnSale && saleFilters.onSale;
+  const tag = tags.some(({ id }) => id === saleFilters.tag) ? saleFilters.tag : null;
+  const collection = collections.some(({ id }) => id === saleFilters.collection) ? saleFilters.collection : null;
+  const items = useMemo(() => onSale || tag !== null || collection !== null
+    ? saleFilterItems(sorted, { traits, currency: pricing.currency, picks: { onSale, tag, collection },
+      categoryId: viewState.categoryId, query, inStock: filters.inStock, sort: viewState.sort }) : undefined,
+  [sorted, traits, pricing.currency, onSale, tag, collection, viewState.categoryId, query, filters.inStock, viewState.sort]);
+  // Picking the picked term again takes it off, as its cross does.
+  const toggled = (current: string | null, next: string | undefined) => (next === undefined || next === current ? null : next);
+  const chips: ProductFilterChip[] = ['inStock', ...anyOnSale ? ['onSale' as const] : [], ...tags.length ? ['tag' as const] : []];
+  const filterRow = <>
+    <ProductFilterBar value={{ ...filters, onSale }} chips={chips} onChange={(next) => {
+      if (next.inStock !== filters.inStock) setFilters({ ...filters, inStock: next.inStock });
+      if (next.onSale !== onSale) changeSaleFilters({ onSale: next.onSale });
+    }} terms={{ tag: { options: tags.map(({ id, value }) => ({ value: id, label: value })), value: tag ?? undefined,
+      onChange: (next) => changeSaleFilters({ tag: toggled(tag, next) }) } }}
+      termGroups={collections.length ? [{ id: 'collection', label: 'Collection', searchPlaceholder: 'Search collections',
+        options: collections.map(({ id, value }) => ({ value: id, label: value })), value: collection ?? undefined,
+        onChange: (next) => changeSaleFilters({ collection: toggled(collection, next) }) }] : undefined} />
+    {items?.length === 0 && !query.trim() ? <Text accessibilityLiveRegion="polite" className="text-sm text-muted-foreground">
+      No products match the picked filters.</Text> : null}
+  </>;
+  // Enter on a code (from the scanner's minimum length) adds it and empties Catalogue's box without reporting it.
+  const selectEntry = (entry: Parameters<typeof add>[0]) => {
+    if (query.trim().length >= scannerSettings.minChars && findEntryByCode(entries, query)?.variant.id === entry.variant.id) setQuery('');
+    return add(entry);
+  };
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
     showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
@@ -361,11 +428,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       aria-disabled={dimmed} style={{ opacity: dimmed ? 0.5 : 1 }}>
     <Catalogue key={catalogueKey} products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
       lastStockCheckAt={lastStockCheckAt} hour12={hour12} minCodeLength={scannerSettings.minChars}
-      onSelect={add} statusText={statusText} statusAccessory={statusAccessory}
+      onSelect={selectEntry} onQueryChange={setQuery} items={items} rowsSlot={filterRow} statusText={statusText} statusAccessory={statusAccessory}
       searchAccessory={productSettingsButton} showViewToggle={!phone} showCategoryNav
-      showFilterBar filters={filters} onFiltersChange={setFilters}
-      viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations}
-      onViewStateError={onViewStateError} />
+      showFilterBar filterChips={[]} filters={filters} onFiltersChange={setFilters}
+      viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
+      onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn && !counting}
+      cameraScanner={{ onDetected: camera.offer, onOpen: camera.reset, scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />
+    <QueryReset key={`query-${catalogueKey}`} setQuery={setQuery} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;
@@ -386,9 +455,16 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {ordersListOpen ? <OpenOrdersList sales={tillSales} currency={pricing.currency}
       onSelect={(id) => { setOrdersListOpen(false); switchTo(id); }} onClose={() => setOrdersListOpen(false)} /> : <>
     <View className="flex-row items-center justify-end gap-4 px-3">
-      {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)}
-        onAddress={sale.order.customer && online && connector.getCustomer && connector.updateCustomer
-          ? () => setAddressCustomerId(sale.order.customer?.id ?? null) : undefined} />}
+      {/* v2's chip drops its search list in place, Guest first; a new customer stays under the "+" menu. */}
+      {connector.searchCustomers && <CustomerDropdown testID="customer-chip" className="min-w-0 shrink"
+        selected={sale.order.customer ?? null} online={online}
+        // connector-medusa 4.1.0 cannot page (searchCustomers only), so a later page is empty and the list never repeats page 1.
+        search={(q, page) => page && page > 1 ? Promise.resolve([]) : connector.searchCustomers!(syncContext, q)}
+        onSelect={(c) => { if (sale.stage.kind !== 'cart') return; sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); }}
+        onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); }}
+        onEditAddress={sale.order.customer && online && connector.getCustomer && connector.updateCustomer
+          ? () => setAddressCustomerId(sale.order.customer?.id ?? null) : undefined}
+        hasAddress={Object.values(sale.order.customer?.billing ?? {}).some(Boolean)} />}
       <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined} />
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
@@ -424,7 +500,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
   const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
   const wide = width >= ROW_BREAKPOINT;
-  const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || sale.stage.order.changeDueMinor > 0);
+  const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || changeDueMinor(sale.stage.order) > 0);
   // Settings shows printers only in a browser, so the paid screen's pickers are there alone (and a thermal choice with them).
   const pickers = Platform.OS === 'web';
   const paper = pickers ? RECEIPT_TEMPLATES.find((t) => t.id === receiptTemplateId)?.paper : undefined;
@@ -484,16 +560,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         onChooseRegister={sheetFromArea ? () => { router.dismissTo('/'); openGate(); } : openGate}
         signOut={signOut} signOutLocked={signOutLocked} lockMessage={lockMessage} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
-      {connector.searchCustomers && <Dialog open={customerOpen && sale.stage.kind === 'cart'} onOpenChange={setCustomerOpen}>
-        <DialogContent testID="customer-dialog"><DialogTitle>Customer</DialogTitle>
-          <ScrollView><CustomerPicker selected={sale.order.customer} online={online}
-            search={(q) => connector.searchCustomers!(syncContext, q)}
-            create={(input) => connector.createCustomer!(syncContext, input)}
-            onSelect={(c) => { if (!pickerLive.current) return; sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
-            onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); }} />
-          </ScrollView>
-        </DialogContent>
-      </Dialog>}
       {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen && sale.stage.kind === 'cart'} onOpenChange={setNewCustomerOpen}
         create={(input) => connector.createCustomer!(syncContext, input)}
         update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}

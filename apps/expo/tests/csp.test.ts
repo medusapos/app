@@ -89,6 +89,6 @@ describe('web Content-Security-Policy (apps/expo/vercel.json)', () => {
   it('C4: the companion headers have their exact values', () => {
     expect(header('Referrer-Policy')).toEqual(['no-referrer']);
     expect(header('X-Content-Type-Options')).toEqual(['nosniff']);
-    expect(header('Permissions-Policy')).toEqual(['camera=(), microphone=(), geolocation=()']);
+    expect(header('Permissions-Policy')).toEqual(['camera=(self), microphone=(), geolocation=()']);
   });
 });

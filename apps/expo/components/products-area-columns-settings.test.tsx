@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
+import { DEFAULT_TILE_FIELDS } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProductsAreaScreen from '../app/products';
 import type { ProductAreaRow } from '../lib/products-area';
@@ -211,7 +212,7 @@ it('starts with Variations before Columns, Open in place selected on a new devic
   fireEvent.click(choice('popover'));
   expect(choice('popover').getAttribute('aria-selected')).toBe('true');
   expect(choice('list').getAttribute('aria-selected')).toBe('false');
-  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover' });
+  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS });
 });
 
 it('Restore Default Settings puts a switched-off column back on and leaves Expanded rows selected', () => {
@@ -222,7 +223,7 @@ it('Restore Default Settings puts a switched-off column back on and leaves Expan
   fireEvent.click(screen.getByTestId('products-settings-restore'));
   expect(column('sku').getAttribute('aria-checked')).toBe('true');
   expect(choice('popover').getAttribute('aria-selected')).toBe('true');
-  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover' });
+  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS });
 });
 
 it('closes the sheet on Close', () => {
