@@ -104,6 +104,9 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: 
           <Text className="text-sm text-foreground">Shipping</Text><Text className="text-sm text-foreground">{money(shippingMinor)}</Text>
         </View> : null}
       </View>
+      {order.refunds.length > 0 ? <Text testID="order-refund-already" className="text-sm text-muted-foreground">
+        {`Already refunded ${money(order.refunds.reduce((total, entry) => total + entry.amountMinor, 0))}`}
+      </Text> : null}
       <Text testID="order-refund-total" className="font-semibold text-foreground">{`Refund ${money(totalMinor)}`}</Text>
       <Text testID="order-refund-destination" className="text-sm text-muted-foreground">{`To ${label}`}</Text>
       <View className="flex-row items-center justify-between">
