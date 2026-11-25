@@ -189,6 +189,25 @@ describe('SessionProvider', () => {
     expect(context.session?.capabilities).toEqual(fresh);
     expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(fresh);
   });
+  const pluginRead = { orderCreate: 3, register: 3, coupons: true, pluginContract: 5 };
+  const customerDisplay = { iceServers: [], snapshot: true };
+  it("U-554-1: a launch's first fresh read with customerDisplay keeps the restored session", async () => {
+    await mount({ ...stored, capabilities: pluginRead });
+    const before = context.session;
+    storage.setItem.mockClear();
+    act(() => context.mergeCapabilities({ ...pluginRead, customerDisplay }));
+    expect(context.session).toBe(before);
+    expect(storage.setItem).not.toHaveBeenCalled();
+  });
+  it('U-554-2: a real change alongside customerDisplay updates the session without it', async () => {
+    await mount({ ...stored, capabilities: pluginRead });
+    const before = context.session;
+    const read = { ...pluginRead, coupons: false };
+    act(() => context.mergeCapabilities({ ...read, customerDisplay }));
+    expect(context.session).not.toBe(before);
+    expect(context.session?.capabilities).toEqual(read);
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(read);
+  });
   it('a fresh read in a different key order keeps the session', async () => {
     await mount({ ...stored, capabilities: { orderCreate: 6, coupons: true, lineTax: { none: true, classes: false } } });
     const before = context.session;

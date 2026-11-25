@@ -88,7 +88,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [session?.token]);
   const mergeCapabilities = useCallback((fresh: ServerCapabilities | undefined) => {
     const current = currentSession.current;
-    const capabilities = resolveCapabilities(fresh, current?.capabilities);
+    const resolved = resolveCapabilities(fresh, current?.capabilities);
+    // #554: customerDisplay is dropped, as loadSession does, so a launch's fresh read matches the restored session.
+    const capabilities = resolved && (({ customerDisplay: _display, ...rest }) => rest)(resolved);
     // Unchanged keeps the session's identity, so nothing that depends on it re-runs.
     if (!current || canonicalJson(capabilities) === canonicalJson(current.capabilities)) return;
     const next = { ...current, capabilities };
