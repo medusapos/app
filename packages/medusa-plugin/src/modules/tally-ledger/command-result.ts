@@ -142,7 +142,9 @@ function parseRefund(value: unknown, object: (value: unknown) => boolean): NonNu
     sum += amount as number
   }
   if (sum !== totalMinor) throw invalid('.byMethod: expected to sum to totalMinor')
-  if (!Array.isArray(input.refunds) || input.refunds.length === 0) throw invalid('.refunds')
+  // TallyUI#1331 / #546: an empty refunds is a stock-only return, so only with a 0 total and no byMethod keys.
+  const stockOnly = totalMinor === 0 && Object.keys(byMethod).length === 0
+  if (!Array.isArray(input.refunds) || (input.refunds.length === 0 && !stockOnly)) throw invalid('.refunds')
   sum = 0
   const refunds = input.refunds.map((entry: unknown, index) => {
     const item = entry as Record<string, unknown>

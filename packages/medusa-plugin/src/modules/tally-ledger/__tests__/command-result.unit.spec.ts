@@ -152,6 +152,12 @@ describe('order.refund applied result (ADR-080)', () => {
     expect(parseCommandResult({ id: 'c', status: 'duplicate', refund })).toEqual({ id: 'c', status: 'duplicate', refund })
   })
 
+  it('accepts an empty refunds only for a stock-only return: total 0 and no byMethod keys (TallyUI#1331, #546)', () => {
+    const stockOnly = { totalMinor: 0, byMethod: {}, refunds: [] }
+    expect(parseCommandResult({ id: 'c', status: 'applied', refund: stockOnly })).toEqual({ id: 'c', status: 'applied', refund: stockOnly })
+    expect(() => parseCommandResult({ id: 'c', status: 'applied', refund: { ...stockOnly, byMethod: { cash: 0 } } })).toThrow('Invalid refund.refunds')
+  })
+
   it.each([
     [null, 'Invalid refund'],
     [{ ...refund, totalMinor: -1 }, 'Invalid refund.totalMinor'],

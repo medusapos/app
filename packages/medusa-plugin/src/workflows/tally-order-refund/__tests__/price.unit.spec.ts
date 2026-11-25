@@ -505,7 +505,7 @@ describe('a stock-only return (#546)', () => {
     const goodwill = { lines: [], shippingMinor: 0, medusaRefundId: 'refund_g', totalMinor: 1 }
     const stockOnly = (totalMinor?: number) => ({ lines: [{ ...z[0], netMinor: 0, taxMinor: 0 }], shippingMinor: 0, medusaRefundId: null, totalMinor })
     const sale = (earlier: PriceRefundInput['earlier'], withZ = true): Omit<PriceRefundInput, 'request'> => ({
-      lines: withZ ? [...lines, { ...free, returnedQuantity: 1 }] : lines, linesMoneyMinor: 353, shippingMinor: 0, paidMinor: 353, earlier, outsideRefundsMinor: 0, refundableMoneyMinor: 352 })
+      lines: withZ ? [...lines, { ...free, returnedQuantity: 1 }] : lines, linesMoneyMinor: 353, shippingMinor: 0, paidMinor: 353, earlier, outsideRefundsMinor: 0, unrecorded: [], refundableMoneyMinor: 352 })
     const clamped = { ok: true, totalMinor: 352, lines: all.map((entry, n) => ({ ...entry, netMinor: [99, 98, 98][n], taxMinor: 19 })) }
     // Without z the clamp takes the 0.01 off; the stock-only row of z leaves that unchanged.
     expect(priceRefund({ ...sale([goodwill], false), request: request({ lines: all, totalMinor: 352 }) })).toEqual(clamped)
