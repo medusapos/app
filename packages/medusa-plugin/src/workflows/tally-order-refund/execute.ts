@@ -172,7 +172,8 @@ async function runLocked(container: MedusaContainer, ctx: { id: string; claimTok
       const current = await loadRefundOrder(container, order.id) ?? order
       const recorded = current.payment ? await recordedRefundsMinor(trx, order, current.payment.id) : 0
       const price = priceRefund({ lines: current.lines, linesMoneyMinor: current.linesMoneyMinor, shippingMinor: current.shippingMinor,
-        earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor), medusaRefundId: entry.medusa_refund_id })),
+        earlier: earlier.map(entry => ({ lines: entry.lines, shippingMinor: Number(entry.shipping_minor), medusaRefundId: entry.medusa_refund_id,
+          totalMinor: Number(entry.total_minor) })),
         paidMinor: current.payment?.amountMinor ?? null,
         outsideRefundsMinor: current.payment ? Math.max(0, current.payment.refundedMinor - recorded) : 0,
         unrecorded: earlier.filter(entry => entry.medusa_refund_id === null && entry.money_started_at !== null && Number(entry.total_minor) > 0)
@@ -293,7 +294,8 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
       await write({ received_at: new Date() })
     }
     step = 'refund'
-    if (!row.medusa_refund_id) {
+    // #546: a stock-only return moves no money.
+    if (!row.medusa_refund_id && Number(row.total_minor) > 0) {
       const check = await unrecorded()
       if (check.message) return await park(step, check.message, 'refund_unrecorded')
       if (row.money_started_at) return await park(step, moneyUnconfirmedMessage, 'money_unconfirmed')

@@ -185,7 +185,7 @@ describe('the last units take the remainder', () => {
       ] })
   })
 
-  it('N1-948-free-line: three single refunds take 354 within the payment cap; the free last line is nothing_to_refund', () => {
+  it('N1-948-free-line: three single refunds take 354 within the payment cap; the free last line is a stock-only return (#546)', () => {
     const shipped = { ...order, lines: [...lines, { id: 'ordli_z', quantity: 1, returnedQuantity: 0, netMinor: 0, taxMinor: 0 }], shippingMinor: 595 }
     const earlier: PriceRefundInput['earlier'] = []
     const totals: number[] = []
@@ -202,7 +202,7 @@ describe('the last units take the remainder', () => {
     expect(total).toBeLessThanOrEqual(948)
     expect(priceRefund({ ...shipped, earlier, refundableMoneyMinor: 948 - total,
       request: request({ lines: take('ordli_z'), totalMinor: 0 }) }))
-      .toMatchObject({ ok: false, error: { code: 'nothing_to_refund' } })
+      .toEqual({ ok: true, totalMinor: 0, lines: [{ ...take('ordli_z')[0], netMinor: 0, taxMinor: 0 }] })
   })
 
   it('N1-dropped: a difference within the bound that neither net nor target tax covers is dropped', () => {
@@ -469,5 +469,50 @@ describe("the refundable quantity counts Medusa's returns (#565)", () => {
 
   it('U-565-4: a returned quantity above the line quantity never makes the refundable quantity negative', () => {
     expect(priceRefund({ ...base, lines: [{ ...line, returnedQuantity: 5 }], request: request({ lines: take(1), totalMinor: 396 }) })).toEqual(exceeds(1, 0))
+  })
+})
+
+// #546: lines priced at 0 with no adjustment are a stock-only return; every other 0 total is still nothing_to_refund.
+describe('a stock-only return (#546)', () => {
+  const free = { id: 'ordli_z', quantity: 1, returnedQuantity: 0, netMinor: 0, taxMinor: 0 }
+  const z = [{ orderLineId: 'ordli_z', quantity: 1, restock: true }]
+  const one = [{ orderLineId: 'ordli_1', quantity: 1, restock: true }]
+  const withFree = { ...base, lines: [line, free] }
+
+  it('U-546-1: one free line, no shipping, no adjustment, total 0 is accepted with the line at 0/0', () => {
+    expect(priceRefund({ ...withFree, request: request({ lines: z, totalMinor: 0 }) }))
+      .toEqual({ ok: true, totalMinor: 0, lines: [{ ...z[0], netMinor: 0, taxMinor: 0 }] })
+  })
+
+  it('U-546-2: no lines, no shipping, no adjustment is still nothing_to_refund', () => {
+    expect(priceRefund({ ...withFree, request: request({ totalMinor: 0 }) })).toMatchObject({ ok: false, error: { code: 'nothing_to_refund' } })
+  })
+
+  it('U-546-3: a line with money and a negative adjustment that brings the total to 0 is nothing_to_refund', () => {
+    expect(priceRefund({ ...withFree, request: request({ lines: one, adjustmentMinor: -396, totalMinor: 0 }) }))
+      .toMatchObject({ ok: false, error: { code: 'nothing_to_refund' } })
+  })
+
+  it('U-546-5: the free line asked at 1 is amount_mismatch at 0', () => {
+    expect(priceRefund({ ...withFree, request: request({ lines: z, totalMinor: 1 }) })).toEqual({ ok: false, error: {
+      code: 'amount_mismatch', message: "The refund total differs from the store's.", data: { expectedMinor: 1, serverMinor: 0 } } })
+  })
+
+  it('U-546-4: an earlier stock-only row counts as recorded for the #547 clamp; a null-id row with money still blocks it', () => {
+    // The 3.53 sale plus a free line z, 0.01 goodwill recorded, then z returned stock-only (its Medusa return received).
+    const lines = ['ordli_a', 'ordli_b', 'ordli_c'].map(id => ({ id, quantity: 1, returnedQuantity: 0, ...connectorSplit('1.1781', '0.1881', 2) }))
+    const all = lines.map(({ id }) => ({ orderLineId: id, quantity: 1, restock: true }))
+    const goodwill = { lines: [], shippingMinor: 0, medusaRefundId: 'refund_g', totalMinor: 1 }
+    const stockOnly = (totalMinor?: number) => ({ lines: [{ ...z[0], netMinor: 0, taxMinor: 0 }], shippingMinor: 0, medusaRefundId: null, totalMinor })
+    const sale = (earlier: PriceRefundInput['earlier'], withZ = true): Omit<PriceRefundInput, 'request'> => ({
+      lines: withZ ? [...lines, { ...free, returnedQuantity: 1 }] : lines, linesMoneyMinor: 353, shippingMinor: 0, paidMinor: 353, earlier, outsideRefundsMinor: 0, refundableMoneyMinor: 352 })
+    const clamped = { ok: true, totalMinor: 352, lines: all.map((entry, n) => ({ ...entry, netMinor: [99, 98, 98][n], taxMinor: 19 })) }
+    // Without z the clamp takes the 0.01 off; the stock-only row of z leaves that unchanged.
+    expect(priceRefund({ ...sale([goodwill], false), request: request({ lines: all, totalMinor: 352 }) })).toEqual(clamped)
+    expect(priceRefund({ ...sale([goodwill, stockOnly(0)]), request: request({ lines: all, totalMinor: 352 }) })).toEqual(clamped)
+    for (const totalMinor of [1, undefined]) {
+      expect(priceRefund({ ...sale([goodwill, stockOnly(totalMinor)]), request: request({ lines: all, totalMinor: 352 }) }))
+        .toMatchObject({ ok: false, error: { code: 'amount_mismatch', data: { expectedMinor: 352, serverMinor: 353 } } })
+    }
   })
 })
