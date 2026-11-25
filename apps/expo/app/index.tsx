@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Platform, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, usePathname } from 'expo-router';
 import { getCalendars } from 'expo-localization';
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, Button, Cart,
-  Catalogue, CustomerPicker, Dialog, DialogContent, DialogTitle, IconButton, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
+  Catalogue, CustomerDropdown, IconButton, Receipt, SyncStatus, Tender, Text as UiText, XIcon,
   DEFAULT_PRODUCT_FILTERS, type ProductFilters,
 } from '@tallyui/components';
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
@@ -23,7 +23,6 @@ import { CartSettingsButton } from '../components/cart-settings';
 import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
-import { CustomerChip } from '../components/customer-chip';
 import { CustomerSavedToast, useCustomerSavedToast } from '../components/customer-saved-toast';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { OfflineToast, useOfflineToast } from '../components/offline-toast';
@@ -155,7 +154,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [ordersListOpen, setOrdersListOpen] = useState(false);
   const [switchRefusal, setSwitchRefusal] = useState<string | null>(null);
   const switchTo = (id: string | null) => { void sale.switchSale(id).then(setSwitchRefusal); };
-  const [customerOpen, setCustomerOpen] = useState(false);
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
@@ -243,14 +241,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [cartOpen, setCartOpen] = useState(false);
   useEffect(() => { if (sale.stage.kind === 'receipt') setCartOpen(false); }, [sale.stage.kind]);
   // v2's checkout is a modal over the cart: the chip and its address pin exist only in the cart stage, and so do the
-  // customer picker, the new-customer dialog, the address dialog and the note dialog, so leaving the cart closes them and a cancelled
+  // customer dropdown, the new-customer dialog, the address dialog and the note dialog, so leaving the cart closes them and a cancelled
   // tender does not reopen them.
   useEffect(() => {
-    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setCustomerOpen(false); setNewCustomerOpen(false); setNoteOpen(false); }
+    if (sale.stage.kind !== 'cart') { setAddressCustomerId(null); setNewCustomerOpen(false); setNoteOpen(false); }
   }, [sale.stage.kind]);
-  // Read at pick time: the picker's New customer create can settle after its dialog closed, and that late pick is dropped.
-  const pickerLive = useRef(false);
-  pickerLive.current = customerOpen && sale.stage.kind === 'cart';
   const traitContext = useMemo(() => ({ currency: pricing.currency }), [pricing.currency]);
 
   // Reconciled stock over replicated stock, for everything the catalogue shows (ADR-060).
@@ -386,9 +381,16 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {ordersListOpen ? <OpenOrdersList sales={tillSales} currency={pricing.currency}
       onSelect={(id) => { setOrdersListOpen(false); switchTo(id); }} onClose={() => setOrdersListOpen(false)} /> : <>
     <View className="flex-row items-center justify-end gap-4 px-3">
-      {connector.searchCustomers && <CustomerChip name={sale.order.customer?.name} onPress={() => setCustomerOpen(true)}
-        onAddress={sale.order.customer && online && connector.getCustomer && connector.updateCustomer
-          ? () => setAddressCustomerId(sale.order.customer?.id ?? null) : undefined} />}
+      {/* v2's chip drops its search list in place, Guest first; a new customer stays under the "+" menu. */}
+      {connector.searchCustomers && <CustomerDropdown testID="customer-chip" className="min-w-0 shrink"
+        selected={sale.order.customer ?? null} online={online}
+        // connector-medusa 4.1.0 cannot page (searchCustomers only), so a later page is empty and the list never repeats page 1.
+        search={(q, page) => page && page > 1 ? Promise.resolve([]) : connector.searchCustomers!(syncContext, q)}
+        onSelect={(c) => { if (sale.stage.kind !== 'cart') return; sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); }}
+        onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); }}
+        onEditAddress={sale.order.customer && online && connector.getCustomer && connector.updateCustomer
+          ? () => setAddressCustomerId(sale.order.customer?.id ?? null) : undefined}
+        hasAddress={Object.values(sale.order.customer?.billing ?? {}).some(Boolean)} />}
       <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined} />
       <CartSettingsButton {...cartSettings} phone={phone} />
     </View>
@@ -484,16 +486,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         onChooseRegister={sheetFromArea ? () => { router.dismissTo('/'); openGate(); } : openGate}
         signOut={signOut} signOutLocked={signOutLocked} lockMessage={lockMessage} />
       <RegisterClosedSheet currency={pricing.currency} store={receiptStore} />
-      {connector.searchCustomers && <Dialog open={customerOpen && sale.stage.kind === 'cart'} onOpenChange={setCustomerOpen}>
-        <DialogContent testID="customer-dialog"><DialogTitle>Customer</DialogTitle>
-          <ScrollView><CustomerPicker selected={sale.order.customer} online={online}
-            search={(q) => connector.searchCustomers!(syncContext, q)}
-            create={(input) => connector.createCustomer!(syncContext, input)}
-            onSelect={(c) => { if (!pickerLive.current) return; sale.setCustomer(c ? { id: c.id, name: c.name, ...(c.email ? { email: c.email } : {}) } : null); if (c) setCustomerOpen(false); }}
-            onError={(error) => { if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized(); }} />
-          </ScrollView>
-        </DialogContent>
-      </Dialog>}
       {connector.createCustomer && <NewCustomerDialog open={newCustomerOpen && sale.stage.kind === 'cart'} onOpenChange={setNewCustomerOpen}
         create={(input) => connector.createCustomer!(syncContext, input)}
         update={connector.updateCustomer && ((id, patch) => connector.updateCustomer!(syncContext, id, patch))}

@@ -18,7 +18,7 @@ test('a searched customer is linked to the Medusa order', async ({ page }) => {
   await signIn(page);
   await addE2E1(page);
   await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-  await page.getByTestId('customer-picker-search').fill(email);
+  await page.getByTestId('customer-dropdown-search').fill(email);
   await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
   await payCash(page);
@@ -35,12 +35,12 @@ test('a customer created at the till is linked to the Medusa order', async ({ pa
   const email = `created-${crypto.randomUUID()}@example.com`;
   const commands = captureCommands<Sale>(page);
   await signIn(page);
-  await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-  await page.getByRole('button', { name: 'New customer', exact: true }).click();
+  await page.getByTestId('cart-add-menu').click();
+  await page.getByTestId('cart-add-new-customer').click();
   await page.getByPlaceholder('First name', { exact: true }).fill('Grace');
   await page.getByPlaceholder('Last name', { exact: true }).fill('Hopper');
   await page.getByPlaceholder('email@example.com', { exact: true }).fill(email);
-  await page.getByRole('button', { name: 'Save Customer', exact: true }).click();
+  await page.getByRole('button', { name: 'Add Customer', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Customer: Grace Hopper', exact: true })).toBeVisible();
   await addE2E1(page);
   await payCash(page);
@@ -126,10 +126,10 @@ test('the cart customer chip\'s address button edits the customer\'s billing add
   await createAdminCustomer(token, email, 'Ada', 'Lovelace');
   await signIn(page);
   await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-  await page.getByTestId('customer-picker-search').fill(email);
+  await page.getByTestId('customer-dropdown-search').fill(email);
   await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
   await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Edit customer address', exact: true }).click();
+  await page.getByRole('button', { name: 'Edit Customer Address', exact: true }).click();
   const dialog = page.getByTestId('customer-address-dialog');
   await dialog.getByLabel('Address line 1', { exact: true }).fill('1 Market St');
   await dialog.getByLabel('City', { exact: true }).fill('Leeds');
