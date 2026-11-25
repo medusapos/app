@@ -66,6 +66,12 @@ describe('scanner-settings', () => {
     expect(() => saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars: 65 })).toThrow();
   });
 
+  it.each([{ avgKeyMs: 9 }, { minChars: 65 }, { prefix: 'AB' }, { suffix: 'AB' }])('a bad %o names the thresholds, not the camera', (bad) => {
+    const save = () => saveScannerSettings(fakeStorage(), 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, ...bad });
+    expect(save).toThrow(/^Average time per key must be a whole number from 10 to 500, and minimum characters a whole number from 1 to 64\. Prefix and suffix must be at most one character each\.$/);
+    expect(save).not.toThrow(/camera/i);
+  });
+
   it('refuses to save a non-integer value', () => {
     const storage = fakeStorage();
     expect(() => saveScannerSettings(storage, 'https://a.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 50.5, minChars: 3 })).toThrow();
@@ -92,7 +98,7 @@ describe('scanner-settings', () => {
   it.each([[95, false], [96, true], [480, true], [481, false], [200.5, false]])('cameraHeight %d is accepted: %s', (cameraHeight, ok) => {
     const storage = fakeStorage(), settings = { ...DEFAULT_SCANNER_SETTINGS, camera: true, cameraHeight };
     const save = () => saveScannerSettings(storage, 'https://a.test', settings);
-    if (!ok) { expect(save).toThrow(/camera scanner height/); return; }
+    if (!ok) { expect(save).toThrow(/^The camera scanner height must be a whole number from 96 to 480\.$/); return; }
     save();
     expect(loadScannerSettings(storage, 'https://a.test')).toEqual(settings);
   });

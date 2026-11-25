@@ -372,7 +372,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       searchAccessory={productSettingsButton} showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
-      onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn}
+      onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn && !counting}
       cameraScanner={{ onDetected: camera.offer, onOpen: camera.reset, scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />

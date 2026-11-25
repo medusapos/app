@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { cameraStub } from './capture/rows';
-import { cartLineQuantity, openArea, signIn, test } from './helpers';
+import { cartLineQuantity, openArea, openRegisterPanel, signIn, test } from './helpers';
 
 // v2's camera scan (AUDIT 25, DEMO 15f.5), web only: Settings › Barcode Scanning › Use camera (off by default) draws
 // TU's camera button beside the Sale's search; its inline scanner's decodes go through useCameraScan's continuous
@@ -28,6 +28,7 @@ async function turnCameraOn(page: Page) {
 }
 
 test('the camera scan button is off by default', async ({ page }) => {
+  await page.addInitScript(cameraStub, { code: E2E2_BARCODE, denied: false });
   await signIn(page);
   await expect(page.getByRole('searchbox')).toBeVisible();
   await expect(button(page)).toHaveCount(0);
@@ -106,6 +107,25 @@ test('leaving the Sale stops the camera; back on the Sale the scanner reopens on
   await expect.poll(() => trackState(page)).toBe('live');
   expect(await page.evaluate(() => { const w = window as unknown as CameraWindow; return w.__cameraStream !== w.__firstStream; }))
     .toBe(true);
+});
+
+// A count makes the catalogue inert, so the scanner goes with it; Back to selling (TU, the session stays open) brings it back.
+test('a register count stops the camera and hides its button; Back to selling shows the button again', async ({ page }) => {
+  await page.addInitScript(cameraStub, { code: E2E2_BARCODE, denied: false });
+  await signIn(page);
+  await turnCameraOn(page);
+  await openArea(page, 'POS');
+  await button(page).click();
+  await expect.poll(() => trackState(page)).toBe('live');
+  await openRegisterPanel(page);
+  await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
+  await expect(page.getByTestId('register-count')).toBeVisible();
+  await expect(panel(page)).toHaveCount(0);
+  await expect(button(page)).toHaveCount(0);
+  await expect.poll(() => trackState(page)).toBe('ended');
+  await page.getByTestId('register-count').getByTestId('count-back').click();
+  await expect(page.getByTestId('register-count')).toHaveCount(0);
+  await expect(button(page)).toBeVisible();
 });
 
 test('a browser without BarcodeDetector shows no camera button and no Use camera switch, even with it saved on', async ({ page }) => {

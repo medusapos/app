@@ -1958,6 +1958,17 @@ describe('ProductsScreen camera scan', () => {
     expect(screen.getByRole('searchbox')).toBeTruthy();
     expect(screen.queryByTestId('camera-scan-button')).toBeNull();
   });
+
+  // A count makes catalogue-area inert, so an open scanner could be neither closed nor used: no camera then.
+  it.each([['open', true], ['counting', false]] as const)('with it on and supported, session status %s draws the camera button: %s', async (status, shown) => {
+    supportedBrowser();
+    cameraOn();
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register, session: { ...fixture.register.session!, status } } });
+    await mount();
+    expect(screen.getByRole('searchbox')).toBeTruthy();
+    expect(screen.queryByTestId('camera-scan-button') !== null).toBe(shown);
+  });
 });
 
 // The #82 review: every sign-out path honours SessionProvider's sale hold, through the real provider and screen.

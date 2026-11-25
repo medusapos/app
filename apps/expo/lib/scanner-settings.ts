@@ -22,12 +22,13 @@ const AVG_KEY_MS_RANGE = [10, 500] as const;
 const MIN_CHARS_RANGE = [1, 64] as const;
 const inRange = (v: unknown, [min, max]: readonly [number, number]): v is number =>
   typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max;
-const isValidSettings = (v: unknown): v is ScannerSettings => typeof v === 'object' && v !== null
+// Thresholds, prefix/suffix and switches; the camera height is checked on its own so each gets its own message.
+const isValidThresholds = (v: unknown): v is ScannerSettings => typeof v === 'object' && v !== null
   && inRange((v as ScannerSettings).avgKeyMs, AVG_KEY_MS_RANGE) && inRange((v as ScannerSettings).minChars, MIN_CHARS_RANGE)
   && typeof (v as ScannerSettings).prefix === 'string' && Array.from((v as ScannerSettings).prefix).length <= 1
   && typeof (v as ScannerSettings).suffix === 'string' && Array.from((v as ScannerSettings).suffix).length <= 1
-  && typeof (v as ScannerSettings).playSound === 'boolean' && typeof (v as ScannerSettings).camera === 'boolean'
-  && inRange((v as ScannerSettings).cameraHeight, CAMERA_HEIGHT_RANGE);
+  && typeof (v as ScannerSettings).playSound === 'boolean' && typeof (v as ScannerSettings).camera === 'boolean';
+const isValidSettings = (v: unknown): v is ScannerSettings => isValidThresholds(v) && inRange(v.cameraHeight, CAMERA_HEIGHT_RANGE);
 
 /** Tolerates a missing or corrupt value, falling back to the defaults (same style as store-settings.ts). */
 export function loadScannerSettings(storage: SessionStorage | null, baseUrl: string): ScannerSettings {
@@ -40,10 +41,11 @@ export function loadScannerSettings(storage: SessionStorage | null, baseUrl: str
 
 /** Throws when `settings` is out of range, so a caller can show a validation message. */
 export function saveScannerSettings(storage: SessionStorage | null, baseUrl: string, settings: ScannerSettings): void {
-  if (!isValidSettings(settings)) throw new Error(`Average time per key must be a whole number from ${AVG_KEY_MS_RANGE[0]} `
+  if (!isValidThresholds(settings)) throw new Error(`Average time per key must be a whole number from ${AVG_KEY_MS_RANGE[0]} `
     + `to ${AVG_KEY_MS_RANGE[1]}, and minimum characters a whole number from ${MIN_CHARS_RANGE[0]} to ${MIN_CHARS_RANGE[1]}. `
-    + 'Prefix and suffix must be at most one character each. '
-    + `The camera scanner height must be a whole number from ${CAMERA_HEIGHT_RANGE[0]} to ${CAMERA_HEIGHT_RANGE[1]}.`);
+    + 'Prefix and suffix must be at most one character each.');
+  if (!isValidSettings(settings)) throw new Error(
+    `The camera scanner height must be a whole number from ${CAMERA_HEIGHT_RANGE[0]} to ${CAMERA_HEIGHT_RANGE[1]}.`);
   storage?.setItem(PREFIX + baseUrl, JSON.stringify(settings));
 }
 
