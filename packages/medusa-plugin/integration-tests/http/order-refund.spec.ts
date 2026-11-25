@@ -779,7 +779,7 @@ medusaIntegrationTestRunner({
 
     // #543 window 2: a run paused inside a Medusa step, still holding the order lock, until the test lets it go.
     type Workflow = typeof import('../../src/workflows/tally-order-refund/workflow')
-    function paused(step: 'moneyStep' | 'receiveStep' | 'requestReturn', dies = false) {
+    function paused(step: 'moneyStep' | 'receiveStep' | 'requestReturn' | 'cancelOrphanReturn', dies = false) {
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
       const original = workflow[step] as (...args: unknown[]) => Promise<unknown>
       let entered!: () => void, release!: () => void
@@ -926,6 +926,34 @@ medusaIntegrationTestRunner({
       expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+    })
+
+    it('O4-lock-lost-in-cancel: a run whose lock is lost while cancelling the orphan never begins a second return; the retry applies once', async () => {
+      const { before, till, order, knex, row, begun } = await orphaned()
+      const stock = await stockA()
+      const pause = paused('cancelOrphanReturn')
+      const first = post([order])
+      try {
+        await pause.reached
+        await terminateHolder(till.orderId)
+      } finally {
+        pause.release()
+      }
+      const response = await first
+      expect([response.status, response.data]).toEqual([503, { code: 'transient', id: order.id, message: 'Temporary failure, retry later.' }])
+      // The zombie's cancel landed; its probe after the orphan loop stopped it before a second begin.
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ id: begun.id, status: 'canceled' })])
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(await stockA()).toBe(stock)
+      expect((await post([order])).data.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
+      const recorded = await knex('tally_refund').where({ id: row.id }).first()
+      expect(recorded).toMatchObject({ status: 'applied' })
+      expect(recorded.return_id).not.toBe(begun.id)
+      expect(await returns(till.orderId)).toEqual(expect.arrayContaining([expect.objectContaining({ id: begun.id, status: 'canceled' }),
+        expect.objectContaining({ id: recorded.return_id, status: 'received' })]))
+      expect(await returns(till.orderId)).toHaveLength(2)
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+      expect(await stockA()).toBe(before)
     })
 
     it('L2: a run whose lock is lost inside the money step never pays twice: the retry parks money_unconfirmed', async () => {

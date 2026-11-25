@@ -251,6 +251,7 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
             return await park('return', `orphan return ${orphanId} could not be cancelled: ${error.message}`)
           }
         }
+        await probe(ctx.trx, order.id)
       }
       try {
         returnId ??= await beginReturn(container, { orderId: order.id, locationId: order.locationId, actorId, note: row.reason,
