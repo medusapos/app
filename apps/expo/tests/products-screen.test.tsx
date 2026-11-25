@@ -2780,6 +2780,29 @@ describe('ProductsScreen sale filter pills', () => {
     expect(tiles()).toEqual(['Apple']);
   });
 
+  it('a tile tapped mid-search (a text of the scanner\'s length that is no code) adds it once and keeps the search', async () => {
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    type('appl');
+    expect(tiles()).toEqual(['Apple']);
+    fireEvent.click(screen.getByTestId('product-tile-Apple'));
+    expect(screen.getAllByRole('button', { name: /^Edit quantity of / })).toHaveLength(1);
+    expect(search().value).toBe('appl');
+    expect(tiles()).toEqual(['Apple']);
+  });
+
+  it('a tile tapped while its full code below the scanner\'s minimum length is searched keeps the search', async () => {
+    saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 100, minChars: 6 });
+    await mount();
+    pick('filter-chip-tag', 'ptag_organic');
+    type('APL-1');
+    expect(tiles()).toEqual(['Apple']);
+    fireEvent.click(screen.getByTestId('product-tile-Apple'));
+    expect(screen.getAllByRole('button', { name: /^Edit quantity of / })).toHaveLength(1);
+    expect(search().value).toBe('APL-1');
+    expect(tiles()).toEqual(['Apple']);
+  });
+
   it('the table view takes the picks', async () => {
     await mount();
     pick('filter-chip-tag', 'ptag_organic');

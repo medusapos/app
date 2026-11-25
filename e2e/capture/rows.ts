@@ -124,9 +124,9 @@ async function cameraOn(page: Page, size: Size, id: string) {
   }, `capture-${id}-camera-off`);
 }
 
-// Row 02a.2's sale price list on E2E-3. The Sale pulls a product again only once its updated_at moves, so a metadata
-// touch on product 3 brings the sale into the cached catalogue, and a second one (an empty value deletes the key) takes
-// it back out on the next row's reload, once the list is gone.
+// Row 02a.2's sale price list on E2E-3. A price list moves no updated_at, so the till sees it at its 30-minute price
+// check; a metadata touch on product 3 brings it into the cached catalogue at the next sync, and a second one (an empty
+// value) takes it back out on the next row's reload, once the list is gone.
 async function saleOnE2E3(): Promise<() => Promise<void>> {
   const token = await adminToken();
   const admin = async (method: string, route: string, body?: object) => {
