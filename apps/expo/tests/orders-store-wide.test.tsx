@@ -35,6 +35,14 @@ vi.mock('../lib/pos-connector', async (importOriginal) => {
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
+// react-native-web drops className without NativeWind, so TableHead and TableCell echo it as data-class for the width check.
+vi.mock('@tallyui/components', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tallyui/components')>();
+  const { forwardRef } = await import('react');
+  const echo = (Actual: typeof actual.TableCell) =>
+    forwardRef<never, Parameters<typeof Actual>[0]>((props, ref) => <Actual ref={ref} {...props} dataSet={{ class: props.className ?? '' }} />);
+  return { ...actual, TableHead: echo(actual.TableHead), TableCell: echo(actual.TableCell) };
+});
 
 const context = { connectorId: 'medusa', baseUrl: 'https://store.test', headers: { Authorization: 'Bearer t' } };
 
@@ -54,6 +62,18 @@ function storeOrder(n: number, extra: Partial<StoreOrder> = {}): StoreOrder {
   };
 }
 const page = (orders: StoreOrder[], extra: Partial<StoreOrderPage> = {}): StoreOrderPage => ({ orders, hasMore: false, ...extra });
+// The billing read goes to Medusa's /admin/orders through fetch, stubbed for every test so none reaches a network.
+const billingFetch = vi.fn<(url: string, init?: RequestInit) => Promise<Response>>();
+const billingAnswer = (orders: unknown[], status = 200) =>
+  ({ ok: status >= 200 && status < 300, status, json: async () => ({ orders }) }) as unknown as Response;
+const address = (id: string, street: string, billing_address: unknown = { address_1: street, city: 'Copenhagen', country_code: 'dk' }) =>
+  ({ id, billing_address });
+// Holds each billing read until the test answers it, in the order they were sent.
+function holdBilling() {
+  const reads: ((answer: Response) => void)[] = [];
+  billingFetch.mockImplementation(() => new Promise((resolve) => { reads.push(resolve); }));
+  return reads;
+}
 function withSales(...recent: PosOrder[]) {
   vi.mocked(useOutboxContext).mockReturnValue({
     orders: null, state: { pending: 0, sending: false }, recent, savesInFlight: 0, stuckCommandIds: [],
@@ -74,6 +94,8 @@ const openButtons = () => within(screen.getByTestId('orders-table')).getAllByRol
 beforeEach(() => {
   vi.useFakeTimers();
   listOrders.mockReset().mockResolvedValue(page([]));
+  billingFetch.mockReset().mockImplementation(async () => billingAnswer([]));
+  vi.stubGlobal('fetch', billingFetch);
   connector.orderFilters = null;
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't' };
   withSales();
@@ -136,7 +158,7 @@ describe('Orders lists the whole store (row 10)', () => {
   });
 
   it('Load more appends page 2, with the store\'s count', async () => {
-    const all = Array.from({ length: 40 }, (_, i) => storeOrder(40 - i));
+    const all = Array.from({ length: 40 }, (_, i) => storeOrder(40 - i, { placedAt: '2026-11-24T09:00:00.000Z' }));
     listOrders.mockResolvedValueOnce(page(all.slice(0, 25), { hasMore: true, total: 40 }))
       .mockResolvedValueOnce(page(all.slice(25), { total: 40 }));
     await mount();
@@ -323,5 +345,206 @@ describe('Orders states', () => {
     await mount();
     expect(screen.getByText('redirect:/login')).toBeTruthy();
     expect(listOrders).not.toHaveBeenCalled();
+  });
+});
+
+describe('Billing Address column and day headers (row 10.1)', () => {
+  const at = (...parts: [number, number, number, number, number]) => new Date(...parts).toISOString();
+  const table = () => screen.getByTestId('orders-table');
+  // The day headers and rows of the main table, in screen order.
+  const layout = (keys: string[]) => Array.from(table().querySelectorAll('[data-testid^="orders-row-"]'),
+    (element) => element.getAttribute('data-testid')!.replace('orders-row-', ''))
+    .filter((id) => id.startsWith('day-') || keys.includes(id));
+
+  it('rows show before the addresses arrive, then fill in; an order without one reads —', async () => {
+    const reads = holdBilling();
+    listOrders.mockResolvedValue(page([storeOrder(2), storeOrder(1)]));
+    await mount();
+    expect(within(table()).getByText('Billing Address', { exact: true })).toBeTruthy();
+    expect(openButtons()).toEqual(['Open order #1002', 'Open order #1001']);
+    expect(cell('order_2', 'billing')).toBe('');
+    expect(cell('order_1', 'billing')).toBe('');
+    expect(billingFetch).toHaveBeenCalledOnce();
+    expect(billingFetch.mock.calls[0]![0]).toContain('/admin/orders?id[]=order_2&id[]=order_1&limit=2&fields=id,billing_address.');
+    expect(billingFetch.mock.calls[0]![1]).toMatchObject({ headers: { Authorization: 'Bearer t' } });
+    await act(async () => { reads[0]!(billingAnswer([address('order_2', 'Nørregade 1'), { id: 'order_1', billing_address: null }])); });
+    await settle();
+    expect(cell('order_2', 'billing')).toBe('Nørregade 1, Copenhagen, DK');
+    expect(cell('order_1', 'billing')).toBe('—');
+  });
+
+  it('a till\'s sale with its own stored address shows it; one without shows its store order\'s', async () => {
+    const own = { ...sale('Red hat', 'applied'), customer: { id: 'c1', name: 'Ada', billing: { address1: 'Main St 5', city: 'Berlin', country: 'DE' } } };
+    const plain = sale('Blue shirt', 'applied');
+    withSales(own, plain);
+    listOrders.mockResolvedValue(page([storeOrder(9, { clientOrderId: own.id }), storeOrder(8, { clientOrderId: plain.id })]));
+    billingFetch.mockImplementation(async () => billingAnswer([address('order_9', 'Shop St 1'), address('order_8', 'Shop St 1')]));
+    await mount();
+    await settle();
+    expect(cell(own.id, 'billing')).toBe('Main St 5, Berlin, DE');
+    expect(cell(plain.id, 'billing')).toBe('Shop St 1, Copenhagen, DK');
+  });
+
+  it.each([
+    ['a failed read', () => Promise.reject(new TypeError('Failed to fetch'))],
+    ['a server error', async () => billingAnswer([], 500)],
+    ['a 403', async () => billingAnswer([], 403)],
+  ])('%s leaves the list whole with empty cells, no alert and no second read', async (_, outcome) => {
+    billingFetch.mockImplementation(outcome);
+    listOrders.mockResolvedValue(page([storeOrder(2), storeOrder(1)]));
+    await mount();
+    await settle();
+    expect(openButtons()).toEqual(['Open order #1002', 'Open order #1001']);
+    expect(cell('order_2', 'billing')).toBe('');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(sessionState.reportUnauthorized).not.toHaveBeenCalled();
+    expect(billingFetch).toHaveBeenCalledOnce();
+  });
+
+  it('a 401 on the read reports the refused session', async () => {
+    billingFetch.mockImplementation(async () => billingAnswer([], 401));
+    listOrders.mockResolvedValue(page([storeOrder(1)]));
+    await mount();
+    await settle();
+    expect(sessionState.reportUnauthorized).toHaveBeenCalledExactlyOnceWith();
+  });
+
+  it('Load more while page 1\'s addresses are out still fills page 1, and page 2', async () => {
+    const reads = holdBilling();
+    const all = Array.from({ length: 30 }, (_, i) => storeOrder(30 - i, { placedAt: '2026-11-24T09:00:00.000Z' }));
+    listOrders.mockResolvedValueOnce(page(all.slice(0, 25), { hasMore: true, total: 30 })).mockResolvedValueOnce(page(all.slice(25), { total: 30 }));
+    await mount();
+    fireEvent.click(screen.getByTestId('orders-load-more'));
+    await settle();
+    expect(billingFetch).toHaveBeenCalledTimes(2);
+    expect(billingFetch.mock.calls[1]![0]).toContain('id[]=order_5&id[]=order_4&id[]=order_3&id[]=order_2&id[]=order_1&limit=5&');
+    await act(async () => { reads[1]!(billingAnswer([address('order_1', 'Page Two 2')])); });
+    await settle();
+    await act(async () => { reads[0]!(billingAnswer([address('order_30', 'Page One 1')])); });
+    await settle();
+    expect(cell('order_30', 'billing')).toBe('Page One 1, Copenhagen, DK');
+    expect(cell('order_1', 'billing')).toBe('Page Two 2, Copenhagen, DK');
+  });
+
+  it('an earlier read answering late does not replace a later read\'s address', async () => {
+    const reads = holdBilling();
+    listOrders.mockResolvedValue(page([storeOrder(1)]));
+    await mount();
+    fireEvent.change(screen.getByTestId('orders-search'), { target: { value: 'ada' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    expect(billingFetch).toHaveBeenCalledTimes(2);
+    await act(async () => { reads[1]!(billingAnswer([address('order_1', 'New St 2')])); });
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('New St 2, Copenhagen, DK');
+    await act(async () => { reads[0]!(billingAnswer([address('order_1', 'Old St 1')])); });
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('New St 2, Copenhagen, DK');
+  });
+
+  it('a change of token empties the addresses and drops an answer read with the old one', async () => {
+    const reads = holdBilling();
+    listOrders.mockResolvedValue(page([storeOrder(1)]));
+    billingFetch.mockImplementationOnce(async () => billingAnswer([address('order_1', 'Old St 1')]));
+    const view = await mount();
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('Old St 1, Copenhagen, DK');
+    // A second read under the old token is still out when the token changes.
+    fireEvent.change(screen.getByTestId('orders-search'), { target: { value: 'ada' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(250); });
+    sessionState.session = { ...sessionState.session!, token: 'u' };
+    view.rerender(<><OrdersScreen /><PortalHost /></>);
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('');
+    expect(reads).toHaveLength(2);
+    await act(async () => { reads[0]!(billingAnswer([address('order_1', 'Stale St 3')])); });
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('');
+    await act(async () => { reads[1]!(billingAnswer([address('order_1', 'New St 2')])); });
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('New St 2, Copenhagen, DK');
+  });
+
+  it('an old token\'s read answering after the new token\'s does not replace its address', async () => {
+    const reads = holdBilling();
+    listOrders.mockResolvedValue(page([storeOrder(1)]));
+    const view = await mount();
+    sessionState.session = { ...sessionState.session!, token: 'u' };
+    view.rerender(<><OrdersScreen /><PortalHost /></>);
+    await settle();
+    expect(reads).toHaveLength(2);
+    await act(async () => { reads[1]!(billingAnswer([address('order_1', 'New St 2')])); });
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('New St 2, Copenhagen, DK');
+    await act(async () => { reads[0]!(billingAnswer([address('order_1', 'Stale St 3')])); });
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('New St 2, Copenhagen, DK');
+  });
+
+  it('a 401 on an old token\'s read does not report the new session, whose read still fills the cell', async () => {
+    const reads = holdBilling();
+    listOrders.mockResolvedValue(page([storeOrder(1)]));
+    const view = await mount();
+    sessionState.session = { ...sessionState.session!, token: 'u' };
+    view.rerender(<><OrdersScreen /><PortalHost /></>);
+    await settle();
+    expect(reads).toHaveLength(2);
+    await act(async () => { reads[0]!(billingAnswer([], 401)); });
+    await settle();
+    expect(sessionState.reportUnauthorized).not.toHaveBeenCalled();
+    await act(async () => { reads[1]!(billingAnswer([address('order_1', 'New St 2')])); });
+    await settle();
+    expect(cell('order_1', 'billing')).toBe('New St 2, Copenhagen, DK');
+    expect(sessionState.reportUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it('one Today and one Yesterday header, each above its own rows; an unsent sale of today first in its day', async () => {
+    vi.setSystemTime(new Date(2026, 10, 25, 15, 0));
+    const pending = sale('Red hat', 'pending', at(2026, 10, 25, 14, 0));
+    withSales(pending);
+    listOrders.mockResolvedValue(page([storeOrder(4, { placedAt: at(2026, 10, 25, 9, 0) }), storeOrder(3, { placedAt: at(2026, 10, 25, 8, 0) }),
+      storeOrder(2, { placedAt: at(2026, 10, 24, 18, 0) }), storeOrder(1, { placedAt: at(2026, 10, 24, 9, 0) })]));
+    await mount();
+    expect(layout([pending.id, 'order_4', 'order_3', 'order_2', 'order_1'])).toEqual(
+      ['day-2026-11-25', pending.id, 'order_4', 'order_3', 'day-2026-11-24', 'order_2', 'order_1']);
+    const today = screen.getByTestId('orders-row-day-2026-11-25');
+    expect(within(today).getByRole('heading').textContent).toBe('Today');
+    expect(within(screen.getByTestId('orders-row-day-2026-11-24')).getByRole('heading').textContent).toBe('Yesterday');
+    expect(within(today).queryByRole('button')).toBeNull();
+    expect(screen.getAllByText('Today', { exact: true })).toHaveLength(1);
+    expect(screen.getAllByText('Yesterday', { exact: true })).toHaveLength(1);
+  });
+
+  it('the offline list has day headers, and its rows read — without an address of their own', async () => {
+    vi.setSystemTime(new Date(2026, 10, 25, 15, 0));
+    const today = sale('Red hat', 'applied', at(2026, 10, 25, 10, 0));
+    const older = sale('Blue shirt', 'applied', at(2026, 10, 20, 10, 0));
+    withSales(today, older);
+    listOrders.mockRejectedValue(new CustomerServiceError('network', 'offline'));
+    await mount();
+    expect(screen.getByRole('alert').textContent).toBe(ORDERS_OFFLINE_TEXT);
+    expect(layout([today.id, older.id])).toEqual(['day-2026-11-25', today.id, 'day-2026-11-20', older.id]);
+    expect(within(screen.getByTestId('orders-row-day-2026-11-20')).getByRole('heading').textContent)
+      .toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(2026, 10, 20, 10, 0)));
+    expect(cell(today.id, 'billing')).toBe('—');
+    expect(billingFetch).not.toHaveBeenCalled();
+  });
+
+  it('Needs attention has the Billing Address column and no day header', async () => {
+    const refused = { ...sale('Red hat', 'rejected'), error: { code: 'platform_error', message: 'Refused' } };
+    withSales(refused);
+    await mount();
+    const attention = screen.getByTestId('orders-attention');
+    expect(within(attention).getByText('Billing Address', { exact: true })).toBeTruthy();
+    expect(screen.getByTestId(`orders-attention-row-${refused.id}-billing`).textContent).toBe('—');
+    expect(attention.querySelector('[data-testid^="orders-attention-row-day-"]')).toBeNull();
+    expect(within(attention).queryByRole('heading')).toBeNull();
+  });
+
+  it('the Billing Address head and its cells take the same double width', async () => {
+    listOrders.mockResolvedValue(page([storeOrder(1)]));
+    await mount();
+    const head = within(table()).getByText('Billing Address', { exact: true }).closest('[role="columnheader"]');
+    expect(head?.getAttribute('data-class')).toBe('flex-[2]');
+    expect(screen.getByTestId('orders-row-order_1-billing').getAttribute('data-class')).toBe(head?.getAttribute('data-class'));
   });
 });

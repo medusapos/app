@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrderDetailLineItem, OrderDetailTaxLine, OrderStatus } from '@tallyui/components';
 import { ConnectorUnauthorizedError, CustomerServiceError, formatMoney, type StoreOrder, type SyncContext } from '@tallyui/core';
 import { buildReceiptDataFromStoreOrder, orderFiltersQuery, type OrderFilterValue, type PosOrder } from '@tallyui/pos';
+import { loadOrderBilling } from './order-billing';
 import { ordersScreenFilterFields } from './order-filters';
 import { authHeaders, createPosConnector, storeOrderFilters } from './pos-connector';
 import type { Session } from './session';
@@ -11,8 +12,10 @@ export const STORE_ORDERS_PER_PAGE = 25;
 // As the Customers search: one request once the cashier stops typing.
 export const STORE_ORDERS_SEARCH_DEBOUNCE_MS = 250;
 
-// One row of the Orders table: a sale this till holds, or an order only the store has.
-export type OrdersRow = { kind: 'local'; key: string; order: PosOrder } | { kind: 'store'; key: string; order: StoreOrder };
+// One row of the Orders table: a sale this till holds (`storeId` when it stands for that store order), or an order only
+// the store has.
+export type OrdersRow = { kind: 'local'; key: string; order: PosOrder; storeId?: string }
+  | { kind: 'store'; key: string; order: StoreOrder };
 
 // The badge for Medusa's own order status word; a word the app doesn't know reads as pending.
 export function storeOrderStatus(status: string): OrderStatus {
@@ -33,7 +36,7 @@ export function mergeOrderRows(unsent: PosOrder[], recent: PosOrder[], store: St
   const local = new Map(recent.map((order) => [order.id, order]));
   for (const order of store) {
     const mine = order.clientOrderId ? local.get(order.clientOrderId) : undefined;
-    const row: OrdersRow = mine ? { kind: 'local', key: mine.id, order: mine } : { kind: 'store', key: order.id, order };
+    const row: OrdersRow = mine ? { kind: 'local', key: mine.id, order: mine, storeId: order.id } : { kind: 'store', key: order.id, order };
     if (seen.has(row.key)) continue;
     seen.add(row.key);
     rows.push(row);
@@ -62,6 +65,7 @@ export function storeOrderDetailFigures(order: StoreOrder): {
 }
 
 export type StoreOrdersFailure = 'network' | 'other';
+const NO_BILLING: ReadonlyMap<string, string | null> = new Map();
 
 // The store's orders, page by page, for the search and filters on screen. A newer request drops an older answer,
 // and a change of search, filters or applied count starts again at page 1.
@@ -90,6 +94,30 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
   const request = useRef(0);
   const unauthorized = useRef(onUnauthorized);
   useEffect(() => { unauthorized.current = onUnauthorized; }, [onUnauthorized]);
+  // The listed orders' billing addresses by store order id, for the store and token they were read with. Each read
+  // outlives a newer page, search or filter; per id, a later read's answer wins. A new store or token starts empty.
+  const [billing, setBilling] = useState<{ context: SyncContext; byId: ReadonlyMap<string, string | null> }>(
+    () => ({ context, byId: new Map() }));
+  const billingReads = useRef({ context, live: true, sent: 0, applied: new Map<string, number>() });
+  useEffect(() => {
+    const reads = { context, live: true, sent: 0, applied: new Map<string, number>() };
+    billingReads.current = reads;
+    return () => { reads.live = false; };
+  }, [context]);
+  const readBilling = useCallback((ids: string[]) => {
+    const reads = billingReads.current;
+    const sent = ++reads.sent;
+    // The rows never wait for it; only a refused session is acted on, any other failure leaves the cells empty.
+    loadOrderBilling(reads.context, ids).then((found) => {
+      const fresh = [...found].filter(([id]) => reads.live && (reads.applied.get(id) ?? 0) < sent);
+      if (fresh.length === 0) return;
+      for (const [id] of fresh) reads.applied.set(id, sent);
+      setBilling((before) => ({ context: reads.context,
+        byId: new Map([...(before.context === reads.context ? before.byId : []), ...fresh]) }));
+    }, (error: unknown) => {
+      if (reads.live && error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') unauthorized.current();
+    });
+  }, []);
 
   useEffect(() => {
     const current = ++request.current;
@@ -109,6 +137,7 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
           unreadable: before.unreadable + (answer.unreadable ?? 0) });
       setFailure(null);
       setLoading(false);
+      readBilling(answer.orders.map((order) => order.id));
     }, (error: unknown) => {
       if (current !== request.current) return;
       setLoading(false);
@@ -120,12 +149,13 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
     });
     // A late answer after a newer request, or after the screen closes, is dropped.
     return () => { ++request.current; };
-  }, [connector, context, registerContext, debounced, filters, page, appliedCount, attempt]);
+  }, [connector, context, registerContext, debounced, filters, page, appliedCount, attempt, readBilling]);
 
   const loadMore = useCallback(() => setPaging({ query, page: page + 1, attempt }), [query, page, attempt]);
   const retry = useCallback(() => setPaging({ query, page: 1, attempt: attempt + 1 }), [query, attempt]);
   return {
     orders: result?.orders ?? [], loaded: result !== null, hasMore: !!result?.hasMore, total: result?.total,
     unreadable: result?.unreadable ?? 0, loading, failure, loadMore, retry, filterFields,
+    billing: billing.context === context ? billing.byId : NO_BILLING,
   };
 }

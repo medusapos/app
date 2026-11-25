@@ -31,13 +31,16 @@ describe('mergeOrderRows', () => {
   it('a store order the till created renders as the till\'s sale, keyed by its id, once', () => {
     const mine = sale('2026-11-24T08:00:00.000Z');
     const rows = mergeOrderRows([], [mine], [storeOrder('order_9', { clientOrderId: mine.id }), storeOrder('order_8')]);
-    expect(rows).toEqual([{ kind: 'local', key: mine.id, order: mine }, { kind: 'store', key: 'order_8', order: storeOrder('order_8') }]);
+    expect(rows).toEqual([{ kind: 'local', key: mine.id, order: mine, storeId: 'order_9' },
+      { kind: 'store', key: 'order_8', order: storeOrder('order_8') }]);
   });
 
   it('an unsent sale the store already lists stays one row, the till\'s, where the unsent sales are', () => {
     const pending = sale('2026-11-24T08:00:00.000Z', 'pending');
     const rows = mergeOrderRows([pending], [pending], [storeOrder('order_7'), storeOrder('order_9', { clientOrderId: pending.id })]);
     expect(rows.map((row) => row.key)).toEqual([pending.id, 'order_7']);
+    // Listed where the unsent sales are, it is not the store's row and names no store order.
+    expect(rows[0]).toEqual({ kind: 'local', key: pending.id, order: pending });
   });
 
   it('a store order whose clientOrderId names no sale on this till is the store\'s row', () => {

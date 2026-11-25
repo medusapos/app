@@ -484,8 +484,10 @@ export async function variantIdBySku(token: string, sku: string): Promise<string
   return variant.id;
 }
 
-// An order the store has that no till rang up, like a web-shop order: a converted admin draft order.
-export async function createStoreOnlyOrder(token: string, sku: string, email: string): Promise<{ id: string; displayId: number }> {
+// An order the store has that no till rang up, like a web-shop order: a converted admin draft order, with the given
+// billing address (Medusa's own field names) when there is one.
+export async function createStoreOnlyOrder(token: string, sku: string, email: string,
+  billingAddress?: Record<string, string>): Promise<{ id: string; displayId: number }> {
   const get = async (path: string) => {
     const response = await fetch(`${backend}${path}`, { headers: { Authorization: `Bearer ${token}` } });
     expect(response.ok, await response.clone().text()).toBeTruthy();
@@ -505,6 +507,7 @@ export async function createStoreOnlyOrder(token: string, sku: string, email: st
   const { draft_order } = await post('/admin/draft-orders', {
     region_id: regionId, sales_channel_id: stores[0].default_sales_channel_id, email,
     items: [{ variant_id: await variantIdBySku(token, sku), quantity: 1 }],
+    ...(billingAddress ? { billing_address: billingAddress } : {}),
   });
   const { order } = await post(`/admin/draft-orders/${draft_order.id}/convert-to-order?fields=id,display_id`);
   return { id: order.id, displayId: order.display_id };

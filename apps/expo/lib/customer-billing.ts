@@ -49,7 +49,7 @@ export async function loadCustomerAddresses(context: SyncContext, id: string): P
   const shipping = find('is_default_shipping');
   return { ...(billing ? { billing: mapAddress(billing) } : {}), ...(shipping ? { shipping: mapAddress(shipping) } : {}) };
 }
-function mapAddress(stored: Record<string, unknown>): CustomerAddress {
+export function mapAddress(stored: Record<string, unknown>): CustomerAddress {
   const address: CustomerAddress = {};
   const mapping = { first_name: 'firstName', last_name: 'lastName', company: 'company', address_1: 'address1',
     address_2: 'address2', city: 'city', province: 'state', postal_code: 'postcode', country_code: 'country', phone: 'phone' } as const;
