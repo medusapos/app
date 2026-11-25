@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@te
 import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StoreSettingsError, type ProductTraits, type StoreSettings as PricingSettings, type VariantSummary } from '@tallyui/core';
-import { useStoreSettings } from '@tallyui/pos';
+import { DEFAULT_TILE_FIELDS, useStoreSettings } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
@@ -1278,7 +1278,7 @@ describe('the Variations choice', () => {
     expect(screen.getByTestId('products-settings-variations-list').getAttribute('aria-selected')).toBe('true');
     press('products-settings-variations-popover');
     expect(screen.getByTestId('products-settings-variations-popover').getAttribute('aria-selected')).toBe('true');
-    expect(JSON.parse(data.get('medusapos.product-settings.https://store.test')!)).toEqual({ variations: 'popover' });
+    expect(JSON.parse(data.get('medusapos.product-settings.https://store.test')!)).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS });
     press('products-settings-close');
     expect(screen.queryByTestId('products-place')).toBeNull();
     expect(rowIds()).toEqual(['v1', 'p4']);
@@ -1291,12 +1291,12 @@ describe('the Variations choice', () => {
     storage();
     show();
     const { result } = renderHook(() => useProductSettings(localStorage, session.baseUrl));
-    expect(result.current.settings).toEqual({ variations: 'list' });
-    act(() => result.current.save({ variations: 'popover' }));
+    expect(result.current.settings).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS });
+    act(() => result.current.save({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS }));
     expect(toggle().getAttribute('aria-expanded')).toBe('false');
     press('products-settings-button');
     press('products-settings-variations-list');
-    expect(result.current.settings).toEqual({ variations: 'list' });
+    expect(result.current.settings).toEqual({ variations: 'list', tileFields: DEFAULT_TILE_FIELDS });
     expect(toggle().hasAttribute('aria-expanded')).toBe(false);
   });
 

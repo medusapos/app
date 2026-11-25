@@ -2,9 +2,14 @@ import { useState } from 'react';
 import { Pressable, ScrollView, View } from 'react-native';
 import { Circle, Line } from 'react-native-svg';
 import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Label, Switch, Text } from '@tallyui/components';
-import { DEFAULT_CATALOGUE_VIEW_STATE, PRODUCT_SORT_FIELDS, type CatalogueViewState } from '@tallyui/pos';
+import { DEFAULT_CATALOGUE_VIEW_STATE, PRODUCT_SORT_FIELDS, TILE_FIELDS, type CatalogueViewState, type TileField } from '@tallyui/pos';
 import type { useProductSettings } from '../lib/product-settings';
 import { DEFAULT_CATALOGUE_SORT } from '../lib/catalogue-view';
+
+// v2's words for the Tile Fields switches.
+const TILE_FIELD_LABELS: Record<TileField, string> = {
+  name: 'Product Name', price: 'Price', onSale: 'On Sale', categories: 'Categories', sku: 'SKU', barcode: 'Barcode', stock: 'Stock',
+};
 
 export const SlidersIcon = createSvgIcon('SlidersIcon', () => <>
   <Line x1={3} y1={6} x2={21} y2={6} /><Circle cx={8} cy={6} r={2} />
@@ -84,12 +89,19 @@ export function ProductSettingsButton({ viewState, onViewStateChange, showOutOfS
             {(['list', 'popover'] as const).map((variations) => {
               const selected = settings.variations === variations;
               return <Pressable key={variations} testID={`product-settings-variations-${variations}`} accessibilityRole="button"
-                accessibilityState={{ selected }} aria-selected={selected} onPress={() => save({ variations })}
+                accessibilityState={{ selected }} aria-selected={selected} onPress={() => save({ ...settings, variations })}
                 className={`min-h-11 flex-1 items-center justify-center rounded-lg border-2 px-2 py-2 ${selected ? 'border-primary bg-muted' : 'border-border bg-card'}`}>
                 <Text>{variations === 'list' ? 'Open in place' : 'Popover'}</Text>
               </Pressable>;
             })}
           </View>
+          <Text>Tile Fields</Text>
+          {TILE_FIELDS.map((field) => <View key={field} className="flex-row items-center justify-between gap-2">
+            <Label nativeID={`product-settings-tile-field-${field}-label`}>{TILE_FIELD_LABELS[field]}</Label>
+            <Switch testID={`product-settings-tile-field-${field}`} className="flex-row" aria-labelledby={`product-settings-tile-field-${field}-label`}
+              checked={settings.tileFields[field]}
+              onCheckedChange={(on) => save({ ...settings, tileFields: { ...settings.tileFields, [field]: on } })} />
+          </View>)}
         </ScrollView>
         <View className="mt-auto flex-row gap-2">
           <Button variant="outline" testID="product-settings-restore" onPress={() => {

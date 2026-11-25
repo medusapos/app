@@ -122,9 +122,29 @@ export const rows: CaptureRow[] = [
     await page.getByText('E2E product 4', { exact: true }).click();
     await expect(page.getByRole('button', { name: /E2E-4B/ })).toBeVisible();
   } },
-  { id: '02d', title: 'Product display settings', state: 'Product display settings open', reach: async (page) => {
+  { id: '02d', title: 'Product display settings', state: 'Product display settings open, scrolled to Tile Fields', reach: async (page) => {
     await page.getByTestId('product-settings-button').click();
     await expect(page.getByTestId('product-settings-sheet')).toBeVisible();
+    await page.getByTestId('product-settings-tile-field-stock').scrollIntoViewIfNeeded();
+    await expect(page.getByText('Tile Fields', { exact: true })).toBeInViewport();
+  } },
+  { id: '02d.4', title: 'Tile fields', state: 'Price off and SKU on in Product settings; grid tiles show name, SKU and stock', reach: async (page) => {
+    const field = (name: string) => page.getByTestId(`product-settings-tile-field-${name}`);
+    await page.getByTestId('product-settings-button').click();
+    for (const [name, on] of [['price', 'false'], ['sku', 'true']] as const) {
+      await field(name).click();
+      await expect(field(name)).toHaveAttribute('aria-checked', on);
+    }
+    await page.getByTestId('product-settings-close').click();
+    // Rows share this page's storage, and the shot is taken after reach returns, so the next load (the next row's
+    // reset) drops this store's product settings once: the defaults that Restore Default Settings would give.
+    await page.addInitScript(() => {
+      if (sessionStorage.getItem('capture-02d.4-restored')) return;
+      sessionStorage.setItem('capture-02d.4-restored', '1');
+      for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.product-settings.')) localStorage.removeItem(key);
+    });
+    await expect(tiles(page).first()).toContainText('SKU E2E-1');
+    await expect(tiles(page).first()).not.toContainText('€');
   } },
   { id: '02e', title: 'Category filter', state: 'Drinks chip selected', reach: async (page) => {
     await page.getByRole('radiogroup', { name: 'Categories' }).getByRole('radio', { name: 'Drinks', exact: true }).click();
