@@ -212,7 +212,7 @@ it('starts with Variations before Columns, Open in place selected on a new devic
   fireEvent.click(choice('popover'));
   expect(choice('popover').getAttribute('aria-selected')).toBe('true');
   expect(choice('list').getAttribute('aria-selected')).toBe('false');
-  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS });
+  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
 });
 
 it('Restore Default Settings puts a switched-off column back on and leaves Expanded rows selected', () => {
@@ -223,7 +223,7 @@ it('Restore Default Settings puts a switched-off column back on and leaves Expan
   fireEvent.click(screen.getByTestId('products-settings-restore'));
   expect(column('sku').getAttribute('aria-checked')).toBe('true');
   expect(choice('popover').getAttribute('aria-selected')).toBe('true');
-  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS });
+  expect(JSON.parse(localStorage.getItem(SALE_KEY) ?? 'null')).toEqual({ variations: 'popover', tileFields: DEFAULT_TILE_FIELDS, browse: 'chips' });
 });
 
 it('closes the sheet on Close', () => {

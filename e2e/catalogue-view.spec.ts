@@ -33,6 +33,36 @@ test.describe('at 1280 × 800', () => {
     await expect(page.getByTestId('product-table-sort-name')).toBeVisible();
   });
 
+  test('Browse by Categories opens the Sale on category tiles, a tile opens its category, and it survives a reload until Restore', async ({ page }) => {
+    await signIn(page, 'Europe', false);
+    await page.getByTestId('product-settings-button').click();
+    await page.getByTestId('product-settings-browse-tiles').click();
+    await expect(page.getByTestId('product-settings-browse-tiles')).toHaveAttribute('aria-selected', 'true');
+    await page.getByTestId('product-settings-close').click();
+    const browse = page.getByTestId('category-browse');
+    const drinks = browse.getByRole('button', { name: 'Drinks', exact: true });
+    await expect(page.getByTestId('category-tile-all')).toBeVisible();
+    await expect(drinks).toContainText('2 products');
+    await expect(browse.getByRole('button', { name: 'Food', exact: true })).toBeVisible();
+    await expect(page.getByTestId(/^product-tile-/)).toHaveCount(0);
+    await drinks.click();
+    await expect(tile(page, 'E2E product 1')).toBeVisible();
+    await expect(tile(page, 'E2E product 2')).toBeVisible();
+    await expect(page.getByTestId(/^product-tile-/)).toHaveCount(2);
+    await page.getByTestId('category-crumb-root').click();
+    await expect(drinks).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByText(/Up to date · 5 products/)).toBeVisible();
+    await expect(page.getByTestId('category-tile-all')).toBeVisible();
+    await page.getByTestId('product-settings-button').click();
+    await page.getByTestId('product-settings-restore').click();
+    await expect(page.getByTestId('product-settings-browse-chips')).toHaveAttribute('aria-selected', 'true');
+    await page.getByTestId('product-settings-close').click();
+    await expect(categories(page).getByRole('radio', { name: 'Drinks', exact: true })).toBeVisible();
+    await expect(page.getByTestId('category-tile-all')).toHaveCount(0);
+  });
+
   test('the sale screen\'s Product and Cart Settings switch thumbs sit inside their tracks, at the start off and the end on', async ({ page }) => {
     await signIn(page);
     for (const [sheet, ids] of [['product', ['product-settings-out-of-stock']],

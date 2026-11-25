@@ -432,7 +432,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       searchAccessory={productSettingsButton} showViewToggle={!phone} showCategoryNav
       showFilterBar filterChips={[]} filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
-      onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn && !counting}
+      categoryBrowse={productSettings.browse} onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn && !counting}
       cameraScanner={{ onDetected: camera.offer, onOpen: camera.reset, scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />
     <QueryReset key={`query-${catalogueKey}`} setQuery={setQuery} />
     </View>
