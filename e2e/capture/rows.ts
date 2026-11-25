@@ -99,6 +99,31 @@ async function settings(page: Page, size: Size, id: string) {
   }
 }
 
+// Playwright Chromium has no camera and Linux CI no BarcodeDetector: getUserMedia gets a blank canvas's stream (or
+// NotAllowedError), kept on window.__cameraStream; the detector sees `code` while window.__cameraCode is set, as a code
+// resting in view.
+export function cameraStub({ code, denied }: { code: string; denied: boolean }) {
+  const w = window as unknown as { BarcodeDetector: unknown; __cameraCode?: boolean; __cameraStream?: MediaStream };
+  navigator.mediaDevices.getUserMedia = async () => denied ? Promise.reject(new DOMException('denied', 'NotAllowedError'))
+    : (w.__cameraStream = Object.assign(document.createElement('canvas'), { width: 640, height: 360 }).captureStream());
+  w.BarcodeDetector = class { async detect() { return w.__cameraCode ? [{ rawValue: code, format: 'ean_13' }] : []; } };
+}
+
+// Stubs the camera before Settings draws the switch, so the host browser's BarcodeDetector never matters, and turns Use
+// camera on; as in 02d.4, the next load (the next row's reset, after the shot) turns it off once.
+async function cameraOn(page: Page, size: Size, id: string) {
+  await page.evaluate(cameraStub, { code: '', denied: false });
+  await settings(page, size, 'scanner');
+  const camera = page.getByRole('switch', { name: 'Use camera to scan barcodes' });
+  await camera.click();
+  await expect(camera).toHaveAttribute('aria-checked', 'true');
+  await page.addInitScript((flag) => {
+    if (sessionStorage.getItem(flag)) return; sessionStorage.setItem(flag, '1');
+    for (const key of Object.keys(localStorage)) if (key.startsWith('medusapos.scanner.'))
+      localStorage.setItem(key, JSON.stringify({ ...JSON.parse(localStorage.getItem(key)!), camera: false }));
+  }, `capture-${id}-camera-off`);
+}
+
 async function customer(email: string) {
   await createAdminCustomer(await adminToken(), email, 'Ada', 'Lovelace');
 }
@@ -155,6 +180,11 @@ export const rows: CaptureRow[] = [
     await page.keyboard.type('E2E-2', { delay: 10 });
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('scan-toast')).toContainText('Added to cart');
+  } },
+  { id: '02.20', title: 'Camera scanner open', state: 'The Sale with the camera scanner open (stubbed camera)', only: ['desktop'], reach: async (page, size) => {
+    await cameraOn(page, size, '02.20');
+    await openArea(page, 'POS'); await page.getByTestId('camera-scan-button').click();
+    await expect(page.getByTestId('camera-scanner-panel')).toBeVisible();
   } },
   { id: '03a', title: 'Cart with items', state: 'Three lines in the cart', reach: async (page, size) => {
     await add(page, 'E2E-1', 'E2E-2', 'E2E-3');
@@ -395,6 +425,7 @@ export const rows: CaptureRow[] = [
   { id: '15d', title: 'Settings, card readers', state: 'Settings › Card readers', reach: (page, size) => settings(page, size, 'card-readers') },
   skip('15e', 'Settings, customer display', 'gap, no section: no customer-facing display'),
   { id: '15f', title: 'Settings, barcode scanning', state: 'Settings › Barcode Scanning', reach: (page, size) => settings(page, size, 'scanner') },
+  { id: '15f.2', title: 'Settings, barcode scanning: Use camera', state: 'Settings › Barcode Scanning, Use camera on', only: ['desktop'], reach: (page, size) => cameraOn(page, size, '15f.2') },
   { id: '15g', title: 'Settings, theme', state: 'Settings › Theme', reach: (page, size) => settings(page, size, 'theme') },
   { id: '16', title: 'Sign-in / connect', state: 'Sign-in screen after Sign out', reach: signOut },
   { id: '17a', title: 'Phone, POS', state: 'The Sale with a line in the cart', only: ['phone'], reach: async (page) => {

@@ -1917,6 +1917,60 @@ describe('ProductsScreen search minCodeLength', () => {
   });
 });
 
+// v2's camera scan (web): the Use camera setting (off by default) draws TU's camera button beside the search.
+// It needs a camera API and a BarcodeDetector (jsdom has neither, so a supported browser is stubbed), and it is drawn
+// only while the Sale's cart is in front, so the camera stops under an area.
+describe('ProductsScreen camera scan', () => {
+  function supportedBrowser() {
+    vi.stubGlobal('BarcodeDetector', class { async detect() { return []; } });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({}) } });
+  }
+  const cameraOn = () => saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS, camera: true });
+  afterEach(() => { Reflect.deleteProperty(navigator, 'mediaDevices'); vi.mocked(usePathname).mockReturnValue('/'); });
+
+  it('with the camera setting off (the default) the Sale draws no camera button', async () => {
+    supportedBrowser();
+    await mount();
+    expect(screen.getByRole('searchbox')).toBeTruthy();
+    expect(screen.queryByTestId('camera-scan-button')).toBeNull();
+  });
+
+  it('with it on, on the web, the camera button shows beside the search', async () => {
+    supportedBrowser();
+    cameraOn();
+    await mount();
+    expect(screen.getByTestId('camera-scan-button')).toBeTruthy();
+  });
+
+  it('with it on but no BarcodeDetector in the browser, no camera button', async () => {
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({}) } });
+    cameraOn();
+    await mount();
+    expect(screen.getByRole('searchbox')).toBeTruthy();
+    expect(screen.queryByTestId('camera-scan-button')).toBeNull();
+  });
+
+  it('with it on and supported, no camera button while an area is over the Sale', async () => {
+    supportedBrowser();
+    cameraOn();
+    vi.mocked(usePathname).mockReturnValue('/orders');
+    await mount();
+    expect(screen.getByRole('searchbox')).toBeTruthy();
+    expect(screen.queryByTestId('camera-scan-button')).toBeNull();
+  });
+
+  // A count makes catalogue-area inert, so an open scanner could be neither closed nor used: no camera then.
+  it.each([['open', true], ['counting', false]] as const)('with it on and supported, session status %s draws the camera button: %s', async (status, shown) => {
+    supportedBrowser();
+    cameraOn();
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register, session: { ...fixture.register.session!, status } } });
+    await mount();
+    expect(screen.getByRole('searchbox')).toBeTruthy();
+    expect(screen.queryByTestId('camera-scan-button') !== null).toBe(shown);
+  });
+});
+
 // The #82 review: every sign-out path honours SessionProvider's sale hold, through the real provider and screen.
 describe('ProductsScreen: every sign-out waits for a saving sale', () => {
   const NOTE = 'Signed out after this sale is saved';
