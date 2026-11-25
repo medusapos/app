@@ -19,6 +19,7 @@ export const TallyRefund = model.define('tally_refund', {
   return_id: model.text().nullable(),
   received_at: model.dateTime().nullable(),
   medusa_refund_id: model.text().nullable(),
+  money_started_at: model.dateTime().nullable(),
 }).indexes([
   { name: 'IDX_tally_refund_client_refund_id', on: ['client_refund_id'], unique: true, where: null },
   { name: 'IDX_tally_refund_session_status', on: ['session_id', 'status'], where: null },

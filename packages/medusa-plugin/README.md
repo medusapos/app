@@ -234,11 +234,13 @@ run `reject` again, not `apply`: an `apply` would leave the cancelled order unma
 Cancelling the order by hand is fine: `reject` still takes back the plugin's top-up. See the ADR 0003 amendment of 2026-09-29.
 `reject` marks the canceled order `tally_rejected`, and register figures skip it.
 **A parked `order.refund`** (ADR 0026) carries `needs_admin_reason` `{ orderId, clientRefundId, refundId, step, message, reason? }`, where
-`step` is the Medusa step that failed (`return`, `receive` or `refund`). Its `tally_refund` row records what already ran
-(`return_id`, `received_at`, `medusa_refund_id`). `tally-ledger-resolve.js <commandId> resume` runs the missing
+`step` is where it stopped (`return`, `receive`, `refund`, `park` or `session`). Its `tally_refund` row records what already ran
+(`return_id`, `received_at`, `money_started_at`, `medusa_refund_id`). `tally-ledger-resolve.js <commandId> resume` runs the missing
 steps and applies the command. Before the receive and again before the money step, the plugin checks that Medusa shows no
 more refunded on the payment than `tally_refund` records; if it does, the row parks with `reason: 'refund_unrecorded'`
-before stock or money moves. `tally-ledger-resolve.js <commandId> apply
+before stock or money moves. `reason: 'park_unrecorded'` is a parked row whose command park never landed, parked again.
+`reason: 'money_unconfirmed'` is a row whose money step started (`money_started_at`) without recording a refund, so no run pays it again: if the provider paid, use `apply`; if it did not, `resume money-not-sent` re-reads Medusa under the order lock, refuses (use `apply`) if a refund the rows do not record has appeared, and otherwise clears `money_started_at` and resumes. It refuses a refund parked for any other reason. If the provider paid but Medusa shows no refund (Medusa deletes its refund record when the provider call throws), leave the row parked; see #576.
+A run that has lost its order lock stops at its next step and leaves its row for the retry. `tally-ledger-resolve.js <commandId> apply
 <medusaRefundId>` records a refund the admin made by hand on the order's payment and applies the command. There is no
 `reject` for a refund: once a return exists, stock has moved.
 `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-resolve.js <commandId> move [<sessionId>]` moves a refund whose session stopped taking money to an open session (by default its register's live session), appends a `tally_refund_moves` audit entry without replacing other metadata, then resumes it; a named session on another register logs which drawer pays.
