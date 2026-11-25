@@ -79,6 +79,7 @@ describe('Refund all (ADR 0026)', () => {
     const dialog = within(await screen.findByTestId('order-refund-dialog'));
     expect(dialog.getByTestId('order-refund-total').textContent).toBe(`Refund ${twelve}`);
     expect(dialog.getByTestId('order-refund-destination').textContent).toBe('To Cash');
+    expect(dialog.queryByTestId('order-refund-already')).toBeNull();
     // The plugin refuses a blank reason, so Confirm waits for one.
     expect(confirm().getAttribute('aria-disabled')).toBe('true');
     expect(dialog.getByTestId('order-refund-hold')).toBeTruthy();
@@ -188,5 +189,16 @@ describe('Refund all (ADR 0026)', () => {
     view.rerender(sheet());
     expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${twelve}`);
     expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+  });
+
+  it('the dialog shows Already refunded when the order has refunds', async () => {
+    // Paid 1200, an earlier 200 refunded: the offer is min(1200, 1200 − 200) = 1000.
+    const refundedOrder: StoreOrder = { ...storeOrder, refunds: [{ id: 'r1', amountMinor: 200 }] };
+    render(<><OrderDetailSheet order={order} onClose={vi.fn()} formatDate={(iso) => iso.slice(0, 10)} onRetry={vi.fn()} onFlush={vi.fn()}
+      storeOrder={refundedOrder} refunds={refunds} /><PortalHost /></>);
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    const dialog = within(await screen.findByTestId('order-refund-dialog'));
+    expect(dialog.getByTestId('order-refund-already').textContent).toBe(`Already refunded ${formatMoney({ amount: 200, currency: 'EUR' })}`);
+    expect(dialog.getByTestId('order-refund-total').textContent).toBe(`Refund ${formatMoney({ amount: 1000, currency: 'EUR' })}`);
   });
 });

@@ -42,7 +42,10 @@ export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments']
   if (linesMinor + shippingMinor === 0) return { offered: false, reason: 'nothing' };
   // #547: earlier refunds carry no lines here, so the offer is capped at what is left; the plugin accepts that figure when
   // the overrun is earlier goodwill and refuses lines or shipping already taken.
-  const totalMinor = Math.min(linesMinor + shippingMinor, paidMinor - sum(order.refunds.map((entry) => entry.amountMinor)));
+  const leftMinor = paidMinor - sum(order.refunds.map((entry) => entry.amountMinor));
+  const totalMinor = Math.min(linesMinor + shippingMinor, leftMinor);
+  // #569: the plugin takes an overrun off the lines only while overMinor <= linesMinor; a bigger one is refused every time.
+  if (linesMinor + shippingMinor - leftMinor > linesMinor) return { offered: false, reason: 'refunded' };
   if (totalMinor <= 0) return { offered: false, reason: 'refunded' };
   // Decision 4: a sale paid only in cash refunds to cash; any other refunds to the sale's own method, non-cash first,
   // and a sale that also took cash gets back in cash only what the non-cash tenders cannot take (fees stay with the store).

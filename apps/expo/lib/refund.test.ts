@@ -70,6 +70,26 @@ describe('fullRefundOffer', () => {
     for (const taken of [refunds(353), refunds(200, 200)]) expect(fullRefundOffer(order({ paid: 353, refunds: taken }), cash, true)).toEqual({ offered: false, reason: 'refunded' });
   });
 
+  it('U-569-1: goodwill bigger than the line money offers nothing; smaller goodwill is still offered', () => {
+    const shipping = [{ name: 'Courier', totalMinor: 500, taxMinor: 95 }];
+    // Lines 3 × 1.18 = 353, shipping 595 gross, paid 948. Refunds 400: overrun 948 − (948 − 400) = 400 > 353, refused.
+    expect(fullRefundOffer(order({ paid: 948, shipping, refunds: [{ id: 'r1', amountMinor: 400 }] }), cash, true))
+      .toEqual({ offered: false, reason: 'refunded' });
+    // Refunds 300: overrun 300 <= 353, offered at min(948, 948 − 300) = 648.
+    expect(fullRefundOffer(order({ paid: 948, shipping, refunds: [{ id: 'r1', amountMinor: 300 }] }), cash, true))
+      .toMatchObject({ offered: true, totalMinor: 648 });
+  });
+
+  it('U-569-2: an overrun equal to the line money is offered; shipping-only with refunds is not', () => {
+    const shipping = [{ name: 'Courier', totalMinor: 500, taxMinor: 95 }];
+    // Refunds 353: overrun 353 = the line money 353, offered at min(948, 948 − 353) = 595.
+    expect(fullRefundOffer(order({ paid: 948, shipping, refunds: [{ id: 'r1', amountMinor: 353 }] }), cash, true))
+      .toMatchObject({ offered: true, totalMinor: 595 });
+    // No product lines, shipping 595, paid 595, refunds 10: overrun 595 − 585 = 10 > line money 0, refused.
+    expect(fullRefundOffer(order({ paid: 595, lines: [], shipping, refunds: [{ id: 'r1', amountMinor: 10 }] }), cash, true))
+      .toEqual({ offered: false, reason: 'refunded' });
+  });
+
   it('nothing to refund', () => {
     const free = (id: string) => line(id, { totalMinor: 0, taxMinor: 0 });
     // Paid only for the fee: the lines' money is 0, and the fee stays.
