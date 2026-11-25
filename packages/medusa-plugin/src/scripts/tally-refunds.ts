@@ -21,7 +21,7 @@ export default async function tallyRefunds({ container, args }: ExecArgs) {
   }
   const handMade = flag === 'hand-made'
   const reason = args.slice(handMade ? 4 : 3).join(' ').trim()
-  if (action !== 'baseline' || !orderId || !medusaRefundId || !reason || args.slice(1).some(arg => arg.startsWith('-'))) {
+  if (action !== 'baseline' || !orderId || !medusaRefundId || !reason || args.slice(1).some(arg => String(arg).startsWith('-'))) {
     throw new Error('Usage: tally-refunds.js list | baseline <orderId> <medusaRefundId> [hand-made] <reason words...>; nothing written')
   }
   await baselineOrderRefund(container, orderId, medusaRefundId, handMade, reason)
