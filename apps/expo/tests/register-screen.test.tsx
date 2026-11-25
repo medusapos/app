@@ -1132,6 +1132,7 @@ describe('the tender gate', () => {
     expect(tenderLegs()).toEqual(['Card terminal €15.00']);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
     expect(tenderLegs()).toEqual(['Card terminal €15.00']);
-    expect(screen.getByRole('textbox', { name: 'Terminal reference' })).toBeTruthy();
+    // TallyUI 5.0.0 tender-pane.tsx:154 edits a reference in place only on startTender's unstamped leg; a taken leg has none.
+    expect(screen.queryByRole('textbox', { name: 'Terminal reference' })).toBeNull();
   });
 });

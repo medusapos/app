@@ -218,11 +218,14 @@ describe('store settings flow', () => {
     await act(async () => { settle.reject(new TypeError('Failed to fetch')); });
     await pos();
     const startSale = async () => { fireEvent.click(screen.getByTestId('product-tile-Shirt')); await payByCard(); };
-    const inTender = () => {
-      expect(tenderLegs()).toEqual(['Card terminal €15.00']);
+    // TallyUI 5.0.0: a taken leg is voided, not removed (use-sale.ts removeTender refuses PAYMENT_TAKEN), and stays listed.
+    const inTender = (voided = 0) => {
+      expect(tenderLegs()).toEqual(Array(voided + 1).fill('Card terminal €15.00'));
       expect(button('Complete sale')).toBeTruthy();
     };
-    const toIdle = () => { fireEvent.click(button('Back')); removeLine('Shirt'); };
+    // TallyUI 5.0.0 tender-pane.tsx:328: Back with a taken leg opens the cancel view; Cancel and void voids it, back to the cart.
+    const back = () => { fireEvent.click(button('Back')); fireEvent.click(button('Cancel and void')); };
+    const toIdle = () => { back(); removeLine('Shirt'); };
     const replicationContext = vi.mocked(useReplicatedProducts).mock.lastCall![1];
 
     // Retry is offered only while the sale is idle, so a sale is started while the retry loads.
@@ -239,10 +242,10 @@ describe('store settings flow', () => {
     await requested(3);
     await startSale();
     await act(async () => { settle.resolve({ ...pricing, taxRatesPpm: { ...pricing.taxRatesPpm } }); });
-    inTender();
+    inTender(1);
     expect(screen.queryByText('Offline')).toBeNull();
     expect(vi.mocked(useReplicatedProducts).mock.lastCall![1]).toBe(replicationContext);
-    fireEvent.click(button('Back'));
+    back();
     expect(button('Edit quantity of Shirt')).toBeTruthy();
     expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
   }, 20000);
@@ -260,7 +263,7 @@ describe('store settings flow', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
     await payByCard();
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
-    fireEvent.click(button('Back'));
+    fireEvent.click(button('Back')); fireEvent.click(button('Cancel and void')); // TallyUI 5.0.0 tender-pane.tsx:328
     removeLine('Shirt');
     await act(async () => { fireEvent.click(button('Retry')); });
     await vi.waitFor(() => expect(storeSettings).toHaveBeenCalledTimes(2));
@@ -277,7 +280,8 @@ describe('store settings flow', () => {
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
     expect(within(screen.getByTestId('cart-footer')).getByTestId('cart-checkout').textContent).toBe('Checkout €30.00');
     await payByCard();
-    expect(tenderLegs()).toEqual(['Card terminal €30.00']);
+    // The voided €15.00 leg stays listed (TallyUI 5.0.0 removeTender refuses PAYMENT_TAKEN, so Back voided it).
+    expect(tenderLegs()).toEqual(['Card terminal €15.00', 'Card terminal €30.00']);
     await act(async () => { fireEvent.click(button('Complete sale')); });
     const record = vi.mocked(useOutboxContext().record);
     expect(record).toHaveBeenCalledOnce();

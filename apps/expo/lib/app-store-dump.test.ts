@@ -47,7 +47,7 @@ describe('dumpAppStore', () => {
       expect(dump.rxdbVersion).toBe('17.5.0');
       expect(dump.stored).toStrictEqual([
         { name: 'cash_movements', version: 0 }, { name: 'closures', version: 0 }, { name: 'drafts', version: 0 },
-        { name: 'pos_orders', version: 20 }, { name: 'pos_refunds', version: 0 }, { name: 'printer_profiles', version: 0 },
+        { name: 'pos_orders', version: 21 }, { name: 'pos_refunds', version: 0 }, { name: 'printer_profiles', version: 0 },
         { name: 'register_commands', version: 0 }, { name: 'register_sessions', version: 2 },
       ]);
       for (const name of Object.keys(inserted) as (keyof typeof inserted)[]) {

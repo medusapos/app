@@ -250,7 +250,8 @@ function figures(overrides: Partial<SalesFigures> = {}): SalesFigures {
   const margin = { costedNetMinor: 0, costMinor: 0, profitMinor: 0, marginPct: null, missingLines: 0, missingQuantity: 0 };
   return {
     range: { from: '2026-09-11', to: '2026-09-11' },
-    totals: { grossMinor: 24000, netMinor: 20000, taxMinor: 4000, discountMinor: 1500, refundsMinor: 2500, embeddedRefundsMinor: 0,
+    totals: { grossMinor: 24000, netMinor: 20000, taxMinor: 4000, discountMinor: 1500, refundsMinor: 2500, embeddedRefundsMinor: 0, roundingMinor: 0, refundBasis: 'dated',
+      grossAfterRefundsMinor: 21500,
       orderCount: 6, averageMinor: 4000, items: 11, margin },
     payments: { rows: [{ method: 'cash', label: 'Cash', amountMinor: 14000, orders: 4 },
       { method: 'card', label: 'Card', amountMinor: 7500, orders: 2 }], takenMinor: 21500 },
