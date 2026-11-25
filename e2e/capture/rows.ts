@@ -330,6 +330,13 @@ export const rows: CaptureRow[] = [
     await page.getByTestId('movement-sheet').getByTestId('movement-amount').fill('5.00');
     await page.getByTestId('movement-sheet').getByTestId('movement-reason').fill('Change for the float');
   } },
+  // Left unconfirmed, so no No sale is recorded for the rows after it.
+  { id: '09d.5', title: 'No sale', state: 'No sale sheet with Drawer check', reach: async (page) => {
+    await openRegisterPanel(page);
+    await page.getByTestId('register-panel').getByTestId('register-panel-no-sale').click();
+    await page.getByTestId('movement-sheet').getByTestId('movement-reason-drawer-check').click();
+    await expect(page.getByTestId('movement-sheet').getByTestId('movement-reason')).toHaveValue('Drawer check');
+  } },
   { id: '09e', title: 'Count / close', state: 'Count screen', reach: async (page) => {
     await openRegisterPanel(page);
     await page.getByTestId('register-panel').getByTestId('register-panel-close').click();
