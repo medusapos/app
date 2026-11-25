@@ -445,7 +445,7 @@ medusaIntegrationTestRunner({
       const parked = await commandRow(order.id)
       expect(parked).toMatchObject({ status: 'needs_admin', needs_admin_reason: { orderId: till.orderId,
         clientRefundId: order.payload.clientRefundId, step: 'refund', reason: 'money_unconfirmed', message: expect.stringMatching(/^money probe\. /) } })
-      expect(parked.needs_admin_reason.message.endsWith("An earlier attempt at this refund's money may have reached the payment provider. Wait a few minutes so that attempt has finished, then check the provider and the order's refunds in Medusa. If Medusa shows the refund, use tally-ledger-resolve apply <medusaRefundId>. If the provider paid but Medusa shows no refund, do not refund again: leave this parked (see medusapos/app#576). If the provider did not pay, use tally-ledger-resolve resume money-not-sent.")).toBe(true)
+      expect(parked.needs_admin_reason.message.endsWith("An earlier attempt at this refund may still be running: wait a few minutes, then look at the order's refunds in Medusa. A till sale is paid through Medusa's manual payment, so Medusa only records a refund and sends no money; the till hands the money back. If Medusa shows this refund, use tally-ledger-resolve apply <medusaRefundId>. If it does not, use tally-ledger-resolve resume money-not-sent to record it. Do this before the register session closes: until then the session's expected figures leave this refund out, so the count will not match (cash shows short by the refund's cash part).")).toBe(true)
       expect(await stockA()).toBe(before)
       expect(await medusaRefunds(till.orderId)).toEqual([])
       expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
@@ -974,6 +974,64 @@ medusaIntegrationTestRunner({
       expect(retry?.results).toEqual([expect.objectContaining({ id: order.id, status: 'applied' })])
       expect(await commandRow(order.id)).toMatchObject({ status: 'applied' })
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: expect.any(String), amount: 10 }])
+    })
+
+    // #576: the sale's payment moved to a provider that would send money; the guard stops before anything is written.
+    async function otherProvider(orderId: string) {
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order',
+        fields: ['payment_collections.payments.id'], filters: { id: orderId } }) as unknown as Rows
+      const ids = (order.payment_collections as Row[]).flatMap(collection => (collection.payments as Row[]).map(payment => payment.id))
+      expect(await knexOf()('payment').whereIn('id', ids).update({ provider_id: 'pp_stripe_stripe' })).toBe(ids.length)
+    }
+    const providerMessage = "This sale's payment uses provider pp_stripe_stripe, not Medusa's manual payment, so a refund through Medusa would go to that provider and could pay twice. Refund it in Medusa Admin, then use tally-ledger-resolve apply <medusaRefundId>. See medusapos/app#576."
+
+    it('G1: a refund of a sale paid through another provider is refused order_state: no row, no return, no refund', async () => {
+      const till = await tillSale()
+      await otherProvider(till.orderId)
+      const order = refund(till)
+      expect((await post([order])).data.results).toEqual([{ id: order.id, status: 'rejected', error: { code: 'order_state',
+        message: "This sale was paid through pp_stripe_stripe, not the till's manual payment, so the till cannot refund it. Refund it in Medusa Admin.",
+        data: { paymentProvider: 'pp_stripe_stripe' } } }])
+      expect(await knexOf()('tally_refund').where({ order_id: till.orderId })).toEqual([])
+      expect(await returns(till.orderId)).toEqual([])
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+      expect(['in_progress', 'needs_admin']).not.toContain((await commandRow(order.id))?.status)
+    })
+
+    it('G2: resume of a parked refund whose sale moved to another provider re-parks payment_provider, writing nothing', async () => {
+      const till = await tillSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
+      jest.spyOn(workflow, 'receiveStep').mockRejectedValueOnce(new Error('receive probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'receive' } })
+      const [row] = await bytes(order.id)
+      const before = await returns(till.orderId)
+      await otherProvider(till.orderId)
+      await expect(resolve(order.id, 'resume')).rejects.toThrow('stays parked (payment_provider)')
+      expect((await bytes(order.id))[0]).toBe(row)
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'payment',
+        reason: 'payment_provider', message: providerMessage } })
+      expect(await returns(till.orderId)).toEqual(before)
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+    })
+
+    it('G3: resume money-not-sent of a money_unconfirmed refund on another provider keeps money_started_at and re-parks', async () => {
+      const till = await tillSale()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
+      jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
+      const order = refund(till)
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'money_unconfirmed' } })
+      const started = (await knexOf()('tally_refund').where({ command_id: order.id }).first()).money_started_at
+      expect(started).toEqual(expect.any(Date))
+      const [row] = await bytes(order.id)
+      await otherProvider(till.orderId)
+      await expect(resolve(order.id, 'resume', 'money-not-sent')).rejects.toThrow('stays parked (payment_provider)')
+      expect((await knexOf()('tally_refund').where({ command_id: order.id }).first()).money_started_at).toEqual(started)
+      expect((await bytes(order.id))[0]).toBe(row)
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'payment_provider' } })
+      expect(await medusaRefunds(till.orderId)).toEqual([])
     })
 
     it('U1: a zombie whose request throws while a retry holds the row never cancels the return or deletes the row', async () => {
