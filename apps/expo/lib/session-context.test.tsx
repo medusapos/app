@@ -4,7 +4,7 @@ import { Text } from 'react-native';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { POS_CONNECTOR_ID } from './pos-connector';
 import { clearProductCache } from './product-cache';
-import { NO_POS_ACCESS_MESSAGE, REFRESH_WINDOW_MS, saveSession, type Session } from './session';
+import { login, NO_POS_ACCESS_MESSAGE, REFRESH_WINDOW_MS, saveSession, type Session } from './session';
 import { SessionProvider, useSession } from './session-context';
 
 vi.mock('./product-cache', () => ({ clearProductCache: vi.fn().mockResolvedValue(undefined) }));
@@ -207,6 +207,24 @@ describe('SessionProvider', () => {
     expect(context.session).not.toBe(before);
     expect(context.session?.capabilities).toEqual(read);
     expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(read);
+  });
+  it('U-554-3: a sign-in keeps customerDisplay out, so the next read keeps the session', async () => {
+    const info = '{"contracts":{"order.create":[3]},"customerDisplay":{"v":1,"iceServers":[],"snapshot":1}}';
+    fetchImpl.mockImplementation(async (url) => new Response(String(url).endsWith('/tally/v1/info') ? info
+      : String(url).endsWith('/auth/user/emailpass') ? JSON.stringify({ token: stored.token }) : '{}'));
+    // Not vacuous: the parsed read carries customerDisplay.
+    const display = (await login(stored.baseUrl, stored.email, 'secret')).capabilities?.customerDisplay;
+    expect(display).toBeDefined();
+    await mount(null);
+    await act(async () => { await context.signIn(stored.baseUrl, stored.email, 'secret'); });
+    expect(context.session?.capabilities).toEqual({ orderCreate: 3 });
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual({ orderCreate: 3 });
+    const before = context.session;
+    storage.setItem.mockClear();
+    act(() => context.mergeCapabilities(undefined));
+    act(() => context.mergeCapabilities({ orderCreate: 3, customerDisplay: display }));
+    expect(context.session).toBe(before);
+    expect(storage.setItem).not.toHaveBeenCalled();
   });
   it('a fresh read in a different key order keeps the session', async () => {
     await mount({ ...stored, capabilities: { orderCreate: 6, coupons: true, lineTax: { none: true, classes: false } } });
