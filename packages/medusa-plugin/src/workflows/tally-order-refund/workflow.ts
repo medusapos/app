@@ -1,7 +1,7 @@
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys } from '@medusajs/framework/utils'
 import {
-  beginReceiveReturnWorkflow, beginReturnOrderWorkflow, cancelReturnReceiveWorkflow, cancelReturnRequestWorkflow,
+  beginReceiveReturnWorkflow, beginReturnOrderWorkflow, cancelReturnReceiveWorkflow, cancelReturnRequestWorkflow, cancelReturnWorkflow,
   confirmReturnReceiveWorkflow, confirmReturnRequestWorkflow, dismissItemReturnRequestWorkflow,
   receiveItemReturnRequestWorkflow, refundPaymentWorkflow, requestItemReturnWorkflow,
 } from '@medusajs/medusa/core-flows'
@@ -37,6 +37,28 @@ export async function findOwnOpenReturn(container: MedusaContainer, input: { ord
   const { data: changes } = await query.graph({ entity: 'order_change', fields: ['id', 'change_type', 'actions.id'],
     filters: { return_id: candidate.id, status: ['pending', 'requested'] } })
   return changes.some(change => change.change_type === 'return_request' && !change.actions?.length) ? candidate.id : null
+}
+
+/**
+ * This row's orphans: open returns it tagged with no items and no active order change, left by a run that died inside the
+ * begin. findOwnOpenReturn cannot reuse them, so a retry cancels them before it begins its own; any other shape is not ours.
+ */
+export async function findOrphanReturns(container: MedusaContainer, input: { orderId: string; refundRowId: string }): Promise<string[]> {
+  const query = container.resolve(ContainerRegistrationKeys.QUERY)
+  const { data } = await query.graph({ entity: 'return', fields: ['id', 'status', 'metadata', 'items.id'], filters: { order_id: input.orderId } })
+  const orphans: string[] = []
+  for (const found of data.filter(found => found.status === 'open' && found.metadata?.tally_refund_id === input.refundRowId
+    && !found.items?.length)) {
+    const { data: changes } = await query.graph({ entity: 'order_change', fields: ['id'],
+      filters: { return_id: found.id, status: ['pending', 'requested'] } })
+    if (!changes.length) orphans.push(found.id)
+  }
+  return orphans
+}
+
+/** Cancels an orphan return (see findOrphanReturns) through Medusa's cancel-return workflow. */
+export async function cancelOrphanReturn(container: MedusaContainer, input: { returnId: string; actorId?: string }): Promise<void> {
+  await cancelReturnWorkflow(container).run({ input: { return_id: input.returnId, canceled_by: input.actorId } })
 }
 
 /**
