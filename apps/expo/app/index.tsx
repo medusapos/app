@@ -12,7 +12,7 @@ import {
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
 import {
   capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, saleLogger, SALE_SAVING, summarizeOutboxHealth, useParkedSales, useSale,
-  normalizeCatalogueViewState, type CatalogueViewState,
+  normalizeCatalogueViewState, useCameraScan, type CatalogueViewState,
 } from '@tallyui/pos';
 
 import { AccountButton } from '../components/account-button';
@@ -67,6 +67,7 @@ import { useProductSettings } from '../lib/product-settings';
 import { RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { cameraScanSupported } from '../lib/camera-scan';
 import { playScanBeep } from '../lib/scan-beep';
 import { forgetDeletedDefaultCustomer, useDefaultCustomer } from '../lib/default-customer';
 import { forgetDeletedCashierCustomer, useCashierCustomer } from '../lib/cashier-customer';
@@ -272,7 +273,18 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2 scans anywhere in the POS; an editable target (search box, coupon field) keeps its own input, so no double add; off while an area is over the Sale and in tender.
   // Every layout listens in the cart stage, the phone's Products and Cart views alike.
   const wedgeActive = sale.stage.kind === 'cart' && pathname === '/';
-  const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  const { settings: scannerSettings, save: saveScannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  // v2's camera scan (web): decodes go to the scan hub, which useDeviceScans already hands to onScan, so no second
+  // subscription. A code shorter than minChars is dropped, as the wedge drops one.
+  const camera = useCameraScan({ active: wedgeActive, minChars: scannerSettings.minChars });
+  // TU's viewfinder keeps its camera stream while mounted; drawing it only in the Sale's cart stage stops the camera while
+  // an area covers the Sale. Hidden where the browser has no BarcodeDetector, as DirectScannerConnection hides.
+  const cameraOn = useMemo(() => scannerSettings.camera && cameraScanSupported(), [scannerSettings.camera]);
+  const onCameraHeightChange = (height: number) => {
+    const cameraHeight = Math.round(height);
+    if (cameraHeight === scannerSettings.cameraHeight) return;
+    try { saveScannerSettings({ ...scannerSettings, cameraHeight }); } catch { /* keep the saved height */ }
+  };
   const { settings: printingSettings } = usePrintingSettings(defaultStorage(), session.baseUrl);
   const cartSettings = useCartSettings(defaultStorage(), session.baseUrl);
   // Sort items (Cart Settings) is display order only: Cart gets a re-ordered copy, the sale's stored order is untouched.
@@ -360,7 +372,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       searchAccessory={productSettingsButton} showViewToggle={!phone} showCategoryNav
       showFilterBar filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
-      onViewStateError={onViewStateError} />
+      onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn}
+      cameraScanner={{ onDetected: camera.offer, onOpen: camera.reset, scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
   </View>;

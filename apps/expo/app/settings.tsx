@@ -7,6 +7,7 @@ import { Card, ChevronDownIcon, createSvgIcon, CustomerPicker, Dialog, DialogCon
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { DirectScannerConnection } from '../components/device-scanner';
+import { cameraScanSupported } from '../lib/camera-scan';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
 import { FontPicker } from '../components/font-choice';
 import { PrintersGroup } from '../components/printers-group';
@@ -355,8 +356,9 @@ function ScannerSection({ session }: { session: Session }) {
   const [prefixInput, setPrefixInput] = useState(settings.prefix);
   const [suffixInput, setSuffixInput] = useState(settings.suffix);
   const [error, setError] = useState<string | null>(null);
+  const [cameraSupported] = useState(cameraScanSupported);
   function onSave() {
-    try { save({ avgKeyMs: Number(avgKeyMsInput), minChars: Number(minCharsInput), prefix: prefixInput, suffix: suffixInput, playSound: settings.playSound }); setError(null); }
+    try { save({ ...settings, avgKeyMs: Number(avgKeyMsInput), minChars: Number(minCharsInput), prefix: prefixInput, suffix: suffixInput }); setError(null); }
     catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
   }
   function onReset() {
@@ -411,6 +413,13 @@ function ScannerSection({ session }: { session: Session }) {
           catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
         }} />
       } />
+      {cameraSupported ? <SettingsRow label="Use camera" className="border-t border-border px-0"
+        description="Shows a camera button beside the Sale's search box. The browser asks for the camera the first time." action={
+        <Switch accessibilityLabel="Use camera to scan barcodes" testID="settings-scanner-camera" className="flex-row" checked={settings.camera} onCheckedChange={(checked) => {
+          try { save({ ...settings, camera: checked }); setError(null); }
+          catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }
+        }} />
+      } /> : null}
       <DirectScannerConnection />
       <View className="gap-1 border-t border-border pt-4">
         <Field accessibilityLabel="Test scan here" label="Test scan here" help="Scan a barcode into this field to check it counts as a scan" value={testValue} onChangeText={setTestValue} onKeyPress={onTestKeyPress} />

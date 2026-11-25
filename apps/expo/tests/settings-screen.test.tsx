@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { Platform } from 'react-native';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
 import { router } from 'expo-router';
 import { DEFAULT_SCANNER_SETTINGS, loadScannerSettings, useScannerSettings } from '../lib/scanner-settings';
@@ -254,6 +255,45 @@ describe('SettingsScreen', () => {
     expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, playSound: true });
     expect(screen.getByTestId('settings-scanner-sound').getAttribute('aria-checked')).toBe('true');
     expect((screen.getByLabelText('Minimum characters') as HTMLInputElement).value).toBe('6');
+  });
+
+  // jsdom has no camera API or BarcodeDetector: the camera tests stub a supported browser.
+  function supportedBrowser({ detector = true } = {}) {
+    if (detector) vi.stubGlobal('BarcodeDetector', class { async detect() { return []; } });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => ({}) } });
+    onTestFinished(() => { Reflect.deleteProperty(navigator, 'mediaDevices'); });
+  }
+
+  it('the Use camera switch saves camera on, and a threshold saved afterwards keeps it on', async () => {
+    params.section = 'scanner';
+    supportedBrowser();
+    await mount();
+    fireEvent.click(screen.getByRole('switch', { name: 'Use camera to scan barcodes' }));
+    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, camera: true });
+    expect(screen.getByTestId('settings-scanner-camera').getAttribute('aria-checked')).toBe('true');
+    fireEvent.change(screen.getByLabelText('Minimum characters'), { target: { value: '6' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, camera: true, minChars: 6 });
+  });
+
+  it('off the web the Use camera switch is not drawn', async () => {
+    params.section = 'scanner';
+    supportedBrowser();
+    const original = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      await mount();
+      expect(screen.getByTestId('settings-scanner-sound')).toBeTruthy();
+      expect(screen.queryByTestId('settings-scanner-camera')).toBeNull();
+    } finally { Platform.OS = original; }
+  });
+
+  it('on the web without BarcodeDetector the Use camera switch is not drawn', async () => {
+    params.section = 'scanner';
+    supportedBrowser({ detector: false });
+    await mount();
+    expect(screen.getByTestId('settings-scanner-sound')).toBeTruthy();
+    expect(screen.queryByTestId('settings-scanner-camera')).toBeNull();
   });
 
   it('reports the stripped test scan with timing from the raw buffer', async () => {

@@ -1,13 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { SessionStorage } from './session';
 
-export type ScannerSettings = { avgKeyMs: number; minChars: number; prefix: string; suffix: string; playSound: boolean };
+export type ScannerSettings = {
+  avgKeyMs: number; minChars: number; prefix: string; suffix: string; playSound: boolean; camera: boolean; cameraHeight: number;
+};
+
+// TU @tallyui/components SCANNER_MIN_HEIGHT, SCANNER_MAX_HEIGHT, SCANNER_DEFAULT_HEIGHT (camera-scanner-panel), copied
+// so this plain module does not load the component bundle.
+const CAMERA_HEIGHT_RANGE = [96, 480] as const;
+const CAMERA_DEFAULT_HEIGHT = 176;
 
 // 100 ms average: Bluetooth HID scanners can send 60-100 ms per key. In the cart view nothing is focused, so a fast human typing a code and Enter wants the same result.
 // WCPOS's default is 24 ms, a per-store setting there (barcode_scanning_avg_time_input_threshold).
 // Medusa SKUs such as "E2E-2" are shorter than WCPOS's default minimum of 8.
 // Prefix/suffix follow v2's single-key-at-the-edge rule, via TallyUI's stripBoundary.
-export const DEFAULT_SCANNER_SETTINGS: ScannerSettings = { avgKeyMs: 100, minChars: 3, prefix: '', suffix: '', playSound: false };
+export const DEFAULT_SCANNER_SETTINGS: ScannerSettings = { avgKeyMs: 100, minChars: 3, prefix: '', suffix: '', playSound: false,
+  camera: false, cameraHeight: CAMERA_DEFAULT_HEIGHT };
 
 const PREFIX = 'medusapos.scanner.';
 const AVG_KEY_MS_RANGE = [10, 500] as const;
@@ -18,7 +26,8 @@ const isValidSettings = (v: unknown): v is ScannerSettings => typeof v === 'obje
   && inRange((v as ScannerSettings).avgKeyMs, AVG_KEY_MS_RANGE) && inRange((v as ScannerSettings).minChars, MIN_CHARS_RANGE)
   && typeof (v as ScannerSettings).prefix === 'string' && Array.from((v as ScannerSettings).prefix).length <= 1
   && typeof (v as ScannerSettings).suffix === 'string' && Array.from((v as ScannerSettings).suffix).length <= 1
-  && typeof (v as ScannerSettings).playSound === 'boolean';
+  && typeof (v as ScannerSettings).playSound === 'boolean' && typeof (v as ScannerSettings).camera === 'boolean'
+  && inRange((v as ScannerSettings).cameraHeight, CAMERA_HEIGHT_RANGE);
 
 /** Tolerates a missing or corrupt value, falling back to the defaults (same style as store-settings.ts). */
 export function loadScannerSettings(storage: SessionStorage | null, baseUrl: string): ScannerSettings {
@@ -33,7 +42,8 @@ export function loadScannerSettings(storage: SessionStorage | null, baseUrl: str
 export function saveScannerSettings(storage: SessionStorage | null, baseUrl: string, settings: ScannerSettings): void {
   if (!isValidSettings(settings)) throw new Error(`Average time per key must be a whole number from ${AVG_KEY_MS_RANGE[0]} `
     + `to ${AVG_KEY_MS_RANGE[1]}, and minimum characters a whole number from ${MIN_CHARS_RANGE[0]} to ${MIN_CHARS_RANGE[1]}. `
-    + 'Prefix and suffix must be at most one character each.');
+    + 'Prefix and suffix must be at most one character each. '
+    + `The camera scanner height must be a whole number from ${CAMERA_HEIGHT_RANGE[0]} to ${CAMERA_HEIGHT_RANGE[1]}.`);
   storage?.setItem(PREFIX + baseUrl, JSON.stringify(settings));
 }
 

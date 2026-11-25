@@ -78,4 +78,27 @@ describe('scanner-settings', () => {
     expect(loadScannerSettings(storage, 'https://a.test')).toEqual({ ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 60, minChars: 4 });
     expect(loadScannerSettings(storage, 'https://b.test')).toEqual({ ...DEFAULT_SCANNER_SETTINGS, avgKeyMs: 200, minChars: 8 });
   });
+
+  it('defaults the camera off at TU\'s 176 px panel height', () => {
+    expect(DEFAULT_SCANNER_SETTINGS).toMatchObject({ camera: false, cameraHeight: 176 });
+  });
+
+  it('loads a value saved before the camera fields existed with the camera off at 176', () => {
+    const old = { avgKeyMs: 60, minChars: 4, prefix: '#', suffix: '', playSound: true };
+    const storage = fakeStorage({ 'medusapos.scanner.https://a.test': JSON.stringify(old) });
+    expect(loadScannerSettings(storage, 'https://a.test')).toEqual({ ...old, camera: false, cameraHeight: 176 });
+  });
+
+  it.each([[95, false], [96, true], [480, true], [481, false], [200.5, false]])('cameraHeight %d is accepted: %s', (cameraHeight, ok) => {
+    const storage = fakeStorage(), settings = { ...DEFAULT_SCANNER_SETTINGS, camera: true, cameraHeight };
+    const save = () => saveScannerSettings(storage, 'https://a.test', settings);
+    if (!ok) { expect(save).toThrow(/camera scanner height/); return; }
+    save();
+    expect(loadScannerSettings(storage, 'https://a.test')).toEqual(settings);
+  });
+
+  it('an out-of-range stored cameraHeight makes the whole value fall back to the defaults', () => {
+    const storage = fakeStorage({ 'medusapos.scanner.https://a.test': JSON.stringify({ minChars: 5, camera: true, cameraHeight: 481 }) });
+    expect(loadScannerSettings(storage, 'https://a.test')).toEqual(DEFAULT_SCANNER_SETTINGS);
+  });
 });
