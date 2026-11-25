@@ -68,7 +68,7 @@ export async function baselineOrderRefund(container: MedusaContainer, orderId: s
     const pending = await trx('tally_refund').where({ order_id: orderId, total_minor: amount }).whereNull('medusa_refund_id')
       .whereIn('status', ['in_progress', 'needs_admin']).first('id', 'command_id')
     if (pending && !handMade) {
-      throw new Error(`Refund ${medusaRefundId} may be refund ${pending.id}'s own money (command ${pending.command_id}); use tally-ledger-resolve.js ${pending.command_id} apply ${medusaRefundId} if it is that refund's, or --hand-made if an admin made it; nothing written`)
+      throw new Error(`Refund ${medusaRefundId} may be refund ${pending.id}'s own money (command ${pending.command_id}); use tally-ledger-resolve.js ${pending.command_id} apply ${medusaRefundId} if it is that refund's, or hand-made if an admin made it; nothing written`)
     }
     await trx('order').where({ id: orderId }).update({ metadata: trx.raw(`jsonb_set(coalesce(metadata, '{}'::jsonb),
       '{tally_refund_baselines}', coalesce(metadata->'tally_refund_baselines', '[]'::jsonb) || ?::jsonb)`,

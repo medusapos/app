@@ -115,7 +115,7 @@ medusaIntegrationTestRunner({
       const script = require(`${built}/scripts/tally-ledger-resolve`) as typeof import('../../src/scripts/tally-ledger-resolve')
       await script.default({ container, args: [id, ...args] } as never)
     }
-    const refundsScript = async (...args: string[]) => {
+    const refundsScript = async (...args: (string | number)[]) => {
       const script = require(`${built}/scripts/tally-refunds`) as typeof import('../../src/scripts/tally-refunds')
       await script.default({ container, args } as never)
     }
@@ -1387,7 +1387,7 @@ medusaIntegrationTestRunner({
         const row = await knex('tally_refund').where({ command_id: order.id }).first()
         await expect(refusal).rejects.toThrow(row.id)
         await expect(refusal).rejects.toThrow(`tally-ledger-resolve.js ${order.id} apply ${medusa.id}`)
-        await expect(refusal).rejects.toThrow('--hand-made')
+        await expect(refusal).rejects.toThrow('or hand-made if an admin made it')
         await resolve(order.id, 'resume')
         expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'refund_unrecorded' } })
         expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId, amount: 1.18 }])
@@ -1404,7 +1404,7 @@ medusaIntegrationTestRunner({
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
       await expect(refundsScript('baseline', till.orderId, hand.id, 'test reason')).rejects.toThrow('nothing written')
-      await refundsScript('baseline', till.orderId, hand.id, '--hand-made', 'test', 'reason')
+      await refundsScript('baseline', till.orderId, hand.id, 'hand-made', 'test', 'reason')
       expect((await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)).metadata?.tally_refund_baselines).toEqual([{
         refundId: hand.id, amountMinor: 118, at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/), reason: 'test reason',
       }])
@@ -1419,8 +1419,30 @@ medusaIntegrationTestRunner({
       await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
-      await expect(refundsScript('baseline', till.orderId, hand.id, ...(handMade ? ['--hand-made'] : []))).rejects.toThrow('nothing written')
+      await expect(refundsScript('baseline', till.orderId, hand.id, ...(handMade ? ['hand-made'] : []))).rejects.toThrow('nothing written')
       expect((await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)).metadata).not.toHaveProperty('tally_refund_baselines')
+    })
+
+    it('B6-baseline-refuses-dashed-word: --hand-made is not swallowed into the reason', async () => {
+      const till = await remainderSale()
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      await expect(refundsScript('baseline', till.orderId, hand.id, '--hand-made', 'test', 'reason')).rejects.toThrow('nothing written')
+      expect((await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)).metadata).not.toHaveProperty('tally_refund_baselines')
+    })
+
+    it('B7-baseline-numeric-word: a number from yargs joins the reason', async () => {
+      const till = await remainderSale()
+      refundAfterPricing(till.paymentId, 0.01)
+      const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
+      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
+      await refundsScript('baseline', till.orderId, hand.id, 'ticket', 1234)
+      const { metadata } = await container.resolve(Modules.ORDER).retrieveOrder(till.orderId)
+      expect((metadata?.tally_refund_baselines as { reason: string }[])[0].reason).toBe('ticket 1234')
     })
 
     it('L1-list: parked refunds with order, session, money and reason, then moved refunds with current status', async () => {

@@ -66,10 +66,10 @@ The plugin still accepts and prices ADR-080's general payload: any line quantiti
   There is no `reject` once stock has moved.
 
   Two more admin actions live in `tally-refunds` (#542):
-  - `baseline <orderId> <medusaRefundId> [--hand-made] <reason>` records a Medusa refund made outside the plugin, so the never-twice check stops counting it as unrecorded.
+  - `baseline <orderId> <medusaRefundId> [hand-made] <reason>` records a Medusa refund made outside the plugin, so the never-twice check stops counting it as unrecorded.
     - The entry is `{ refundId, amountMinor, at, reason }` in the order's metadata `tally_refund_baselines`, merged into the metadata. A reason is required.
     - The check reads each baselined refund's amount live from Medusa. A lost or cleared key fails closed: the refund counts as unrecorded again and the check refuses.
-    - A refund whose amount equals a pending till refund's needs `--hand-made`, because it may be that refund's own money, which `apply` records instead.
+    - A refund whose amount equals a pending till refund's needs `hand-made`, because it may be that refund's own money, which `apply` records instead.
   - `list` prints the parked refunds, then the moved ones with their current status. It is a script only, with no Admin route.
 - **Never refund twice.** The workflow compares the payment's refunded amount in Medusa with the sum of the `medusa_refund_id` amounts that `tally_refund` already records for it. If Medusa shows more, a refund happened without being recorded, and the command goes to `needs_admin` with the reason `refund_unrecorded`.
   - The check runs before step 2, so stock never moves when the money won't (amended 2026-11-23, desk ruling).
