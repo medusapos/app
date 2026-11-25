@@ -34,7 +34,7 @@ const takeOrderLock = async (trx: Knex.Transaction, orderId: string): Promise<bo
 class LockLost extends Error {}
 const probe = async (trx: Knex.Transaction, orderId: string) => { if (!await takeOrderLock(trx, orderId).catch((error: Error) => {
   throw new LockLost(`order lock lost: ${error.message}`) })) throw new LockLost(`order lock lost: order ${orderId}`) }
-const moneyUnconfirmedMessage = "An earlier attempt at this refund's money may have reached the payment provider. Check the provider: if it paid, use tally-ledger-resolve apply <medusaRefundId>; if it did not, use tally-ledger-resolve resume money-not-sent."
+const moneyUnconfirmedMessage = "An earlier attempt at this refund's money may have reached the payment provider. Wait a few minutes so that attempt has finished, then check the provider and the order's refunds in Medusa. If Medusa shows the refund, use tally-ledger-resolve apply <medusaRefundId>. If the provider paid but Medusa shows no refund, do not refund again: leave this parked (see medusapos/app#576). If the provider did not pay, use tally-ledger-resolve resume money-not-sent."
 const sessionClosedMessage = (id: string) =>
   `session_closed: refund ${id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.`
 
@@ -214,6 +214,7 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
   const lines = row.lines.map(({ orderLineId, quantity, restock }) => ({ orderLineId, quantity, restock }))
   // A failure before anything is in Medusa (or after the begun return was cancelled) leaves no row and no claim.
   const undo = async (error: Error): Promise<Run> => {
+    await probe(ctx.trx, order.id)
     await knex('tally_refund').where({ id: row.id }).delete()
     return { outcome: failedOutcome(container, id, error), keepClaim: false }
   }
@@ -242,6 +243,7 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
         return await undo(error)
       }
       // Recorded at once, so a resume reuses this return and never begins a second one.
+      await probe(ctx.trx, order.id)
       await write({ return_id: returnId })
       row.return_id = returnId
       begun = true
@@ -251,6 +253,7 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
       try {
         await requestReturn(container, { returnId: row.return_id!, lines, actorId })
       } catch (error) {
+        await probe(ctx.trx, order.id)
         if (!begun) throw error
         try {
           await cancelReturn(container, row.return_id!)
@@ -276,6 +279,7 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
       if (row.money_started_at) return await park(step, moneyUnconfirmedMessage, 'money_unconfirmed')
       await probe(ctx.trx, order.id)
       await write({ money_started_at: row.money_started_at = new Date() })
+      // Lock lost after the probe above: a retry read the marker still null, so paying here would pay twice.
       await probe(ctx.trx, order.id)
       const medusaRefundId = await moneyStep(container, { paymentId: check.paymentId,
         amount: minorToMajor(Number(row.total_minor), order.decimals), note: row.reason, actorId })
@@ -286,7 +290,8 @@ async function runSteps(container: MedusaContainer, ctx: { id: string; claimToke
   } catch (error) {
     if (error instanceof LockLost) throw error
     // A moneyStep throw leaves the intent set: money_unconfirmed, never a guess that it failed.
-    return park(step, error.message, row.money_started_at && !row.medusa_refund_id ? 'money_unconfirmed' : undefined)
+    if (row.money_started_at && !row.medusa_refund_id) return park(step, `${error.message}. ${moneyUnconfirmedMessage}`, 'money_unconfirmed')
+    return park(step, error.message)
   }
   const result = refundResult(id, row)
   if (await takeOrderLock(ctx.trx, order.id)) await ledger.completeByCommand(id, result)
@@ -389,7 +394,7 @@ export async function resolveOrderRefund(container: MedusaContainer, commandId: 
     return { kind: 'result', result }
   }
   if (moneyNotSent && (await knex('tally_command').where({ id: commandId }).first('needs_admin_reason'))?.needs_admin_reason?.reason !== 'money_unconfirmed') {
-    throw new Error(`Refund ${row.id} is not parked money_unconfirmed; resume money-not-sent is only for that; nothing written`)
+    throw new Error(`Refund ${row.id} is not parked money_unconfirmed; resume money-not-sent is only for that. Use tally-ledger-resolve resume, or apply <medusaRefundId>; nothing written`)
   }
   if (moneyNotSent) await knex.transaction(async trx => {
     if (!await takeOrderLock(trx, order.id)) throw new Error(`A refund of order ${order.id} is in progress; try again`)
