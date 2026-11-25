@@ -28,3 +28,16 @@ export function formatPaidDate(value: string | null | undefined, now: Date = new
   const day = today ? 'Today' : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date);
   return `${day} · ${time}`;
 }
+
+const sameDay = (a: Date, b: Date) =>
+  a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+
+/** The Orders table's day header, as v2: `Today`, `Yesterday` (the previous local calendar day), else the medium date. */
+export function formatDayHeader(value: string | null | undefined, now: Date = new Date()): string {
+  const date = parse(value);
+  if (typeof date === 'string') return date;
+  if (sameDay(date, now)) return 'Today';
+  // Built from the calendar fields, so a day of 23 or 25 hours (a DST change) is still one day back.
+  if (sameDay(date, new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1))) return 'Yesterday';
+  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(date);
+}
