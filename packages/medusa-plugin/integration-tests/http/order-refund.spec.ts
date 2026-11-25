@@ -180,6 +180,27 @@ medusaIntegrationTestRunner({
       return { ...session, orderId, paymentId: payment.id as string, full,
         feeId: (order.items as Row[]).find(item => item.metadata?.tally_fee_uuid)?.id as string | undefined }
     }
+    /**
+     * #565: one line of variant A at quantity 2, 10.00 EUR each tax inclusive (19%), paid 20.00 cash. #583: any quantity, and
+     * an optional gross line discount (v3, as tillSale sends it). Net is round(gross ÷ 1.19): 2000 → 1681, 3000 → 2521, 1900 → 1597.
+     */
+    async function twoOfA(quantity = 2, d = 0) {
+      const session = { sessionId: randomUUID(), registerId: randomUUID() }, clientLineId = randomUUID()
+      const totalMinor = 1000 * quantity - d, netMinor = Math.round(totalMinor * 100 / 119), taxMinor = totalMinor - netMinor
+      const sale = command('order.create', { clientOrderId: randomUUID(), createdAt: openedAt, currency: 'EUR', pricesIncludeTax: true,
+        sessionId: session.sessionId, lines: [{ clientLineId, variantId: data.variantA, quantity, unitPriceMinor: 1000, ...(d ? { discountMinor: d } : {}) }],
+        ...(d ? { discountMinor: d } : {}), subtotalMinor: netMinor, taxMinor, totalMinor,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor, tenderedMinor: totalMinor, changeMinor: 0 }],
+        display: { currency: 'EUR', exponent: 2, taxInclusive: true, subtotalMinor: 1000 * quantity, discountMinor: d, taxMinor,
+          totalMinor, orderDiscountMinor: 0, lines: [{ clientLineId, amountMinor: totalMinor,
+            discounts: d ? [{ discountId: 'd', label: 'Till discount', amountMinor: d }] : [] }] },
+        taxByRate: [{ ratePpm: 190000, code: 'VAT', netMinor, taxMinor, grossMinor: totalMinor }] }, 3)
+      const [, created] = await applied([command('register.session.open', { ...session, openedAt, countedFloatMinor: 100 }), sale])
+      const orderId = created.serverRefs.orderId as string
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+        entity: 'order', fields: ['items.id'], filters: { id: orderId } }) as unknown as Rows
+      return { ...session, orderId, lineId: order.items[0].id as string }
+    }
     /** An Admin refund made once the next till command is priced (after its return is requested), so the receive parks it. */
     function refundAfterPricing(paymentId: string, amount: number) {
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
@@ -378,6 +399,106 @@ medusaIntegrationTestRunner({
       expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual([stock[0] + 1, stock[1] + 1])
       expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([1.18, 2.35])
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' }), expect.objectContaining({ status: 'received' })])
+    })
+
+    it("I-565-4: a quantity-2 line refunded one unit then one unit applies both; the till's own return counts once", async () => {
+      const till = await twoOfA()
+      const stock = await stockA()
+      const unit = (totalMinor: number) => command('order.refund', { clientRefundId: randomUUID(), orderId: till.orderId,
+        registerId: till.registerId, sessionId: till.sessionId, lines: [{ orderLineId: till.lineId, quantity: 1, restock: true }],
+        shippingMinor: 0, adjustmentMinor: 0, totalMinor, destination: 'original_method', reason: 'Wrong size', createdAt: openedAt })
+      // Line 2000 incl. 19%: net round(2000 − 319.33) = 1681, tax 319. Unit 1: round(1681/2) + round(319/2) = 841 + 160 = 1001;
+      // unit 2 is the last, so it takes the remainder 2000 − 1001 = 999.
+      expect((await applied([unit(1001)]))[0].refund.totalMinor).toBe(1001)
+      expect(await stockA()).toBe(stock + 1)
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+      expect((await applied([unit(999)]))[0].refund.totalMinor).toBe(999)
+      expect(await stockA()).toBe(stock + 2)
+      expect((await returns(till.orderId)).map(row => row.status)).toEqual(['received', 'received'])
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([9.99, 10.01])
+      const third = unit(1000)
+      expect((await post([third])).data.results).toEqual([{ id: third.id, status: 'rejected', error: { code: 'quantity_exceeds',
+        message: expect.any(String), data: { lines: [{ orderLineId: till.lineId, quantity: 1, refundableQuantity: 0 }] } } }])
+      expect([await stockA(), (await returns(till.orderId)).length, (await medusaRefunds(till.orderId)).length]).toEqual([stock + 2, 2, 2])
+    })
+
+    /** #583: one unit refund of `till`'s single line, priced at totalMinor. */
+    const unitsOf = (till: { orderId: string; registerId: string; sessionId: string; lineId: string }, quantity: number, totalMinor: number) =>
+      command('order.refund', { clientRefundId: randomUUID(), orderId: till.orderId, registerId: till.registerId, sessionId: till.sessionId,
+        lines: [{ orderLineId: till.lineId, quantity, restock: true }], shippingMinor: 0, adjustmentMinor: 0, totalMinor,
+        destination: 'original_method', reason: 'Wrong size', createdAt: openedAt })
+    /** #583: 3 × 0.99 EUR ex 19% on one line of variant A, no shipping, paid 3.53 cash (gross 3.5343). */
+    async function threeAtNinetyNine() {
+      const session = { sessionId: randomUUID(), registerId: randomUUID() }, clientLineId = randomUUID()
+      const sale = command('order.create', { clientOrderId: randomUUID(), createdAt: openedAt, currency: 'EUR', pricesIncludeTax: false,
+        sessionId: session.sessionId, lines: [{ clientLineId, variantId: data.variantA, quantity: 3, unitPriceMinor: 99 }],
+        subtotalMinor: 297, taxMinor: 56, totalMinor: 353,
+        payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: 353, tenderedMinor: 400, changeMinor: 47 }],
+        display: { currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor: 297, discountMinor: 0, taxMinor: 56,
+          totalMinor: 353, orderDiscountMinor: 0, lines: [{ clientLineId, amountMinor: 297, discounts: [] }] },
+        taxByRate: [{ ratePpm: 190000, code: 'VAT', netMinor: 297, taxMinor: 56, grossMinor: 353 }] }, 3)
+      const [, created] = await applied([command('register.session.open', { ...session, openedAt, countedFloatMinor: 100 }), sale])
+      const orderId = created.serverRefs.orderId as string
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({
+        entity: 'order', fields: ['items.id'], filters: { id: orderId } }) as unknown as Rows
+      return { ...session, orderId, lineId: order.items[0].id as string }
+    }
+
+    it('I-583-1: 3 × 10.00 incl. 19% on one line refunds 1, 1, 1 unit at 1000 each; Medusa\'s shrunk totals do not reprice them', async () => {
+      const till = await twoOfA(3)
+      // As sold: gross 3000, net round(3000 − 478.99) = 2521, tax 479. Unit 1: round(2521/3) + round(479/3) = 840 + 160 = 1000;
+      // unit 2: (round(5042/3) − 840) + (round(958/3) − 160) = 841 + 159 = 1000; unit 3 is the last: 3000 − 2000 = 1000.
+      for (const n of [1, 2, 3]) {
+        expect((await applied([unitsOf(till, 1, 1000)]))[0].refund.totalMinor).toBe(1000)
+        expect(await returns(till.orderId)).toHaveLength(n)
+      }
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount)).toEqual([10, 10, 10])
+    })
+
+    it('I-583-2: 3 × 0.99 ex 19% on one line refunds 1 unit at 118, then the last 2 at 235: 353, the line as sold', async () => {
+      const till = await threeAtNinetyNine()
+      // As sold: gross 3 × 0.99 × 1.19 = 3.5343, net round(353.43 − 56.43) = 297, tax round(353.43) − 297 = 56.
+      // Unit 1: round(297/3) + round(56/3) = 99 + 19 = 118. Units 2–3 are the last: net 297 − 99 = 198, tax 56 − 19 = 37, 235 = 353 − 118.
+      expect((await applied([unitsOf(till, 1, 118)]))[0].refund.totalMinor).toBe(118)
+      expect((await applied([unitsOf(till, 2, 235)]))[0].refund.totalMinor).toBe(235)
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([1.18, 2.35])
+    })
+
+    it('I-583-3: 2 × 10.00 incl. 19% with a 1.00 line discount refunds 951 then 949: the payment, the discount counted once', async () => {
+      const till = await twoOfA(2, 100)
+      // As sold: gross 2000 − 100 = 1900; tax (2000 − 100)/1.19 × 0.19 = 303.36, net round(1596.64) = 1597, tax 303.
+      // Unit 1: round(1597/2) + round(303/2) = 799 + 152 = 951 (half up); unit 2 is the last: 798 + 151 = 949 = 1900 − 951.
+      expect((await applied([unitsOf(till, 1, 951)]))[0].refund.totalMinor).toBe(951)
+      expect((await applied([unitsOf(till, 1, 949)]))[0].refund.totalMinor).toBe(949)
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([9.49, 9.51])
+    })
+
+    it("I-583-4: before any refund, loadRefundOrder's as-sold lines equal Medusa's live split of the same items", async () => {
+      const { loadRefundOrder } = require(`${built}/workflows/tally-order-refund/execute`) as typeof import('../../src/workflows/tally-order-refund/execute')
+      const { connectorSplit } = require(`${built}/workflows/tally-order-refund/price`) as typeof import('../../src/workflows/tally-order-refund/price')
+      for (const till of [await twoOfA(3), await threeAtNinetyNine(), await twoOfA(2, 100)]) {
+        const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order',
+          fields: ['total', 'items.id', 'items.raw_total', 'items.raw_tax_total'], filters: { id: till.orderId } }) as unknown as Rows
+        const live = (order.items as Row[]).map(item => ({ id: item.id, ...connectorSplit(item.raw_total.value, item.raw_tax_total.value, 2) }))
+        const lines = (await loadRefundOrder(container, till.orderId))!.lines
+        expect(lines.map(({ id, netMinor, taxMinor }) => ({ id, netMinor, taxMinor }))).toEqual(live)
+      }
+    })
+
+    it('I-583-5: 2 × 10.00 incl. 19% with 1 unit returned in Admin and no refund: the till refunds the other at 999', async () => {
+      const till = await twoOfA()
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const lines = [{ orderLineId: till.lineId, quantity: 1, restock: true }]
+      const returnId = await workflow.beginReturn(container, { orderId: till.orderId, locationId: data.berlinId, note: 'return in Admin',
+        refundRowId: 'tref_admin_return' })
+      await workflow.requestReturn(container, { returnId, lines })
+      await workflow.receiveStep(container, { returnId, lines })
+      const stock = await stockA()
+      // As sold: net 1681, tax 319; the Admin unit is the first: 841 + 160 = 1001, so the other is (1681 − 841) + (319 − 160) = 999.
+      // No Medusa refund was made, so nothing is outside the till (outsideRefundsMinor 0).
+      expect((await applied([unitsOf(till, 1, 999)]))[0].refund.totalMinor).toBe(999)
+      expect(await stockA()).toBe(stock + 1)
+      expect(await medusaRefunds(till.orderId)).toEqual([expect.objectContaining({ amount: 9.99 })])
     })
 
     it('F3-parked: a received row holds back 118 from the cap and its line money leaves 235 for the last two', async () => {
