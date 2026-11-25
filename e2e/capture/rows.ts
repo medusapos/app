@@ -158,13 +158,13 @@ export const rows: CaptureRow[] = [
     await customer(email);
     await cart(page, size);
     await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-    await page.getByTestId('customer-picker-search').fill(email);
+    await page.getByTestId('customer-dropdown-search').fill(email);
     await expect(page.getByLabel(`Ada Lovelace, ${email}`, { exact: true })).toBeVisible();
   } },
   { id: '04b', title: 'New customer', state: 'New-customer form', reach: async (page, size) => {
     await cart(page, size);
-    await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
-    await page.getByRole('button', { name: 'New customer', exact: true }).click();
+    await page.getByTestId('cart-add-menu').click();
+    await page.getByTestId('cart-add-new-customer').click();
     await expect(page.getByPlaceholder('First name')).toBeVisible();
   } },
   { id: '04c', title: 'Order note', state: '⋮ Order details sheet with its Form | JSON tabs (#511)', reach: async (page, size) => {
