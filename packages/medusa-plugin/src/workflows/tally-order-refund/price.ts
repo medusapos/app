@@ -65,7 +65,9 @@ export interface PriceRefundInput {
   /** The order's shipping, gross, in minor units. */
   shippingMinor: number
   /** What earlier refunds of this order took back; medusaRefundId null when the row recorded no Medusa refund. */
-  earlier: { lines: PricedLine[]; shippingMinor: number; medusaRefundId: string | null }[]
+  earlier: { lines: PricedLine[]; shippingMinor: number; medusaRefundId: string | null
+    /** The row's total; 0 is a stock-only return. */
+    totalMinor?: number }[]
   /** The payment's amount; null when the order has no payment. */
   paidMinor: number | null
   /** Medusa's refunds beyond what the tally rows and baselines record (made outside the till); 0 when there is no payment. */
@@ -156,7 +158,7 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
   const goodwillMinor = (input.paidMinor ?? 0) - input.refundableMoneyMinor - input.earlier.reduce((sum, earlier) =>
     sum + earlier.shippingMinor + earlier.lines.reduce((total, line) => total + line.netMinor + line.taxMinor, 0), 0)
   if (input.paidMinor !== null && overMinor > 0 && overMinor <= goodwillMinor && priced.length && overMinor <= linesMinor
-    && input.earlier.every(earlier => earlier.medusaRefundId !== null)
+    && input.earlier.every(earlier => earlier.medusaRefundId !== null || earlier.totalMinor === 0)
     && input.lines.every(line => line.returnedQuantity <= (refunded.get(line.id) ?? 0))) {
     const grossOf = (line: PricedLine) => line.netMinor + line.taxMinor
     const shares = priced.map((line, n) => {
@@ -177,7 +179,8 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
     }
   }
   if (totalMinor !== request.totalMinor) return mismatch(totalMinor, "The refund total differs from the store's.")
-  if (totalMinor === 0) return nothing
+  // #546: lines priced at 0 with no adjustment are a stock-only return; any other 0 total still refuses.
+  if (totalMinor === 0 && (!priced.length || request.adjustmentMinor !== 0)) return nothing
   if (totalMinor > input.refundableMoneyMinor) {
     return mismatch(input.refundableMoneyMinor, 'The refund is more than the money the order has left to refund.')
   }

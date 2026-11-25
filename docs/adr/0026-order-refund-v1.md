@@ -147,8 +147,7 @@ So a refund that leaves every product line fully refunded prices its lines at th
   - Otherwise, within D's bound, the difference is dropped and the lines price at their own figures; no net or tax is ever negative. Beyond the bound it is money drift. The till applies the same rule.
   - **Accepted limit:** a dropped difference over-refunds the lines by at most one minor unit per line; the payment cap still bounds the order's refunds.
     - Example: 3 × 0.99 ex 19% plus a free line z, with 5.95 of shipping (paid 9.48). Refunding a, b and c singly takes 1.18 each, 3.54 against 3.53 of line money.
-    - z alone then prices at 0 and is refused `nothing_to_refund`.
-    - A stock-only return of a free line is not in v1.
+    - z alone then prices at 0 and is a stock-only return (#546), received with no Medusa refund.
 - **C. A resume or takeover after the session has closed.** The refund parks again as `needs_admin`, reason `session_closed`, with no money and no stock moved. The closed session's figures never move.
   - On the till, the refund reads as in progress, never as paid. TallyUI's wire has no message for a parked command; the plain "not paid" wording on the till is a TallyUI contract change: TallyUI/tallyui#1280.
   - The admin finishes such a refund with `move` (decision 2, #542).

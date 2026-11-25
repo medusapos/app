@@ -145,23 +145,26 @@ medusaIntegrationTestRunner({
       return { till, order, row }
     }
 
-    /** The remainder order (ADR 0026 decision 5): three one-unit lines at 0.99 ex 19% (gross 1.1781 each), paid 3.53 cash. */
-    async function remainderSale(charge?: 'fee' | 'shipping') {
+    /**
+     * The remainder order (ADR 0026 decision 5): three one-unit lines at 0.99 ex 19% (gross 1.1781 each), paid 3.53 cash.
+     * With free, a fourth line z of variant D at 0 (#546).
+     */
+    async function remainderSale(charge?: 'fee' | 'shipping', free = false) {
       const session = { sessionId: randomUUID(), registerId: randomUUID() }
-      const clientLineIds = [randomUUID(), randomUUID(), randomUUID()]
+      const clientLineIds = [randomUUID(), randomUUID(), randomUUID(), ...(free ? [randomUUID()] : [])]
       const fees = charge === 'fee' ? [{ clientFeeId: randomUUID(), name: 'Bag', amountMinor: 100, taxStatus: 'taxable', taxMinor: 19 }] : []
       const shipping = charge === 'shipping' ? [{ clientShippingId: randomUUID(), name: 'Delivery', amountMinor: 500, taxStatus: 'taxable', taxMinor: 95 }] : []
       const netMinor = 297 + (charge === 'fee' ? 100 : charge === 'shipping' ? 500 : 0)
       const taxMinor = 56 + (charge === 'fee' ? 19 : charge === 'shipping' ? 95 : 0), totalMinor = netMinor + taxMinor
       const sale = command('order.create', {
         clientOrderId: randomUUID(), createdAt: openedAt, currency: 'EUR', pricesIncludeTax: false, sessionId: session.sessionId,
-        lines: [data.variantA, data.variantB, data.variantC].map((variantId, index) =>
-          ({ clientLineId: clientLineIds[index], variantId, quantity: 1, unitPriceMinor: 99 })),
+        lines: [data.variantA, data.variantB, data.variantC, ...(free ? [data.variantD] : [])].map((variantId, index) =>
+          ({ clientLineId: clientLineIds[index], variantId, quantity: 1, unitPriceMinor: index === 3 ? 0 : 99 })),
         ...(fees.length ? { fees } : {}), ...(shipping.length ? { shipping } : {}),
         subtotalMinor: 297, taxMinor, totalMinor,
         payments: [{ clientPaymentId: randomUUID(), method: 'cash', amountMinor: totalMinor, tenderedMinor: totalMinor + 47, changeMinor: 47 }],
         display: { currency: 'EUR', exponent: 2, taxInclusive: false, subtotalMinor: 297, discountMinor: 0, taxMinor,
-          totalMinor, orderDiscountMinor: 0, lines: clientLineIds.map(clientLineId => ({ clientLineId, amountMinor: 99, discounts: [] })),
+          totalMinor, orderDiscountMinor: 0, lines: clientLineIds.map((clientLineId, index) => ({ clientLineId, amountMinor: index === 3 ? 0 : 99, discounts: [] })),
           ...(fees.length ? { fees: fees.map(({ clientFeeId, amountMinor }) => ({ clientFeeId, amountMinor })) } : {}),
           ...(shipping.length ? { shipping: shipping.map(({ clientShippingId, amountMinor }) => ({ clientShippingId, amountMinor })) } : {}) },
         taxByRate: [{ ratePpm: 190000, code: 'VAT', netMinor, taxMinor, grossMinor: totalMinor }],
@@ -169,16 +172,17 @@ medusaIntegrationTestRunner({
       const [, created] = await applied([command('register.session.open', { ...session, openedAt, countedFloatMinor: 100 }), sale])
       const orderId = created.serverRefs.orderId as string
       const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order',
-        fields: ['total', 'items.id', 'items.metadata', 'payment_collections.payments.id', 'payment_collections.payments.amount'],
+        fields: ['total', 'items.id', 'items.metadata', 'items.variant_id', 'payment_collections.payments.id', 'payment_collections.payments.amount'],
         filters: { id: orderId } }) as unknown as Rows
       const [payment] = (order.payment_collections as Row[]).flatMap(collection => collection.payments as Row[])
-      expect([Number(payment.amount), order.items.length]).toEqual([totalMinor / 100, charge === 'fee' ? 4 : 3])
+      expect([Number(payment.amount), order.items.length]).toEqual([totalMinor / 100, charge === 'fee' || free ? 4 : 3])
       const productLines = (order.items as Row[]).filter(item => !item.metadata?.tally_fee_uuid)
       const full = command('order.refund', { clientRefundId: randomUUID(), orderId, ...session,
         lines: productLines.map(item => ({ orderLineId: item.id, quantity: 1, restock: true })), shippingMinor: 0,
         adjustmentMinor: 0, totalMinor: 353, destination: 'original_method', reason: 'Wrong size', createdAt: openedAt })
       return { ...session, orderId, paymentId: payment.id as string, full,
-        feeId: (order.items as Row[]).find(item => item.metadata?.tally_fee_uuid)?.id as string | undefined }
+        feeId: (order.items as Row[]).find(item => item.metadata?.tally_fee_uuid)?.id as string | undefined,
+        freeId: (order.items as Row[]).find(item => free && item.variant_id === data.variantD)?.id as string | undefined }
     }
     /**
      * #565: one line of variant A at quantity 2, 10.00 EUR each tax inclusive (19%), paid 20.00 cash. #583: any quantity, and
@@ -259,6 +263,28 @@ medusaIntegrationTestRunner({
       expect((await applied([till.full]))[0].refund.totalMinor).toBe(353)
       expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((a, b) => a - b)).toEqual([0.01, 3.53])
       expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+    })
+
+    it('I-546-1: the ADR N1 sale: a, b, c at 118 each, then the free z alone is a stock-only return with no Medusa refund', async () => {
+      const till = await remainderSale('shipping', true)
+      expect(till.freeId).toEqual(expect.any(String))
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      for (const line of till.full.payload.lines.filter(entry => entry.orderLineId !== till.freeId)) {
+        const one = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines: [line], totalMinor: 118 })
+        expect((await applied([one]))[0].refund.totalMinor).toBe(118)
+      }
+      const stock = await stockOf(data.inventoryD)
+      const money = jest.spyOn(workflow, 'moneyStep')
+      const z = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(),
+        lines: [{ orderLineId: till.freeId!, quantity: 1, restock: true }], shippingMinor: 0, adjustmentMinor: 0, totalMinor: 0 })
+      expect((await post([z])).data).toEqual({ results: [{ id: z.id, status: 'applied', refund: { totalMinor: 0, byMethod: {}, refunds: [] } }] })
+      expect(money).not.toHaveBeenCalled()
+      expect(await medusaRefunds(till.orderId)).toEqual([1, 2, 3].map(() => ({ paymentId: till.paymentId, amount: 1.18 })))
+      const received = (await returns(till.orderId)).filter(entry => entry.status === 'received')
+      expect(received).toHaveLength(4)
+      expect(await stockOf(data.inventoryD)).toBe(stock + 1)
+      const row = await container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_refund').where({ command_id: z.id }).first()
+      expect(row).toMatchObject({ status: 'applied', medusa_refund_id: null, money_started_at: null, received_at: expect.any(Date) })
     })
 
     // #547 (desk 2026-11-24): earlier goodwill no row puts on a line lets Refund all pass at what is left.
