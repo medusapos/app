@@ -324,6 +324,62 @@ medusaIntegrationTestRunner({
       expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([0.01, 1.16, 1.18, 1.18])
     })
 
+    /** #565: the sale's lines by variant (a = A, stocked; b = B, not stocked; c = C, stocked), and a return of a received in Admin. */
+    async function adminReturnOfA() {
+      const till = await remainderSale()
+      const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order',
+        fields: ['items.id', 'items.variant_id'], filters: { id: till.orderId } }) as unknown as Rows
+      const lineOf = (variantId: string) => till.full.payload.lines.find((entry: Row) =>
+        entry.orderLineId === (order.items as Row[]).find(item => item.variant_id === variantId)!.id)!
+      const [a, b, c] = [lineOf(data.variantA), lineOf(data.variantB), lineOf(data.variantC)]
+      const stock = [await stockOf(data.inventoryA), await stockOf(data.inventoryC)]
+      const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
+      const returnId = await workflow.beginReturn(container, { orderId: till.orderId, locationId: data.berlinId, note: 'return in Admin',
+        refundRowId: 'tref_admin_return' })
+      await workflow.requestReturn(container, { returnId, lines: [a] })
+      await workflow.receiveStep(container, { returnId, lines: [a] })
+      expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual([stock[0] + 1, stock[1]])
+      return { till, a, b, c, stock: [stock[0] + 1, stock[1]] }
+    }
+    const tillRefunds = (orderId: string) => container.resolve(ContainerRegistrationKeys.PG_CONNECTION)('tally_refund').where({ order_id: orderId })
+
+    it('I-565-1: an Admin return of line a, no refund: Refund all refuses quantity_exceeds; no row, return, stock move or refund', async () => {
+      const { till, a, stock } = await adminReturnOfA()
+      const full = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID() })
+      expect((await post([full])).data.results).toEqual([{ id: full.id, status: 'rejected', error: { code: 'quantity_exceeds',
+        message: expect.any(String), data: { lines: [{ orderLineId: a.orderLineId, quantity: 1, refundableQuantity: 0 }] } } }])
+      expect(await tillRefunds(till.orderId)).toEqual([])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' })])
+      expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual(stock)
+      expect(await medusaRefunds(till.orderId)).toEqual([])
+    })
+
+    it('I-565-2: an Admin return of line a: the till refunds b and c, restocked once; a refund of a then refuses', async () => {
+      const { till, a, b, c, stock } = await adminReturnOfA()
+      const rest = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines: [b, c], totalMinor: 236 })
+      expect((await applied([rest]))[0].refund.totalMinor).toBe(236)
+      expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual([stock[0], stock[1] + 1])
+      const again = command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines: [a], totalMinor: 117 })
+      expect((await post([again])).data.results).toEqual([{ id: again.id, status: 'rejected', error: { code: 'quantity_exceeds',
+        message: expect.any(String), data: { lines: [{ orderLineId: a.orderLineId, quantity: 1, refundableQuantity: 0 }] } } }])
+      expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual([stock[0], stock[1] + 1])
+      expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 2.36 }])
+      expect(await tillRefunds(till.orderId)).toHaveLength(1)
+      expect(await returns(till.orderId)).toHaveLength(2)
+    })
+
+    it('I-565-3: till-only history: line a, then the rest at the remainder; one restock per line', async () => {
+      const till = await remainderSale()
+      const stock = [await stockOf(data.inventoryA), await stockOf(data.inventoryC)]
+      const [first, ...others] = till.full.payload.lines
+      const part = (lines: unknown[], totalMinor: number) => command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines, totalMinor })
+      expect((await applied([part([first], 118)]))[0].refund.totalMinor).toBe(118)
+      expect((await applied([part(others, 235)]))[0].refund.totalMinor).toBe(235)
+      expect([await stockOf(data.inventoryA), await stockOf(data.inventoryC)]).toEqual([stock[0] + 1, stock[1] + 1])
+      expect((await medusaRefunds(till.orderId)).map(entry => entry.amount).sort((x, y) => x - y)).toEqual([1.18, 2.35])
+      expect(await returns(till.orderId)).toEqual([expect.objectContaining({ status: 'received' }), expect.objectContaining({ status: 'received' })])
+    })
+
     it('F3-parked: a received row holds back 118 from the cap and its line money leaves 235 for the last two', async () => {
       const till = await remainderSale()
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')

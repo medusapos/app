@@ -334,8 +334,18 @@ describe('the goodwill clamp (#547)', () => {
   })
 
   it('clamp: a Medusa return beyond the rows blocks it', () => {
-    const returned = sale(1, { lines: lines.map((entry, n) => ({ ...entry, returnedQuantity: n === 0 ? 1 : 0 })) })
-    expect(priceRefund({ ...returned, request: request({ lines: all, totalMinor: 352 }) })).toEqual(refused(differs, 352, 353))
+    const returnedLines = lines.map((entry, n) => ({ ...entry, returnedQuantity: n === 0 ? 1 : 0 }))
+    const returned = sale(1, { lines: returnedLines })
+    // #565: the Medusa return takes line a out of a Refund all before the clamp is reached.
+    expect(priceRefund({ ...returned, request: request({ lines: all, totalMinor: 352 }) })).toEqual({ ok: false, error: { code: 'quantity_exceeds',
+      message: 'A line asks for more than its refundable quantity, or is not on the order.',
+      data: { lines: [{ orderLineId: 'ordli_a', quantity: 1, refundableQuantity: 0 }] } } })
+    // The unit twin of the integration test: 1.18 refunded with the Admin return looks like goodwill to the clamp (G = 353 − 235),
+    // and the two lines left price at 236 on a cap of 235. Line a's returned quantity keeps the clamp off.
+    const admin = sale(118, { lines: returnedLines })
+    const rest = all.slice(1)
+    expect(priceRefund({ ...admin, request: request({ lines: rest, totalMinor: 236 }) })).toEqual(refused(cap, 236, 235))
+    expect(priceRefund({ ...admin, request: request({ lines: rest, totalMinor: 235 }) })).toEqual(refused(differs, 235, 236))
   })
 
   it('clamp: one figure, no ping-pong', () => {
@@ -398,5 +408,37 @@ describe('the goodwill clamp (#547)', () => {
     expect(priceRefund({ ...sale(1, { outsideRefundsMinor: 1 }), request: request({}) })).toEqual(outside(1))
     expect(priceRefund({ ...sale(1, { outsideRefundsMinor: 1 }), request: request({ lines: [{ orderLineId: 'ordli_x', quantity: 1, restock: true }], totalMinor: 1 }) })).toEqual(outside(1))
     expect(priceRefund({ ...sale(1, { outsideRefundsMinor: 0 }), request: request({ lines: all, totalMinor: 352 }) })).toEqual({ ok: true, totalMinor: 352, lines: priced([99, 98, 98]) })
+  })
+})
+
+describe("the refundable quantity counts Medusa's returns (#565)", () => {
+  const exceeds = (quantity: number, refundableQuantity: number) => ({ ok: false, error: { code: 'quantity_exceeds',
+    message: 'A line asks for more than its refundable quantity, or is not on the order.', data: { lines: [{ orderLineId: 'ordli_1', quantity, refundableQuantity }] } } })
+  const take = (quantity: number) => [{ orderLineId: 'ordli_1', quantity, restock: true }]
+  // The till refunded one unit of three (its own return, so Medusa's returnedQuantity is at least 1).
+  const tillOne = { ...base, refundableMoneyMinor: 1294,
+    earlier: [{ lines: [{ orderLineId: 'ordli_1', quantity: 1, restock: true, netMinor: 333, taxMinor: 63 }], shippingMinor: 0, medusaRefundId: 'refund_1' }] }
+
+  it('U-565-1: a quantity-1 line Medusa returned with no till refund has nothing refundable', () => {
+    const one = { ...base, lines: [{ ...line, quantity: 1, returnedQuantity: 1 }] }
+    expect(priceRefund({ ...one, request: request({ lines: take(1), totalMinor: 1190 }) })).toEqual(exceeds(1, 0))
+  })
+
+  it("U-565-2: the till's own return is inside Medusa's figure: max, not sum", () => {
+    // already = max(1, 1) = 1, so two units are left; a sum (2) would leave one.
+    expect(priceRefund({ ...tillOne, lines: [{ ...line, returnedQuantity: 1 }], request: request({ lines: take(2), totalMinor: 794 }) }))
+      .toEqual({ ok: true, totalMinor: 794, lines: [{ orderLineId: 'ordli_1', quantity: 2, restock: true, netMinor: 667, taxMinor: 127 }] })
+  })
+
+  it('U-565-3: an Admin return beyond the till refund leaves one unit, priced as the third', () => {
+    const lines = [{ ...line, returnedQuantity: 2 }]
+    expect(priceRefund({ ...tillOne, lines, request: request({ lines: take(2), totalMinor: 794 }) })).toEqual(exceeds(2, 1))
+    // already = 2: units 3..3 are 1000 − 667 and 190 − 127 (the till figure alone would price units 2..2 at 334 + 64).
+    expect(priceRefund({ ...tillOne, lines, request: request({ lines: take(1), totalMinor: 396 }) }))
+      .toEqual({ ok: true, totalMinor: 396, lines: [{ orderLineId: 'ordli_1', quantity: 1, restock: true, netMinor: 333, taxMinor: 63 }] })
+  })
+
+  it('U-565-4: a returned quantity above the line quantity never makes the refundable quantity negative', () => {
+    expect(priceRefund({ ...base, lines: [{ ...line, returnedQuantity: 5 }], request: request({ lines: take(1), totalMinor: 396 }) })).toEqual(exceeds(1, 0))
   })
 })

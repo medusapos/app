@@ -54,7 +54,7 @@ export function shareMinor(total: number, quantity: number, refunded: number, no
   return Number(at(refunded + now) - at(refunded))
 }
 
-/** returnedQuantity: Medusa's return requested + received + dismissed on the item (#547's Medusa-returned guard). */
+/** returnedQuantity: Medusa's return requested + received + dismissed on the item (#547's clamp guard; #565's refundable quantity). */
 export interface RefundableLine { id: string; quantity: number; netMinor: number; taxMinor: number; returnedQuantity: number }
 export interface PricedLine { orderLineId: string; quantity: number; restock: boolean; netMinor: number; taxMinor: number }
 export interface RefundRefusal { code: 'nothing_to_refund' | 'quantity_exceeds' | 'amount_mismatch' | 'order_state'; message: string; data?: Record<string, unknown> }
@@ -93,7 +93,8 @@ export function priceRefund(input: PriceRefundInput): { ok: true; lines: PricedL
   const priced: PricedLine[] = []
   for (const { orderLineId, quantity, restock } of request.lines) {
     const line = input.lines.find(candidate => candidate.id === orderLineId)
-    const already = line ? Math.min(line.quantity, refunded.get(orderLineId) ?? 0) : 0
+    // #565: Medusa's returns count too; max, not sum, since a till refund's own return is inside Medusa's figure.
+    const already = line ? Math.min(line.quantity, Math.max(refunded.get(orderLineId) ?? 0, line.returnedQuantity)) : 0
     const refundableQuantity = line ? line.quantity - already : 0
     if (!line || quantity > refundableQuantity) {
       exceeded.push({ orderLineId, quantity, refundableQuantity })
