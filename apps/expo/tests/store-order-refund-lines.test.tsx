@@ -96,4 +96,25 @@ describe('useStoreOrderWithRefundLines', () => {
     await act(async () => { first.resolve([withLines(1)]); });
     expect(result.current).toBe(newer);
   });
+
+  it('L6: switching orders returns the new listed order until its own read resolves', async () => {
+    const firstRead = withLines();
+    const second = deferred();
+    getOrders.mockResolvedValueOnce([firstRead]).mockReturnValueOnce(second.promise);
+    const { result, rerender } = renderHook(({ listed }) => useStoreOrderWithRefundLines(SESSION_6, listed, 0),
+      { initialProps: { listed: storeOrder() } });
+    await waitFor(() => expect(result.current).toBe(firstRead));
+
+    const refund = { id: 'refund_02', amountMinor: 1200 };
+    const secondListed = { ...storeOrder([refund]), id: 'order_2' };
+    rerender({ listed: secondListed });
+    expect(getOrders).toHaveBeenNthCalledWith(2, expect.anything(), ['order_2']);
+    expect(result.current).toBe(secondListed);
+    expect(result.current?.id).toBe('order_2');
+
+    const secondRead = { ...secondListed, refunds: [{ ...refund,
+      lines: [{ orderLineId: 'line_1', quantity: 2, netMinor: 1200, taxMinor: 0 }] }] };
+    await act(async () => { second.resolve([secondRead]); });
+    expect(result.current).toBe(secondRead);
+  });
 });
