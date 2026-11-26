@@ -30,6 +30,9 @@ export default defineConfig({
     exclude: ['**/node_modules/**', 'dev/**', 'packages/medusa-plugin/**'],
     passWithNoTests: true,
     setupFiles: ['apps/expo/tests/setup-storage.ts'],
+    // UI tests take about 4 times as long on CI as on the agent host. Several take
+    // 4.8 to 5.2 s on CI, close to Vitest's 5 s default (#614).
+    testTimeout: 15_000,
     // The shared agent host caps test workers at 2.
     maxWorkers: 2,
     server: {
