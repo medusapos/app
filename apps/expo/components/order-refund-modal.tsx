@@ -22,7 +22,7 @@ export function OrderRefundModal({ order, refunds, input, onClose, onUnanswered 
   input: Extract<RefundFormInput, { offered: true }>;
   onClose: () => void;
   /** The refund was sent without a final answer; the sheet resumes it on its own envelope. */
-  onUnanswered: (message: string) => void;
+  onUnanswered: (message: string, record: import('@tallyui/pos').PosRefund) => void;
 }): JSX.Element {
   const { register, boundRegisterId, commandTransport } = useRegister();
   const online = useNetworkOnline();
@@ -46,13 +46,13 @@ export function OrderRefundModal({ order, refunds, input, onClose, onUnanswered 
     inFlight.current = true;
     setMessage('');
     try {
-      const { outcome } = await submitOrderRefund({ refunds, transport: commandTransport(), envelope });
+      const { outcome, record } = await submitOrderRefund({ refunds, transport: commandTransport(), envelope });
       if (outcome.kind === 'applied') return onClose();
       // A rejection is final for its command; the next confirm sends a new one for the same refund.
       if (outcome.kind === 'rejected') return setMessage(outcomeMessage(outcome));
-      onUnanswered(outcomeMessage(outcome));
+      onUnanswered(outcome.kind === 'needs_admin' ? '' : outcomeMessage(outcome), record);
     } catch (error) {
-      if (error instanceof RefundAnswerPendingError) return onUnanswered(REFUND_IN_PROGRESS);
+      if (error instanceof RefundAnswerPendingError) return onUnanswered(REFUND_IN_PROGRESS, error.record);
       setMessage(error instanceof Error ? error.message : String(error));
     } finally {
       inFlight.current = false;

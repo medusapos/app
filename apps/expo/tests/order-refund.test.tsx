@@ -91,8 +91,6 @@ const submit = async (form: Awaited<ReturnType<typeof modal>>) => {
 const parked = (reason: string, message: string) => async (batch: OrderRefundEnvelope[]): Promise<TransportOutcome> => ({
   kind: 'retry', reason: `needs_admin:${reason}`, needsAdmin: { id: batch[0].id, reason, message },
 });
-const confirm = () => screen.getByTestId('order-refund-confirm');
-const giveReason = async () => fireEvent.change(await screen.findByTestId('order-refund-reason'), { target: { value: ' Damaged ' } });
 
 beforeEach(async () => {
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't', capabilities: REFUND_ON };
@@ -185,6 +183,20 @@ describe('Refund in the Orders sheet (#569)', () => {
     expect(sent(1).id).toBe(sent(0).id);
     expect(sent(1)).toEqual(sent(0));
     expect(await refunds.count().exec()).toBe(1);
+  });
+
+  it('C5b: a rejected resume shows the store message without another Confirm', async () => {
+    send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' }).mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch));
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    fireEvent.click(await screen.findByTestId('order-refund-confirm'));
+    await waitFor(() => expect(screen.getByTestId('order-refund-error').textContent).toBe('The store refused: amount_mismatch'));
+    expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(sent(1)).toEqual(sent(0));
   });
 
   it("C6: a rejection shows the store's message; the next confirm sends a new command id, the same refund id and the form's values", async () => {
@@ -374,14 +386,17 @@ describe('Refund in the Orders sheet (#569)', () => {
 });
 
 describe('needs_admin (#545)', () => {
-  it.each(['session_closed', 'money_unconfirmed'])('shows the store message and the notice for %s instead of Confirm', async (reason) => {
-    const message = `Store response: ${reason}`;
-    send.mockImplementationOnce(parked(reason, message));
-    render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(confirm());
-    expect((await screen.findByTestId('refund-needs-admin-line')).textContent).toBe(refundNeedsAdminLine(reason));
+  it.each(['session_closed', 'money_unconfirmed'])('shows the store message and the notice for %s instead of Confirm', async (adminReason) => {
+    const message = `Store response: ${adminReason}`;
+    send.mockImplementationOnce(parked(adminReason, message));
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    expect((await screen.findByTestId('refund-needs-admin-line')).textContent).toBe(refundNeedsAdminLine(adminReason));
+    expect(screen.queryByTestId('refund-modal')).toBeNull();
+    expect(screen.getByTestId('order-refund-total').textContent).toBe(`Refund ${money(1200)}`);
     expect(screen.getByTestId('refund-needs-admin-message').textContent).toBe(message);
     expect(screen.queryByTestId('order-refund-error')).toBeNull();
     expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
@@ -389,10 +404,11 @@ describe('needs_admin (#545)', () => {
 
   it('Check again applies the same envelope and closes the dialog', async () => {
     send.mockImplementationOnce(parked('session_closed', 'Store response')).mockImplementationOnce(async (batch) => applied(batch));
-    render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(confirm());
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
     fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
     await screen.findByTestId('order-detail-refunded');
     expect(screen.queryByTestId('order-refund-dialog')).toBeNull();
@@ -404,14 +420,15 @@ describe('needs_admin (#545)', () => {
 
   it('reopens on the stored notice without sending until Check again', async () => {
     send.mockImplementationOnce(parked('session_closed', 'Stored response')).mockImplementationOnce(async (batch) => applied(batch));
-    const view = render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(confirm());
+    const view = render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
     await screen.findByTestId('refund-needs-admin-line');
     const record = await refunds.findOne().exec();
-    view.rerender(sheet(false));
-    view.rerender(sheet());
+    view.rerender(sheet({ open: false, store: twoUnits }));
+    view.rerender(sheet({ store: twoUnits }));
     expect((await screen.findByTestId('refund-needs-admin-line')).textContent).toBe(refundNeedsAdminLine('session_closed'));
     expect(screen.getByTestId('refund-needs-admin-message').textContent).toBe('Stored response');
     expect(send).toHaveBeenCalledTimes(1);
@@ -422,10 +439,11 @@ describe('needs_admin (#545)', () => {
 
   it('keeps the notice alongside the error after an unreachable store', async () => {
     send.mockImplementationOnce(parked('money_unconfirmed', 'Store response')).mockResolvedValueOnce({ kind: 'retry', reason: 'network' });
-    render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(confirm());
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
     fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
     expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store did not answer. Try again.');
     expect(screen.getByTestId('refund-needs-admin-line').textContent).toBe(refundNeedsAdminLine('money_unconfirmed'));
@@ -433,22 +451,24 @@ describe('needs_admin (#545)', () => {
     expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
   });
 
-  it('clears the notice after rejection and Confirm sends a new command', async () => {
+  it('clears the notice after rejection and only offers a new refund through the form', async () => {
     send.mockImplementationOnce(parked('money_unconfirmed', 'Store response'))
-      .mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch)).mockImplementationOnce(async (batch) => applied(batch));
-    render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(confirm());
+      .mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch));
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
     fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
     expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: amount_mismatch');
     expect(screen.queryByTestId('refund-needs-admin-line')).toBeNull();
     expect(screen.queryByTestId('refund-needs-admin-check-again')).toBeNull();
-    fireEvent.click(confirm());
-    await screen.findByTestId('order-detail-refunded');
-    const [first, second, third] = send.mock.calls.map(([batch]) => batch[0]);
-    expect(second.id).toBe(first.id);
-    expect(third.id).not.toBe(second.id);
-    expect(third.payload.clientRefundId).toBe(first.payload.clientRefundId);
+    expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(sent(1).id).toBe(sent(0).id);
+    expect(sent(1).payload.clientRefundId).toBe(sent(0).payload.clientRefundId);
+    fireEvent.click(screen.getByTestId('order-refund-cancel'));
+    await openModal();
+    expect(send).toHaveBeenCalledTimes(2);
   });
 });

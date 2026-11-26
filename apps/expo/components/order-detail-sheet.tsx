@@ -82,7 +82,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   const [reprint, setReprint] = useState(false);
   const [syncing, setSyncing] = useState(false);
   // What is open over the sheet: the refund form, or the dialog that resends a refund sent without a final answer.
-  const [refunding, setRefunding] = useState<'none' | 'modal' | 'resume'>('none');
+  const [refunding, setRefunding] = useState<'none' | 'modal' | PosRefund>('none');
   // Why the form handed its refund to the resume dialog.
   const [handoff, setHandoff] = useState('');
   // Each sale opens on its detail; keyed on the id, so a live sync-status update keeps the receipt up.
@@ -99,7 +99,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   const canResume = gate && !!resume;
   // A refund sent without a final answer opens again on its own envelope when its sale does; never over the open form,
   // whose own send is pending until it answers.
-  useEffect(() => { if (canResume) setRefunding((open) => open === 'none' ? 'resume' : open); }, [order?.id, resume?.id, canResume]);
+  useEffect(() => { if (canResume && resume) setRefunding((open) => open === 'none' ? resume : open); }, [order?.id, resume?.id, canResume]);
   const refundedParts = [...(storeOrder?.refunds.map((refund) => refund.amountMinor) ?? []),
     ...unlanded.map(refundAmount)];
   const refundedMinor = refundedParts.length ? refundedParts.reduce((total, amount) => total + amount, 0) : null;
@@ -167,9 +167,9 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
     {/* Over the sheet as user-sheet's SwitchConfirm: a sibling, since a dialog inside DialogContent never shows on web. */}
     {refunding === 'modal' && order && storeOrder && refunds && input?.offered ? <OrderRefundModal order={storeOrder}
       tenders={order.payments} refunds={refunds} input={input} onClose={() => setRefunding('none')}
-      onUnanswered={(message) => { setHandoff(message); setRefunding('resume'); }} /> : null}
-    {refunding === 'resume' && order && storeOrder && refunds && resume ? <OrderRefundDialog key={resume.id} order={storeOrder}
-      tenders={order.payments} refunds={refunds} resume={resume} notice={handoff || undefined}
+      onUnanswered={(message, record) => { setHandoff(message); setRefunding(record); }} /> : null}
+    {typeof refunding === 'object' && order && storeOrder && refunds ? <OrderRefundDialog key={refunding.id} order={storeOrder}
+      tenders={order.payments} refunds={refunds} resume={refunding} notice={handoff || undefined}
       onClose={() => { setRefunding('none'); setHandoff(''); }} /> : null}
   </>;
 }

@@ -3,11 +3,10 @@ import { View } from 'react-native';
 import { Button, Dialog, DialogContent, DialogFooter, DialogTitle, Label, Notice, RefundNeedsAdminNotice, Switch, Text, Textarea } from '@tallyui/components';
 import { formatMoney, type OrderRefundEnvelope, type StoreOrder } from '@tallyui/core';
 import {
-  getDeviceId, mintUuid, RefundAnswerPendingError, submitOrderRefund, type OrderRefundOutcome, type PosOrder, type PosRefund, type PosRefundCollection,
+  RefundAnswerPendingError, submitOrderRefund, type OrderRefundOutcome, type PosOrder, type PosRefund, type PosRefundCollection,
 } from '@tallyui/pos';
 import { fullRefundOffer, REFUND_REASON_MAX } from '../lib/refund';
 import { useRegister } from '../lib/register-context';
-import { defaultStorage, REGISTER_ID_KEY } from '../lib/session';
 import { useNetworkOnline } from '../lib/use-network-online';
 
 export const REFUND_IN_PROGRESS = 'This refund is still in progress. Try again in a moment.';
@@ -46,9 +45,7 @@ export function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'app
 }
 
 /**
- * Refund all (ADR 0026): one order.refund v1 for the whole order, nothing editable but Restock and the reason. Mounted
- * once per opening, so its refund id is minted once. After no answer, a refusal or an unauthorized answer, Confirm resends
- * the same envelope; after a rejection, it sends a new command for the same refund.
+ * Resume an unanswered refund (ADR 0026) on its original envelope. A rejection ends this attempt.
  */
 export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, notice }: {
   order: StoreOrder; tenders: PosOrder['payments']; refunds: PosRefundCollection; resume: PosRefund | null; onClose: () => void;
@@ -67,7 +64,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, no
     const storedReason = resume.error.data?.reason;
     return { reason: typeof storedReason === 'string' ? storedReason : 'admin_check', message: resume.error.message };
   });
-  const clientRefundId = useRef(resumed?.clientRefundId ?? mintUuid());
+  const [rejected, setRejected] = useState(false);
   const envelope = useRef<OrderRefundEnvelope | null>(resume?.envelope ?? null);
   const inFlight = useRef(false);
   const offer = fullRefundOffer(order, tenders, restock);
@@ -83,12 +80,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, no
   async function confirm() {
     if (inFlight.current || !online || !sessionId || !boundRegisterId) return;
     if (!envelope.current) {
-      if (!offer.offered || !reason.trim() || reason.trim().length > REFUND_REASON_MAX) return;
-      const createdAt = new Date().toISOString();
-      envelope.current = { id: mintUuid(), type: 'order.refund', version: 1, createdAt, deviceId: getDeviceId(defaultStorage(), REGISTER_ID_KEY), attempt: 1,
-        payload: { clientRefundId: clientRefundId.current, orderId: order.id, clientOrderId: order.clientOrderId, lines: offer.lines,
-          shippingMinor: offer.shippingMinor, adjustmentMinor: 0, totalMinor: offer.totalMinor, destination: offer.destination, reason: reason.trim(),
-          registerId: boundRegisterId, sessionId, createdAt } };
+      return;
     }
     inFlight.current = true;
     setPending(true);
@@ -97,9 +89,8 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, no
       const { outcome } = await submitOrderRefund({ refunds, transport: commandTransport(), envelope: envelope.current });
       if (outcome.kind === 'applied') return onClose();
       if (outcome.kind === 'needs_admin') return setNeedsAdmin({ reason: outcome.reason, message: outcome.message });
-      // A refusal is final for its command; the next Confirm sends a new one for the same refund.
       if (outcome.kind === 'rejected') {
-        envelope.current = null;
+        setRejected(true);
         setNeedsAdmin(null);
       }
       setMessage(outcomeMessage(outcome));
@@ -143,7 +134,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, no
       {message ? <Notice tone="bad" title={message} testID="order-refund-error" /> : null}
       <DialogFooter>
         <Button variant="outline" testID="order-refund-cancel" disabled={pending} onPress={onClose}><Text>Cancel</Text></Button>
-        {!needsAdmin && <Button variant="destructive" testID="order-refund-confirm" disabled={pending || !!hold} onPress={() => { void confirm(); }}>
+        {!needsAdmin && !rejected && <Button variant="destructive" testID="order-refund-confirm" disabled={pending || !!hold} onPress={() => { void confirm(); }}>
           <Text>Confirm</Text>
         </Button>}
       </DialogFooter>
