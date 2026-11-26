@@ -25,7 +25,7 @@ export function ReportSheet({ panel, covers, onClose, onExport, onPrint, printin
         </DialogClose>
       </View>
       <ScrollView className="flex-1" contentContainerClassName="px-4">
-        {panel.rows.length === 0 ? <Text testID="report-sheet-empty" className="text-muted-foreground">None in this period</Text>
+        {panel.rows.length === 0 ? <Text testID="report-sheet-empty" className="text-muted-foreground">{panel.empty ?? 'None in this period'}</Text>
           : <Table>
             <TableHeader><TableRow>
               {panel.columns.map((column, i) => <TableHead key={column.label} className={cellClass(i)}>

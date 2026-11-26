@@ -1,12 +1,18 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SalesFilters } from '@tallyui/components';
-import { createOrderBuilder, exportCsv, finalizeOrder, selectClosureRows, type Closure, type PosOrder } from '@tallyui/pos';
-import { byCashier, closureCashierOptions, closureDayLabel, closureDays, closureHistoryWindow, closureDayTotal, closureScopeFor, closuresCsvFilename, closureTableRow, closureVarianceMinor, csvLabel, downloadCsv, historyClosure, historyTableRow, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures, showsTodayClosures, varianceLabel } from './reports';
+import type { StoreOrder } from '@tallyui/core';
+import { createOrderBuilder, exportCsv, finalizeOrder, salesFigures, selectClosureRows, type Closure, type PosOrder } from '@tallyui/pos';
+import { byCashier, closureCashierOptions, closureDayLabel, closureDays, closureHistoryWindow, closureDayTotal, closureScopeFor, closuresCsvFilename, closureTableRow, closureVarianceMinor, csvLabel, downloadCsv, historyClosure, historyTableRow, localDay, localDayStartIso, paymentMethodLabel, salesRoomFigures, showsTodayClosures, storeRefundsByLocalOrder, storeRefundsReadable, varianceLabel } from './reports';
 import { closureContext } from '../components/register-close';
 import type { ClosureHistoryEntry } from './closure-history';
 
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
+// The real salesFigures, watched so a test can read what Reports hands it.
+vi.mock('@tallyui/pos', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tallyui/pos')>();
+  return { ...actual, salesFigures: vi.fn(actual.salesFigures) };
+});
 
 const today = '2026-11-10';
 const storeKey = 'https://store.test';
@@ -357,5 +363,106 @@ describe('closure filters', () => {
     expect(closureCashierOptions(['user-2', 'user-1', 'user-2', 'user-9'], { 'user-1': 'Zoe', 'user-2': 'Ana' })).toEqual([
       { value: 'user-2', label: 'Ana' }, { value: 'user-9', label: 'user-9' }, { value: 'user-1', label: 'Zoe' },
     ]);
+  });
+});
+
+describe('salesRoomFigures with the store\'s refunds', () => {
+  const filters: SalesFilters = { preset: 'today', range: { from: today, to: today }, compare: 'previous',
+    status: 'all', cashierId: null, registerId: null };
+  function storeOrder(overrides: Partial<StoreOrder> = {}): StoreOrder {
+    return { id: 'store-1', reference: '1001', status: 'completed', placedAt: new Date(2026, 10, 10, 12, 0).toISOString(),
+      currency: 'EUR', pricesIncludeTax: false, customer: null, lines: [], fees: [], shipping: [], coupons: [], taxLines: [],
+      discountMinor: 0, discountTaxMinor: 0, taxMinor: 0, totalMinor: 1200, payments: [], refunds: [], ...overrides };
+  }
+  const lastInput = () => vi.mocked(salesFigures).mock.calls.at(-1)![0];
+
+  it('counts a store refund on the till\'s sale', () => {
+    const sales = [order({ id: 'sale-1' }), order({ id: 'sale-2', totalMinor: 800 })];
+    const refunds = storeRefundsByLocalOrder(sales, [storeOrder({ clientOrderId: 'sale-1', refunds: [{ id: 'r1', amountMinor: 500 }] })]);
+    const { figures } = salesRoomFigures(sales, filters, 'EUR', refunds);
+    expect(figures.refunds).toEqual({ count: 1, amountMinor: 500, orders: 1 });
+    expect(figures.totals).toMatchObject({ grossMinor: 2000, refundBasis: 'dated', grossAfterRefundsMinor: 1500 });
+    expect(lastInput().refunds).toEqual([{ id: 'r1', orderId: 'sale-1', at: sales[0].createdAt, amountMinor: 500 }]);
+    expect(lastInput().orders.every((o) => o.refunds.length === 0)).toBe(true);
+  });
+  it('two refunds on one sale count twice, on one order', () => {
+    const sales = [order({ id: 'sale-1' }), order({ id: 'sale-2', totalMinor: 800 })];
+    const refunds = storeRefundsByLocalOrder(sales, [storeOrder({ clientOrderId: 'sale-1',
+      refunds: [{ id: 'r1', amountMinor: 300 }, { id: 'r2', amountMinor: -200 }] })]);
+    expect(refunds.get('sale-1')).toEqual([{ id: 'r1', amountMinor: 300 }, { id: 'r2', amountMinor: 200 }]);
+    const { figures } = salesRoomFigures(sales, filters, 'EUR', refunds);
+    expect(figures.refunds).toEqual({ count: 2, amountMinor: 500, orders: 1 });
+    expect(figures.totals.orderCount).toBe(2);
+  });
+  it('a refund counts on its sale\'s day, not in a later period', () => {
+    const yesterday = order({ id: 'yesterday', createdAt: new Date(2026, 10, 9, 12, 0).toISOString() });
+    const refunds = storeRefundsByLocalOrder([yesterday], [storeOrder({ clientOrderId: 'yesterday', refunds: [{ id: 'r1', amountMinor: 400 }] })]);
+    const { figures } = salesRoomFigures([yesterday], filters, 'EUR', refunds);
+    expect(figures.refunds).toEqual({ count: 0, amountMinor: 0, orders: 0 });
+    expect(figures.comparison?.totals).toMatchObject({ grossMinor: 1200, grossAfterRefundsMinor: 800 });
+  });
+  it('ignores refunds on store orders the till did not make', () => {
+    const sales = [order({ id: 'sale-1', storeOrderId: 'store-mine' })];
+    const refunds = storeRefundsByLocalOrder(sales, [
+      storeOrder({ id: 'store-other', clientOrderId: 'other-till', refunds: [{ id: 'r1', amountMinor: 500 }] }),
+      storeOrder({ id: 'store-admin', refunds: [{ id: 'r2', amountMinor: 700 }] }),
+      storeOrder({ id: 'store-mine', refunds: [] }),
+    ]);
+    expect(refunds.size).toBe(0);
+    expect(salesRoomFigures(sales, filters, 'EUR', refunds).figures.refunds).toEqual({ count: 0, amountMinor: 0, orders: 0 });
+  });
+  it('matches a store order by clientOrderId or by the sale\'s storeOrderId', () => {
+    const sales = [order({ id: 'by-client' }), order({ id: 'by-store-id', storeOrderId: 'store-2' })];
+    const refunds = storeRefundsByLocalOrder(sales, [
+      storeOrder({ id: 'store-1', clientOrderId: 'by-client', refunds: [{ id: 'r1', amountMinor: 100 }] }),
+      storeOrder({ id: 'store-2', refunds: [{ id: 'r2', amountMinor: 200 }] }),
+    ]);
+    expect([...refunds.entries()]).toEqual([
+      ['by-client', [{ id: 'r1', amountMinor: 100 }]], ['by-store-id', [{ id: 'r2', amountMinor: 200 }]],
+    ]);
+    expect(salesRoomFigures(sales, filters, 'EUR', refunds).figures.refunds).toEqual({ count: 2, amountMinor: 300, orders: 2 });
+  });
+  it('a refund is filtered out with its sale', () => {
+    const sales = [
+      order({ id: 'kept', registerId: 'register-1', cashierRef: 'ana@store.test' }),
+      order({ id: 'other-register', registerId: 'register-2', cashierRef: 'ana@store.test' }),
+      order({ id: 'other-cashier', registerId: 'register-1', cashierRef: 'ben@store.test' }),
+      order({ id: 'pending', registerId: 'register-1', cashierRef: 'ana@store.test', syncStatus: 'pending' }),
+      order({ id: 'usd', registerId: 'register-1', cashierRef: 'ana@store.test', currency: 'USD' }),
+    ];
+    const refunds = storeRefundsByLocalOrder(sales, sales.map((sale) =>
+      storeOrder({ id: `store-${sale.id}`, clientOrderId: sale.id, refunds: [{ id: `r-${sale.id}`, amountMinor: 100 }] })));
+    expect(refunds.size).toBe(5);
+    const { figures } = salesRoomFigures(sales, { ...filters, registerId: 'register-1', cashierId: 'ana@store.test', status: 'applied' }, 'EUR', refunds);
+    expect(figures.refunds).toEqual({ count: 1, amountMinor: 100, orders: 1 });
+    expect(lastInput().refunds?.map((refund) => refund.orderId)).toEqual(['kept']);
+  });
+  it('without store refunds the figures are unchanged', () => {
+    const sales = [order({ id: 'sale-1' }), order({ id: 'yesterday', createdAt: new Date(2026, 10, 9, 12, 0).toISOString() })];
+    const { figures } = salesRoomFigures(sales, filters, 'EUR');
+    const input = lastInput();
+    expect(Object.keys(input).sort()).toEqual(['compare', 'orders', 'range', 'timezone']);
+    expect(figures.totals.refundBasis).toBe('embedded');
+    expect(JSON.stringify(figures)).toBe(JSON.stringify(salesFigures({ orders: input.orders, range: filters.range,
+      compare: input.compare, timezone: 'device' })));
+  });
+  it('store refunds leave gross, net and tax unchanged', () => {
+    const sales = [order({ id: 'sale-1' }), order({ id: 'sale-2', totalMinor: 800 })];
+    const without = salesRoomFigures(sales, filters, 'EUR').figures;
+    const refunds = storeRefundsByLocalOrder(sales, [storeOrder({ clientOrderId: 'sale-2', refunds: [{ id: 'r1', amountMinor: 800 }] })]);
+    const withRefunds = salesRoomFigures(sales, filters, 'EUR', refunds).figures;
+    for (const key of ['grossMinor', 'netMinor', 'taxMinor', 'orderCount'] as const) expect(withRefunds.totals[key]).toBe(without.totals[key]);
+    expect(withRefunds.payments).toEqual(without.payments);
+    expect(withRefunds.taxes).toEqual(without.taxes);
+  });
+});
+
+describe('storeRefundsReadable', () => {
+  it('needs order.refund and the refund plugin contract', () => {
+    expect(storeRefundsReadable(undefined)).toBe(false);
+    expect(storeRefundsReadable({ orderCreate: 1, orderRefund: 1 })).toBe(false);
+    expect(storeRefundsReadable({ orderCreate: 1, orderRefund: 1, pluginContract: 4 })).toBe(false);
+    expect(storeRefundsReadable({ orderCreate: 1, pluginContract: 5 })).toBe(false);
+    expect(storeRefundsReadable({ orderCreate: 1, orderRefund: 1, pluginContract: 5 })).toBe(true);
   });
 });

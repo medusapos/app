@@ -11,12 +11,17 @@ export type ReportPanel = {
   more: number;
   status: string;
   filename: string;
+  /** What the sheet says when the panel has no rows; the sheet's own "None in this period" when absent. */
+  empty?: string;
 };
 
 // v2's Orders panel lists the 60 most recent orders of the period.
 const ORDERS_LISTED = 60;
 // A figure the till does not know reads as a dash, never 0 (as TallyUI's cards show it).
 const UNKNOWN = '—';
+// What an empty Refunds panel says while the store's refunds are unread, so it never reads as "none in this period".
+export const REFUNDS_PANEL_FAILED = "Refunds couldn't be read from the store.";
+export const REFUNDS_PANEL_READING = 'Refunds are still being read from the store.';
 
 const left = (label: string): ReportColumn => ({ label, align: 'left' });
 const right = (label: string): ReportColumn => ({ label, align: 'right' });
@@ -24,6 +29,8 @@ const right = (label: string): ReportColumn => ({ label, align: 'right' });
 export function reportPanel(card: SalesCardId, input: {
   figures: SalesFigures; orders: readonly PosOrder[];
   ctx: Pick<ClosureContext, 'formatMoney' | 'exponent' | 'locale'>; today: string;
+  /** The store's refunds failed or are still being read, so an empty Refunds panel must not claim there were none. */
+  refundsState?: 'failed' | 'reading';
 }): ReportPanel {
   const { figures, orders, ctx, today } = input;
   const { totals, range } = figures;
@@ -74,14 +81,19 @@ export function reportPanel(card: SalesCardId, input: {
       return panel('Taxes collected', 'taxes', [left('Rate'), right('Net'), right('Tax'), right('Gross')],
         figures.taxes.map((row) => [row.label || 'Tax', row.netMinor === null ? UNKNOWN : money(row.netMinor),
           money(row.taxMinor), row.netMinor === null ? UNKNOWN : money(row.netMinor + row.taxMinor)]));
-    case 'refunds':
-      return panel('Refunds', 'refunds', [left('Refunds'), right('Orders'), right('Amount')],
+    case 'refunds': {
+      const refunds = panel('Refunds', 'refunds', [left('Refunds'), right('Orders'), right('Amount')],
         figures.refunds.count > 0 ? [['Refunds', String(figures.refunds.count), money(figures.refunds.amountMinor)]] : []);
+      if (refunds.rows.length > 0 || !input.refundsState) return refunds;
+      return { ...refunds, empty: input.refundsState === 'failed' ? REFUNDS_PANEL_FAILED : REFUNDS_PANEL_READING };
+    }
   }
 }
 
 export function reportPanelCsv(panel: ReportPanel): string {
-  return csvFromCells([panel.columns.map((column) => column.label), ...panel.rows]);
+  // An empty panel with a note carries the note, so the file never reads as "none in this period".
+  const rows = panel.rows.length === 0 && panel.empty ? [[panel.empty]] : panel.rows;
+  return csvFromCells([panel.columns.map((column) => column.label), ...rows]);
 }
 
 // Black on white, readable on 80 mm paper and as a centred column on A4 (as the till's other printed reports).
@@ -109,6 +121,8 @@ export function reportPanelHtml(panel: ReportPanel, input: {
   const { ctx, covers } = input;
   const { store } = ctx;
   const align = (index: number) => panel.columns[index]?.align === 'right' ? ' class="right"' : '';
+  // An empty panel with a note prints the note in place of the empty table body.
+  const note = panel.rows.length === 0 ? panel.empty : undefined;
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(panel.title)}</title><style>${STYLE}</style></head>
 <body><main class="report-panel">
@@ -117,8 +131,9 @@ export function reportPanelHtml(panel: ReportPanel, input: {
   <p class="covers">${escapeHtml(covers)}</p>
   <table class="report">
     <thead><tr>${panel.columns.map((column, i) => `<th scope="col"${align(i)}>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
-    <tbody>${panel.rows.map((row) => `<tr>${row.map((cell, i) => `<td${align(i)}>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
-  </table>
+    ${note ? '' : `<tbody>${panel.rows.map((row) => `<tr>${row.map((cell, i) => `<td${align(i)}>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>`}
+  </table>${note ? `
+  <p class="warning">${escapeHtml(note)}</p>` : ''}
   <p class="status">${escapeHtml(panel.status)}</p>
   <footer><p>Printed ${escapeHtml(formatClosureDate(ctx.printedAt, ctx).datetime)}</p></footer>
 </main></body></html>`;

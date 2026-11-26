@@ -95,11 +95,13 @@ export type SalesSummaryInput = {
   figures: SalesFigures;
   context: Pick<ClosureContext, 'store' | 'formatMoney' | 'exponent' | 'timezone' | 'locale' | 'printedAt'>;
   period: string; scope: string; notSentCount: number;
+  /** Printed as a warning when the store's refunds were not read in full, so the Refunded figure may be short. */
+  refundsNote?: string;
 };
 
 /** v2's Reports "Print summary": the period's figures exactly as the Sales room has them, grouped as v2 prints them. */
 export function salesSummaryHtml(input: SalesSummaryInput): string {
-  const { figures: { totals, payments, taxes, refunds }, context, period, scope, notSentCount } = input;
+  const { figures: { totals, payments, taxes, refunds }, context, period, scope, notSentCount, refundsNote } = input;
   const { store } = context;
   const money = (minor: number) => context.formatMoney(minorToDecimal(minor, context.exponent));
   // Every row has the same three cells: label, count, amount.
@@ -122,7 +124,8 @@ export function salesSummaryHtml(input: SalesSummaryInput): string {
     row('Tax collected', '', money(taxes.reduce((total, tax) => total + tax.taxMinor, 0)))) : ''}
   ${group('Orders', `${row('Items sold', totals.items, '')}${row('Average order', '', money(totals.averageMinor))}`)}
   <table class="total"><tbody>${row('Total sales', totals.orderCount, money(totals.grossMinor))}</tbody></table>
-  ${notSentCount > 0 ? `<p class="warning">${escapeHtml(`${notSentCount} ${notSentCount === 1 ? 'sale' : 'sales'} not sent yet`)}</p>` : ''}
+  ${notSentCount > 0 ? `<p class="warning">${escapeHtml(`${notSentCount} ${notSentCount === 1 ? 'sale' : 'sales'} not sent yet`)}</p>` : ''}${refundsNote ? `
+  <p class="warning">${escapeHtml(refundsNote)}</p>` : ''}
   <footer><p>Printed ${escapeHtml(formatClosureDate(context.printedAt, context).datetime)}</p></footer>
 </main></body></html>`;
 }
