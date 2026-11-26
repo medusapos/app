@@ -318,8 +318,8 @@ describe('Reopen a store order (row 10.3)', () => {
     await settle();
     expect(screen.queryByTestId('store-order-detail-sheet')).toBeNull();
     expect(vi.mocked(router.dismissTo)).toHaveBeenCalledWith('/');
-    expect(takeReopen()).toEqual(placed);
-    expect(takeReopen()).toBeNull();
+    expect(takeReopen(sessionState.session!.baseUrl)).toEqual(placed);
+    expect(takeReopen(sessionState.session!.baseUrl)).toBeNull();
   });
 });
 

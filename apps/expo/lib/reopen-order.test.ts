@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { StoreOrder, StoreOrderLine } from '@tallyui/core';
-import { buildReopenCart } from './reopen-order';
+import { buildReopenCart, requestReopen, takeReopen } from './reopen-order';
 
 const line = (name: string, quantity: number, variantId?: string): StoreOrderLine =>
   ({ id: `line_${name}`, name, quantity, variantId, subtotalMinor: 0, subtotalTaxMinor: 0, totalMinor: 0, taxMinor: 0 });
@@ -12,6 +12,16 @@ const order = (lines: StoreOrderLine[], customer: StoreOrder['customer'] = null)
 // The catalogue's entries by variant id; the reopen takes them as they are, prices and all.
 const catalogue = new Map([['blue', { variant: { id: 'blue' } }], ['red', { variant: { id: 'red' } }]]);
 const lookup = (variantId: string) => catalogue.get(variantId);
+
+it('drops a reopen taken by another store and returns a matching request only once', () => {
+  const placed = order([line('Red hat', 1, 'red')]);
+  requestReopen(placed, 'https://a.test');
+  expect(takeReopen('https://b.test')).toBeNull();
+  expect(takeReopen('https://a.test')).toBeNull();
+  requestReopen(placed, 'https://a.test');
+  expect(takeReopen('https://a.test')).toBe(placed);
+  expect(takeReopen('https://a.test')).toBeNull();
+});
 
 describe('buildReopenCart', () => {
   it("builds the order's lines with their quantities and its customer, from the catalogue", () => {

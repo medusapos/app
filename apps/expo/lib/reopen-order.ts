@@ -27,18 +27,19 @@ export function buildReopenCart<Entry>(order: StoreOrder, lookup: (variantId: st
 
 // The hand-off from Orders to the Sale screen, which stays mounted under Orders: one pending order, taken once.
 let pending: StoreOrder | null = null;
+let pendingStoreUrl: string;
 const listeners = new Set<() => void>();
 const notify = () => { for (const listener of listeners) listener(); };
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 
 /** Asks the Sale screen to reopen `order`; a later request replaces one not yet taken. */
-export function requestReopen(order: StoreOrder): void { pending = order; notify(); }
+export function requestReopen(order: StoreOrder, storeUrl: string): void { pending = order; pendingStoreUrl = storeUrl; notify(); }
 
 /** The pending request, cleared: a second call returns null, so a request is applied once. */
-export function takeReopen(): StoreOrder | null {
+export function takeReopen(storeUrl: string): StoreOrder | null {
   const order = pending;
   if (order) { pending = null; notify(); }
-  return order;
+  return storeUrl === pendingStoreUrl ? order : null;
 }
 
 /** The pending request, re-rendering when one arrives or is taken. */

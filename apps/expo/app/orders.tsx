@@ -111,7 +111,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
       billing={openStore ? orderBillingCell({ kind: 'store', key: openStore.id, order: openStore }, store.billing) : undefined}
       onReopen={(order) => {
         // The Sale screen takes the request and starts the new sale; Orders goes back to it as the rail does.
-        requestReopen(order); setOpenStoreId(null);
+        requestReopen(order, session.baseUrl); setOpenStoreId(null);
         const step = frameStep('orders', 'sale'); if (step) router[step.method](step.href as Href);
       }} />
   </View>;
