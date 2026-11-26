@@ -1,4 +1,4 @@
-import { orderFilters, orderPage, parseOrdersQuery, toStoreOrder, type OrderRow } from '../list'
+import { orderFilters, orderPage, parseOrdersQuery, refundLinesById, toStoreOrder, type OrderRow } from '../list'
 
 const raw = (value: string | number) => ({ value })
 const vat19 = { rate: 19, code: 'VAT19', description: 'VAT' }
@@ -6,6 +6,19 @@ const vat19 = { rate: 19, code: 'VAT19', description: 'VAT' }
 const grossCents = (row: { raw_total: { value: string | number } }) => Math.round(Number(row.raw_total.value) * 100)
 
 describe('parseOrdersQuery', () => {
+  it('parses ids as 1 to 100 comma-separated order ids', () => {
+    for (const ids of [['order_a', 'order_b'], ['b', ' a', 'b'], Array.from({ length: 100 }, (_, index) => `order_${index}`)]) {
+      expect(parseOrdersQuery({ ids: ids.join(',') })).toMatchObject({ ok: true, query: { ids } })
+    }
+  })
+
+  it('refuses an empty id, an empty list, 101 ids or a repeated ids', () => {
+    for (const ids of ['', 'a,,b', 'a,', Array(101).fill('order').join(',')]) {
+      expect(parseOrdersQuery({ ids })).toEqual({ ok: false, error: { code: 'invalid_query', message: 'ids must be 1 to 100 comma-separated order ids' } })
+    }
+    expect(parseOrdersQuery({ ids: ['a', 'b'] })).toEqual({ ok: false, error: { code: 'invalid_query', message: 'expected one string value for: ids' } })
+  })
+
   it('defaults to page 1 of 25 with allChannels false', () => {
     expect(parseOrdersQuery({})).toEqual({ ok: true, query: { page: 1, perPage: 25, allChannels: false } })
   })
@@ -60,6 +73,13 @@ describe('orderFilters', () => {
 
   it('scopes to the channel and leaves drafts out', () => {
     expect(orderFilters(query({}), { salesChannelId: 'sc_1' })).toEqual({ sales_channel_id: 'sc_1', is_draft_order: false })
+  })
+
+  it('filters by ids alongside the channel and other filters', () => {
+    const ids = ['order_b', 'order_a']
+    expect(orderFilters(query({ ids, status: 'pending', search: '42' }), { salesChannelId: 'sc_1' })).toEqual({
+      id: ids, sales_channel_id: 'sc_1', is_draft_order: false, status: 'pending', display_id: 42,
+    })
   })
 
   it('lists all channels while leaving drafts out and keeping the register filter', () => {
@@ -134,7 +154,38 @@ function expectGrossRoundedOnce(order: OrderRow, mapped: ReturnType<typeof toSto
   mapped.shipping.forEach((method, i) => expect(method.totalMinor + method.taxMinor).toBe(grossCents(order.shipping_methods![i]!)))
 }
 
+describe('refundLinesById', () => {
+  it('L1: maps stored lines without restock and leaves out a zero quantity', () => {
+    const line = { orderLineId: 'item_a', quantity: 1, netMinor: 99, taxMinor: 19 }
+    const zero = { ...line, quantity: 0 }
+    expect(refundLinesById([
+      { medusa_refund_id: 'paid', lines: [{ ...line, restock: true }, zero, { ...line, quantity: 1.5 }] },
+      { medusa_refund_id: 'invalid', lines: {} }, { medusa_refund_id: 'empty', lines: [zero] },
+    ])).toEqual(new Map([['paid', [line]]]))
+  })
+})
+
 describe('toStoreOrder', () => {
+  const refunded = { ...tillOrder, payment_collections: [{ payments: [{ id: 'payment', provider_id: 'cash', raw_amount: raw(10),
+    refunds: ['first', 'second', 'admin'].map(id => ({ id, raw_amount: raw(1), note: id })) }] }] }
+  const firstLine = { orderLineId: 'item_a', quantity: 2, netMinor: 90, taxMinor: 10 }
+  const secondLine = { orderLineId: 'item_b', quantity: 1, netMinor: 95, taxMinor: 5 }
+  const bare = ['first', 'second', 'admin'].map(id => ({ id, amountMinor: 100, reason: id }))
+
+  it("R1: puts each till refund's lines on its refund and none on an Admin refund", () => {
+    const lines = new Map([['second', [secondLine]], ['first', [firstLine]]])
+    expect(toStoreOrder(refunded, lines).refunds).toStrictEqual([
+      { ...bare[0], lines: [firstLine] }, { ...bare[1], lines: [secondLine] }, bare[2],
+    ])
+  })
+
+  it('R2: carries no lines on any refund when together they name more of a line than was ordered', () => {
+    for (const orderLineId of ['item_a', 'unknown', 'item_fee']) {
+      const lines = new Map([['first', [firstLine]], ['second', [{ ...secondLine, orderLineId }]]])
+      expect(toStoreOrder(refunded, lines).refunds).toStrictEqual(bare)
+    }
+  })
+
   it('maps a tax-exclusive till order', () => {
     const mapped = toStoreOrder(tillOrder)
     expect(mapped).toEqual({

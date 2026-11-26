@@ -415,6 +415,57 @@ medusaIntegrationTestRunner({
       expect(await returns(till.orderId)).toHaveLength(2)
     })
 
+    it("I-1324-1: GET /tally/v1/orders returns each till refund's lines and none on an Admin refund", async () => {
+      const till = await remainderSale()
+      const [firstLine, ...others] = till.full.payload.lines
+      const part = (lines: unknown[], totalMinor: number) => command('order.refund', { ...till.full.payload, clientRefundId: randomUUID(), lines, totalMinor })
+      const first = part([firstLine], 118), second = part(others, 235)
+      await applied([first])
+      await applied([second])
+      const note = 'goodwill in Admin'
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note } })
+      const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
+      const admin = await knex('refund').where({ payment_id: till.paymentId, note }).whereNull('deleted_at').first('id')
+      const expected: Row[] = [{ id: admin.id, amountMinor: 1, reason: note }]
+      for (const refund of [first, second]) {
+        const row = await knex('tally_refund').where({ command_id: refund.id }).first('medusa_refund_id', 'lines')
+        const lines = row.lines.map(({ orderLineId, quantity, netMinor, taxMinor }) => ({ orderLineId, quantity, netMinor, taxMinor }))
+        expect(lines.map(({ orderLineId, quantity }) => ({ orderLineId, quantity }))).toEqual(
+          (refund === first ? [firstLine] : others).map(({ orderLineId, quantity }) => ({ orderLineId, quantity })))
+        expected.push({ id: row.medusa_refund_id, amountMinor: refund.payload.totalMinor, reason: 'Wrong size', lines })
+      }
+      const list = (query: string) => api.get(`/tally/v1/orders?${query}&allChannels=true`, { headers, validateStatus: () => true })
+      const response = await list(`page=1&perPage=1&ids=${till.orderId}`)
+      expect(response.status).toBe(200)
+      expect(response.data.orders).toHaveLength(1)
+      const [order] = response.data.orders
+      expect(order.id).toBe(till.orderId)
+      const byAmount = (left: Row, right: Row) => left.amountMinor - right.amountMinor
+      expect(order.refunds.sort(byAmount)).toEqual(expected)
+      const unfiltered = await list(`search=${order.reference}`)
+      expect(unfiltered.status).toBe(200)
+      expect(unfiltered.data.orders.map(order => order.id)).toEqual([till.orderId])
+      expect(unfiltered.data.orders[0].refunds.sort(byAmount)).toEqual(expected)
+    })
+
+    it('I-1324-2: ids lists only the named orders and refuses a bad list', async () => {
+      const first = await remainderSale(), second = await remainderSale()
+      const list = (ids: string) => api.get(`/tally/v1/orders?ids=${ids}&allChannels=true`, { headers, validateStatus: () => true })
+      const one = await list(first.orderId)
+      expect(one.status).toBe(200)
+      expect(one.data.total).toBe(1)
+      expect(one.data.orders.map(order => order.id)).toEqual([first.orderId])
+      const both = await list(`${first.orderId},${second.orderId}`)
+      expect(both.status).toBe(200)
+      expect(both.data.orders.map(order => order.id).sort()).toEqual([first.orderId, second.orderId].sort())
+      for (const ids of ['', Array(101).fill(first.orderId).join(',')]) {
+        const bad = await list(ids)
+        expect(bad.status).toBe(400)
+        expect(bad.data).toEqual({ code: 'invalid_query', message: 'ids must be 1 to 100 comma-separated order ids' })
+      }
+    })
+
     it('I-565-3: till-only history: line a, then the rest at the remainder; one restock per line', async () => {
       const till = await remainderSale()
       const stock = [await stockOf(data.inventoryA), await stockOf(data.inventoryC)]
