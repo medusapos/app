@@ -17,6 +17,8 @@ import { setWindowWidth } from './window-width';
 import { cartLineCells } from './tender-pane';
 import type { StoreOrder } from '@tallyui/core';
 import { requestReopen } from '../lib/reopen-order';
+import { saveDefaultCustomer } from '../lib/default-customer';
+import { defaultStorage } from '../lib/session';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
 vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, Stack: { Screen: () => null } }));
@@ -358,4 +360,44 @@ it('a line the cart refuses stops the reopen and says the tab is partial', async
   expect(cart.queryByText('Hat')).toBeNull();
   const current = saleTabs().getByRole('tab', { selected: true });
   expect(within(current).getByTestId(/-who$/).textContent).toBe('Ada Lovelace');
+});
+
+it('two lines of one variant reopen as one line with their summed quantity', async () => {
+  await mount(); add();
+  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2], ['Shirt', 'blue', 3]])); });
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
+  expect(cartLineCells('Shirt')).toEqual(['5', 'Shirt', '€12.00', '€60.00']);
+});
+
+it('a refused reopen on a phone opens the cart to show why', async () => {
+  setWindowWidth(390);
+  await mount();
+  expect(screen.queryByTestId('cart-header')).toBeNull();
+  await act(async () => { requestReopen(storeOrder([['Old scarf', 'gone', 1]])); });
+  expect(screen.getByTestId('open-sale-refusal').textContent).toBe('Can\'t reopen: "Old scarf" is no longer for sale.');
+});
+
+it('a reopen waits for the catalogue pull before taking the request', async () => {
+  const replicated = (useReplicatedProducts as unknown as () => ReturnType<typeof useReplicatedProducts>)();
+  vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, state: 'syncing' });
+  const view = await mount(); add();
+  await act(async () => { requestReopen(storeOrder([['Hat', 'red', 1]])); });
+  expect(screen.queryByTestId('open-sale-refusal')).toBeNull();
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
+  vi.mocked(useReplicatedProducts).mockReturnValue(replicated);
+  withHat();
+  await act(async () => { view.rerender(<><ProductsScreen /><PortalHost /></>); });
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
+  expect(cartLineCells('Hat')).toEqual(['1', 'Hat', '€5.00', '€5.00']);
+  expect(screen.queryByTestId('open-sale-refusal')).toBeNull();
+});
+
+it("a guest order reopens as a guest, not the tab's default customer", async () => {
+  saveDefaultCustomer(defaultStorage(), useSession().session!.baseUrl, { id: 'grace', name: 'Grace Hopper' });
+  await mount(); add();
+  expect(within(saleTabs().getByRole('tab')).getByTestId(/-who$/).textContent).toBe('Grace Hopper');
+  await act(async () => { requestReopen({ ...storeOrder([['Shirt', 'blue', 1]]), customer: null }); });
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
+  const current = saleTabs().getByRole('tab', { selected: true });
+  expect(within(current).getByTestId(/-who$/).textContent).toBe('Guest · Shirt');
 });

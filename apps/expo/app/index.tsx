@@ -276,28 +276,30 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // at today's catalogue prices and its customer; a refusal shows where a tab switch's does and identifies a partial tab.
   const reopenRequest = useReopenRequest();
   useEffect(() => {
-    if (!reopenRequest || !entries.length) return;
+    if (!reopenRequest || !entries.length || pullState === 'syncing' || pullState === 'connecting') return;
     const order = takeReopen(); if (!order) return;
+    const refuse = (message: string) => { setSwitchRefusal(message); if (phone) setCartOpen(true); };
     const cart = buildReopenCart(order, (variantId) => entries.find(({ variant }) => variant.id === variantId));
-    if (typeof cart === 'string') { setSwitchRefusal(cart); return; }
-    if (counting) { setSwitchRefusal(REGISTER_CLOSING); return; }
+    if (typeof cart === 'string') { refuse(cart); return; }
+    if (counting) { refuse(REGISTER_CLOSING); return; }
     void sale.switchSale(null).then((refused) => {
-      setSwitchRefusal(refused); if (refused) return;
+      if (refused !== null) { refuse(refused); return; }
+      setSwitchRefusal(refused);
       // Two lines of one variant land on one cart line, so its quantity is their sum.
       const quantities = new Map<string, number>();
       for (const { entry, quantity } of cart.lines) {
         const added = add(entry);
         if (typeof added !== 'object') {
-          setSwitchRefusal(`Reopened only part of order #${order.reference}: ${typeof added === 'string' ? added : REGISTER_CLOSING}`);
+          refuse(`Reopened only part of order #${order.reference}: ${typeof added === 'string' ? added : REGISTER_CLOSING}`);
           break;
         }
         const total = (quantities.get(added.lineId) ?? 0) + quantity; quantities.set(added.lineId, total);
         if (total > 1) sale.setQuantity(added.lineId, total);
       }
-      if (cart.customer) sale.setCustomer(cart.customer);
+      sale.setCustomer(cart.customer);
       if (phone) setCartOpen(true);
     });
-  }, [reopenRequest, entries]); // On a request (or the catalogue it waits for), not on every sale change.
+  }, [reopenRequest, entries, pullState]); // On a request (or the catalogue and pull it waits for), not on every sale change.
   // The Products area reads this catalogue; it stays live while the area is pushed over the Sale.
   const catalogueState = catalogueStatus(products.length, state);
   const catalogueSyncing = pullState === 'syncing' || pullState === 'connecting';
