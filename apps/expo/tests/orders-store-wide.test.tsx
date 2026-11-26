@@ -12,6 +12,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { formatDate } from '../lib/format-date';
 import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEXT, ORDERS_NO_MATCH_TEXT, ORDERS_OFFLINE_TEXT }
   from '../app/orders';
+import { setWindowWidth } from './window-width';
 
 const { listOrders, sessionState, connector } = vi.hoisted(() => ({
   listOrders: vi.fn(),
@@ -92,6 +93,8 @@ const openButtons = () => within(screen.getByTestId('orders-table')).getAllByRol
   .map((button) => button.getAttribute('aria-label'));
 
 beforeEach(() => {
+  // These are the table's tests; below 600 px Orders draws phone rows (orders-screen.test.tsx).
+  setWindowWidth(1024, 768);
   vi.useFakeTimers();
   listOrders.mockReset().mockResolvedValue(page([]));
   billingFetch.mockReset().mockImplementation(async () => billingAnswer([]));
@@ -546,5 +549,21 @@ describe('Billing Address column and day headers (row 10.1)', () => {
     const head = within(table()).getByText('Billing Address', { exact: true }).closest('[role="columnheader"]');
     expect(head?.getAttribute('data-class')).toBe('flex-[2]');
     expect(screen.getByTestId('orders-row-order_1-billing').getAttribute('data-class')).toBe(head?.getAttribute('data-class'));
+  });
+});
+
+describe('orders on a phone (row 10.5)', () => {
+  it('on a phone a store order\'s detail shows its Billing Address', async () => {
+    setWindowWidth(390, 844);
+    listOrders.mockResolvedValue(page([storeOrder(2)]));
+    billingFetch.mockImplementation(async () => billingAnswer([address('order_2', 'Nørregade 1')]));
+    await mount();
+    await settle();
+    const row = screen.getByTestId('orders-row-order_2');
+    expect(screen.queryByTestId('orders-row-order_2-billing')).toBeNull();
+    fireEvent.click(within(row).getByRole('button', { name: 'Open order #1002' }));
+    await settle();
+    const sheet = within(screen.getByTestId('store-order-detail-sheet'));
+    expect(sheet.getByTestId('store-order-detail-billing').textContent).toBe('Billing addressNørregade 1, Copenhagen, DK');
   });
 });

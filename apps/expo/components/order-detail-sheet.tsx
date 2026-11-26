@@ -9,6 +9,7 @@ import {
   canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
 } from '../lib/order-detail';
 import { formatReceiptDate } from '../lib/format-date';
+import { ordersTableCells } from '../lib/orders-table';
 import { REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
 import { fullRefundOffer } from '../lib/refund';
 import { defaultStorage } from '../lib/session';
@@ -33,12 +34,23 @@ export function injectReceiptPrintStyle() {
 }
 
 // One stored sale, read-only, in a right-hand sheet as WCPOS v2 opens an order.
-export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush, stuck, storeOrder, refunds }: {
+// A labelled muted line in a sheet's customer block; nothing for an empty value or the table's '—'.
+export function DetailLine({ testID, label, value }: { testID: string; label: string; value?: string }) {
+  if (!value || value === '—') return null;
+  return <View testID={testID}>
+    <Text className="text-xs font-semibold text-muted-foreground">{label}</Text>
+    <Text className="text-sm text-muted-foreground">{value}</Text>
+  </View>;
+}
+
+export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush, stuck, storeOrder, refunds, billing }: {
   order: PosOrder | null; onClose: () => void; formatDate: (iso: string) => string;
   onRetry: (orderIds: string[]) => Promise<number>; onFlush: () => Promise<void>;
   stuck?: UseOrderOutboxResult['state']['stuck'];
   /** The store's copy of this sale and this till's `pos_refunds`: Refund all (ADR 0026) needs both. */
   storeOrder?: StoreOrder | null; refunds?: PosRefundCollection;
+  /** The Billing Address the sale's table row shows ('—' when it has none). */
+  billing?: string;
 }) {
   const { session } = useSession();
   const [reprint, setReprint] = useState(false);
@@ -78,6 +90,8 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
         customerSlot={<View className="gap-1">
           <Text className="text-sm text-muted-foreground">{formatDate(order.createdAt)}</Text>
           <Text className="text-sm text-foreground">{order.customer?.name || order.customer?.email || 'Guest'}</Text>
+          <DetailLine testID="order-detail-billing" label="Billing address" value={billing} />
+          <DetailLine testID="order-detail-cashier" label="Cashier" value={ordersTableCells(order).cashier} />
           {order.note ? <Text testID="order-detail-note" className="text-sm text-muted-foreground">{`Customer note: ${order.note}`}</Text> : null}
           {/* The notices OrdersList showed under each sale. */}
           <View testID="order-detail-notices" className="gap-1"><OrderSyncNotices order={order} stuck={stuck} /></View>

@@ -128,6 +128,7 @@ describe('OrdersScreen', () => {
 });
 
 describe('order detail (row 10)', () => {
+  beforeEach(() => { setWindowWidth(1024, 768); });
   function sale(name: string, syncStatus: PosOrder['syncStatus'], extra: Partial<PosOrder> = {}): PosOrder {
     const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
     builder.addLine({ productId: name, variantId: name, name, unitPrice: { amount: 1200, currency: 'EUR' } });
@@ -214,6 +215,8 @@ describe('orders table (row 10.1)', () => {
   const openButton = (table: string, order: PosOrder) =>
     within(screen.getByTestId(`${table}-row-${order.id}`)).getByRole('button', { name: `Open order ${orderReference(order)}` });
   const refusal = "The online store refused this sale. Ask the store owner to look at the till's sync log.";
+  // These are the table's tests; below 600 px Orders draws phone rows (row 10.5, below).
+  beforeEach(() => { setWindowWidth(1024, 768); });
 
   it('a synced sale is only in the table, with v2\'s columns, its own words, and no notices or Retry', async () => {
     const order = sold();
@@ -357,5 +360,78 @@ describe('orders table (row 10.1)', () => {
     fireEvent.change(screen.getByTestId('orders-search'), { target: { value: 'no such sale' } });
     expect(screen.getByTestId('orders-empty').textContent).toBe('No orders match.');
     expect(screen.queryByTestId('orders-table')).toBeNull();
+  });
+});
+
+describe('orders on a phone (row 10.5)', () => {
+  function sale(name: string, syncStatus: PosOrder['syncStatus'], extra: Partial<PosOrder> = {}): PosOrder {
+    const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
+    builder.addLine({ productId: name, variantId: name, name, unitPrice: { amount: 1200, currency: 'EUR' } });
+    builder.addPayment({ method: 'cash', amountMinor: 1200 });
+    return { ...finalizeOrder(builder.getSnapshot()), syncStatus, ...extra };
+  }
+  async function mount(...recent: PosOrder[]) {
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), recent });
+    render(<SessionProvider><OrdersScreen /><PortalHost /></SessionProvider>);
+    await act(async () => {});
+  }
+  const heads = ['Status', 'Order Number', 'Customer', 'Billing Address', 'Date Created', 'Cashier', 'Payment Method', 'Total'];
+
+  it('on a phone the Orders rows are two lines: number and total, then status, customer and date', async () => {
+    setWindowWidth(390, 844);
+    const order = sale('Blue shirt', 'applied', { cashierRef: 'ann@store.test', customer: { id: 'c1', name: 'Ada Lovelace' } });
+    await mount(order);
+    const table = within(screen.getByTestId('orders-table'));
+    const row = screen.getByTestId(`orders-row-${order.id}`);
+    const cell = (name: string) => screen.getByTestId(`orders-row-${order.id}-${name}`).textContent;
+    expect(cell('number')).toBe(orderReference(order));
+    expect(cell('total')).toBe(formatMoney({ amount: order.totalMinor, currency: 'EUR' }));
+    expect(cell('status')).toBe('Completed');
+    expect(cell('customer')).toBe('Ada Lovelace');
+    expect(cell('date')).toBe(formatDate(order.createdAt));
+    // No table head on a phone, and no Billing Address, Cashier or Payment Method: the detail sheet shows those.
+    for (const head of heads) expect(table.queryByText(head, { exact: true })).toBeNull();
+    for (const name of ['billing', 'cashier', 'payment']) expect(screen.queryByTestId(`orders-row-${order.id}-${name}`)).toBeNull();
+    expect(row.textContent).not.toContain('ann@store.test');
+    expect(row.textContent).not.toContain('Cash');
+    expect(within(row).getByRole('button', { name: `Open order ${orderReference(order)}` })).toBeTruthy();
+
+    act(() => { setWindowWidth(1024, 768); });
+    const wide = within(screen.getByTestId('orders-table'));
+    for (const head of heads) expect(wide.getByText(head, { exact: true })).toBeTruthy();
+    expect(cell('cashier')).toBe('ann@store.test');
+    expect(cell('payment')).toBe('Cash');
+  });
+
+  it('on a phone an attention row keeps its sync notice and Retry', async () => {
+    setWindowWidth(390, 844);
+    const refused = sale('Red hat', 'rejected', { error: { code: 'platform_error', message: 'Refused' } });
+    let resolve: (count: number) => void = () => {};
+    const requeue = vi.fn(() => new Promise<number>((done) => { resolve = done; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), requeue });
+    await mount(refused);
+    const attention = within(screen.getByTestId('orders-attention'));
+    expect(attention.queryByText('Billing Address', { exact: true })).toBeNull();
+    const notices = within(attention.getByTestId(`orders-attention-row-${refused.id}-notices`));
+    expect(notices.getByText("The online store refused this sale. Ask the store owner to look at the till's sync log.")).toBeTruthy();
+    const retry = notices.getByRole('button', { name: 'Retry' });
+    await act(async () => { fireEvent.click(retry); });
+    await act(async () => { fireEvent.click(retry); });
+    expect(requeue).toHaveBeenCalledExactlyOnceWith([refused.id]);
+    expect(screen.queryByTestId('order-detail-sheet')).toBeNull();
+    await act(async () => { resolve(1); });
+  });
+
+  it('on a phone the order detail shows the Billing Address and Cashier the row leaves out', async () => {
+    setWindowWidth(390, 844);
+    const order = sale('Blue shirt', 'applied', { cashierRef: 'ann@store.test',
+      customer: { id: 'c1', name: 'Ada Lovelace', billing: { address1: 'Main St 5', city: 'Berlin', country: 'DE' } } });
+    await mount(order);
+    const row = screen.getByTestId(`orders-row-${order.id}`);
+    expect(row.textContent).not.toContain('Main St 5');
+    fireEvent.click(within(row).getByRole('button', { name: `Open order ${orderReference(order)}` }));
+    const sheet = within(await screen.findByTestId('order-detail-sheet'));
+    expect(sheet.getByTestId('order-detail-billing').textContent).toBe('Billing addressMain St 5, Berlin, DE');
+    expect(sheet.getByTestId('order-detail-cashier').textContent).toBe('Cashierann@store.test');
   });
 });

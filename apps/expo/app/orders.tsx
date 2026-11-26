@@ -16,6 +16,7 @@ import { formatDate } from '../lib/format-date';
 import { refundsCollection } from '../lib/order-store';
 import { filterOrders, orderFilterOptions } from '../lib/order-filters';
 import { mergeOrderRows, useStoreOrders, type OrdersRow } from '../lib/store-orders';
+import { orderBillingCell } from '../lib/orders-table';
 
 export const ORDERS_LOADING_TEXT = 'Loading orders…';
 export const ORDERS_EMPTY_TEXT = 'No orders yet.';
@@ -60,6 +61,9 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   const openMenu = useFrameMenu();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
   const topInset = useContext(StripHeightContext);
+  const openSale = recent.find((order) => order.id === openId) ?? null;
+  const openSaleStore = openId ? store.orders.find((order) => order.clientOrderId === openId) ?? null : null;
+  const openStore = store.orders.find((order) => order.id === openStoreId) ?? null;
   return <View className="flex-1 bg-background" role="main" aria-label="Orders">
     <Stack.Screen options={{ title: 'Orders', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
@@ -96,11 +100,13 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
       {!fallback && store.hasMore ? <Button variant="outline" className="self-center" testID="orders-load-more"
         disabled={store.loading} onPress={store.loadMore}><ButtonText>Load more</ButtonText></Button> : null}
     </ScrollView>
-    {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. */}
-    <OrderDetailSheet order={recent.find((order) => order.id === openId) ?? null} onClose={() => setOpenId(null)}
-      storeOrder={openId ? store.orders.find((order) => order.clientOrderId === openId) ?? null : null} refunds={refundsCollection(localOrders)}
+    {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. Each sheet gets
+        the Billing Address its table row shows, which a phone's row leaves out. */}
+    <OrderDetailSheet order={openSale} onClose={() => setOpenId(null)}
+      storeOrder={openSaleStore} refunds={refundsCollection(localOrders)}
+      billing={openSale ? orderBillingCell({ kind: 'local', key: openSale.id, order: openSale, storeId: openSaleStore?.id }, store.billing) : undefined}
       formatDate={formatDate} onRetry={requeue} onFlush={flush} stuck={state.stuck} />
-    <StoreOrderDetailSheet order={store.orders.find((order) => order.id === openStoreId) ?? null}
-      onClose={() => setOpenStoreId(null)} formatDate={formatDate} />
+    <StoreOrderDetailSheet order={openStore} onClose={() => setOpenStoreId(null)} formatDate={formatDate}
+      billing={openStore ? orderBillingCell({ kind: 'store', key: openStore.id, order: openStore }, store.billing) : undefined} />
   </View>;
 }
