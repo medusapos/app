@@ -17,11 +17,12 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   // and its registerApproval, the plugin's default approvalThresholdMinor of 500 (ADR 0023; parsed since TallyUI 3.13.0, ADR-082).
   // TallyUI ADR-075 sends v5 only for charges or custom lines; discounts without them go out at version 4.
   // The plugin's contract 5 (#540) adds order.refund v1.
+  // Contract 6 adds region_id and terminal on GET /tally/v1/payment-providers.
   // The session leaves the customer display out (#554); the plugin still advertises it (ADR-085) at /info,
   // with its default STUN servers (PR #538).
   expect((await (await info).json()).customerDisplay).toEqual({ v: 1,
     iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 });
-  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 5, orderRefund: 1,
+  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 6, orderRefund: 1,
     coupons: true,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
     registerApproval: { thresholdMinor: 500 } });
