@@ -751,4 +751,47 @@ describe('the Refunds card', () => {
     await waitFor(() => expect(screen.getByTestId('card-refunds-figure').textContent).toBe(ctx.formatMoney('5.00')));
     expect(listOrders).toHaveBeenCalledTimes(2);
   });
+
+  // The store's `created_at` is when a sale reached the store; the read's bounds are `modifiedAfter` or `dateRange.after`.
+  function readWindow(query: unknown): { after: string; before: string } {
+    const q = query as { modifiedAfter?: string; dateRange: { after?: string; before: string } };
+    return { after: (q.modifiedAfter ?? q.dateRange.after)!, before: q.dateRange.before };
+  }
+  async function mountYesterday() {
+    const yesterday = dayBefore(localDay(new Date()));
+    const [year, month, date] = yesterday.split('-').map(Number);
+    await store.orders.insert(order(1200, 'cash', { id: 'sale-1', createdAt: new Date(year, month - 1, date, 23, 50).toISOString() }));
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token',
+      capabilities: { orderCreate: 1, orderRefund: 1, pluginContract: 5 } });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    fireEvent.click(await screen.findByTestId('sales-filter-period'));
+    fireEvent.click(await screen.findByTestId('sales-filter-period-yesterday'));
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('12.00')));
+    return yesterday;
+  }
+
+  it('reads the store\'s orders up to today, so a sale that synced after the range still counts its refund', async () => {
+    const now = new Date();
+    const syncedAt = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 10).toISOString();
+    listOrders.mockImplementation(async (_context, query) => {
+      const { after, before } = readWindow(query);
+      const covered = Date.parse(after) <= Date.parse(syncedAt) && Date.parse(syncedAt) < Date.parse(before);
+      return { orders: covered ? [storeOrder({ clientOrderId: 'sale-1', placedAt: syncedAt,
+        refunds: [{ id: 'r1', amountMinor: 500 }] })] : [], hasMore: false };
+    });
+    await mountYesterday();
+    await waitFor(() => expect(screen.getByTestId('card-refunds-figure').textContent).toBe(ctx.formatMoney('5.00')));
+    const tomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime();
+    expect(Date.parse(readWindow(listOrders.mock.calls.at(-1)![1]).before)).toBeGreaterThanOrEqual(tomorrow);
+  });
+
+  it('reads from the day before the range, for a store clock behind the till\'s', async () => {
+    listOrders.mockResolvedValue({ orders: [], hasMore: false });
+    const yesterday = await mountYesterday();
+    // Yesterday's window starts at its compare day, the day before; the read starts the day before that.
+    const [year, month, date] = dayBefore(dayBefore(yesterday)).split('-').map(Number);
+    await waitFor(() => expect(Date.parse(readWindow(listOrders.mock.calls.at(-1)![1]).after))
+      .toBeLessThanOrEqual(new Date(year, month - 1, date).getTime()));
+    expect(screen.getByTestId('card-refunds-none')).toBeTruthy();
+  });
 });
