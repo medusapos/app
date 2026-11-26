@@ -20,7 +20,8 @@ export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
 // Contract 3 adds GET /tally/v1/orders
 // Contract 4 adds allChannels=true on GET /tally/v1/orders
 // Contract 5 adds order.refund v1 (ADR 0026)
-export const PLUGIN_CONTRACT = 5
+// Contract 6 adds region_id and terminal on GET /tally/v1/payment-providers
+export const PLUGIN_CONTRACT = 6
 
 export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
   const value = options.approvalThresholdMinor

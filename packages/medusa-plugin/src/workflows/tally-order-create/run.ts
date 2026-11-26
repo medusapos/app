@@ -23,6 +23,8 @@ export type TallyPluginOptions = {
   approvalThresholdMinor?: number
   // Refuse register contracts below this version; unset accepts every supported version.
   minRegisterContract?: number
+  // Payment provider ids that are card terminals (Settings › Card readers); none by default.
+  terminalProviders?: string[]
 }
 
 export async function liveOrderFor(container: MedusaContainer, clientOrderId: string) {
