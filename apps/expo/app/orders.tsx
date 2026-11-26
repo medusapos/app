@@ -16,7 +16,7 @@ import { useTillName } from '../lib/till-name';
 import { formatDate } from '../lib/format-date';
 import { refundsCollection } from '../lib/order-store';
 import { filterOrders, orderFilterOptions } from '../lib/order-filters';
-import { mergeOrderRows, useStoreOrders, type OrdersRow } from '../lib/store-orders';
+import { mergeOrderRows, useStoreOrders, useStoreOrderWithRefundLines, type OrdersRow } from '../lib/store-orders';
 import { orderBillingCell } from '../lib/orders-table';
 import { requestReopen } from '../lib/reopen-order';
 
@@ -68,6 +68,8 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   const topInset = useContext(StripHeightContext);
   const openSale = recent.find((order) => order.id === openId) ?? null;
   const openSaleStore = openId ? store.orders.find((order) => order.clientOrderId === openId) ?? null : null;
+  // The sheet's copy is read again with its refunds' lines, which the refund form needs and the list's read leaves out.
+  const sheetStore = useStoreOrderWithRefundLines(session, openSaleStore, appliedCount);
   const openStore = store.orders.find((order) => order.id === openStoreId) ?? null;
   return <View className="flex-1 bg-background" role="main" aria-label="Orders">
     <Stack.Screen options={{ title: 'Orders', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
@@ -108,7 +110,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
     {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. Each sheet gets
         the Billing Address its table row shows, which a phone's row leaves out. */}
     <OrderDetailSheet order={openSale} onClose={() => setOpenId(null)}
-      storeOrder={openSaleStore} refunds={refundsCollection(localOrders)}
+      storeOrder={sheetStore} refunds={refundsCollection(localOrders)}
       billing={openSale ? orderBillingCell({ kind: 'local', key: openSale.id, order: openSale, storeId: openSaleStore?.id }, store.billing) : undefined}
       formatDate={formatDate} onRetry={requeue} onFlush={flush} stuck={state.stuck} />
     <StoreOrderDetailSheet order={openStore} onClose={() => setOpenStoreId(null)} formatDate={formatDate}
