@@ -277,7 +277,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const reopenRequest = useReopenRequest();
   useEffect(() => {
     if (!reopenRequest || !entries.length || pullState === 'syncing' || pullState === 'connecting') return;
-    const order = takeReopen(); if (!order) return;
+    const order = takeReopen(session.baseUrl); if (!order) return;
     const refuse = (message: string) => { setSwitchRefusal(message); if (phone) setCartOpen(true); };
     const cart = buildReopenCart(order, (variantId) => entries.find(({ variant }) => variant.id === variantId));
     if (typeof cart === 'string') { refuse(cart); return; }

@@ -292,6 +292,7 @@ it.each([1280, 390])('hides tabs during tender and restores the same tab on canc
 });
 
 // Orders' Reopen (row 10.3): the store order's lines and customer as a new tab, the open sale parked beside it.
+const reopen = (order: StoreOrder) => requestReopen(order, useSession().session!.baseUrl);
 const storeOrder = (lines: [string, string | undefined, number][]): StoreOrder => ({
   id: 'order_7', reference: '1007', status: 'completed', placedAt: '2026-11-24T09:00:00.000Z', currency: 'EUR',
   pricesIncludeTax: false, customer: { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.test' },
@@ -310,7 +311,7 @@ it("a reopen request parks the open sale and starts a new tab with the order's l
   withHat();
   await mount(); add();
   const parkedTab = saleTabs().getByRole('tab').getAttribute('data-testid')!;
-  await act(async () => { requestReopen(storeOrder([['Hat', 'red', 3], ['Shirt', 'blue', 1]])); });
+  await act(async () => { reopen(storeOrder([['Hat', 'red', 3], ['Shirt', 'blue', 1]])); });
   await waitFor(() => expect(saleTabs().getAllByRole('tab')).toHaveLength(2));
   expect(await drafts().find().exec()).toHaveLength(1);
   expect(screen.getByTestId(parkedTab).getAttribute('aria-selected')).toBe('false');
@@ -323,38 +324,45 @@ it("a reopen request parks the open sale and starts a new tab with the order's l
 
 it('a refused reopen shows why and keeps the open sale', async () => {
   await mount(); add();
-  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2], ['Old scarf', 'gone', 1]])); });
+  await act(async () => { reopen(storeOrder([['Shirt', 'blue', 2], ['Old scarf', 'gone', 1]])); });
   expect(screen.getByTestId('open-sale-refusal').textContent).toBe('Can\'t reopen: "Old scarf" is no longer for sale.');
   expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
   expect(await drafts().find().exec()).toHaveLength(0);
 });
 
-it('a reopen while the register is counting is refused and starts no tab', async () => {
+it.each([1280, 390])('a reopen while the register is counting is refused and starts no tab at width %i', async (width) => {
+  setWindowWidth(width, 800);
   const view = await mount(); add();
   const fixture = openRegisterFixture();
   vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register,
     session: { ...fixture.register.session!, status: 'counting' } } });
   await act(async () => { view.rerender(<><ProductsScreen /><PortalHost /></>); });
-  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2]])); });
+  if (width === 390) {
+    fireEvent.click(screen.getByRole('tab', { name: 'Products' }));
+    expect(screen.queryByTestId('cart-header')).toBeNull();
+  }
+  await act(async () => { reopen(storeOrder([['Shirt', 'blue', 2]])); });
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   await act(async () => { view.rerender(<><ProductsScreen /><PortalHost /></>); });
   expect(screen.getByTestId('open-sale-refusal').textContent).toBe(REGISTER_CLOSING);
   expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
-  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  expect(cartLineCells('Shirt')).toEqual(width === 390 ? ['1', 'Shirt', '€12.00'] : ['1', 'Shirt', '€12.00', '€12.00']);
   expect(await drafts().find().exec()).toHaveLength(0);
 });
 
-it('a line the cart refuses stops the reopen and says the tab is partial', async () => {
+it.each([1280, 390])('a line the cart refuses stops the reopen and says the tab is partial at width %i', async (width) => {
+  setWindowWidth(width, 800);
   withHat();
   const replicated = (useReplicatedProducts as unknown as () => ReturnType<typeof useReplicatedProducts>)();
   vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [...replicated.products, { id: 'cap', title: 'Cap',
     status: 'published', variants: [{ id: 'cap-std', title: 'Std', sku: 'CAP', prices: [{ amount: 5, currency_code: 'usd' }] }] }] });
   await mount(); add();
-  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2], ['Cap', 'cap-std', 1], ['Hat', 'red', 1]])); });
+  if (width === 390) expect(screen.queryByTestId('cart-header')).toBeNull();
+  await act(async () => { reopen(storeOrder([['Shirt', 'blue', 2], ['Cap', 'cap-std', 1], ['Hat', 'red', 1]])); });
   expect(screen.getByTestId('open-sale-refusal').textContent).toBe('Reopened only part of order #1007: No EUR price for Cap');
   expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
-  expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
+  expect(cartLineCells('Shirt')).toEqual(width === 390 ? ['2', 'Shirt', '€24.00'] : ['2', 'Shirt', '€12.00', '€24.00']);
   const cart = within(screen.getByTestId('cart-header').parentElement!);
   expect(cart.queryByText('Cap')).toBeNull();
   expect(cart.queryByText('Hat')).toBeNull();
@@ -364,7 +372,7 @@ it('a line the cart refuses stops the reopen and says the tab is partial', async
 
 it('two lines of one variant reopen as one line with their summed quantity', async () => {
   await mount(); add();
-  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2], ['Shirt', 'blue', 3]])); });
+  await act(async () => { reopen(storeOrder([['Shirt', 'blue', 2], ['Shirt', 'blue', 3]])); });
   expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
   expect(cartLineCells('Shirt')).toEqual(['5', 'Shirt', '€12.00', '€60.00']);
 });
@@ -373,19 +381,28 @@ it('a refused reopen on a phone opens the cart to show why', async () => {
   setWindowWidth(390);
   await mount();
   expect(screen.queryByTestId('cart-header')).toBeNull();
-  await act(async () => { requestReopen(storeOrder([['Old scarf', 'gone', 1]])); });
+  await act(async () => { reopen(storeOrder([['Old scarf', 'gone', 1]])); });
   expect(screen.getByTestId('open-sale-refusal').textContent).toBe('Can\'t reopen: "Old scarf" is no longer for sale.');
 });
 
+it('a reopen on a phone opens the cart when the sale changes while being parked', async () => {
+  setWindowWidth(390);
+  await mount(); add();
+  drafts().preInsert(() => { add(); }, false);
+  expect(screen.queryByTestId('cart-header')).toBeNull();
+  await act(async () => { reopen(storeOrder([['Shirt', 'blue', 1]])); });
+  expect((await screen.findByTestId('open-sale-refusal')).textContent).toBe('The sale changed while it was being parked; park it again');
+});
+
 it('a reopen waits for the catalogue pull before taking the request', async () => {
+  withHat();
   const replicated = (useReplicatedProducts as unknown as () => ReturnType<typeof useReplicatedProducts>)();
   vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, state: 'syncing' });
   const view = await mount(); add();
-  await act(async () => { requestReopen(storeOrder([['Hat', 'red', 1]])); });
+  await act(async () => { reopen(storeOrder([['Hat', 'red', 1]])); });
   expect(screen.queryByTestId('open-sale-refusal')).toBeNull();
   expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated);
-  withHat();
   await act(async () => { view.rerender(<><ProductsScreen /><PortalHost /></>); });
   expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
   expect(cartLineCells('Hat')).toEqual(['1', 'Hat', '€5.00', '€5.00']);
@@ -396,7 +413,7 @@ it("a guest order reopens as a guest, not the tab's default customer", async () 
   saveDefaultCustomer(defaultStorage(), useSession().session!.baseUrl, { id: 'grace', name: 'Grace Hopper' });
   await mount(); add();
   expect(within(saleTabs().getByRole('tab')).getByTestId(/-who$/).textContent).toBe('Grace Hopper');
-  await act(async () => { requestReopen({ ...storeOrder([['Shirt', 'blue', 1]]), customer: null }); });
+  await act(async () => { reopen({ ...storeOrder([['Shirt', 'blue', 1]]), customer: null }); });
   expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
   const current = saleTabs().getByRole('tab', { selected: true });
   expect(within(current).getByTestId(/-who$/).textContent).toBe('Guest · Shirt');
