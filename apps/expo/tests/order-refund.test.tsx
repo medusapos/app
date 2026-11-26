@@ -5,7 +5,7 @@ import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
-import { formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder } from '@tallyui/core';
+import { formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder, type StoreOrderLine } from '@tallyui/core';
 import {
   createOrderBuilder, finalizeOrder, posRefundCollection, type PosOrder, type PosRefundCollection, type TransportOutcome,
 } from '@tallyui/pos';
@@ -20,7 +20,7 @@ vi.mock('../lib/register-context', async (original) => ({
   ...await original<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
 
-const REFUND_ON = { orderRefund: 1, pluginContract: 5 } as ServerCapabilities;
+const REFUND_ON = { orderRefund: 1, pluginContract: 6 } as ServerCapabilities;
 const send = vi.fn<(batch: OrderRefundEnvelope[]) => Promise<TransportOutcome>>();
 let db: RxDatabase;
 let refunds: PosRefundCollection;
@@ -32,21 +32,47 @@ function sale(): PosOrder {
   return { ...finalizeOrder(builder.getSnapshot()), syncStatus: 'applied' };
 }
 const order = sale();
+const cardSale: PosOrder = { ...order, payments: [{ ...order.payments[0], method: 'external', methodId: 'pp_card' }] };
 const storeOrder: StoreOrder = {
   id: 'order_1', reference: '1001', clientOrderId: order.id, status: 'completed', placedAt: order.createdAt, currency: 'EUR',
   pricesIncludeTax: false, customer: null, fees: [], shipping: [], coupons: [], taxLines: [], discountMinor: 0, discountTaxMinor: 0,
   lines: [{ id: 'line_1', clientLineId: order.lines[0].id, name: 'Blue shirt', quantity: 1, subtotalMinor: 1200, subtotalTaxMinor: 0, totalMinor: 1200, taxMinor: 0 }],
   taxMinor: 0, totalMinor: 1200, payments: [{ id: 'pay_1', method: 'pp_system_default', amountMinor: 1200 }], refunds: [],
 };
-const applied = (batch: OrderRefundEnvelope[]): TransportOutcome => ({ kind: 'results', results: [{ id: batch[0].id, status: 'applied',
-  refund: { totalMinor: 1200, byMethod: { cash: 1200 }, refunds: [{ id: 'ref_1', paymentId: 'pay_1', totalMinor: 1200, state: 'succeeded' }] } }] });
+// Two units of one line, paid 24.00.
+const twoUnits: StoreOrder = { ...storeOrder, totalMinor: 2400, payments: [{ id: 'pay_1', method: 'pp_system_default', amountMinor: 2400 }],
+  lines: [{ ...storeOrder.lines[0], quantity: 2, subtotalMinor: 2400, totalMinor: 2400 }] };
+// 3 × 0.99 ex 19%, each 1.18 gross, paid 3.53: the order's tax rounds down a cent, so refunding every line takes −0.01.
+const centLine = (id: string): StoreOrderLine => ({ id, clientLineId: `client-${id}`, name: `Item ${id}`, quantity: 1, subtotalMinor: 99,
+  subtotalTaxMinor: 19, totalMinor: 99, taxMinor: 19 });
+const threeCents: StoreOrder = { ...storeOrder, totalMinor: 353, taxMinor: 56, payments: [{ id: 'pay_1', method: 'pp_system_default', amountMinor: 353 }],
+  lines: [centLine('a'), centLine('b'), centLine('c')] };
+const unitRefund = (id: string) => ({ id, amountMinor: 1200, lines: [{ orderLineId: 'line_1', quantity: 1, netMinor: 1200, taxMinor: 0 }] });
+const applied = (batch: OrderRefundEnvelope[], refundId = 'ref_1'): TransportOutcome => {
+  const totalMinor = batch[0].payload.totalMinor;
+  return { kind: 'results', results: [{ id: batch[0].id, status: 'applied',
+    refund: { totalMinor, byMethod: { cash: totalMinor }, refunds: [{ id: refundId, paymentId: 'pay_1', totalMinor, state: 'succeeded' }] } }] };
+};
 const rejected = (code: string) => (batch: OrderRefundEnvelope[]): TransportOutcome => ({ kind: 'results',
   results: [{ id: batch[0].id, status: 'rejected', error: { code, message: `The store refused: ${code}` } }] });
-const sheet = (open = true) => <><OrderDetailSheet order={open ? order : null} onClose={vi.fn()} formatDate={(iso) => iso.slice(0, 10)}
-  onRetry={vi.fn()} onFlush={vi.fn()} storeOrder={storeOrder} refunds={refunds} /><PortalHost /></>;
-const confirm = () => screen.getByTestId('order-refund-confirm');
-const giveReason = async () => fireEvent.change(await screen.findByTestId('order-refund-reason'), { target: { value: ' Damaged ' } });
-const twelve = formatMoney({ amount: 1200, currency: 'EUR' });
+const sheet = ({ open = true, store = storeOrder, local = order }: { open?: boolean; store?: StoreOrder; local?: PosOrder } = {}) => <>
+  <OrderDetailSheet order={open ? local : null} onClose={vi.fn()} formatDate={(iso) => iso.slice(0, 10)}
+    onRetry={vi.fn()} onFlush={vi.fn()} storeOrder={store} refunds={refunds} /><PortalHost /></>;
+const money = (amount: number) => formatMoney({ amount, currency: 'EUR' });
+const sent = (call = 0) => send.mock.calls[call][0][0];
+
+// Drives the form by test id: a stepper's "+" is its second Pressable, which shows "+".
+const modal = async () => within(await screen.findByTestId('refund-modal'));
+const openModal = async () => { fireEvent.click(await screen.findByTestId('order-detail-refund')); return modal(); };
+const plus = (form: Awaited<ReturnType<typeof modal>>, lineId: string, times = 1) => {
+  for (let press = 0; press < times; press++) fireEvent.click(within(form.getByTestId(`refund-qty-${lineId}`)).getByText('+'));
+};
+const reason = (form: Awaited<ReturnType<typeof modal>>, value = ' Damaged ') => fireEvent.change(form.getByTestId('refund-reason'), { target: { value } });
+const submit = async (form: Awaited<ReturnType<typeof modal>>) => {
+  await waitFor(() => expect(form.getByTestId('refund-submit').getAttribute('aria-disabled')).not.toBe('true'));
+  fireEvent.click(form.getByTestId('refund-submit'));
+  fireEvent.click(await form.findByTestId('refund-confirm'));
+};
 
 beforeEach(async () => {
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't', capabilities: REFUND_ON };
@@ -57,9 +83,9 @@ beforeEach(async () => {
 });
 afterEach(async () => { cleanup(); await db.remove(); vi.clearAllMocks(); });
 
-describe('Refund all (ADR 0026)', () => {
-  it('capability off', async () => {
-    for (const capabilities of [{}, { orderRefund: 1, pluginContract: 4 }, { orderRefund: 0, pluginContract: 5 }] as ServerCapabilities[]) {
+describe('Refund in the Orders sheet (#569)', () => {
+  it('C1: no Refund button with orderRefund 0 or plugin contract 5 (no per-refund lines)', async () => {
+    for (const capabilities of [{}, { orderRefund: 1, pluginContract: 5 }, { orderRefund: 0, pluginContract: 6 }] as ServerCapabilities[]) {
       sessionState.session = { ...sessionState.session!, capabilities };
       const view = render(sheet());
       await screen.findByTestId('order-detail');
@@ -71,134 +97,218 @@ describe('Refund all (ADR 0026)', () => {
     expect(await screen.findByTestId('order-detail-refund')).toBeTruthy();
   });
 
-  it('double submit', async () => {
+  it('C2: one unit of a two-unit line sends quantity 1 at its price, to cash, with the trimmed reason, and closes on applied', async () => {
+    send.mockImplementation(async (batch) => applied(batch));
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    expect(form.getByTestId('refund-remaining-line_1').textContent).toBe('2');
+    expect(form.queryByTestId('refund-destination-original_method')).toBeNull();
+    plus(form, 'line_1');
+    reason(form);
+    expect(form.getByTestId('refund-total').textContent).toBe(money(1200));
+    await submit(form);
+    await waitFor(() => expect(screen.queryByTestId('refund-modal')).toBeNull());
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(sent()).toMatchObject({ type: 'order.refund', version: 1, attempt: 1, payload: { orderId: 'order_1', clientOrderId: order.id,
+      lines: [{ orderLineId: 'line_1', quantity: 1, restock: true }], shippingMinor: 0, adjustmentMinor: 0, totalMinor: 1200,
+      destination: 'cash', reason: 'Damaged', registerId: 'register-1', sessionId: 'session-1' } });
+    expect(sent().id).not.toBe(sent().payload.clientRefundId);
+    expect((await refunds.findOne(sent().payload.clientRefundId).exec())?.status).toBe('applied');
+  });
+
+  it('C3: 3 × 0.99 ex 19% paid 3.53, every line refunded: Rounding −0.01, total 3.53; the envelope sends 353 with adjustment 0', async () => {
+    send.mockImplementation(async (batch) => applied(batch));
+    render(sheet({ store: threeCents }));
+    const form = await openModal();
+    for (const id of ['a', 'b', 'c']) plus(form, id);
+    reason(form);
+    expect(form.getByTestId('refund-rounding').textContent).toBe(money(-1));
+    expect(form.getByTestId('refund-total').textContent).toBe(money(353));
+    await submit(form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(sent().payload).toMatchObject({ totalMinor: 353, adjustmentMinor: 0, shippingMinor: 0, destination: 'cash',
+      lines: ['a', 'b', 'c'].map((orderLineId) => ({ orderLineId, quantity: 1, restock: true })) });
+  });
+
+  it('C4: a double press of Process Refund sends one envelope', async () => {
     let answer!: () => void;
     send.mockImplementation((batch) => new Promise((resolve) => { answer = () => resolve(applied(batch)); }));
     render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    const dialog = within(await screen.findByTestId('order-refund-dialog'));
-    expect(dialog.getByTestId('order-refund-total').textContent).toBe(`Refund ${twelve}`);
-    expect(dialog.getByTestId('order-refund-destination').textContent).toBe('To Cash');
-    expect(dialog.queryByTestId('order-refund-already')).toBeNull();
-    // The plugin refuses a blank reason, so Confirm waits for one.
-    expect(confirm().getAttribute('aria-disabled')).toBe('true');
-    expect(dialog.getByTestId('order-refund-hold')).toBeTruthy();
-    await giveReason();
-    fireEvent.click(confirm());
-    fireEvent.click(confirm());
-    await waitFor(() => expect(confirm().getAttribute('aria-disabled')).toBe('true'));
-    fireEvent.click(confirm());
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    fireEvent.click(form.getByTestId('refund-confirm'));
     await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    fireEvent.click(form.getByTestId('refund-confirm'));
     await act(async () => answer());
-    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${twelve}`);
-    expect(screen.queryByTestId('order-refund-dialog')).toBeNull();
-    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    await waitFor(() => expect(screen.queryByTestId('refund-modal')).toBeNull());
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(1200)}`);
     expect(send).toHaveBeenCalledTimes(1);
-    const sent = send.mock.calls[0][0][0];
-    expect(sent).toMatchObject({ type: 'order.refund', version: 1, attempt: 1, payload: { orderId: 'order_1', clientOrderId: order.id,
-      lines: [{ orderLineId: 'line_1', quantity: 1, restock: true }], shippingMinor: 0, adjustmentMinor: 0, totalMinor: 1200,
-      destination: 'cash', reason: 'Damaged', registerId: 'register-1', sessionId: 'session-1' } });
   });
 
-  it('retry reuses', async () => {
-    send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' }).mockResolvedValueOnce({ kind: 'refused', status: 503, reason: 'status_503' })
-      .mockImplementationOnce(async (batch) => applied(batch));
-    const view = render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(await screen.findByTestId('order-refund-confirm'));
-    expect((await screen.findByTestId('order-refund-error')).textContent).toContain('did not answer');
-    fireEvent.click(confirm());
-    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
-    expect((await screen.findByTestId('order-refund-error')).textContent).toContain('status_503');
-    // Closing the sale and opening it again opens the dialog on the unsent refund's own envelope.
-    view.rerender(sheet(false));
-    view.rerender(sheet());
-    await waitFor(() => expect(confirm().getAttribute('aria-disabled')).not.toBe('true'));
-    fireEvent.click(confirm());
-    await screen.findByTestId('order-detail-refunded');
-    const [first, second, third] = send.mock.calls.map(([batch]) => batch[0]);
-    expect(second.id).toBe(first.id);
-    expect(third.id).toBe(first.id);
-    expect(third.payload.clientRefundId).toBe(first.payload.clientRefundId);
+  it('C5: no final answer closes the form and opens the resume dialog on the same envelope, whose Confirm resends it', async () => {
+    send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' }).mockImplementationOnce(async (batch) => applied(batch));
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    const dialog = within(await screen.findByTestId('order-refund-dialog'));
+    expect(screen.queryByTestId('refund-modal')).toBeNull();
+    expect(dialog.getByTestId('order-refund-error').textContent).toContain('did not answer');
+    expect(dialog.getByTestId('order-refund-total').textContent).toBe(`Refund ${money(1200)}`);
+    await waitFor(() => expect(dialog.getByTestId('order-refund-confirm').getAttribute('aria-disabled')).not.toBe('true'));
+    fireEvent.click(dialog.getByTestId('order-refund-confirm'));
+    await waitFor(() => expect(screen.queryByTestId('order-refund-dialog')).toBeNull());
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(sent(1).id).toBe(sent(0).id);
+    expect(sent(1)).toEqual(sent(0));
     expect(await refunds.count().exec()).toBe(1);
   });
 
-  it('refusals', async () => {
-    for (const code of ['forbidden', 'no_open_session', 'amount_mismatch']) {
-      send.mockReset().mockImplementation(async (batch) => rejected(code)(batch));
-      const view = render(sheet());
-      fireEvent.click(await screen.findByTestId('order-detail-refund'));
-      await giveReason();
-      fireEvent.click(await screen.findByTestId('order-refund-confirm'));
-      expect((await screen.findByTestId('order-refund-error')).textContent).toBe(`The store refused: ${code}`);
-      expect(screen.queryByTestId('order-detail-refunded')).toBeNull();
-      expect(screen.getByTestId('order-refund-dialog')).toBeTruthy();
-      view.unmount();
-      await refunds.find().remove();
-    }
-  });
-
-  it('a rejection then Confirm sends a new command for the same refund', async () => {
+  it("C6: a rejection shows the store's message; the next confirm sends a new command id, the same refund id and the form's values", async () => {
     send.mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch)).mockImplementationOnce(async (batch) => applied(batch));
-    render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(await screen.findByTestId('order-refund-confirm'));
-    expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: amount_mismatch');
-    await waitFor(() => expect(confirm().getAttribute('aria-disabled')).not.toBe('true'));
-    fireEvent.click(confirm());
-    await screen.findByTestId('order-detail-refunded');
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    expect((await form.findByTestId('refund-error')).textContent).toBe('The store refused: amount_mismatch');
+    expect(screen.getByTestId('refund-modal')).toBeTruthy();
+    plus(form, 'line_1');
+    reason(form, 'Both damaged');
+    await submit(form);
+    await waitFor(() => expect(screen.queryByTestId('refund-modal')).toBeNull());
     expect(send).toHaveBeenCalledTimes(2);
-    const [first, second] = send.mock.calls.map(([batch]) => batch[0]);
-    expect(second.id).not.toBe(first.id);
-    expect(second.payload.clientRefundId).toBe(first.payload.clientRefundId);
+    expect(sent(1).id).not.toBe(sent(0).id);
+    expect(sent(1).payload.clientRefundId).toBe(sent(0).payload.clientRefundId);
+    expect(sent(1).payload).toMatchObject({ lines: [{ orderLineId: 'line_1', quantity: 2, restock: true }], totalMinor: 2400,
+      adjustmentMinor: 0, shippingMinor: 0, destination: 'cash', reason: 'Both damaged' });
     const records = (await refunds.find().exec()).map((doc) => doc.toJSON());
     expect(records).toHaveLength(1);
-    expect(records[0]).toMatchObject({ id: first.payload.clientRefundId, commandId: second.id, status: 'applied' });
+    expect(records[0]).toMatchObject({ id: sent(0).payload.clientRefundId, commandId: sent(1).id, status: 'applied' });
   });
 
-  it('a reason over 500 characters sends nothing', async () => {
-    send.mockImplementation(async (batch) => applied(batch));
-    render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    const reasonField = await screen.findByTestId('order-refund-reason');
-    expect(reasonField.getAttribute('maxlength')).toBe('500');
-    fireEvent.change(reasonField, { target: { value: 'x'.repeat(501) } });
-    await act(async () => { fireEvent.click(confirm()); });
-    expect(send).not.toHaveBeenCalled();
-    expect(await refunds.count().exec()).toBe(0);
-    // 500 is the plugin's limit and goes out.
-    fireEvent.change(reasonField, { target: { value: 'x'.repeat(500) } });
-    fireEvent.click(confirm());
-    await screen.findByTestId('order-detail-refunded');
-    expect(send.mock.calls[0][0][0].payload.reason).toHaveLength(500);
+  it('C7: an earlier refund with lines on the store copy shows the remaining quantity and Previously Refunded', async () => {
+    send.mockImplementation(async (batch) => applied(batch, 'ref_2'));
+    render(sheet({ store: { ...twoUnits, refunds: [unitRefund('ref_1')] } }));
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(1200)}`);
+    const form = await openModal();
+    expect(form.getByTestId('refund-remaining-line_1').textContent).toBe('1');
+    expect(form.getByTestId('refund-previously-refunded').textContent).toBe(money(-1200));
+    plus(form, 'line_1', 2);
+    reason(form);
+    expect(form.getByTestId('refund-total').textContent).toBe(money(1200));
+    await submit(form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(sent().payload).toMatchObject({ lines: [{ orderLineId: 'line_1', quantity: 1, restock: true }], totalMinor: 1200, adjustmentMinor: 0 });
   });
 
-  it('receipt after refund', async () => {
-    send.mockImplementation(async (batch) => applied(batch));
-    const view = render(sheet());
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    await giveReason();
-    fireEvent.click(await screen.findByTestId('order-refund-confirm'));
-    await screen.findByTestId('order-detail-refunded');
-    fireEvent.click(screen.getByTestId('order-detail-receipt'));
-    expect(within(await screen.findByTestId('order-detail-receipt-view')).getByText('Blue shirt')).toBeTruthy();
-    // Opened again, the sale reads Refunded from this till's record and offers no second refund.
-    view.rerender(sheet(false));
-    view.rerender(sheet());
-    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${twelve}`);
+  it('C8: a local applied refund not yet on the store copy withholds Refund and counts in Refunded until the copy carries it', async () => {
+    send.mockImplementation(async (batch) => applied(batch, 'ref_1'));
+    const view = render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    await waitFor(() => expect(screen.queryByTestId('refund-modal')).toBeNull());
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(1200)}`);
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    // Another store refund that is not this one leaves the record unlanded: Refunded adds both.
+    view.rerender(sheet({ store: { ...twoUnits, refunds: [{ id: 'ref_other', amountMinor: 100, lines: [] }] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1300)}`));
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    view.rerender(sheet({ store: { ...twoUnits, refunds: [unitRefund('ref_1')] } }));
+    expect(await screen.findByTestId('order-detail-refund')).toBeTruthy();
+    expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1200)}`);
+  });
+
+  it('C9: an earlier store refund whose lines are unknown offers no Refund', async () => {
+    render(sheet({ store: { ...storeOrder, refunds: [{ id: 'r1', amountMinor: 200 }] } }));
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(200)}`);
     expect(screen.queryByTestId('order-detail-refund')).toBeNull();
   });
 
-  it('the dialog shows Already refunded when the order has refunds', async () => {
-    // Paid 1200, an earlier 200 refunded: the offer is min(1200, 1200 − 200) = 1000.
-    const refundedOrder: StoreOrder = { ...storeOrder, refunds: [{ id: 'r1', amountMinor: 200 }] };
-    render(<><OrderDetailSheet order={order} onClose={vi.fn()} formatDate={(iso) => iso.slice(0, 10)} onRetry={vi.fn()} onFlush={vi.fn()}
-      storeOrder={refundedOrder} refunds={refunds} /><PortalHost /></>);
-    fireEvent.click(await screen.findByTestId('order-detail-refund'));
-    const dialog = within(await screen.findByTestId('order-refund-dialog'));
-    expect(dialog.getByTestId('order-refund-already').textContent).toBe(`Already refunded ${formatMoney({ amount: 200, currency: 'EUR' })}`);
-    expect(dialog.getByTestId('order-refund-total').textContent).toBe(`Refund ${formatMoney({ amount: 1000, currency: 'EUR' })}`);
+  it('C10: earlier goodwill of 2.00 caps the whole line at 10.00; adjustment −2.00 sends 1000 with adjustment −200', async () => {
+    send.mockImplementation(async (batch) => applied(batch));
+    render(sheet({ store: { ...storeOrder, refunds: [{ id: 'r1', amountMinor: 200, lines: [] }] } }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    expect(form.getByTestId('refund-invalid').textContent).toBe(`You can refund at most ${money(1000)}.`);
+    expect(form.getByTestId('refund-submit').getAttribute('aria-disabled')).toBe('true');
+    fireEvent.change(form.getByTestId('refund-adjustment'), { target: { value: '-2.00' } });
+    expect(form.getByTestId('refund-total').textContent).toBe(money(1000));
+    await submit(form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(sent().payload).toMatchObject({ lines: [{ orderLineId: 'line_1', quantity: 1, restock: true }], totalMinor: 1000,
+      adjustmentMinor: -200, shippingMinor: 0 });
+  });
+
+  it('C11: a card sale refunds to the original method by default; picking cash sends cash', async () => {
+    send.mockImplementationOnce(async (batch) => rejected('order_state')(batch)).mockImplementationOnce(async (batch) => applied(batch));
+    render(sheet({ local: cardSale }));
+    const form = await openModal();
+    expect(form.getByTestId('refund-destination-original_method').textContent).toBe('Refund to Card terminal');
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    await form.findByTestId('refund-error');
+    expect(sent(0).payload.destination).toBe('original_method');
+    fireEvent.click(form.getByTestId('refund-destination-cash'));
+    await submit(form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(sent(1).payload.destination).toBe('cash');
+  });
+
+  it('C12: the receipt still reprints after a refund', async () => {
+    send.mockImplementation(async (batch) => applied(batch));
+    const view = render(sheet());
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    await screen.findByTestId('order-detail-refunded');
+    fireEvent.click(screen.getByTestId('order-detail-receipt'));
+    expect(within(await screen.findByTestId('order-detail-receipt-view')).getByText('Blue shirt')).toBeTruthy();
+    // Opened again before the store copy carries it, the sale reads Refunded from this till's record and offers no refund.
+    view.rerender(sheet({ open: false }));
+    view.rerender(sheet());
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(1200)}`);
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+  });
+
+  it('C13: a reason over 500 characters sends nothing', async () => {
+    send.mockImplementation(async (batch) => applied(batch));
+    render(sheet());
+    const form = await openModal();
+    expect(form.getByTestId('refund-reason').getAttribute('maxlength')).toBe('500');
+    plus(form, 'line_1');
+    reason(form, 'x'.repeat(501));
+    await submit(form);
+    expect(await form.findByTestId('refund-error')).toBeTruthy();
+    expect(send).not.toHaveBeenCalled();
+    expect(await refunds.count().exec()).toBe(0);
+    // 500 is the plugin's limit and goes out.
+    reason(form, 'x'.repeat(500));
+    await submit(form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(sent().payload.reason).toHaveLength(500);
+  });
+
+  it('C14: with the register not open the form says so and sends nothing', async () => {
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register, session: null }, commandTransport: () => ({ send }) });
+    render(sheet());
+    const form = await openModal();
+    expect(form.getByTestId('refund-error').textContent).toBe('Open the register to refund');
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    await waitFor(() => expect(form.getByTestId('refund-submit')).toBeTruthy());
+    expect(form.getByTestId('refund-error').textContent).toBe('Open the register to refund');
+    expect(send).not.toHaveBeenCalled();
+    expect(await refunds.count().exec()).toBe(0);
   });
 });

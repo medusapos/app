@@ -5,6 +5,7 @@ import { Button, OrderFilterBar, SearchInput, Text as ButtonText } from '@tallyu
 import { getDeviceId, needsAttention, type OrderFilterValue } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, frameStep, useFrameMenu } from '../components/app-frame';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
+import { useAppliedRefundCount } from '../components/order-refund-dialog';
 import { OrdersTable } from '../components/orders-table';
 import { StoreOrderDetailSheet } from '../components/store-order-detail-sheet';
 import { StripHeightContext } from '../components/store-refused';
@@ -38,8 +39,11 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   const [filters, setFilters] = useState<OrderFilterValue>({});
   const [openId, setOpenId] = useState<string | null>(null);
   const [openStoreId, setOpenStoreId] = useState<string | null>(null);
-  // A sale reaching the store changes this count, and the store's first page is read again to list it.
-  const appliedCount = useMemo(() => recent.filter((order) => order.syncStatus === 'applied').length, [recent]);
+  // A sale reaching the store, or a refund the store applied, changes this count, and the store's first page is read again
+  // to list it: the refund form reads what is left of each line from the store's copy.
+  const appliedRefunds = useAppliedRefundCount(refundsCollection(localOrders));
+  const appliedSales = useMemo(() => recent.filter((order) => order.syncStatus === 'applied').length, [recent]);
+  const appliedCount = appliedSales + appliedRefunds;
   const store = useStoreOrders(session, search, filters, appliedCount, onUnauthorized);
   // The Register pill's one option is this till: its sales carry its device id (outbox-context.tsx), as tally_register_id.
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));

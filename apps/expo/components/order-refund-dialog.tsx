@@ -23,7 +23,18 @@ export function useRefundRecords(refunds: PosRefundCollection | undefined, order
   return refunds && records.orderId === orderId ? records.list : [];
 }
 
-function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'applied' }>): string {
+/** How many of this till's `pos_refunds` the store has applied, live. */
+export function useAppliedRefundCount(refunds: PosRefundCollection | undefined): number {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    if (!refunds) return;
+    const subscription = refunds.count({ selector: { status: 'applied' } }).$.subscribe(setCount);
+    return () => subscription.unsubscribe();
+  }, [refunds]);
+  return refunds ? count : 0;
+}
+
+export function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'applied' }>): string {
   switch (outcome.kind) {
     // TallyUI exports no cashier text for refund codes, so the store's own message shows.
     case 'rejected': return outcome.error.message;
@@ -39,8 +50,10 @@ function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'applied' }
  * once per opening, so its refund id is minted once. After no answer, a refusal or an unauthorized answer, Confirm resends
  * the same envelope; after a rejection, it sends a new command for the same refund.
  */
-export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: {
+export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, notice }: {
   order: StoreOrder; tenders: PosOrder['payments']; refunds: PosRefundCollection; resume: PosRefund | null; onClose: () => void;
+  /** Shown as the first error message: why a refund form handed this refund over unanswered. */
+  notice?: string;
 }) {
   const { register, boundRegisterId, commandTransport } = useRegister();
   const online = useNetworkOnline();
@@ -48,7 +61,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: 
   const [restock, setRestock] = useState(resumed ? resumed.lines.every((line) => line.restock) : true);
   const [reason, setReason] = useState(resumed?.reason ?? '');
   const [pending, setPending] = useState(false);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState(notice ?? '');
   const clientRefundId = useRef(resumed?.clientRefundId ?? mintUuid());
   const envelope = useRef<OrderRefundEnvelope | null>(resume?.envelope ?? null);
   const inFlight = useRef(false);

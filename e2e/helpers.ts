@@ -549,3 +549,30 @@ export async function discount(page: Page, opener: 'line' | 'order', type: 'Perc
   await page.getByLabel('Discount value', { exact: true }).fill(value);
   await page.getByRole('button', { name: 'Apply', exact: true }).click();
 }
+
+/**
+ * Refunds in the Orders sheet's refund form (#569): the first line's `units`, or every line's whole remaining quantity,
+ * then the reason, Process Refund and its confirmation. Polled as text, so a refusal fails with the form's own message.
+ * Returns the form's Refund Total in minor units (the e2e store's currency has two decimals), read before submitting.
+ */
+export async function refundInModal(page: Page, { units, reason }: { units?: number; reason: string }): Promise<number> {
+  const modal = page.getByTestId('refund-modal');
+  await expect(modal).toBeVisible();
+  const steppers = modal.locator('[data-testid^="refund-qty-"]');
+  const lines = units === undefined ? await steppers.count() : 1;
+  for (let index = 0; index < lines; index++) {
+    const stepper = steppers.nth(index);
+    const lineId = ((await stepper.getAttribute('data-testid')) ?? '').slice('refund-qty-'.length);
+    const target = units ?? Number(await modal.getByTestId(`refund-remaining-${lineId}`).textContent());
+    for (let press = 0; press < target; press++) await stepper.getByText('+', { exact: true }).click();
+  }
+  await modal.getByTestId('refund-reason').fill(reason);
+  const messages = async () => [...await modal.getByTestId('refund-error').allTextContents(),
+    ...await modal.getByTestId('refund-invalid').allTextContents()].join(' | ');
+  await expect.poll(messages).toBe('');
+  const totalMinor = Number(((await modal.getByTestId('refund-total').textContent()) ?? '').replace(/\D/g, ''));
+  await modal.getByTestId('refund-submit').click();
+  await modal.getByTestId('refund-confirm').click();
+  await expect.poll(async () => await modal.count() === 0 ? 'closed' : await messages() || 'open', { timeout: 15_000 }).toBe('closed');
+  return totalMinor;
+}

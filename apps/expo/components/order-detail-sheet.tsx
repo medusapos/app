@@ -10,12 +10,13 @@ import {
 } from '../lib/order-detail';
 import { formatReceiptDate } from '../lib/format-date';
 import { ordersTableCells } from '../lib/orders-table';
-import { REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
-import { fullRefundOffer } from '../lib/refund';
+import { PARTIAL_REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
+import { refundFormInput } from '../lib/refund';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedSettings } from '../lib/store-settings';
 import { OrderRefundDialog, useRefundRecords } from './order-refund-dialog';
+import { OrderRefundModal } from './order-refund-modal';
 
 // While a reprint shows, a print keeps only it: other branches collapse, its ancestors stop positioning, clipping and
 // painting, and it moves to the page's top left. Inert without a reprint on the page, so the paid screen prints as before.
@@ -47,7 +48,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   order: PosOrder | null; onClose: () => void; formatDate: (iso: string) => string;
   onRetry: (orderIds: string[]) => Promise<number>; onFlush: () => Promise<void>;
   stuck?: UseOrderOutboxResult['state']['stuck'];
-  /** The store's copy of this sale and this till's `pos_refunds`: Refund all (ADR 0026) needs both. */
+  /** The store's copy of this sale and this till's `pos_refunds`: Refund (ADR 0026, #569) needs both. */
   storeOrder?: StoreOrder | null; refunds?: PosRefundCollection;
   /** The Billing Address the sale's table row shows ('—' when it has none). */
   billing?: string;
@@ -55,19 +56,31 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   const { session } = useSession();
   const [reprint, setReprint] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [refunding, setRefunding] = useState(false);
+  // What is open over the sheet: the refund form, or the dialog that resends a refund sent without a final answer.
+  const [refunding, setRefunding] = useState<'none' | 'modal' | 'resume'>('none');
+  // Why the form handed its refund to the resume dialog.
+  const [handoff, setHandoff] = useState('');
   // Each sale opens on its detail; keyed on the id, so a live sync-status update keeps the receipt up.
-  useEffect(() => { setReprint(false); setRefunding(false); }, [order?.id]);
+  useEffect(() => { setReprint(false); setRefunding('none'); setHandoff(''); }, [order?.id]);
   const records = useRefundRecords(refunds, storeOrder?.id ?? undefined);
-  const applied = records.find((record) => record.status === 'applied');
   const resume = records.find((record) => record.status === 'pending' || record.status === 'unsent') ?? null;
   const capabilities = session?.capabilities;
-  const canRefund = !!order && !!storeOrder && !!refunds && (capabilities?.orderRefund ?? 0) >= 1
-    && (capabilities?.pluginContract ?? 0) >= REFUND_PLUGIN_CONTRACT && !applied && fullRefundOffer(storeOrder, order.payments, true).offered;
-  // A refund sent without a final answer opens again on its own envelope when its sale does.
-  useEffect(() => { if (resume && canRefund) setRefunding(true); }, [order?.id, resume?.id, canRefund]);
-  const refundedMinor = applied ? applied.result?.totalMinor ?? applied.envelope.payload.totalMinor
-    : storeOrder?.refunds.length ? storeOrder.refunds.reduce((total, refund) => total + refund.amountMinor, 0) : null;
+  const gate = !!order && !!storeOrder && !!refunds && (capabilities?.orderRefund ?? 0) >= 1
+    && (capabilities?.pluginContract ?? 0) >= PARTIAL_REFUND_PLUGIN_CONTRACT;
+  const input = gate && order && storeOrder ? refundFormInput(storeOrder, order.payments) : null;
+  // An applied refund has landed once the store's copy carries each of its store refunds; until then the form would
+  // read stale remaining quantities, so no new refund starts.
+  const storeRefundIds = new Set(storeOrder?.refunds.map((refund) => refund.id));
+  const unlanded = records.filter((record) => record.status === 'applied'
+    && !(record.result?.refunds ?? []).every((refund) => storeRefundIds.has(refund.id)));
+  const canRefund = gate && !resume && unlanded.length === 0 && !!input?.offered;
+  const canResume = gate && !!resume;
+  // A refund sent without a final answer opens again on its own envelope when its sale does; never over the open form,
+  // whose own send is pending until it answers.
+  useEffect(() => { if (canResume) setRefunding((open) => open === 'none' ? 'resume' : open); }, [order?.id, resume?.id, canResume]);
+  const refundedParts = [...(storeOrder?.refunds.map((refund) => refund.amountMinor) ?? []),
+    ...unlanded.map((record) => record.result?.totalMinor ?? record.envelope.payload.totalMinor)];
+  const refundedMinor = refundedParts.length ? refundedParts.reduce((total, amount) => total + amount, 0) : null;
   useEffect(() => { if (reprint) injectReceiptPrintStyle(); }, [reprint]);
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
@@ -116,7 +129,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
           </View> : null}
           {refundedMinor !== null ? <Text testID="order-detail-refunded" className="text-sm text-foreground">{`Refunded ${money(refundedMinor)}`}</Text> : null}
         </View>}
-        onRefund={canRefund ? () => setRefunding(true) : undefined}
+        onRefund={canRefund ? () => setRefunding('modal') : undefined}
         footerSlot={<View className="flex-row gap-2">
           {canSyncOrder(order) ? <Button variant="outline" className="flex-1" testID="order-detail-sync" disabled={syncing}
             onPress={() => {
@@ -130,7 +143,11 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
     </DialogContent> : null}
   </Dialog>
     {/* Over the sheet as user-sheet's SwitchConfirm: a sibling, since a dialog inside DialogContent never shows on web. */}
-    {refunding && order && storeOrder && refunds ? <OrderRefundDialog order={storeOrder} tenders={order.payments} refunds={refunds} resume={resume}
-      onClose={() => setRefunding(false)} /> : null}
+    {refunding === 'modal' && order && storeOrder && refunds && input?.offered ? <OrderRefundModal order={storeOrder}
+      tenders={order.payments} refunds={refunds} input={input} onClose={() => setRefunding('none')}
+      onUnanswered={(message) => { setHandoff(message); setRefunding('resume'); }} /> : null}
+    {refunding === 'resume' && order && storeOrder && refunds && resume ? <OrderRefundDialog key={resume.id} order={storeOrder}
+      tenders={order.payments} refunds={refunds} resume={resume} notice={handoff || undefined}
+      onClose={() => { setRefunding('none'); setHandoff(''); }} /> : null}
   </>;
 }
