@@ -151,6 +151,20 @@ describe('Settings › Card readers', () => {
     expect(screen.getByTestId('settings-card-readers-how').textContent).toContain('No card readers');
   });
 
+  it('with the plugin contract unknown (the /info read fails), says nothing about updating the plugin', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) =>
+      url.includes('/tally/v1/info') ? new Response(null, { status: 500 })
+        : url.includes('/tally/v1/payment-providers') ? ok({ providers: [manual, stripe] }) : new Response(null, { status: 404 })));
+    setWindowWidth(1280, 800);
+    await mount();
+    fireEvent.click(screen.getByTestId('settings-nav-card-readers'));
+    await screen.findByTestId('settings-payment-provider-pp_system_default');
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringMatching(`^${baseUrl}/tally/v1/info`), expect.anything()));
+    expect(screen.queryByTestId('settings-card-readers-update')).toBeNull();
+    expect(screen.queryByTestId(/^settings-card-reader-pp_/)).toBeNull();
+    expect(screen.getByTestId('settings-card-readers-how').textContent).toContain('No card readers');
+  });
+
   it('with no terminal providers says there are no card readers and how to take a card at checkout', async () => {
     vi.stubGlobal('fetch', providersResponse([manual]));
     setWindowWidth(1280, 800);
