@@ -319,6 +319,21 @@ describe('salesSummaryHtml', () => {
     expect(summary({ notSentCount: 3 }).querySelector('p.warning')?.textContent).toBe('3 sales not sent yet');
   });
 
+  it('prints the refunds note as a warning when given, and nothing extra without one', () => {
+    const input: SalesSummaryInput = { figures: figures({ refunds: { count: 0, amountMinor: 0, orders: 0 } }), context,
+      period: 'Today', scope: 'All registers · All orders', notSentCount: 1 };
+    const note = "Refunds couldn't be read from the store, so the <b>Refunded</b> figure may be short.";
+    const html = salesSummaryHtml({ ...input, refundsNote: note });
+    expect(Array.from(parse(html).querySelectorAll('p.warning')).map((p) => p.textContent)).toEqual(['1 sale not sent yet', note]);
+    expect(html).not.toContain('<b>');
+    // The note is the only difference: without it the page is exactly the page as it was.
+    const plain = salesSummaryHtml(input);
+    expect(html.replace(`\n  <p class="warning">${note.replace(/'/g, '&#39;').replace(/</g, '&lt;').replace(/>/g, '&gt;')}</p>`, ''))
+      .toBe(plain);
+    expect(salesSummaryHtml({ ...input, refundsNote: '' })).toBe(plain);
+    expect(parse(plain).querySelectorAll('p.warning')).toHaveLength(1);
+  });
+
   it('escapes the labels it prints', () => {
     const rows = [{ method: 'gift', label: '<b>Gift</b>', amountMinor: 100, orders: 1 }];
     const html = salesSummaryHtml({ figures: figures({ payments: { rows, takenMinor: 100 } }), context,

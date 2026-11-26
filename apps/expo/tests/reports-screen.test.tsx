@@ -727,6 +727,38 @@ describe('the Refunds card', () => {
     expect(within(sheet).getByTestId('report-sheet-empty').textContent).toBe("Refunds couldn't be read from the store.");
   });
 
+  async function printedSummaryWarnings() {
+    document.getElementById('closure-print-frame')?.remove();
+    fireEvent.click(screen.getByTestId('reports-print-summary'));
+    const frame = document.getElementById('closure-print-frame') as HTMLIFrameElement;
+    const print = vi.spyOn(frame.contentWindow!, 'print').mockImplementation(() => {});
+    await waitFor(() => expect(print).toHaveBeenCalledOnce());
+    return Array.from(frame.contentDocument!.querySelectorAll('p.warning')).map((p) => p.textContent);
+  }
+
+  it('Print summary carries the refunds note when the store\'s refunds couldn\'t be read', async () => {
+    listOrders.mockRejectedValue(new TypeError('Failed to fetch'));
+    await mountRefundable();
+    await screen.findByTestId('reports-refunds-unread');
+    expect(await printedSummaryWarnings())
+      .toEqual(["Refunds couldn't be read from the store, so the Refunded figure may be short."]);
+  });
+
+  it('Print summary carries the reading note while the store\'s refunds are still being read', async () => {
+    listOrders.mockReturnValue(new Promise<StoreOrderPage>(() => {}));
+    await mountRefundable();
+    await waitFor(() => expect(listOrders).toHaveBeenCalled());
+    expect(await printedSummaryWarnings())
+      .toEqual(['Refunds were still being read from the store, so the Refunded figure may be short.']);
+  });
+
+  it('Print summary carries no refunds note once the store\'s refunds are read', async () => {
+    listOrders.mockResolvedValue({ orders: [storeOrder({ clientOrderId: 'sale-1', refunds: [{ id: 'r1', amountMinor: 500 }] })], hasMore: false });
+    await mountRefundable();
+    await waitFor(() => expect(screen.getByTestId('card-refunds-figure').textContent).toBe(ctx.formatMoney('5.00')));
+    expect(await printedSummaryWarnings()).toEqual([]);
+  });
+
   it('says the refunds could not be read when a store order in the window is unreadable', async () => {
     // The medusa connector leaves an order it cannot parse out of `orders` and counts it in the page's `unreadable`.
     listOrders.mockResolvedValue({ orders: [storeOrder({ clientOrderId: 'sale-1', refunds: [{ id: 'r1', amountMinor: 500 }] })],

@@ -131,4 +131,31 @@ describe('reportPanelCsv and reportPanelHtml', () => {
     expect(html).not.toContain('<b>x</b>');
     expect(html).toContain('Printed ');
   });
+
+  const htmlInput = {
+    ctx: { ...ctx, store: { name: 'Test shop' }, timezone: 'device' as const, printedAt: '2026-11-18T10:00:00Z' },
+    covers: 'Today · All registers',
+  };
+  const page = (html: string) => new DOMParser().parseFromString(html, 'text/html');
+  it('an unread Refunds panel prints and exports the couldn\'t-be-read note, not an empty table', () => {
+    const unread = reportPanel('refunds', { figures: figures(), orders: [], ctx, today, refundsUnread: true });
+    const html = reportPanelHtml(unread, htmlInput);
+    expect(page(html).querySelector('p.warning')?.textContent).toBe("Refunds couldn't be read from the store.");
+    expect(html).toContain('Refunds couldn&#39;t be read from the store.');
+    expect(Array.from(page(html).querySelectorAll('thead th')).map((th) => th.textContent)).toEqual(['Refunds', 'Orders', 'Amount']);
+    expect(page(html).querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(reportPanelCsv(unread).split('\r\n')).toEqual(['"Refunds","Orders","Amount"', '"Refunds couldn\'t be read from the store."']);
+  });
+  it('a panel without an empty note prints and exports as before', () => {
+    const none = panel('refunds', figures());
+    expect(none.empty).toBeUndefined();
+    const html = reportPanelHtml(none, htmlInput);
+    expect(html).toContain('<tbody></tbody>');
+    expect(page(html).querySelector('p.warning')).toBeNull();
+    expect(reportPanelCsv(none)).toBe('"Refunds","Orders","Amount"');
+    // A note never replaces rows that are there.
+    const listed = { ...products, empty: 'None read' };
+    expect(reportPanelHtml(listed, htmlInput)).toBe(reportPanelHtml(products, htmlInput));
+    expect(reportPanelCsv(listed)).toBe(reportPanelCsv(products));
+  });
 });

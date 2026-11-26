@@ -29,6 +29,10 @@ const PrinterIcon = createSvgIcon('PrinterIcon', () => <>
   <Path d="M6 14h12v8H6z" />
 </>);
 
+// What a printed summary says when the store's refunds were not read in full: its Refunded row may be short or missing.
+const REFUNDS_FAILED_NOTE = "Refunds couldn't be read from the store, so the Refunded figure may be short.";
+const REFUNDS_READING_NOTE = 'Refunds were still being read from the store, so the Refunded figure may be short.';
+
 export default function ReportsScreen() {
   const { session } = useSession();
   const { orders } = useOutboxContext();
@@ -156,7 +160,8 @@ export default function ReportsScreen() {
                   const { period, registerLabel, statusLabel } = reportScope(filters, registers, today, ctx.locale);
                   try {
                     await printSalesSummary({ figures: summary.figures, context: ctx, notSentCount: summary.notSentCount,
-                      period, scope: `${registerLabel} · ${statusLabel}` });
+                      period, scope: `${registerLabel} · ${statusLabel}`, refundsNote: refundsRead.state === 'failed'
+                        ? REFUNDS_FAILED_NOTE : refundsRead.state === 'reading' ? REFUNDS_READING_NOTE : undefined });
                   } catch (error) {
                     setSummaryError(error instanceof Error ? error.message : SUMMARY_PRINT_FAILED);
                   } finally { setSummaryBusy(false); }

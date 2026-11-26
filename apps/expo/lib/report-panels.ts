@@ -87,7 +87,9 @@ export function reportPanel(card: SalesCardId, input: {
 }
 
 export function reportPanelCsv(panel: ReportPanel): string {
-  return csvFromCells([panel.columns.map((column) => column.label), ...panel.rows]);
+  // An empty panel with a note carries the note, so the file never reads as "none in this period".
+  const rows = panel.rows.length === 0 && panel.empty ? [[panel.empty]] : panel.rows;
+  return csvFromCells([panel.columns.map((column) => column.label), ...rows]);
 }
 
 // Black on white, readable on 80 mm paper and as a centred column on A4 (as the till's other printed reports).
@@ -115,6 +117,8 @@ export function reportPanelHtml(panel: ReportPanel, input: {
   const { ctx, covers } = input;
   const { store } = ctx;
   const align = (index: number) => panel.columns[index]?.align === 'right' ? ' class="right"' : '';
+  // An empty panel with a note prints the note in place of the empty table body.
+  const note = panel.rows.length === 0 ? panel.empty : undefined;
   return `<!doctype html>
 <html><head><meta charset="utf-8"><title>${escapeHtml(panel.title)}</title><style>${STYLE}</style></head>
 <body><main class="report-panel">
@@ -123,8 +127,9 @@ export function reportPanelHtml(panel: ReportPanel, input: {
   <p class="covers">${escapeHtml(covers)}</p>
   <table class="report">
     <thead><tr>${panel.columns.map((column, i) => `<th scope="col"${align(i)}>${escapeHtml(column.label)}</th>`).join('')}</tr></thead>
-    <tbody>${panel.rows.map((row) => `<tr>${row.map((cell, i) => `<td${align(i)}>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>
-  </table>
+    ${note ? '' : `<tbody>${panel.rows.map((row) => `<tr>${row.map((cell, i) => `<td${align(i)}>${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')}</tbody>`}
+  </table>${note ? `
+  <p class="warning">${escapeHtml(note)}</p>` : ''}
   <p class="status">${escapeHtml(panel.status)}</p>
   <footer><p>Printed ${escapeHtml(formatClosureDate(ctx.printedAt, ctx).datetime)}</p></footer>
 </main></body></html>`;
