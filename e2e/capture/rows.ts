@@ -575,4 +575,11 @@ export const rows: CaptureRow[] = [
     await sell(page, size, 'E2E-2');
     await expect(headerState(page)).toHaveText('Offline · 1 sale to send');
   } },
+  // `?` outside a text field (lib/shortcuts.ts), so the search box the scan typed into lets go first.
+  { id: '20', title: 'Keyboard shortcuts', state: 'Help sheet open over the Sale', reach: async (page) => {
+    await add(page, 'E2E-1');
+    await search(page).blur();
+    await page.keyboard.press('?');
+    await expect(page.getByTestId('shortcuts-sheet')).toBeVisible();
+  } },
 ];
