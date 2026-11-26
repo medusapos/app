@@ -104,6 +104,13 @@ An unsupported version is a per-command `unsupported_version` with `error.data` 
 - `413 { code: 'batch_too_large', maxCommands: MAX_COMMANDS, message }`: more than `MAX_COMMANDS` commands; `413 { code: 'body_too_large', maxBytes: MAX_BODY_BYTES, message }`: a JSON body over `MAX_BODY_BYTES` bytes. Nothing is claimed; split the batch and resend.
   The parser reads and discards the whole oversized upload before it answers, so put a proxy body limit in front of the store to stop large uploads early.
 - `409 { code: 'in_progress', id }`: this command is already being processed.
+- `409 { code: 'needs_admin', id, reason, message }`: this `order.create` or `order.refund` is parked for an admin (#545).
+  `reason` and `message` come from a fixed table (`commands/needs-admin.ts`), never from the stored admin detail. A sale
+  always answers `admin_check`. A refund answers its stored reason, and an unknown or missing one answers `admin_check`.
+  `session_closed` (the till's "Not paid") is sent only when, at answer time, its `tally_refund` row has neither
+  `money_started_at` nor `medusa_refund_id` and Medusa's payment shows no refund that the till rows do not record;
+  otherwise it answers `money_unconfirmed`. Old tills read it as any `409`. Once an admin resolves the command, the same
+  resend gets its result.
 - `503 { code: 'transient', id, message }`: execution failed; its claim is released for retry.
 
 A `409` or `503` stops the batch at that command. Retry the whole batch; earlier
@@ -222,8 +229,8 @@ See [the lease ADR](../../docs/adr/0001-command-ledger-lease.md).
 
 `needs_admin`: a reclaimed `order.create` that finds its order in a state the recipe never creates (a refund, a partial
 capture, a non-system payment provider or a canceled fulfilment) stops before any write. The row is parked with
-`needs_admin_reason` (`{ orderId, clientOrderId, detail }`) and one error log line, `claim` never reclaims it, and the till gets `409 in_progress`
-on every resend. The script builds to `.medusa/server/src/scripts/tally-ledger-resolve.js` (checked after `npm run build`);
+`needs_admin_reason` (`{ orderId, clientOrderId, detail }`) and one error log line, `claim` never reclaims it, and the till gets `409 needs_admin`
+(reason `admin_check`) on every resend. The script builds to `.medusa/server/src/scripts/tally-ledger-resolve.js` (checked after `npm run build`);
 from the store's directory an admin runs `npx medusa exec node_modules/@medusapos/medusa-plugin/.medusa/server/src/scripts/tally-ledger-resolve.js <commandId> apply|reject [message]`:
 `apply` (order fixed) makes the row reclaimable at once, so the next resend resumes it. `reject` first takes back any stock
 top-up the plugin made for the sale and hasn't reversed (ADR 0003), then cancels the sale's live order with

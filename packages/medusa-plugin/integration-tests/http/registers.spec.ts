@@ -343,7 +343,8 @@ medusaIntegrationTestRunner({
         await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
         await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
         const parked = await post([order])
-        expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+        expect([parked.status, parked.data]).toEqual([409, { code: 'needs_admin', id: order.id, reason: 'admin_check',
+          message: 'A manager must check this sale in the store admin.' }])
         const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
         await script.default({ container, args: [order.id, 'reject'] })
         const read = await api.get(`/tally/v1/registers/${opening.payload.registerId}`, { headers })
@@ -590,7 +591,8 @@ medusaIntegrationTestRunner({
       await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
       await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
       const parked = await post([order])
-      expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+      expect([parked.status, parked.data]).toEqual([409, { code: 'needs_admin', id: order.id, reason: 'admin_check',
+        message: 'A manager must check this sale in the store admin.' }])
       expect(await ledger.retrieveTallyCommand(order.id)).toMatchObject({ status: 'needs_admin' })
       const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
       await script.default({ container, args: [order.id, 'reject'] })
@@ -629,7 +631,8 @@ medusaIntegrationTestRunner({
       await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
       await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
       const parked = await post([order])
-      expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+      expect([parked.status, parked.data]).toEqual([409, { code: 'needs_admin', id: order.id, reason: 'admin_check',
+        message: 'A manager must check this sale in the store admin.' }])
       expect(await ledger.retrieveTallyCommand(order.id)).toMatchObject({ status: 'needs_admin' })
       const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
       await script.default({ container, args: [order.id, 'reject'] })
@@ -683,7 +686,8 @@ medusaIntegrationTestRunner({
       await markPaymentCollectionAsPaid(container).run({ input: { order_id: draft.id, payment_collection_id: collection.id } })
       await container.resolve(Modules.PAYMENT).updatePaymentCollections(collection.id, { status: 'partially_captured' })
       const parked = await post([order])
-      expect([parked.status, parked.data]).toEqual([409, { code: 'in_progress', id: order.id }])
+      expect([parked.status, parked.data]).toEqual([409, { code: 'needs_admin', id: order.id, reason: 'admin_check',
+        message: 'A manager must check this sale in the store admin.' }])
       expect(await ledger.retrieveTallyCommand(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { orderId: draft.id } })
       const script = require('../../.medusa/server/src/scripts/tally-ledger-resolve') as typeof import('../../src/scripts/tally-ledger-resolve')
       await script.default({ container, args: [order.id, 'reject'] })

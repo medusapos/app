@@ -10,15 +10,21 @@ import { envelopeErrors, payloadNulErrors, payloadShapeErrors, MAX_PAYLOAD_ERROR
 import { clientTimeStageErrors, clientTimeUpperBound } from '../../../../workflows/client-time'
 import { lineTaxRefusals, v5DisplayErrors, withoutV5Display } from '../../../../workflows/tally-order-create/v5'
 import { executeOrderRefund } from '../../../../workflows/tally-order-refund/execute'
+import { loadNeedsAdminAnswer } from './needs-admin'
 import { registerVersionAccepted, SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_ORDER_REFUND_VERSIONS, SUPPORTED_REGISTER_VERSIONS } from '../versions'
 
 export type BatchOutcome =
   | { status: 200; body: CommandBatchResponse }
   | { status: 409; body: { code: 'in_progress'; id: string } }
+  | { status: 409; body: { code: 'needs_admin'; id: string; reason: string; message: string } }
   | { status: 503; body: { code: 'transient'; id: string; message: string } }
 
-function batchFailure(container: MedusaContainer, outcome: Exclude<ExecuteOutcome, { kind: 'result' }>): BatchOutcome {
-  if (outcome.kind === 'in_progress') return { status: 409, body: { code: 'in_progress', id: outcome.id } }
+export async function batchFailure(container: MedusaContainer, outcome: Exclude<ExecuteOutcome, { kind: 'result' }>): Promise<BatchOutcome> {
+  if (outcome.kind === 'in_progress') {
+    const answer = await loadNeedsAdminAnswer(container, outcome.id)
+    if (answer) return { status: 409, body: { code: 'needs_admin', id: outcome.id, ...answer } }
+    return { status: 409, body: { code: 'in_progress', id: outcome.id } }
+  }
   const { id, message } = outcome
   const logger = container.resolve(ContainerRegistrationKeys.LOGGER)
   logger.error(`Command ${id} failed transiently: ${message}`)
@@ -82,7 +88,7 @@ export async function processBatch(
         continue
       }
       const outcome = replay ?? await executeOrderRefund(container, envelope, upperBound, actorId)
-      if (outcome.kind !== 'result') return batchFailure(container, outcome)
+      if (outcome.kind !== 'result') return await batchFailure(container, outcome)
       results.push(outcome.result)
       continue
     }
@@ -97,7 +103,7 @@ export async function processBatch(
         continue
       }
       const outcome = replay ?? await executeRegisterCommand(container, envelope, upperBound, options)
-      if (outcome.kind !== 'result') return batchFailure(container, outcome)
+      if (outcome.kind !== 'result') return await batchFailure(container, outcome)
       results.push(outcome.result)
       continue
     }
@@ -108,7 +114,7 @@ export async function processBatch(
       continue
     }
     const replay = await replayOrderCreate(container, command)
-    if (replay && replay.kind !== 'result') return batchFailure(container, replay)
+    if (replay && replay.kind !== 'result') return await batchFailure(container, replay)
     if (replay?.kind === 'result') {
       results.push(replay.result)
       continue
@@ -168,7 +174,7 @@ export async function processBatch(
       continue
     }
     const outcome = await executeOrderCreate(container, command, options, writes)
-    if (outcome.kind !== 'result') return batchFailure(container, outcome)
+    if (outcome.kind !== 'result') return await batchFailure(container, outcome)
     results.push(outcome.result)
   }
   return { status: 200, body: { results } }
