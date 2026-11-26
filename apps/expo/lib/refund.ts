@@ -1,5 +1,6 @@
-import type { OrderRefundLine, StoreOrder } from '@tallyui/core';
-import type { PosOrder } from '@tallyui/pos';
+import type { RefundFormValue } from '@tallyui/components';
+import type { OrderRefundLine, StoreOrder, StoreOrderLine } from '@tallyui/core';
+import { priceRefund, refundableLines, type EarlierRefund, type PosOrder } from '@tallyui/pos';
 import { paymentLabel } from './order-detail';
 
 /** A full refund of one store order (ADR 0026), priced as the plugin prices it, or why none is offered. */
@@ -58,4 +59,54 @@ export function fullRefundOffer(order: StoreOrder, tenders: PosOrder['payments']
     offered: true, lines: products.map((line) => ({ orderLineId: line.id, quantity: line.quantity, restock })), shippingMinor,
     adjustmentMinor: 0, totalMinor, destination: nonCash.length > 0 ? 'original_method' : 'cash', methodLabel,
   };
+}
+
+export type RefundFormInput =
+  | { offered: true; lines: StoreOrderLine[]; refunds: EarlierRefund[]; orderTotalMinor: number; refundedMinor: number;
+      refundableShippingMinor: number; remainderShareMinor: number; originalMethod?: { title: string; available: true } }
+  | { offered: false; reason: 'canceled' | 'refunded' | 'no_payment' | 'money_drift' | 'lines_unknown' };
+
+export function refundFormInput(order: StoreOrder, tenders: PosOrder['payments']): RefundFormInput {
+  if (order.status === 'canceled') return { offered: false, reason: 'canceled' };
+  const paidMinor = sum(order.payments.map((payment) => payment.amountMinor));
+  if (order.paymentRecordUnreadable || paidMinor === 0) return { offered: false, reason: 'no_payment' };
+  if (order.refunds.some((refund) => refund.lines === undefined)) return { offered: false, reason: 'lines_unknown' };
+  const refundedMinor = sum(order.refunds.map((refund) => refund.amountMinor));
+  if (paidMinor - refundedMinor <= 0) return { offered: false, reason: 'refunded' };
+
+  const lines = order.lines.filter((line) => line.clientLineId && line.quantity > 0);
+  const refunds = order.refunds.map((refund) => ({ lines: refund.lines! }));
+  const earlierLineMoney = refunds.map((refund) => sum(refund.lines.map((line) => line.netMinor + line.taxMinor)));
+  const shippingMinor = sum(order.shipping.map(gross));
+  // Earlier shipping is an upper estimate: the store does not return each refund's shipping.
+  const earlierShippingMinor = sum(order.refunds.map((refund, index) => Math.max(0, refund.amountMinor - earlierLineMoney[index])));
+  const refundableShippingMinor = Math.max(0, shippingMinor - earlierShippingMinor);
+  const fees = [...order.lines.filter((line) => !line.clientLineId), ...order.fees];
+  const remainderMinor = paidMinor - shippingMinor - sum(fees.map(gross)) - sum(earlierLineMoney);
+  const request = refundableLines(lines, refunds).map(({ orderLineId, refundableQuantity }) =>
+    ({ orderLineId, quantity: refundableQuantity, restock: false }));
+  const { priced, totalMinor } = priceRefund(lines, refunds, request);
+  let remainderShareMinor = 0;
+  // Mirror the plugin's ADR 0026 rulings B/N1: a negative difference needs a covering net or the largest gross line's tax.
+  if (priced.length) {
+    const difference = remainderMinor - totalMinor;
+    if (Math.abs(difference) > lines.length) return { offered: false, reason: 'money_drift' };
+    const largest = priced.reduce((best, line) => line.totalMinor >= best.totalMinor ? line : best);
+    if (difference >= 0 || priced.some((line) => line.netMinor >= -difference) || largest.taxMinor + difference >= 0) {
+      remainderShareMinor = difference;
+    }
+  }
+  const labels = [...new Set(tenders.filter((tender) => tender.method !== 'cash').map((tender) => paymentLabel(tender.method)))];
+  return {
+    offered: true, lines, refunds, orderTotalMinor: paidMinor, refundedMinor, refundableShippingMinor, remainderShareMinor,
+    ...(labels.length ? { originalMethod: { title: labels.join(', '), available: true as const } } : {}),
+  };
+}
+
+export function refundRequest(value: RefundFormValue, input: Extract<RefundFormInput, { offered: true }>): RefundFormValue {
+  if (!value.lines.length || input.remainderShareMinor === 0) return value;
+  const remaining = refundableLines(input.lines, input.refunds);
+  const emptiesLines = remaining.every(({ orderLineId, refundableQuantity }) =>
+    (value.lines.find((line) => line.orderLineId === orderLineId)?.quantity ?? 0) === refundableQuantity);
+  return emptiesLines ? { ...value, adjustmentMinor: value.adjustmentMinor - input.remainderShareMinor } : value;
 }

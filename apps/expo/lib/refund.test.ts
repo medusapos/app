@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { StoreOrder, StoreOrderLine } from '@tallyui/core';
 import type { PosOrder } from '@tallyui/pos';
-import { fullRefundOffer } from './refund';
+import type { RefundFormValue } from '@tallyui/components';
+import { paymentLabel } from './order-detail';
+import { fullRefundOffer, refundFormInput, refundRequest } from './refund';
 
 // 0.99 ex 19% splits the plugin's way (net = round(gross − tax)): net 99, tax 19, 1.18 a line.
 const line = (id: string, extra: Partial<StoreOrderLine> = {}): StoreOrderLine => ({
@@ -149,5 +151,110 @@ describe('fullRefundOffer', () => {
     const offer = fullRefundOffer(order({ paid: 1553, lines: [product, fee], shipping }), cash, true);
     expect(offer).toMatchObject({ offered: true, totalMinor: 1553 - 121, shippingMinor: 242 });
     expect(offer.offered && offer.lines.map((entry) => entry.orderLineId)).toEqual(['p']);
+  });
+});
+
+const earlierLine = (orderLineId: string) => ({ orderLineId, quantity: 1, netMinor: 99, taxMinor: 19 });
+const firstRefund = { id: 'r1', amountMinor: 118, lines: [earlierLine('a')] };
+const formValue: RefundFormValue = {
+  lines: threeLines().map(({ id }) => ({ orderLineId: id, quantity: 1, restock: true })),
+  shippingMinor: 0, adjustmentMinor: -1, totalMinor: 353, destination: 'cash', reason: 'Returned',
+};
+
+describe('refundFormInput', () => {
+  it('offers the signed difference between the payment and the three line shares', () => {
+    const input = refundFormInput(order({ paid: 353 }), cash);
+    expect(input).toMatchObject({ offered: true, remainderShareMinor: -1, orderTotalMinor: 353, refundedMinor: 0 });
+    expect(input.offered && input.lines).toEqual(threeLines());
+    expect(refundFormInput(order({ paid: 355 }), cash)).toMatchObject({ offered: true, remainderShareMinor: 1 });
+  });
+
+  it('subtracts earlier line money before assigning the remainder to the remaining lines', () => {
+    expect(refundFormInput(order({ paid: 353, refunds: [firstRefund] }), cash)).toMatchObject({
+      offered: true, refundedMinor: 118, remainderShareMinor: -1, refunds: [{ lines: firstRefund.lines }],
+    });
+    const second = { id: 'r2', amountMinor: 118, lines: [earlierLine('b')] };
+    expect(refundFormInput(order({ paid: 353, refunds: [firstRefund, second] }), cash))
+      .toMatchObject({ offered: true, refundedMinor: 236, remainderShareMinor: -1 });
+  });
+
+  it('prices the remaining units of a partially refunded line', () => {
+    const lines = [line('a', { quantity: 3, totalMinor: 297, taxMinor: 57 })];
+    const double = { id: 'r1', amountMinor: 236, lines: [{ orderLineId: 'a', quantity: 2, netMinor: 198, taxMinor: 38 }] };
+    for (const refunds of [[], [double], [firstRefund, { ...firstRefund, id: 'r2' }]]) {
+      expect(refundFormInput(order({ paid: 353, lines, refunds }), cash)).toMatchObject({ offered: true, remainderShareMinor: -1 });
+    }
+  });
+
+  it('refuses drift greater than one minor unit per line', () => {
+    expect(refundFormInput(order({ paid: 360 }), cash)).toEqual({ offered: false, reason: 'money_drift' });
+  });
+
+  it('drops a negative difference unless the net or the largest gross line’s tax covers it', () => {
+    const shipping = [{ name: 'Courier', totalMinor: 100, taxMinor: 0 }];
+    const lines = ['a', 'b'].map(id => line(id, { totalMinor: 1, taxMinor: 0 }));
+    expect(refundFormInput(order({ paid: 100, lines, shipping }), cash)).toMatchObject({ offered: true, remainderShareMinor: 0 });
+    expect(refundFormInput(order({ paid: 101, lines: [line('a', { totalMinor: 0, taxMinor: 2 })], shipping }), cash))
+      .toMatchObject({ offered: true, remainderShareMinor: -1 });
+  });
+
+  it('excludes both kinds of fees from the remainder and the form lines', () => {
+    const lines = [...threeLines(), line('fee', { clientLineId: undefined, totalMinor: 50, taxMinor: 0 })];
+    const fees = [{ name: 'Bag fee', totalMinor: 20, taxMinor: 0 }];
+    const input = refundFormInput(order({ paid: 423, lines, fees }), cash);
+    expect(input).toMatchObject({ offered: true, remainderShareMinor: -1 });
+    expect(input.offered && input.lines).toEqual(threeLines());
+  });
+
+  it('reduces available shipping only by earlier amounts beyond the refunded lines', () => {
+    const sale = { paid: 853, shipping: [{ name: 'Courier', totalMinor: 500, taxMinor: 0 }] };
+    expect(refundFormInput(order(sale), cash)).toMatchObject({ offered: true, refundableShippingMinor: 500 });
+    expect(refundFormInput(order({ ...sale, refunds: [{ ...firstRefund, amountMinor: 618 }] }), cash))
+      .toMatchObject({ offered: true, refundableShippingMinor: 0 });
+    expect(refundFormInput(order({ ...sale, refunds: [firstRefund] }), cash)).toMatchObject({ offered: true, refundableShippingMinor: 500 });
+  });
+
+  it('refuses an earlier refund whose lines are unknown', () => {
+    expect(refundFormInput(order({ paid: 353, refunds: [{ id: 'r1', amountMinor: 353 }] }), cash))
+      .toEqual({ offered: false, reason: 'lines_unknown' });
+  });
+
+  it('refuses canceled, unpaid, unreadable and fully refunded sales', () => {
+    expect(refundFormInput(order({ paid: 353, status: 'canceled' }), cash)).toEqual({ offered: false, reason: 'canceled' });
+    expect(refundFormInput(order({ paid: 353, payments: [] }), cash)).toEqual({ offered: false, reason: 'no_payment' });
+    expect(refundFormInput(order({ paid: 353, paymentRecordUnreadable: true }), cash)).toEqual({ offered: false, reason: 'no_payment' });
+    const refunds = [{ id: 'r1', amountMinor: 353, lines: threeLines().map(({ id }) => earlierLine(id)) }];
+    expect(refundFormInput(order({ paid: 353, refunds }), cash)).toEqual({ offered: false, reason: 'refunded' });
+  });
+
+  it('omits the original method for cash and names each non-cash method once', () => {
+    const sale = order({ paid: 353 });
+    expect(refundFormInput(sale, cash)).not.toHaveProperty('originalMethod');
+    for (const tenders of [card, [...cash, ...card, ...card]]) {
+      expect(refundFormInput(sale, tenders)).toMatchObject({ offered: true, originalMethod: { title: paymentLabel('external'), available: true } });
+    }
+  });
+});
+
+describe('refundRequest', () => {
+  it('removes the remainder from the adjustment but keeps the form total', () => {
+    const input = refundFormInput(order({ paid: 353 }), cash);
+    expect(input.offered && refundRequest(formValue, input)).toEqual({ ...formValue, adjustmentMinor: 0, totalMinor: 353 });
+  });
+
+  it('only removes the share when every remaining line is taken', () => {
+    const input = refundFormInput(order({ paid: 353, refunds: [firstRefund] }), cash);
+    const both = { ...formValue, lines: formValue.lines.slice(1), totalMinor: 235 };
+    const onlyB = { ...both, lines: both.lines.slice(0, 1), adjustmentMinor: 0, totalMinor: 118 };
+    expect(input.offered && refundRequest(onlyB, input)).toBe(onlyB);
+    expect(input.offered && refundRequest(both, input)).toEqual({ ...both, adjustmentMinor: 0 });
+  });
+
+  it('preserves a partial request and an emptying request with no share', () => {
+    const input = refundFormInput(order({ paid: 353 }), cash);
+    const partial = { ...formValue, lines: formValue.lines.slice(0, 2), adjustmentMinor: 0, totalMinor: 236 };
+    expect(input.offered && refundRequest(partial, input)).toBe(partial);
+    const exact = refundFormInput(order({ paid: 354 }), cash);
+    expect(exact.offered && refundRequest(formValue, exact)).toEqual(formValue);
   });
 });
