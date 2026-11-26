@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
 import { BehaviorSubject } from 'rxjs';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
@@ -26,6 +26,7 @@ import { watchStorageHealth } from '../lib/storage-health';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { fetchStoreSettings, saveCachedPricing, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { loadSaleFilters } from '../lib/sale-filters';
+import { runShortcut, useAvailableShortcuts, type ShortcutId } from '../lib/shortcuts';
 import ProductsScreen from '../app/index';
 import { AppFrame } from '../components/app-frame';
 import OrdersScreen from '../app/orders';
@@ -2974,5 +2975,48 @@ describe('ProductsScreen sale filter pills', () => {
     expect(tiles()).toEqual(all);
     expect(screen.getByTestId('filter-chip-onSale').getAttribute('aria-pressed')).toBe('false');
     expect(screen.getByTestId('filter-chip-tag').textContent).toBe('Tag');
+  });
+});
+
+// v2's Alt+P / Alt+N (lib/shortcuts.ts): what the Sale offers the keyboard, read through the shortcut registry.
+describe('ProductsScreen keyboard shortcuts', () => {
+  // Read, not run: this harness's sale has no drafts, so a real switchSale would throw.
+  const offered = (id: ShortcutId) => renderHook(() => useAvailableShortcuts()).result.current.has(id);
+  beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+    status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'BLUE', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
+
+  it('checkout.open is unavailable with an empty cart', async () => {
+    await mount();
+    expect(runShortcut('checkout.open')).toBe(false);
+    expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+    expect(offered('sale.new')).toBe(true);
+    expect(offered('search.focus')).toBe(true);
+  });
+
+  it('checkout.open is available with one line, and opens the tender as the cart\'s Checkout does', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await act(async () => { expect(runShortcut('checkout.open')).toBe(true); });
+    expect(screen.getByRole('button', { name: 'Complete sale' })).toBeTruthy();
+    // The tender is not the cart stage: neither Checkout nor New sale runs from there.
+    expect(runShortcut('checkout.open')).toBe(false);
+    expect(offered('sale.new')).toBe(false);
+    expect(offered('search.focus')).toBe(false);
+  });
+
+  it('sale.new and checkout.open are unavailable while the sale is saving', async () => {
+    let save!: () => void;
+    const record = vi.fn(() => new Promise<void>((resolve) => { save = resolve; }));
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), record });
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await payByCard();
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Complete sale' })); });
+    expect(record).toHaveBeenCalledTimes(1);
+    expect(offered('sale.new')).toBe(false);
+    expect(runShortcut('checkout.open')).toBe(false);
+    await act(async () => { save(); });
+    expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+    expect(offered('sale.new')).toBe(false);
   });
 });

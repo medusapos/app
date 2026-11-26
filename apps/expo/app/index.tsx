@@ -82,6 +82,7 @@ import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-pro
 import { useDeviceScans } from '../lib/use-device-scans';
 import { useNetworkOnline } from '../lib/use-network-online';
 import { useEscapeBack } from '../lib/use-escape-back';
+import { useShortcut } from '../lib/shortcuts';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -446,6 +447,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const noteSet = (sale.order.note ?? '').trim() !== '';
   const hasLines = sale.order.lineItems.length > 0;
   const noteInTotals = noteSet && hasLines;
+  // v2's Alt+F / Alt+N / Alt+P (lib/shortcuts.ts), on the Sale's cart stage only; Checkout runs the cart's own Checkout.
+  const tillKeys = pathname === '/' && sale.stage.kind === 'cart' && !counting;
+  // Stopgap until TallyUI's Catalogue exposes a search focus: its testID wraps the search box's input.
+  useShortcut('search.focus', pathname === '/' && sale.stage.kind === 'cart'
+    ? () => document.querySelector<HTMLInputElement>('[data-testid="catalogue-search"] input')?.focus() : null);
+  useShortcut('sale.new', tillKeys && !sale.saving ? () => { setOrdersListOpen(false); switchTo(null); } : null);
+  useShortcut('checkout.open', tillKeys && hasLines ? checkout.onCheckout : null);
   const noteRow = <CartNoteRow note={sale.order.note ?? ''} onPress={() => setNoteOpen(true)} />;
   const couponField = couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : null;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).

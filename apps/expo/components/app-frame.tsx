@@ -3,12 +3,14 @@
 // only by TallyUI's RegisterBar (an unexported hook), which would add a second menu button to the register bar.
 // Navigation is modelled on the Tally Woo app's rail-routes.ts: the stack stays at most Sale plus one area.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { View, useWindowDimensions } from 'react-native';
+import { Platform, View, useWindowDimensions } from 'react-native';
 import { router, usePathname, type Href } from 'expo-router';
 import { Circle, Line, Path, Rect } from 'react-native-svg';
 import { createSvgIcon, IconButton, NavDrawer, NavRail, Text, type ShellNavItem } from '@tallyui/components';
 import { version as appVersion } from '../package.json';
+import { useShortcut, useShortcutKeys } from '../lib/shortcuts';
 import { AccountButton } from './account-button';
+import { ShortcutsSheet } from './shortcuts-sheet';
 
 // TallyUI's one layout boundary (AppShell's WIDE_MIN_WIDTH / WIDE_MIN_HEIGHT, @tallyui/components 3.18.0
 // src/shell/app-shell.tsx l.16-17): at least 768 wide AND 480 tall gets the rail, anything smaller the drawer.
@@ -145,6 +147,15 @@ export function AppFrame({ signedIn, children }: { signedIn: boolean; children: 
     const step = active && frameStep(active, to as FrameAreaId);
     if (step) router[step.method](step.href as Href);
   };
+  // v2's hotkeys (web only): the frame offers Orders and the help sheet in every signed-in area.
+  const shortcuts = active !== null && Platform.OS === 'web';
+  const [helpOpen, setHelpOpen] = useState(false);
+  if (!shortcuts && helpOpen) setHelpOpen(false);
+  const openHelp = useCallback(() => setHelpOpen(true), []);
+  const closeHelp = useCallback(() => setHelpOpen(false), []);
+  useShortcut('orders.open', shortcuts && active !== 'orders' ? () => navigate('orders') : null);
+  useShortcut('help.open', shortcuts ? openHelp : null);
+  useShortcutKeys(shortcuts, openHelp, helpOpen, closeHelp);
   // One tree whether or not the frame shows, so signing in or out never remounts the Stack under it.
   return <FrameContext.Provider value={state}>
     <View testID={active ? 'app-frame' : undefined} className="flex-1 flex-row bg-background">
@@ -158,6 +169,7 @@ export function AppFrame({ signedIn, children }: { signedIn: boolean; children: 
       {/* v2's phone drawer starts on its POS row; the phone header names the store and register (DEMO-PARITY row 17b). */}
       {active && !wide ? <NavDrawer open={menuOpen} onOpenChange={setMenuOpen} items={items} activeId={active}
         onNavigate={navigate} footer={<VersionLine testID="frame-drawer-version" className="px-5 pb-4" />} /> : null}
+      {shortcuts ? <ShortcutsSheet open={helpOpen} onOpenChange={setHelpOpen} /> : null}
     </View>
   </FrameContext.Provider>;
 }
