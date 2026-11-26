@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
-import { Button, Dialog, DialogContent, DialogFooter, DialogTitle, Label, Notice, Switch, Text, Textarea } from '@tallyui/components';
+import { Button, Dialog, DialogContent, DialogFooter, DialogTitle, Label, Notice, RefundNeedsAdminNotice, Switch, Text, Textarea } from '@tallyui/components';
 import { formatMoney, type OrderRefundEnvelope, type StoreOrder } from '@tallyui/core';
 import {
   getDeviceId, mintUuid, RefundAnswerPendingError, submitOrderRefund, type OrderRefundOutcome, type PosOrder, type PosRefund, type PosRefundCollection,
@@ -23,12 +23,12 @@ export function useRefundRecords(refunds: PosRefundCollection | undefined, order
   return refunds && records.orderId === orderId ? records.list : [];
 }
 
-function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'applied' }>): string {
+function outcomeMessage(outcome: Exclude<OrderRefundOutcome, { kind: 'applied' | 'needs_admin' }>): string {
   switch (outcome.kind) {
     // TallyUI exports no cashier text for refund codes, so the store's own message shows.
     case 'rejected': return outcome.error.message;
-    // TallyUI 5.0.0 splits needs_admin out of unknown (send-order-refund.ts:27); both resend the same envelope.
-    case 'unknown': case 'needs_admin': return 'The store did not answer. Try again.';
+    // An unknown answer leaves the envelope available for retry.
+    case 'unknown': return 'The store did not answer. Try again.';
     case 'refused': return `The store refused the refund (${outcome.reason}). Try again.`;
     case 'unauthorized': return 'Sign in again, then try again.';
   }
@@ -49,6 +49,11 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: 
   const [reason, setReason] = useState(resumed?.reason ?? '');
   const [pending, setPending] = useState(false);
   const [message, setMessage] = useState('');
+  const [needsAdmin, setNeedsAdmin] = useState<{ reason: string; message: string } | null>(() => {
+    if (resume?.error?.code !== 'needs_admin') return null;
+    const storedReason = resume.error.data?.reason;
+    return { reason: typeof storedReason === 'string' ? storedReason : 'admin_check', message: resume.error.message };
+  });
   const clientRefundId = useRef(resumed?.clientRefundId ?? mintUuid());
   const envelope = useRef<OrderRefundEnvelope | null>(resume?.envelope ?? null);
   const inFlight = useRef(false);
@@ -78,8 +83,12 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: 
     try {
       const { outcome } = await submitOrderRefund({ refunds, transport: commandTransport(), envelope: envelope.current });
       if (outcome.kind === 'applied') return onClose();
+      if (outcome.kind === 'needs_admin') return setNeedsAdmin({ reason: outcome.reason, message: outcome.message });
       // A refusal is final for its command; the next Confirm sends a new one for the same refund.
-      if (outcome.kind === 'rejected') envelope.current = null;
+      if (outcome.kind === 'rejected') {
+        envelope.current = null;
+        setNeedsAdmin(null);
+      }
       setMessage(outcomeMessage(outcome));
     } catch (error) {
       setMessage(error instanceof RefundAnswerPendingError ? REFUND_IN_PROGRESS : error instanceof Error ? error.message : String(error));
@@ -117,12 +126,13 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose }: 
       <Textarea testID="order-refund-reason" value={reason} onChangeText={setReason} editable={!locked} placeholder="Reason"
         accessibilityLabel="Reason" maxLength={REFUND_REASON_MAX} />
       {hold ? <Notice tone="info" title={hold} testID="order-refund-hold" /> : null}
+      {needsAdmin ? <RefundNeedsAdminNotice {...needsAdmin} onCheckAgain={confirm} /> : null}
       {message ? <Notice tone="bad" title={message} testID="order-refund-error" /> : null}
       <DialogFooter>
         <Button variant="outline" testID="order-refund-cancel" disabled={pending} onPress={onClose}><Text>Cancel</Text></Button>
-        <Button variant="destructive" testID="order-refund-confirm" disabled={pending || !!hold} onPress={() => { void confirm(); }}>
+        {!needsAdmin && <Button variant="destructive" testID="order-refund-confirm" disabled={pending || !!hold} onPress={() => { void confirm(); }}>
           <Text>Confirm</Text>
-        </Button>
+        </Button>}
       </DialogFooter>
     </DialogContent>
   </Dialog>;
