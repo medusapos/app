@@ -163,6 +163,13 @@ describe('refundLinesById', () => {
       { medusa_refund_id: 'invalid', lines: {} }, { medusa_refund_id: 'empty', lines: [zero] },
     ])).toEqual(new Map([['paid', [line]]]))
   })
+
+  it('L2: preserves a stored empty line list beside a normal refund', () => {
+    const line = { orderLineId: 'item_a', quantity: 1, netMinor: 99, taxMinor: 19 }
+    expect(refundLinesById([
+      { medusa_refund_id: 'paid', lines: [line] }, { medusa_refund_id: 'shipping', lines: [] },
+    ])).toEqual(new Map([['paid', [line]], ['shipping', []]]))
+  })
 })
 
 describe('toStoreOrder', () => {
@@ -184,6 +191,24 @@ describe('toStoreOrder', () => {
       const lines = new Map([['first', [firstLine]], ['second', [{ ...secondLine, orderLineId }]]])
       expect(toStoreOrder(refunded, lines).refunds).toStrictEqual(bare)
     }
+  })
+
+  it('R2b: omits even a stored empty line list when another refund claims an unknown line', () => {
+    const lines = refundLinesById([
+      { medusa_refund_id: 'first', lines: [firstLine] },
+      { medusa_refund_id: 'second', lines: [{ ...secondLine, orderLineId: 'unknown' }] },
+      { medusa_refund_id: 'admin', lines: [] },
+    ])
+    expect(toStoreOrder(refunded, lines).refunds).toStrictEqual(bare)
+  })
+
+  it('R3: includes an empty line list on a shipping-only till refund but no lines key on an Admin refund', () => {
+    const lines = refundLinesById([
+      { medusa_refund_id: 'first', lines: [firstLine] }, { medusa_refund_id: 'second', lines: [] },
+    ])
+    expect(toStoreOrder(refunded, lines).refunds).toStrictEqual([
+      { ...bare[0], lines: [firstLine] }, { ...bare[1], lines: [] }, bare[2],
+    ])
   })
 
   it('maps a tax-exclusive till order', () => {
