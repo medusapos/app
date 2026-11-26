@@ -89,10 +89,11 @@ test('Orders on a phone opens on number, customer and total without scrolling si
     expect(box.x, `${name} starts on screen`).toBeGreaterThanOrEqual(0);
     expect(box.x + box.width, `${name} ends on screen`).toBeLessThanOrEqual(viewport.width);
   }
+  // The proof: the list itself fits the phone (main's was the 1160 px table inside a sideways ScrollView).
+  const list = (await page.getByTestId('orders-table').boundingBox())!;
+  expect(list.width, 'the orders list fits the phone').toBeLessThanOrEqual(viewport.width);
   const widths = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: window.innerWidth }));
   expect(widths.page).toBeLessThanOrEqual(widths.viewport);
-  const table = await page.getByTestId('orders-table').evaluate((element) => ({ scroll: element.scrollWidth, client: element.clientWidth }));
-  expect(table.scroll).toBeLessThanOrEqual(table.client);
 
   await row.getByRole('button', { name: /^Open order / }).click();
   await expect(page.getByTestId('order-detail-sheet')).toBeVisible();

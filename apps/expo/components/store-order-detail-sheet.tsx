@@ -2,11 +2,14 @@ import { View } from 'react-native';
 import { Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, OrderDetail, Text, XIcon } from '@tallyui/components';
 import { formatMoney, type StoreOrder } from '@tallyui/core';
 import { storeOrderDetailFigures, storeOrderStatus } from '../lib/store-orders';
+import { DetailLine } from './order-detail-sheet';
 
 // An order only the store has, read-only, in the same right-hand sheet as the till's own sales. It has no Receipt,
 // Sync or Refund: the till didn't ring it up, so there is nothing of its own to print, send or refund.
-export function StoreOrderDetailSheet({ order, onClose, formatDate }: {
+export function StoreOrderDetailSheet({ order, onClose, formatDate, billing }: {
   order: StoreOrder | null; onClose: () => void; formatDate: (iso: string) => string;
+  /** The Billing Address the order's table row shows ('—' when it has none). */
+  billing?: string;
 }) {
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';
   return <Dialog open={order !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -24,6 +27,7 @@ export function StoreOrderDetailSheet({ order, onClose, formatDate }: {
         customerSlot={<View className="gap-1">
           <Text className="text-sm text-muted-foreground">{formatDate(order.placedAt)}</Text>
           <Text className="text-sm text-foreground">{order.customer?.name || order.customer?.email || 'Guest'}</Text>
+          <DetailLine testID="store-order-detail-billing" label="Billing address" value={billing} />
         </View>}
         paymentSlot={<View className="gap-1">
           <Text className="text-xs font-semibold text-muted-foreground">Payment</Text>

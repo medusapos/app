@@ -15,8 +15,8 @@ const NO_BILLING: ReadonlyMap<string, string | null> = new Map();
 const HEADS = ['Status', 'Order Number', 'Customer', 'Billing Address', 'Date Created', 'Cashier', 'Payment Method', 'Total'];
 // v2's Billing Address column is twice as wide as the others; its cells below take the same `flex-[2]`.
 const HEAD_CLASS: Partial<Record<string, string>> = { 'Billing Address': 'flex-[2]', Total: 'items-end' };
-// ADR 0009: below this width the rows are two lines, as Products' phone list, in place of the 1160 px table; Billing Address,
-// Cashier and Payment Method stay in the detail sheet a row opens.
+// ADR 0009: below this width the rows are two lines, as Products' phone list, in place of the 1160 px table. The row leaves
+// out Billing Address, Cashier and Payment Method; the detail sheet it opens shows all three (orders.tsx hands it the address).
 const PHONE_BREAKPOINT = 600;
 
 // v2's Orders table: a row opens the sale. With `onRetry` (the attention table only) each row is followed by a
@@ -88,9 +88,12 @@ export function OrdersTable({ orders, rows, testID, rowTestID = `${testID}-row`,
             </View>
             <View className="flex-row items-center gap-2">
               <View testID={`${row}-status`}><OrderStatusBadge status={cells.status} /></View>
-              <Text numberOfLines={1} className="min-w-0 flex-1 text-sm text-muted-foreground">
-                <Text testID={`${row}-customer`}>{cells.customer}</Text>{' · '}<Text testID={`${row}-date`}>{formatDate(cells.date)}</Text>
-              </Text>
+              {/* Only the customer truncates; the date keeps its width. */}
+              <View className="min-w-0 flex-1 flex-row">
+                <Text testID={`${row}-customer`} numberOfLines={1} className="min-w-0 shrink text-sm text-muted-foreground">{cells.customer}</Text>
+                <Text numberOfLines={1} className="shrink-0 text-sm text-muted-foreground">
+                  {'\u00a0· '}<Text testID={`${row}-date`}>{formatDate(cells.date)}</Text></Text>
+              </View>
             </View>
           </Pressable>
         </View>

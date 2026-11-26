@@ -128,6 +128,7 @@ describe('OrdersScreen', () => {
 });
 
 describe('order detail (row 10)', () => {
+  beforeEach(() => { setWindowWidth(1024, 768); });
   function sale(name: string, syncStatus: PosOrder['syncStatus'], extra: Partial<PosOrder> = {}): PosOrder {
     const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
     builder.addLine({ productId: name, variantId: name, name, unitPrice: { amount: 1200, currency: 'EUR' } });
@@ -419,5 +420,18 @@ describe('orders on a phone (row 10.5)', () => {
     expect(requeue).toHaveBeenCalledExactlyOnceWith([refused.id]);
     expect(screen.queryByTestId('order-detail-sheet')).toBeNull();
     await act(async () => { resolve(1); });
+  });
+
+  it('on a phone the order detail shows the Billing Address and Cashier the row leaves out', async () => {
+    setWindowWidth(390, 844);
+    const order = sale('Blue shirt', 'applied', { cashierRef: 'ann@store.test',
+      customer: { id: 'c1', name: 'Ada Lovelace', billing: { address1: 'Main St 5', city: 'Berlin', country: 'DE' } } });
+    await mount(order);
+    const row = screen.getByTestId(`orders-row-${order.id}`);
+    expect(row.textContent).not.toContain('Main St 5');
+    fireEvent.click(within(row).getByRole('button', { name: `Open order ${orderReference(order)}` }));
+    const sheet = within(await screen.findByTestId('order-detail-sheet'));
+    expect(sheet.getByTestId('order-detail-billing').textContent).toBe('Billing addressMain St 5, Berlin, DE');
+    expect(sheet.getByTestId('order-detail-cashier').textContent).toBe('Cashierann@store.test');
   });
 });

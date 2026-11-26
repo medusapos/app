@@ -551,3 +551,19 @@ describe('Billing Address column and day headers (row 10.1)', () => {
     expect(screen.getByTestId('orders-row-order_1-billing').getAttribute('data-class')).toBe(head?.getAttribute('data-class'));
   });
 });
+
+describe('orders on a phone (row 10.5)', () => {
+  it('on a phone a store order\'s detail shows its Billing Address', async () => {
+    setWindowWidth(390, 844);
+    listOrders.mockResolvedValue(page([storeOrder(2)]));
+    billingFetch.mockImplementation(async () => billingAnswer([address('order_2', 'Nørregade 1')]));
+    await mount();
+    await settle();
+    const row = screen.getByTestId('orders-row-order_2');
+    expect(screen.queryByTestId('orders-row-order_2-billing')).toBeNull();
+    fireEvent.click(within(row).getByRole('button', { name: 'Open order #1002' }));
+    await settle();
+    const sheet = within(screen.getByTestId('store-order-detail-sheet'));
+    expect(sheet.getByTestId('store-order-detail-billing').textContent).toBe('Billing addressNørregade 1, Copenhagen, DK');
+  });
+});
