@@ -5,7 +5,7 @@ import { buildReceiptDataFromStoreOrder, orderFiltersQuery, type OrderFilterValu
 import { loadOrderBilling } from './order-billing';
 import { ordersScreenFilterFields } from './order-filters';
 import { authHeaders, createPosConnector, storeOrderFilters } from './pos-connector';
-import { PARTIAL_REFUND_PLUGIN_CONTRACT } from './plugin-contract';
+import { PARTIAL_REFUND_PLUGIN_CONTRACT, REFUND_LINES_PLUGIN_CONTRACT } from './plugin-contract';
 import type { Session } from './session';
 
 // listOrders' own default page size (its max is 100); WCPOS v2 pages its Orders list the same way.
@@ -161,16 +161,14 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
   };
 }
 
-// The order open in the sheet, read again through getOrders so its refunds carry their lines (plugin contract 6): the
-// list's own read sends no capabilities without a register filter (desk, 2026-11-24), so connector-medusa skips them.
-// Until the read for this order, refund count and applied count arrives, or when it fails, it is the list's order,
-// whose refunds carry no lines, so the refund form refuses (lines_unknown): the safe side. A 401 is the list's to act on.
+// Reread the open order with capabilities for refund lines at contract 6, and for sold figures and returned quantities
+// at 7 even without a till refund. Until it arrives or if it fails, the form refuses any missing figures on the list copy.
 export function useStoreOrderWithRefundLines(session: Session, storeOrder: StoreOrder | null, appliedCount: number): StoreOrder | null {
   const connector = useMemo(() => createPosConnector(), []);
   const id = storeOrder?.id;
   const refundCount = storeOrder?.refunds.length ?? 0;
-  const wanted = !!id && refundCount > 0
-    && (session.capabilities?.pluginContract ?? 0) >= PARTIAL_REFUND_PLUGIN_CONTRACT;
+  const contract = session.capabilities?.pluginContract ?? 0;
+  const wanted = !!id && (contract >= PARTIAL_REFUND_PLUGIN_CONTRACT || (refundCount > 0 && contract >= REFUND_LINES_PLUGIN_CONTRACT));
   const key = `${id}\n${refundCount}\n${appliedCount}`;
   const [read, setRead] = useState<{ key: string; order: StoreOrder | null } | null>(null);
   useEffect(() => {

@@ -6,7 +6,7 @@ import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
 import {
-  formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder, type StoreOrderLine, type StoreOrderRefund,
+  formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder, type StoreOrderLine, type StoreOrderRefund, type SyncContext,
 } from '@tallyui/core';
 import {
   createOrderBuilder, finalizeOrder, posRefundCollection, refundNeedsAdminLine, type PosOrder, type PosRefundCollection, type TransportOutcome,
@@ -14,15 +14,20 @@ import {
 import { OrderDetailSheet } from '../components/order-detail-sheet';
 import { useRegister } from '../lib/register-context';
 import type { Session } from '../lib/session';
+import { useStoreOrderWithRefundLines } from '../lib/store-orders';
 import { openRegisterFixture } from './register-fixture';
 
 const { sessionState } = vi.hoisted(() => ({ sessionState: { session: null as Session | null } }));
+const { getOrders } = vi.hoisted(() => ({ getOrders: vi.fn<(context: SyncContext, ids: readonly string[]) => Promise<StoreOrder[]>>() }));
+vi.mock('../lib/pos-connector', async (original) => ({
+  ...await original<typeof import('../lib/pos-connector')>(), createPosConnector: () => ({ id: 'medusa', getOrders }),
+}));
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
 vi.mock('../lib/register-context', async (original) => ({
   ...await original<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
 
-const REFUND_ON = { orderRefund: 1, pluginContract: 6 } as ServerCapabilities;
+const REFUND_ON = { orderRefund: 1, pluginContract: 7 } as ServerCapabilities;
 const send = vi.fn<(batch: OrderRefundEnvelope[]) => Promise<TransportOutcome>>();
 let db: RxDatabase;
 let refunds: PosRefundCollection;
@@ -38,15 +43,16 @@ const cardSale: PosOrder = { ...order, payments: [{ ...order.payments[0], method
 const storeOrder: StoreOrder = {
   id: 'order_1', reference: '1001', clientOrderId: order.id, status: 'completed', placedAt: order.createdAt, currency: 'EUR',
   pricesIncludeTax: false, customer: null, fees: [], shipping: [], coupons: [], taxLines: [], discountMinor: 0, discountTaxMinor: 0,
-  lines: [{ id: 'line_1', clientLineId: order.lines[0].id, name: 'Blue shirt', quantity: 1, subtotalMinor: 1200, subtotalTaxMinor: 0, totalMinor: 1200, taxMinor: 0 }],
+  lines: [{ id: 'line_1', clientLineId: order.lines[0].id, name: 'Blue shirt', quantity: 1, subtotalMinor: 1200, subtotalTaxMinor: 0,
+    totalMinor: 1200, taxMinor: 0, soldTotalMinor: 1200, soldTaxMinor: 0 }],
   taxMinor: 0, totalMinor: 1200, payments: [{ id: 'pay_1', method: 'pp_system_default', amountMinor: 1200 }], refunds: [],
 };
 // Two units of one line, paid 24.00.
 const twoUnits: StoreOrder = { ...storeOrder, totalMinor: 2400, payments: [{ id: 'pay_1', method: 'pp_system_default', amountMinor: 2400 }],
-  lines: [{ ...storeOrder.lines[0], quantity: 2, subtotalMinor: 2400, totalMinor: 2400 }] };
+  lines: [{ ...storeOrder.lines[0], quantity: 2, subtotalMinor: 2400, totalMinor: 2400, soldTotalMinor: 2400 }] };
 // 3 × 0.99 ex 19%, each 1.18 gross, paid 3.53: the order's tax rounds down a cent, so refunding every line takes −0.01.
 const centLine = (id: string): StoreOrderLine => ({ id, clientLineId: `client-${id}`, name: `Item ${id}`, quantity: 1, subtotalMinor: 99,
-  subtotalTaxMinor: 19, totalMinor: 99, taxMinor: 19 });
+  subtotalTaxMinor: 19, totalMinor: 99, taxMinor: 19, soldTotalMinor: 99, soldTaxMinor: 19 });
 const threeCents: StoreOrder = { ...storeOrder, totalMinor: 353, taxMinor: 56, payments: [{ id: 'pay_1', method: 'pp_system_default', amountMinor: 353 }],
   lines: [centLine('a'), centLine('b'), centLine('c')] };
 // Two units of one line at 6.00, paid 12.00.
@@ -73,6 +79,10 @@ const rejected = (code: string) => (batch: OrderRefundEnvelope[]): TransportOutc
 const sheet = ({ open = true, store = storeOrder, local = order }: { open?: boolean; store?: StoreOrder; local?: PosOrder } = {}) => <>
   <OrderDetailSheet order={open ? local : null} onClose={vi.fn()} formatDate={(iso) => iso.slice(0, 10)}
     onRetry={vi.fn()} onFlush={vi.fn()} storeOrder={store} refunds={refunds} /><PortalHost /></>;
+function RereadSheet({ listed }: { listed: StoreOrder }) {
+  const store = useStoreOrderWithRefundLines(sessionState.session!, listed, 0);
+  return store && sheet({ store });
+}
 const money = (amount: number) => formatMoney({ amount, currency: 'EUR' });
 const sent = (call = 0) => send.mock.calls[call][0][0];
 
@@ -102,8 +112,8 @@ beforeEach(async () => {
 afterEach(async () => { cleanup(); await db.remove(); vi.clearAllMocks(); });
 
 describe('Refund in the Orders sheet (#569)', () => {
-  it('C1: no Refund button with orderRefund 0 or plugin contract 5 (no per-refund lines)', async () => {
-    for (const capabilities of [{}, { orderRefund: 1, pluginContract: 5 }, { orderRefund: 0, pluginContract: 6 }] as ServerCapabilities[]) {
+  it('C1: Refund requires orderRefund and contract 7', async () => {
+    for (const capabilities of [{}, { orderRefund: 1, pluginContract: 5 }, { orderRefund: 1, pluginContract: 6 }, { ...REFUND_ON, orderRefund: 0 }] as ServerCapabilities[]) {
       sessionState.session = { ...sessionState.session!, capabilities };
       const view = render(sheet());
       await screen.findByTestId('order-detail');
@@ -382,6 +392,48 @@ describe('Refund in the Orders sheet (#569)', () => {
     expect(form.getByTestId('refund-error').textContent).toBe('Open the register to refund');
     expect(send).not.toHaveBeenCalled();
     expect(await refunds.count().exec()).toBe(0);
+  });
+});
+
+describe('Contract 7 refunds in the Orders sheet (#636)', () => {
+  const listed: StoreOrder = { ...storeOrder, totalMinor: 80, taxMinor: 13, payments: [{ ...storeOrder.payments[0], amountMinor: 119 }],
+    lines: [{ id: 'a', clientLineId: order.lines[0].id, name: 'Blue shirt', quantity: 3, subtotalMinor: 67, subtotalTaxMinor: 13,
+      totalMinor: 67, taxMinor: 13 }] };
+
+  it('C15: rereads a sale without till refunds and sends only the two units left after an admin return', async () => {
+    getOrders.mockResolvedValueOnce([{ ...listed, lines: [{ ...listed.lines[0], soldTotalMinor: 100, soldTaxMinor: 19, returnedQuantity: 1 }] }]);
+    send.mockImplementation(async (batch) => applied(batch));
+    render(<RereadSheet listed={listed} />);
+    const form = await openModal();
+    expect(getOrders).toHaveBeenCalledWith(expect.objectContaining({ capabilities: REFUND_ON }), [listed.id]);
+    expect(form.getByTestId('refund-remaining-a').textContent).toBe('2');
+    plus(form, 'a', 2);
+    reason(form);
+    await submit(form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    expect(sent().payload).toMatchObject({ lines: [{ orderLineId: 'a', quantity: 2 }], totalMinor: 80, adjustmentMinor: 0 });
+  });
+
+  it('C16: resuming a card sale refunded to cash shows the sent destination and partial total', async () => {
+    send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' });
+    render(sheet({ store: twoHalves, local: cardSale }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    fireEvent.click(form.getByTestId('refund-destination-cash'));
+    reason(form);
+    await submit(form);
+    const dialog = within(await screen.findByTestId('order-refund-dialog'));
+    expect(sent().payload).toMatchObject({ totalMinor: 600, destination: 'cash' });
+    expect(dialog.getByTestId('order-refund-destination').textContent).toBe('To Cash');
+    expect(dialog.getByTestId('order-refund-total').textContent).toBe(`Refund ${money(sent().payload.totalMinor)}`);
+  });
+
+  it('C17: a failed reread with no till refunds leaves Refund unavailable without sold figures', async () => {
+    getOrders.mockRejectedValueOnce(new Error('offline'));
+    await act(async () => { render(<RereadSheet listed={{ ...storeOrder, lines: [{ ...storeOrder.lines[0], soldTotalMinor: undefined, soldTaxMinor: undefined }] }} />); });
+    expect(getOrders).toHaveBeenCalledWith(expect.objectContaining({ capabilities: REFUND_ON }), [storeOrder.id]);
+    expect(screen.getByTestId('order-detail')).toBeTruthy();
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
   });
 });
 

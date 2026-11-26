@@ -12,9 +12,10 @@ export const DEVICE_CLEAR_PLUGIN_CONTRACT = 2;
 export const REFUND_PLUGIN_CONTRACT = 5;
 // The plugin contract that adds `region_id` and `terminal` on GET /tally/v1/payment-providers; only Card readers needs it.
 export const CARD_READERS_PLUGIN_CONTRACT = 6;
-// The plugin contract whose GET /tally/v1/orders returns each till refund's lines (#629), which the refund form needs to
-// show what is left of each line; only the Orders sheet's Refund needs it, so Reports keeps REFUND_PLUGIN_CONTRACT.
-export const PARTIAL_REFUND_PLUGIN_CONTRACT = 6;
+// GET /tally/v1/orders returns each till refund's lines (#629).
+export const REFUND_LINES_PLUGIN_CONTRACT = 6;
+// The Orders sheet's Refund needs each line's sold figures and returned quantity (#636).
+export const PARTIAL_REFUND_PLUGIN_CONTRACT = 7;
 
 /** `unknown`: the read was inconclusive (offline, a timeout, a non-2xx, not an info body) and never latches. */
 export type PluginContractStatus = 'ok' | 'too_old' | 'unknown';
