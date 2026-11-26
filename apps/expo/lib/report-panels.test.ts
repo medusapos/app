@@ -77,15 +77,15 @@ describe('reportPanel', () => {
     expect(result.empty).toBeUndefined();
   });
   it('the refunds panel says the refunds could not be read when the read failed', () => {
-    const unread = reportPanel('refunds', { figures: figures(), orders: [], ctx, today, refundsUnread: true });
+    const unread = reportPanel('refunds', { figures: figures(), orders: [], ctx, today, refundsState: 'failed' });
     expect(unread).toMatchObject({ rows: [], empty: "Refunds couldn't be read from the store." });
     expect(panel('refunds', figures()).empty).toBeUndefined();
     // Refunds that were counted still show; another card's empty text is never changed.
     const counted = reportPanel('refunds', { figures: figures({ refunds: { count: 1, amountMinor: 300, orders: 1 } }), orders: [],
-      ctx, today, refundsUnread: true });
+      ctx, today, refundsState: 'failed' });
     expect(counted.rows).toEqual([['Refunds', '1', '€3.00']]);
     expect(counted.empty).toBeUndefined();
-    expect(reportPanel('products', { figures: figures(), orders: [], ctx, today, refundsUnread: true }).empty).toBeUndefined();
+    expect(reportPanel('products', { figures: figures(), orders: [], ctx, today, refundsState: 'failed' }).empty).toBeUndefined();
   });
 
   it('lists the 60 most recent orders in the given order and counts the rest', () => {
@@ -138,13 +138,20 @@ describe('reportPanelCsv and reportPanelHtml', () => {
   };
   const page = (html: string) => new DOMParser().parseFromString(html, 'text/html');
   it('an unread Refunds panel prints and exports the couldn\'t-be-read note, not an empty table', () => {
-    const unread = reportPanel('refunds', { figures: figures(), orders: [], ctx, today, refundsUnread: true });
+    const unread = reportPanel('refunds', { figures: figures(), orders: [], ctx, today, refundsState: 'failed' });
     const html = reportPanelHtml(unread, htmlInput);
     expect(page(html).querySelector('p.warning')?.textContent).toBe("Refunds couldn't be read from the store.");
     expect(html).toContain('Refunds couldn&#39;t be read from the store.');
     expect(Array.from(page(html).querySelectorAll('thead th')).map((th) => th.textContent)).toEqual(['Refunds', 'Orders', 'Amount']);
     expect(page(html).querySelectorAll('tbody tr')).toHaveLength(0);
     expect(reportPanelCsv(unread).split('\r\n')).toEqual(['"Refunds","Orders","Amount"', '"Refunds couldn\'t be read from the store."']);
+  });
+  it('a Refunds panel still being read prints and exports the reading note, not an empty table', () => {
+    const reading = reportPanel('refunds', { figures: figures(), orders: [], ctx, today, refundsState: 'reading' });
+    const html = reportPanelHtml(reading, htmlInput);
+    expect(page(html).querySelector('p.warning')?.textContent).toBe('Refunds are still being read from the store.');
+    expect(page(html).querySelectorAll('tbody tr')).toHaveLength(0);
+    expect(reportPanelCsv(reading).split('\r\n')).toEqual(['"Refunds","Orders","Amount"', '"Refunds are still being read from the store."']);
   });
   it('a panel without an empty note prints and exports as before', () => {
     const none = panel('refunds', figures());

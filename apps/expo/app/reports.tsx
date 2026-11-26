@@ -88,7 +88,7 @@ export default function ReportsScreen() {
   const covers = scope ? `${scope.period} · ${scope.registerLabel}` : '';
   const panel = openCard && ctx && summary
     ? reportPanel(openCard, { figures: summary.figures, orders: summary.periodOrders, ctx, today,
-      refundsUnread: refundsRead.state === 'failed' }) : null;
+      refundsState: refundsRead.state === 'failed' || refundsRead.state === 'reading' ? refundsRead.state : undefined }) : null;
   // v2's closed strip offers Print closure where the open strip has Print X report (reports/index.mdx#closures).
   const lastClosure = register.lastClosure;
   const closurePrint = Platform.OS === 'web' && !!lastClosure

@@ -727,6 +727,15 @@ describe('the Refunds card', () => {
     expect(within(sheet).getByTestId('report-sheet-empty').textContent).toBe("Refunds couldn't be read from the store.");
   });
 
+  it('the Refunds sheet says the refunds are still being read while the store read is pending', async () => {
+    listOrders.mockReturnValue(new Promise<StoreOrderPage>(() => {}));
+    await mountRefundable();
+    await waitFor(() => expect(listOrders).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId('card-refunds-open'));
+    const sheet = await screen.findByTestId('report-sheet');
+    expect(within(sheet).getByTestId('report-sheet-empty').textContent).toBe('Refunds are still being read from the store.');
+  });
+
   async function printedSummaryWarnings() {
     document.getElementById('closure-print-frame')?.remove();
     fireEvent.click(screen.getByTestId('reports-print-summary'));

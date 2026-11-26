@@ -19,6 +19,9 @@ export type ReportPanel = {
 const ORDERS_LISTED = 60;
 // A figure the till does not know reads as a dash, never 0 (as TallyUI's cards show it).
 const UNKNOWN = '—';
+// What an empty Refunds panel says while the store's refunds are unread, so it never reads as "none in this period".
+export const REFUNDS_PANEL_FAILED = "Refunds couldn't be read from the store.";
+export const REFUNDS_PANEL_READING = 'Refunds are still being read from the store.';
 
 const left = (label: string): ReportColumn => ({ label, align: 'left' });
 const right = (label: string): ReportColumn => ({ label, align: 'right' });
@@ -26,8 +29,8 @@ const right = (label: string): ReportColumn => ({ label, align: 'right' });
 export function reportPanel(card: SalesCardId, input: {
   figures: SalesFigures; orders: readonly PosOrder[];
   ctx: Pick<ClosureContext, 'formatMoney' | 'exponent' | 'locale'>; today: string;
-  /** The store's refunds could not be read, so an empty Refunds panel must not claim there were none. */
-  refundsUnread?: boolean;
+  /** The store's refunds failed or are still being read, so an empty Refunds panel must not claim there were none. */
+  refundsState?: 'failed' | 'reading';
 }): ReportPanel {
   const { figures, orders, ctx, today } = input;
   const { totals, range } = figures;
@@ -81,7 +84,8 @@ export function reportPanel(card: SalesCardId, input: {
     case 'refunds': {
       const refunds = panel('Refunds', 'refunds', [left('Refunds'), right('Orders'), right('Amount')],
         figures.refunds.count > 0 ? [['Refunds', String(figures.refunds.count), money(figures.refunds.amountMinor)]] : []);
-      return refunds.rows.length === 0 && input.refundsUnread ? { ...refunds, empty: "Refunds couldn't be read from the store." } : refunds;
+      if (refunds.rows.length > 0 || !input.refundsState) return refunds;
+      return { ...refunds, empty: input.refundsState === 'failed' ? REFUNDS_PANEL_FAILED : REFUNDS_PANEL_READING };
     }
   }
 }
