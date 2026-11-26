@@ -43,14 +43,15 @@ const clearRow = { order_id: 'sale', money_started_at: null, medusa_refund_id: n
 const command = { type: 'order.refund', status: 'needs_admin', needs_admin_reason: { reason: 'session_closed' } }
 const uncertain = { reason: 'money_unconfirmed', message: messages.money_unconfirmed }
 
-function proofContainer(row: unknown, refunded: string | null, recorded: number) {
+function proofContainer(row: unknown, refunded: string | null, recorded: number, readRefund = () => row) {
   const knex = (table: string) => ({
     where() { return this }, whereNotNull() { return this }, whereNull() { return this },
     whereIn() { return this }, whereNotIn() { return this }, select: () => [], sum: () => [{ sum: recorded }],
-    first: () => table === 'order' ? { metadata: {} } : row,
+    first: () => table === 'order' ? { metadata: {} } : readRefund(),
   })
   const services = {
     [TALLY_LEDGER_MODULE]: { listTallyCommands: () => [command] },
+    [ContainerRegistrationKeys.LOGGER]: { warn: jest.fn() },
     [ContainerRegistrationKeys.PG_CONNECTION]: knex,
     [ContainerRegistrationKeys.QUERY]: { graph: () => ({ data: [{ id: 'sale', currency_code: 'eur',
       payment_collections: [{ payments: refunded === null ? [] : [{ id: 'payment', raw_amount: { value: '10' },
@@ -82,8 +83,12 @@ describe('N-U2: session_closed requires current refund and payment proof', () =>
 
 describe('N-U3: read failures', () => {
   it('keeps the in_progress response when the command read throws', async () => {
-    const container = { resolve: () => ({ listTallyCommands: () => { throw new Error('ledger read') } }) } as unknown as MedusaContainer
+    const warn = jest.fn()
+    const container = { resolve: (key: string) => key === ContainerRegistrationKeys.LOGGER ? { warn }
+      : { listTallyCommands: () => { throw new Error('ledger read') } } } as unknown as MedusaContainer
     expect(await loadNeedsAdminAnswer(container, id)).toBeNull()
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(`tally commands: needs_admin answer for ${id} fell back (command read): ledger read`)
     expect(await batchFailure(container, { kind: 'in_progress', id })).toEqual({ status: 409, body: { code: 'in_progress', id } })
   })
 
@@ -91,5 +96,24 @@ describe('N-U3: read failures', () => {
     const container = { resolve: (key: string) => key === TALLY_LEDGER_MODULE ? { listTallyCommands: () => [command] }
       : () => { throw new Error('refund read') } } as unknown as MedusaContainer
     expect(await loadNeedsAdminAnswer(container, id)).toEqual(uncertain)
+  })
+})
+
+describe('N-U4: final refund markers decide the proof', () => {
+  it.each([
+    ['N-U4a', { money_started_at: new Date() }],
+    ['N-U4b', { medusa_refund_id: 'refund' }],
+  ])('%s downgrades when a marker appears after the first read', async (_, marker) => {
+    const readRefund = jest.fn().mockReturnValueOnce(clearRow).mockReturnValue({ ...clearRow, ...marker })
+    expect(await loadNeedsAdminAnswer(proofContainer(clearRow, '1', 100, readRefund), id)).toEqual(uncertain)
+  })
+
+  it('N-U4c downgrades and warns when the final marker read throws', async () => {
+    const readRefund = jest.fn().mockReturnValueOnce(clearRow).mockImplementation(() => { throw new Error('final marker read') })
+    const container = proofContainer(clearRow, '1', 100, readRefund)
+    expect(await loadNeedsAdminAnswer(container, id)).toEqual(uncertain)
+    const { warn } = container.resolve(ContainerRegistrationKeys.LOGGER)
+    expect(warn).toHaveBeenCalledTimes(1)
+    expect(warn).toHaveBeenCalledWith(`tally commands: needs_admin answer for ${id} fell back (proof read): final marker read`)
   })
 })

@@ -38,14 +38,22 @@ export async function loadNeedsAdminAnswer(container: MedusaContainer, id: strin
         const row = await knex('tally_refund').where({ command_id: id }).first('order_id', 'money_started_at', 'medusa_refund_id')
         if (row?.money_started_at === null && row.medusa_refund_id === null) {
           const order = await loadRefundOrder(container, row.order_id)
-          if (order?.payment) sessionClosedProven = order.payment.refundedMinor <= await recordedRefundsMinor(knex, order, order.payment.id)
+          if (order?.payment && order.payment.refundedMinor <= await recordedRefundsMinor(knex, order, order.payment.id)) {
+            const markers = await knex('tally_refund').where({ command_id: id }).first('money_started_at', 'medusa_refund_id')
+            sessionClosedProven = markers?.money_started_at === null && markers.medusa_refund_id === null
+          }
         }
-      } catch {
-        sessionClosedProven = false
+      } catch (error) {
+        try {
+          container.resolve(ContainerRegistrationKeys.LOGGER).warn(`tally commands: needs_admin answer for ${id} fell back (proof read): ${error instanceof Error ? error.message : String(error)}`)
+        } catch {}
       }
     }
     return needsAdminWire({ type: command.type, storedReason, sessionClosedProven })
-  } catch {
+  } catch (error) {
+    try {
+      container.resolve(ContainerRegistrationKeys.LOGGER).warn(`tally commands: needs_admin answer for ${id} fell back (command read): ${error instanceof Error ? error.message : String(error)}`)
+    } catch {}
     return null
   }
 }
