@@ -3,8 +3,8 @@ import { Platform, ScrollView, View } from 'react-native';
 import {
   Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, OrderDetail, orderReference, OrderSyncNotices, Receipt, Text, XIcon,
 } from '@tallyui/components';
-import { formatMoney, type StoreOrder } from '@tallyui/core';
-import { buildReceiptDataFromPosOrder, refundDueOf, type PosOrder, type PosRefundCollection, type UseOrderOutboxResult } from '@tallyui/pos';
+import { formatMoney, type StoreOrder, type StoreOrderRefund } from '@tallyui/core';
+import { buildReceiptDataFromPosOrder, refundDueOf, type PosOrder, type PosRefund, type PosRefundCollection, type UseOrderOutboxResult } from '@tallyui/pos';
 import {
   canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
 } from '../lib/order-detail';
@@ -32,6 +32,31 @@ export function injectReceiptPrintStyle() {
   style.id = 'order-receipt-print-style';
   style.textContent = RECEIPT_PRINT_CSS;
   document.head.appendChild(style);
+}
+
+const refundAmount = (record: PosRefund) => record.result?.totalMinor ?? record.envelope.payload.totalMinor;
+// A refund's lines as a multiset of orderLineId × quantity, in a fixed order; restock and net/tax play no part.
+const lineKey = (lines: readonly { orderLineId: string; quantity: number }[]) =>
+  JSON.stringify(lines.filter((line) => line.quantity > 0).map((line) => [line.orderLineId, line.quantity]).sort());
+
+/**
+ * This till's applied refunds the store's copy does not carry yet. The applied result ids are the plugin's own
+ * (`<tally refund id>:<n>`), never the store's refund ids, so a refund is matched by what it refunded: equal line
+ * multisets, or, for a refund without lines, a store refund without lines of the same amount. Each store refund
+ * matches one record at most, in the records' creation order. A zero refund (stock only) creates no store refund.
+ */
+export function unlandedRefunds(records: readonly PosRefund[], storeRefunds: readonly StoreOrderRefund[]): PosRefund[] {
+  const free = storeRefunds.map((refund) => ({ key: lineKey(refund.lines ?? []), amountMinor: refund.amountMinor }));
+  return [...records].filter((record) => record.status === 'applied')
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .filter((record) => {
+      if (refundAmount(record) === 0) return false;
+      const key = lineKey(record.envelope.payload.lines);
+      const match = free.findIndex((refund) => refund.key === key && (key !== '[]' || refund.amountMinor === refundAmount(record)));
+      if (match < 0) return true;
+      free.splice(match, 1);
+      return false;
+    });
 }
 
 // One stored sale, read-only, in a right-hand sheet as WCPOS v2 opens an order.
@@ -68,18 +93,15 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   const gate = !!order && !!storeOrder && !!refunds && (capabilities?.orderRefund ?? 0) >= 1
     && (capabilities?.pluginContract ?? 0) >= PARTIAL_REFUND_PLUGIN_CONTRACT;
   const input = gate && order && storeOrder ? refundFormInput(storeOrder, order.payments) : null;
-  // An applied refund has landed once the store's copy carries each of its store refunds; until then the form would
-  // read stale remaining quantities, so no new refund starts.
-  const storeRefundIds = new Set(storeOrder?.refunds.map((refund) => refund.id));
-  const unlanded = records.filter((record) => record.status === 'applied'
-    && !(record.result?.refunds ?? []).every((refund) => storeRefundIds.has(refund.id)));
+  // Until the store's copy carries each applied refund, the form would read stale remaining quantities: no new refund starts.
+  const unlanded = unlandedRefunds(records, storeOrder?.refunds ?? []);
   const canRefund = gate && !resume && unlanded.length === 0 && !!input?.offered;
   const canResume = gate && !!resume;
   // A refund sent without a final answer opens again on its own envelope when its sale does; never over the open form,
   // whose own send is pending until it answers.
   useEffect(() => { if (canResume) setRefunding((open) => open === 'none' ? 'resume' : open); }, [order?.id, resume?.id, canResume]);
   const refundedParts = [...(storeOrder?.refunds.map((refund) => refund.amountMinor) ?? []),
-    ...unlanded.map((record) => record.result?.totalMinor ?? record.envelope.payload.totalMinor)];
+    ...unlanded.map(refundAmount)];
   const refundedMinor = refundedParts.length ? refundedParts.reduce((total, amount) => total + amount, 0) : null;
   useEffect(() => { if (reprint) injectReceiptPrintStyle(); }, [reprint]);
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';

@@ -5,7 +5,9 @@ import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
-import { formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder, type StoreOrderLine } from '@tallyui/core';
+import {
+  formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder, type StoreOrderLine, type StoreOrderRefund,
+} from '@tallyui/core';
 import {
   createOrderBuilder, finalizeOrder, posRefundCollection, type PosOrder, type PosRefundCollection, type TransportOutcome,
 } from '@tallyui/pos';
@@ -47,8 +49,21 @@ const centLine = (id: string): StoreOrderLine => ({ id, clientLineId: `client-${
   subtotalTaxMinor: 19, totalMinor: 99, taxMinor: 19 });
 const threeCents: StoreOrder = { ...storeOrder, totalMinor: 353, taxMinor: 56, payments: [{ id: 'pay_1', method: 'pp_system_default', amountMinor: 353 }],
   lines: [centLine('a'), centLine('b'), centLine('c')] };
-const unitRefund = (id: string) => ({ id, amountMinor: 1200, lines: [{ orderLineId: 'line_1', quantity: 1, netMinor: 1200, taxMinor: 0 }] });
-const applied = (batch: OrderRefundEnvelope[], refundId = 'ref_1'): TransportOutcome => {
+// Two units of one line at 6.00, paid 12.00.
+const twoHalves: StoreOrder = { ...storeOrder, lines: [{ ...storeOrder.lines[0], quantity: 2 }] };
+// The real id schemes: a store refund carries Medusa's refund id, an applied result the plugin's own `<tally refund id>:<n>`.
+const unitRefund = (id: string, amountMinor = 1200, quantity = 1): StoreOrderRefund => ({ id, amountMinor,
+  lines: [{ orderLineId: 'line_1', quantity, netMinor: amountMinor, taxMinor: 0 }] });
+// An applied record of this till, written straight into pos_refunds.
+const record = async (id: string, totalMinor: number, lines: OrderRefundEnvelope['payload']['lines'], createdAt = '2026-11-26T10:00:00.000Z') => {
+  const payload = { clientRefundId: id, orderId: 'order_1', lines, shippingMinor: 0, adjustmentMinor: lines.length ? 0 : totalMinor, totalMinor,
+    destination: 'cash', reason: 'Damaged', registerId: 'register-1', sessionId: 'session-1', createdAt } as OrderRefundEnvelope['payload'];
+  await refunds.insert({ id, commandId: `cmd-${id}`, orderId: 'order_1', sessionId: 'session-1', registerId: 'register-1',
+    envelope: { id: `cmd-${id}`, type: 'order.refund', version: 1, attempt: 1, deviceId: 'device-1', createdAt, payload } as OrderRefundEnvelope,
+    status: 'applied', result: { totalMinor, byMethod: { cash: totalMinor }, refunds: [{ id: `tref_${id}:0`, paymentId: 'pay_1', totalMinor, state: 'succeeded' }] },
+    createdAt, updatedAt: createdAt });
+};
+const applied = (batch: OrderRefundEnvelope[], refundId = 'tref_1:0'): TransportOutcome => {
   const totalMinor = batch[0].payload.totalMinor;
   return { kind: 'results', results: [{ id: batch[0].id, status: 'applied',
     refund: { totalMinor, byMethod: { cash: totalMinor }, refunds: [{ id: refundId, paymentId: 'pay_1', totalMinor, state: 'succeeded' }] } }] };
@@ -191,8 +206,8 @@ describe('Refund in the Orders sheet (#569)', () => {
   });
 
   it('C7: an earlier refund with lines on the store copy shows the remaining quantity and Previously Refunded', async () => {
-    send.mockImplementation(async (batch) => applied(batch, 'ref_2'));
-    render(sheet({ store: { ...twoUnits, refunds: [unitRefund('ref_1')] } }));
+    send.mockImplementation(async (batch) => applied(batch, 'tref_2:0'));
+    render(sheet({ store: { ...twoUnits, refunds: [unitRefund('refund_01')] } }));
     expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(1200)}`);
     const form = await openModal();
     expect(form.getByTestId('refund-remaining-line_1').textContent).toBe('1');
@@ -205,23 +220,59 @@ describe('Refund in the Orders sheet (#569)', () => {
     expect(sent().payload).toMatchObject({ lines: [{ orderLineId: 'line_1', quantity: 1, restock: true }], totalMinor: 1200, adjustmentMinor: 0 });
   });
 
-  it('C8: a local applied refund not yet on the store copy withholds Refund and counts in Refunded until the copy carries it', async () => {
-    send.mockImplementation(async (batch) => applied(batch, 'ref_1'));
-    const view = render(sheet({ store: twoUnits }));
+  it('C8: a local applied refund not yet on the store copy withholds Refund and counts in Refunded until the copy carries its lines', async () => {
+    send.mockImplementation(async (batch) => applied(batch, 'tref_1:0'));
+    const view = render(sheet({ store: twoHalves }));
     const form = await openModal();
     plus(form, 'line_1');
     reason(form);
+    expect(form.getByTestId('refund-total').textContent).toBe(money(600));
     await submit(form);
     await waitFor(() => expect(screen.queryByTestId('refund-modal')).toBeNull());
-    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(1200)}`);
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(600)}`);
     expect(screen.queryByTestId('order-detail-refund')).toBeNull();
-    // Another store refund that is not this one leaves the record unlanded: Refunded adds both.
-    view.rerender(sheet({ store: { ...twoUnits, refunds: [{ id: 'ref_other', amountMinor: 100, lines: [] }] } }));
-    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1300)}`));
+    // A store refund that is not this one leaves the record unlanded: Refunded adds both.
+    view.rerender(sheet({ store: { ...twoHalves, refunds: [{ id: 'refund_00', amountMinor: 100, lines: [] }] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(700)}`));
     expect(screen.queryByTestId('order-detail-refund')).toBeNull();
-    view.rerender(sheet({ store: { ...twoUnits, refunds: [unitRefund('ref_1')] } }));
+    // The store's refund id is not the result's; its lines match, so the record has landed and is not counted twice.
+    view.rerender(sheet({ store: { ...twoHalves, refunds: [unitRefund('refund_01', 600)] } }));
     expect(await screen.findByTestId('order-detail-refund')).toBeTruthy();
-    expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1200)}`);
+    expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(600)}`);
+  });
+
+  it('C8b: a store refund with different lines does not land the record', async () => {
+    // The store copy leaves a unit refundable, so only the unlanded record withholds Refund.
+    await record('r1', 1200, [{ orderLineId: 'line_1', quantity: 2, restock: true }]);
+    render(sheet({ store: { ...twoHalves, refunds: [unitRefund('refund_01', 600)] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1800)}`));
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+  });
+
+  it('C8c: two identical applied records need two store refunds; one lands one record', async () => {
+    await record('r1', 600, [{ orderLineId: 'line_1', quantity: 1, restock: true }], '2026-11-26T10:00:00.000Z');
+    await record('r2', 600, [{ orderLineId: 'line_1', quantity: 1, restock: false }], '2026-11-26T10:05:00.000Z');
+    const view = render(sheet({ store: { ...twoHalves, refunds: [unitRefund('refund_01', 600)] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1200)}`));
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    view.rerender(sheet({ store: { ...twoHalves, refunds: [unitRefund('refund_01', 600), unitRefund('refund_02', 600)] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1200)}`));
+    // Both landed; nothing is left to refund, so the form is not offered.
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+  });
+
+  it('C8d: a record without lines lands on a store refund without lines of the same amount only', async () => {
+    await record('r1', 300, []);
+    const view = render(sheet({ store: { ...storeOrder, refunds: [{ id: 'refund_01', amountMinor: 400, lines: [] }] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(700)}`));
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    view.rerender(sheet({ store: { ...storeOrder, refunds: [{ id: 'refund_01', amountMinor: 300 }] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(300)}`));
+    // lines absent leaves the form unable to price (C9); lines [] is known goodwill, so Refund is offered.
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    view.rerender(sheet({ store: { ...storeOrder, refunds: [{ id: 'refund_01', amountMinor: 300, lines: [] }] } }));
+    expect(await screen.findByTestId('order-detail-refund')).toBeTruthy();
+    expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(300)}`);
   });
 
   it('C9: an earlier store refund whose lines are unknown offers no Refund', async () => {
@@ -276,6 +327,10 @@ describe('Refund in the Orders sheet (#569)', () => {
     view.rerender(sheet({ open: false }));
     view.rerender(sheet());
     expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(1200)}`);
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    // The store copy carries it under Medusa's refund id, not the result's `tref_1:0`: counted once.
+    view.rerender(sheet({ store: { ...storeOrder, refunds: [unitRefund('refund_01')] } }));
+    await waitFor(() => expect(screen.getByTestId('order-detail-refunded').textContent).toBe(`Refunded ${money(1200)}`));
     expect(screen.queryByTestId('order-detail-refund')).toBeNull();
   });
 
