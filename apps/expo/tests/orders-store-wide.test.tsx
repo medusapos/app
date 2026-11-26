@@ -10,6 +10,9 @@ import { REGISTER_ID_KEY, type Session } from '../lib/session';
 import { saveTillName } from '../lib/till-name';
 import { useOutboxContext } from '../lib/outbox-context';
 import { formatDate } from '../lib/format-date';
+import { takeReopen } from '../lib/reopen-order';
+import { router } from 'expo-router';
+import { StoreOrderDetailSheet } from '../components/store-order-detail-sheet';
 import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEXT, ORDERS_NO_MATCH_TEXT, ORDERS_OFFLINE_TEXT }
   from '../app/orders';
 import { setWindowWidth } from './window-width';
@@ -281,6 +284,42 @@ describe('Orders lists the whole store (row 10)', () => {
     await settle();
     expect(screen.getByTestId('order-detail-sheet')).toBeTruthy();
     expect(screen.queryByTestId('store-order-detail-sheet')).toBeNull();
+  });
+});
+
+// v2's Re-open (row 10.3), Medusa's way: a new sale with the order's lines, started by the Sale screen (lib/reopen-order.ts).
+describe('Reopen a store order (row 10.3)', () => {
+  const sheet = (onReopen?: (order: StoreOrder) => void) => render(<><StoreOrderDetailSheet order={storeOrder(4)}
+    onClose={vi.fn()} formatDate={formatDate} onReopen={onReopen} /><PortalHost /></>);
+
+  it('shows Reopen and hands it the order', async () => {
+    const onReopen = vi.fn();
+    sheet(onReopen);
+    await settle();
+    fireEvent.click(within(screen.getByTestId('store-order-detail-sheet')).getByRole('button', { name: 'Re-open' }));
+    expect(onReopen).toHaveBeenCalledWith(storeOrder(4));
+  });
+
+  it('has no Reopen without onReopen', async () => {
+    sheet();
+    await settle();
+    expect(screen.getByTestId('store-order-detail-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('order-detail-reopen')).toBeNull();
+    expect(screen.queryByText('Re-open')).toBeNull();
+  });
+
+  it('Reopen on a store order closes the sheet and asks the Sale screen to reopen it', async () => {
+    const placed = storeOrder(3);
+    listOrders.mockResolvedValue(page([placed]));
+    await mount();
+    fireEvent.click(screen.getByRole('button', { name: 'Open order #1003' }));
+    await settle();
+    fireEvent.click(within(screen.getByTestId('store-order-detail-sheet')).getByRole('button', { name: 'Re-open' }));
+    await settle();
+    expect(screen.queryByTestId('store-order-detail-sheet')).toBeNull();
+    expect(vi.mocked(router.dismissTo)).toHaveBeenCalledWith('/');
+    expect(takeReopen()).toEqual(placed);
+    expect(takeReopen()).toBeNull();
   });
 });
 

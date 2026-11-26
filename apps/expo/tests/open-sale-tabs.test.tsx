@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
-import { type PosOrder } from '@tallyui/pos';
+import { REGISTER_CLOSING, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import ProductsScreen from '../app/index';
 import { draftsCollection, openOrderStore } from '../lib/order-store';
@@ -15,6 +15,8 @@ import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
 import { cartLineCells } from './tender-pane';
+import type { StoreOrder } from '@tallyui/core';
+import { requestReopen } from '../lib/reopen-order';
 
 vi.mock('../lib/pos-connector', async (original) => (await import('./pos-connector-mock')).mockPosConnector(original));
 vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, Stack: { Screen: () => null } }));
@@ -285,4 +287,75 @@ it.each([1280, 390])('hides tabs during tender and restores the same tab on canc
   expect(screen.getByTestId('open-sale-tabs')).toBeTruthy();
   expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
   expect(screen.getByTestId(tabId).getAttribute('aria-selected')).toBe('true');
+});
+
+// Orders' Reopen (row 10.3): the store order's lines and customer as a new tab, the open sale parked beside it.
+const storeOrder = (lines: [string, string | undefined, number][]): StoreOrder => ({
+  id: 'order_7', reference: '1007', status: 'completed', placedAt: '2026-11-24T09:00:00.000Z', currency: 'EUR',
+  pricesIncludeTax: false, customer: { id: 'ada', name: 'Ada Lovelace', email: 'ada@example.test' },
+  lines: lines.map(([name, variantId, quantity]) => ({ id: `line_${name}`, name, variantId, quantity,
+    subtotalMinor: 0, subtotalTaxMinor: 0, totalMinor: 0, taxMinor: 0 })),
+  fees: [], shipping: [], coupons: [], taxLines: [], discountMinor: 0, discountTaxMinor: 0, taxMinor: 0, totalMinor: 0,
+  payments: [], refunds: [],
+});
+function withHat() {
+  const replicated = (useReplicatedProducts as unknown as () => ReturnType<typeof useReplicatedProducts>)(); // the beforeEach value
+  vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [...replicated.products, { id: 'hat', title: 'Hat',
+    status: 'published', variants: [{ id: 'red', title: 'Red', sku: 'RED', prices: [{ amount: 5, currency_code: 'eur' }] }] }] });
+}
+
+it("a reopen request parks the open sale and starts a new tab with the order's lines, quantities and customer", async () => {
+  withHat();
+  await mount(); add();
+  const parkedTab = saleTabs().getByRole('tab').getAttribute('data-testid')!;
+  await act(async () => { requestReopen(storeOrder([['Hat', 'red', 3], ['Shirt', 'blue', 1]])); });
+  await waitFor(() => expect(saleTabs().getAllByRole('tab')).toHaveLength(2));
+  expect(await drafts().find().exec()).toHaveLength(1);
+  expect(screen.getByTestId(parkedTab).getAttribute('aria-selected')).toBe('false');
+  expect(cartLineCells('Hat')).toEqual(['3', 'Hat', '€5.00', '€15.00']);
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  const current = saleTabs().getAllByRole('tab').find((tab) => tab.getAttribute('aria-selected') === 'true')!;
+  expect(within(current).getByTestId(/-who$/).textContent).toBe('Ada Lovelace');
+  expect(screen.queryByTestId('open-sale-refusal')).toBeNull();
+});
+
+it('a refused reopen shows why and keeps the open sale', async () => {
+  await mount(); add();
+  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2], ['Old scarf', 'gone', 1]])); });
+  expect(screen.getByTestId('open-sale-refusal').textContent).toBe('Can\'t reopen: "Old scarf" is no longer for sale.');
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
+  expect(await drafts().find().exec()).toHaveLength(0);
+});
+
+it('a reopen while the register is counting is refused and starts no tab', async () => {
+  const view = await mount(); add();
+  const fixture = openRegisterFixture();
+  vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register,
+    session: { ...fixture.register.session!, status: 'counting' } } });
+  await act(async () => { view.rerender(<><ProductsScreen /><PortalHost /></>); });
+  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2]])); });
+  vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
+  await act(async () => { view.rerender(<><ProductsScreen /><PortalHost /></>); });
+  expect(screen.getByTestId('open-sale-refusal').textContent).toBe(REGISTER_CLOSING);
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(1);
+  expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  expect(await drafts().find().exec()).toHaveLength(0);
+});
+
+it('a line the cart refuses stops the reopen and says the tab is partial', async () => {
+  withHat();
+  const replicated = (useReplicatedProducts as unknown as () => ReturnType<typeof useReplicatedProducts>)();
+  vi.mocked(useReplicatedProducts).mockReturnValue({ ...replicated, products: [...replicated.products, { id: 'cap', title: 'Cap',
+    status: 'published', variants: [{ id: 'cap-std', title: 'Std', sku: 'CAP', prices: [{ amount: 5, currency_code: 'usd' }] }] }] });
+  await mount(); add();
+  await act(async () => { requestReopen(storeOrder([['Shirt', 'blue', 2], ['Cap', 'cap-std', 1], ['Hat', 'red', 1]])); });
+  expect(screen.getByTestId('open-sale-refusal').textContent).toBe('Reopened only part of order #1007: No EUR price for Cap');
+  expect(saleTabs().getAllByRole('tab')).toHaveLength(2);
+  expect(cartLineCells('Shirt')).toEqual(['2', 'Shirt', '€12.00', '€24.00']);
+  const cart = within(screen.getByTestId('cart-header').parentElement!);
+  expect(cart.queryByText('Cap')).toBeNull();
+  expect(cart.queryByText('Hat')).toBeNull();
+  const current = saleTabs().getByRole('tab', { selected: true });
+  expect(within(current).getByTestId(/-who$/).textContent).toBe('Ada Lovelace');
 });

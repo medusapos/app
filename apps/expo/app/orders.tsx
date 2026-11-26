@@ -1,9 +1,9 @@
 import { useContext, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { Redirect, Stack } from 'expo-router';
+import { Redirect, router, Stack, type Href } from 'expo-router';
 import { Button, OrderFilterBar, SearchInput, Text as ButtonText } from '@tallyui/components';
 import { getDeviceId, needsAttention, type OrderFilterValue } from '@tallyui/pos';
-import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
+import { AreaAccountButton, FrameMenuButton, frameStep, useFrameMenu } from '../components/app-frame';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
 import { OrdersTable } from '../components/orders-table';
 import { StoreOrderDetailSheet } from '../components/store-order-detail-sheet';
@@ -17,6 +17,7 @@ import { refundsCollection } from '../lib/order-store';
 import { filterOrders, orderFilterOptions } from '../lib/order-filters';
 import { mergeOrderRows, useStoreOrders, type OrdersRow } from '../lib/store-orders';
 import { orderBillingCell } from '../lib/orders-table';
+import { requestReopen } from '../lib/reopen-order';
 
 export const ORDERS_LOADING_TEXT = 'Loading orders…';
 export const ORDERS_EMPTY_TEXT = 'No orders yet.';
@@ -107,6 +108,11 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
       billing={openSale ? orderBillingCell({ kind: 'local', key: openSale.id, order: openSale, storeId: openSaleStore?.id }, store.billing) : undefined}
       formatDate={formatDate} onRetry={requeue} onFlush={flush} stuck={state.stuck} />
     <StoreOrderDetailSheet order={openStore} onClose={() => setOpenStoreId(null)} formatDate={formatDate}
-      billing={openStore ? orderBillingCell({ kind: 'store', key: openStore.id, order: openStore }, store.billing) : undefined} />
+      billing={openStore ? orderBillingCell({ kind: 'store', key: openStore.id, order: openStore }, store.billing) : undefined}
+      onReopen={(order) => {
+        // The Sale screen takes the request and starts the new sale; Orders goes back to it as the rail does.
+        requestReopen(order); setOpenStoreId(null);
+        const step = frameStep('orders', 'sale'); if (step) router[step.method](step.href as Href);
+      }} />
   </View>;
 }
