@@ -224,6 +224,26 @@ test('Theme: Dark puts the dark class on <html> and its tokens, the first frame 
   expect(await page.evaluate(() => localStorage.getItem('medusapos.theme'))).toBe('light');
 });
 
+test("Theme: Light draws the selected rail entry in v2's navy, and Dark keeps TallyUI's", async ({ page }) => {
+  const token = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--color-rail-selected-foreground').trim());
+  await page.emulateMedia({ colorScheme: 'light' });
+  await signIn(page, 'Europe', false);
+  await expect(page.locator('html')).toHaveClass(/(^|\s)light(\s|$)/);
+  await expect.poll(token).toBe('#26365e');
+  // The phone drawer labels its entries; the selected one (POS) draws its label in the token's colour.
+  await page.getByRole('button', { name: 'Menu', exact: true }).click();
+  const selected = page.getByRole('navigation', { name: 'Main' }).locator('[data-testid^="nav-item-"][aria-current="page"]');
+  await expect(selected).toHaveCount(1);
+  await expect(selected.getByText('POS', { exact: true })).toHaveCSS('color', 'rgb(38, 54, 94)');
+
+  // The drawer is open, so go to Settings › Theme from it.
+  await page.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Settings', exact: true }).click();
+  await page.getByTestId('settings-list').getByRole('button', { name: 'Theme', exact: true }).click();
+  await page.getByRole('button', { name: 'Dark', exact: true }).click();
+  await expect(page.locator('html')).toHaveClass(/(^|\s)dark(\s|$)/);
+  await expect.poll(token).toBe('#818cf8');
+});
+
 test('Scale: Regular is the default, Auto persists after reload, and Regular restores the default size', async ({ page }) => {
   await signIn(page, 'Europe', false);
   await openSettings(page, 'Theme');

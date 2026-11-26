@@ -40,7 +40,7 @@
   --color-destructive-foreground: oklch(0.99 0.01 25);
 }
 
-/* v2's three surfaces and cobalt primary in the default Light theme (desk, 22 Nov), over @tallyui/theme's #e4eaf5
+/* v2's three surfaces, cobalt primary and navy selected rail entry in the default Light theme (desk, 22 Nov), over @tallyui/theme's #e4eaf5
    rail, #f8f9fa canvas and #5b5ef0 primary. Each value is a 9x9 patch mean from v2's captures, at the point given:
    01 = docs/v2-parity/demo-shots/01-pos-empty-cart-demo-desktop.jpg, 03 = 03-cart-items-demo-desktop.jpg (its
    Checkout button), 17 = 17-menu-demo-phone.jpg. Here, not in themes.css: lib/themes-css.test.ts holds themes.css to
@@ -57,6 +57,10 @@
       --color-primary: #0031cc; /* 03 Checkout (900,695) #0031cb; v2's c1, TallyUI's --color-c1 */
       --color-primary-foreground: #ffffff; /* 03 Checkout label: white, 9.1:1 on the primary */
       --color-ring: #0031cc; /* as the primary */
+      /* 01 selected rail icon, box (18,16) 30x34: darkest-5 stroke mean #26365e (darkest #213159; the box's darkest
+         4% wash to #3f4e73); 17 drawer POS icon (18,16) 20x24: #25344c. On rail-selected #ffffff 11.9:1, on the
+         sidebar 9.7:1. The square itself stays white (01 corners #f6fbfd-#f6faff, 17 #fffefb). */
+      --color-rail-selected-foreground: #26365e;
     }
   }
 }
