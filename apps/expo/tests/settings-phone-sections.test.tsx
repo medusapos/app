@@ -33,7 +33,7 @@ vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 vi.mock('expo-localization', () => ({ getLocales: () => [{ languageTag: 'en-GB' }] }));
 
 const SECTION_TEST_IDS = ['settings-store', 'settings-tax', 'settings-printing', 'settings-card-readers', 'settings-scanner',
-  'settings-theme', 'settings-register', 'settings-danger'];
+  'settings-theme', 'settings-register', 'settings-health', 'settings-danger'];
 
 beforeEach(() => {
   const data = new Map<string, string>();
@@ -80,7 +80,7 @@ describe('Settings on a phone: a list of sections, each on its own page', () => 
     expect(listRows().map((row) => row.textContent)).toEqual(wideLabels);
     expect(listRows().map((row) => row.getAttribute('aria-label'))).toEqual(wideLabels);
     expect(listRows().map((row) => row.dataset.testid)).toEqual(['settings-list-store', 'settings-list-tax', 'settings-list-printing',
-      'settings-list-card-readers', 'settings-list-scanner', 'settings-list-theme', 'settings-list-register', 'settings-list-danger']);
+      'settings-list-card-readers', 'settings-list-scanner', 'settings-list-theme', 'settings-list-register', 'settings-list-health', 'settings-list-danger']);
     for (const row of listRows()) expect(within(row).getByTestId('settings-list-chevron').querySelector('svg')).toBeTruthy();
     expect(screen.getByRole('main', { name: 'Settings' }).contains(screen.getByTestId('settings-list'))).toBe(true);
     for (const id of SECTION_TEST_IDS) expect(screen.queryByTestId(id)).toBeNull();
@@ -131,7 +131,7 @@ describe('Settings on a phone: a list of sections, each on its own page', () => 
   it('an unknown section shows the list', async () => {
     params.section = 'nope';
     await mountFramed(390, 844);
-    expect(listRows()).toHaveLength(8);
+    expect(listRows()).toHaveLength(9);
     for (const id of SECTION_TEST_IDS) expect(screen.queryByTestId(id)).toBeNull();
     expect(screen.getByTestId('header-left').dataset.title).toBe('Settings');
   });
@@ -155,7 +155,7 @@ describe('Settings on a phone carries the account avatar at the top right, as v2
     const avatar = screen.getByTestId('area-user-menu');
     expect(screen.getByTestId('header-right').contains(avatar)).toBe(true);
     expect(listRows()).not.toContain(avatar);
-    expect(listRows()).toHaveLength(8);
+    expect(listRows()).toHaveLength(9);
     expect(screen.getByTestId('area-user-menu-avatar').textContent).toBe('DC');
     fireEvent.click(avatar);
     expect(open).toHaveBeenCalledOnce();

@@ -6,6 +6,7 @@ import { Path } from 'react-native-svg';
 import { Card, ChevronDownIcon, createSvgIcon, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsLayout, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
+import { HealthSection } from '../components/health-section';
 import { DirectScannerConnection } from '../components/device-scanner';
 import { cameraScanSupported } from '../lib/camera-scan';
 import { THEME_LABELS, ThemeTiles } from '../components/theme-tiles';
@@ -72,6 +73,7 @@ export default function SettingsScreen() {
     { id: 'scanner', label: 'Barcode Scanning', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
+    { id: 'health', label: 'Health', element: <HealthSection session={session} /> },
     { id: 'danger', label: 'Danger zone', element: <ClearLocalDataSection /> },
   ];
   const chosen = sections.find(({ id }) => id === chosenSection) ?? sections[0];
