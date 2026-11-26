@@ -80,7 +80,7 @@ beforeEach(() => {
   vi.mocked(useSession).mockReturnValue(sessionFixture(session));
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
-    record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(),
+    record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(),
     isStored: vi.fn().mockResolvedValue(false) });
   vi.mocked(useReplicatedProducts).mockImplementation((_connector, context) => {
     const id = context.pricingContext?.region_id;
