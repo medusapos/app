@@ -87,7 +87,7 @@ beforeEach(async () => {
   store = await openOrderStore(baseUrl);
   record = vi.fn(async (order: PosOrder) => { await store.orders.insert(order); });
   vi.mocked(useOutboxContext).mockReturnValue({ orders: store.orders, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [],
-    record, flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
+    record, flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
 });
 afterEach(async () => {
   cleanup();
