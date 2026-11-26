@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { adminToken, inventoryLevel, openArea, sellBySku, setInventoryLevel, signIn, test } from './helpers';
+import { adminToken, inventoryLevel, openArea, refundInModal, sellBySku, setInventoryLevel, signIn, test } from './helpers';
 
 async function openNewestSale(page: Page) {
   await openArea(page, 'Orders');
@@ -85,13 +85,8 @@ test.describe('at 1280 × 800', () => {
       const sheet = await openNewestSale(page);
       await expect(sheet.getByTestId('order-detail-refund')).toBeVisible({ timeout: 15_000 });
       await sheet.getByTestId('order-detail-refund').click();
-      const dialog = page.getByTestId('order-refund-dialog');
-      const refundMinor = minorOf(await dialog.getByTestId('order-refund-total').textContent());
+      const refundMinor = await refundInModal(page, { reason: 'e2e reports refund' });
       expect(refundMinor).toBeGreaterThan(0);
-      await dialog.getByTestId('order-refund-reason').fill('e2e reports refund');
-      await dialog.getByTestId('order-refund-confirm').click();
-      await expect.poll(async () => await dialog.count() === 0 ? 'closed'
-        : (await dialog.getByTestId('order-refund-error').allTextContents()).join(' | ') || 'open').toBe('closed');
       await expect(sheet.getByTestId('order-detail-refunded')).toBeVisible();
       await sheet.getByTestId('order-detail-close').click();
 

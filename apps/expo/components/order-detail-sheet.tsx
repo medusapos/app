@@ -3,19 +3,20 @@ import { Platform, ScrollView, View } from 'react-native';
 import {
   Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, OrderDetail, orderReference, OrderSyncNotices, Receipt, Text, XIcon,
 } from '@tallyui/components';
-import { formatMoney, type StoreOrder } from '@tallyui/core';
-import { buildReceiptDataFromPosOrder, refundDueOf, type PosOrder, type PosRefundCollection, type UseOrderOutboxResult } from '@tallyui/pos';
+import { formatMoney, type StoreOrder, type StoreOrderRefund } from '@tallyui/core';
+import { buildReceiptDataFromPosOrder, mintUuid, refundDueOf, type PosOrder, type PosRefund, type PosRefundCollection, type UseOrderOutboxResult } from '@tallyui/pos';
 import {
   canSyncOrder, orderDetailFigures, orderStatusBadge, paymentLabel, receiptTaxLabel, syncOrder,
 } from '../lib/order-detail';
 import { formatReceiptDate } from '../lib/format-date';
 import { ordersTableCells } from '../lib/orders-table';
-import { REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
-import { fullRefundOffer } from '../lib/refund';
+import { PARTIAL_REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
+import { refundFormInput } from '../lib/refund';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedSettings } from '../lib/store-settings';
 import { OrderRefundDialog, useRefundRecords } from './order-refund-dialog';
+import { OrderRefundModal } from './order-refund-modal';
 
 // While a reprint shows, a print keeps only it: other branches collapse, its ancestors stop positioning, clipping and
 // painting, and it moves to the page's top left. Inert without a reprint on the page, so the paid screen prints as before.
@@ -33,6 +34,31 @@ export function injectReceiptPrintStyle() {
   document.head.appendChild(style);
 }
 
+const refundAmount = (record: PosRefund) => record.result?.totalMinor ?? record.envelope.payload.totalMinor;
+// A refund's lines as a multiset of orderLineId × quantity, in a fixed order; restock and net/tax play no part.
+const lineKey = (lines: readonly { orderLineId: string; quantity: number }[]) =>
+  JSON.stringify(lines.filter((line) => line.quantity > 0).map((line) => [line.orderLineId, line.quantity]).sort());
+
+/**
+ * This till's applied refunds the store's copy does not carry yet. The applied result ids are the plugin's own
+ * (`<tally refund id>:<n>`), never the store's refund ids, so a refund is matched by what it refunded: equal line
+ * multisets, or, for a refund without lines, a store refund without lines of the same amount. Each store refund
+ * matches one record at most, in the records' creation order. A zero refund (stock only) creates no store refund.
+ */
+export function unlandedRefunds(records: readonly PosRefund[], storeRefunds: readonly StoreOrderRefund[]): PosRefund[] {
+  const free = storeRefunds.map((refund) => ({ key: lineKey(refund.lines ?? []), amountMinor: refund.amountMinor }));
+  return [...records].filter((record) => record.status === 'applied')
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+    .filter((record) => {
+      if (refundAmount(record) === 0) return false;
+      const key = lineKey(record.envelope.payload.lines);
+      const match = free.findIndex((refund) => refund.key === key && (key !== '[]' || refund.amountMinor === refundAmount(record)));
+      if (match < 0) return true;
+      free.splice(match, 1);
+      return false;
+    });
+}
+
 // One stored sale, read-only, in a right-hand sheet as WCPOS v2 opens an order.
 // A labelled muted line in a sheet's customer block; nothing for an empty value or the table's '—'.
 export function DetailLine({ testID, label, value }: { testID: string; label: string; value?: string }) {
@@ -47,7 +73,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   order: PosOrder | null; onClose: () => void; formatDate: (iso: string) => string;
   onRetry: (orderIds: string[]) => Promise<number>; onFlush: () => Promise<void>;
   stuck?: UseOrderOutboxResult['state']['stuck'];
-  /** The store's copy of this sale and this till's `pos_refunds`: Refund all (ADR 0026) needs both. */
+  /** The store's copy of this sale and this till's `pos_refunds`: Refund (ADR 0026, #569) needs both. */
   storeOrder?: StoreOrder | null; refunds?: PosRefundCollection;
   /** The Billing Address the sale's table row shows ('—' when it has none). */
   billing?: string;
@@ -55,19 +81,28 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   const { session } = useSession();
   const [reprint, setReprint] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const [refunding, setRefunding] = useState(false);
+  // What is open over the sheet: the refund form, or the dialog that resends a refund sent without a final answer.
+  const [refunding, setRefunding] = useState<null | string | PosRefund>(null);
+  // Why the form handed its refund to the resume dialog.
+  const [handoff, setHandoff] = useState('');
   // Each sale opens on its detail; keyed on the id, so a live sync-status update keeps the receipt up.
-  useEffect(() => { setReprint(false); setRefunding(false); }, [order?.id]);
+  useEffect(() => { setReprint(false); setRefunding(null); setHandoff(''); }, [order?.id]);
   const records = useRefundRecords(refunds, storeOrder?.id ?? undefined);
-  const applied = records.find((record) => record.status === 'applied');
   const resume = records.find((record) => record.status === 'pending' || record.status === 'unsent') ?? null;
   const capabilities = session?.capabilities;
-  const canRefund = !!order && !!storeOrder && !!refunds && (capabilities?.orderRefund ?? 0) >= 1
-    && (capabilities?.pluginContract ?? 0) >= REFUND_PLUGIN_CONTRACT && !applied && fullRefundOffer(storeOrder, order.payments, true).offered;
-  // A refund sent without a final answer opens again on its own envelope when its sale does.
-  useEffect(() => { if (resume && canRefund) setRefunding(true); }, [order?.id, resume?.id, canRefund]);
-  const refundedMinor = applied ? applied.result?.totalMinor ?? applied.envelope.payload.totalMinor
-    : storeOrder?.refunds.length ? storeOrder.refunds.reduce((total, refund) => total + refund.amountMinor, 0) : null;
+  const gate = !!order && !!storeOrder && !!refunds && (capabilities?.orderRefund ?? 0) >= 1
+    && (capabilities?.pluginContract ?? 0) >= PARTIAL_REFUND_PLUGIN_CONTRACT;
+  const input = gate && order && storeOrder ? refundFormInput(storeOrder, order.payments) : null;
+  // Until the store's copy carries each applied refund, the form would read stale remaining quantities: no new refund starts.
+  const unlanded = unlandedRefunds(records, storeOrder?.refunds ?? []);
+  const canRefund = gate && !resume && unlanded.length === 0 && !!input?.offered;
+  const canResume = gate && !!resume;
+  // A refund sent without a final answer opens again on its own envelope when its sale does; never over the open form,
+  // whose own send is pending until it answers.
+  useEffect(() => { if (canResume && resume) setRefunding((open) => open ?? resume); }, [order?.id, resume?.id, canResume]);
+  const refundedParts = [...(storeOrder?.refunds.map((refund) => refund.amountMinor) ?? []),
+    ...unlanded.map(refundAmount)];
+  const refundedMinor = refundedParts.length ? refundedParts.reduce((total, amount) => total + amount, 0) : null;
   useEffect(() => { if (reprint) injectReceiptPrintStyle(); }, [reprint]);
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
@@ -116,7 +151,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
           </View> : null}
           {refundedMinor !== null ? <Text testID="order-detail-refunded" className="text-sm text-foreground">{`Refunded ${money(refundedMinor)}`}</Text> : null}
         </View>}
-        onRefund={canRefund ? () => setRefunding(true) : undefined}
+        onRefund={canRefund ? () => setRefunding(mintUuid()) : undefined}
         footerSlot={<View className="flex-row gap-2">
           {canSyncOrder(order) ? <Button variant="outline" className="flex-1" testID="order-detail-sync" disabled={syncing}
             onPress={() => {
@@ -130,7 +165,11 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
     </DialogContent> : null}
   </Dialog>
     {/* Over the sheet as user-sheet's SwitchConfirm: a sibling, since a dialog inside DialogContent never shows on web. */}
-    {refunding && order && storeOrder && refunds ? <OrderRefundDialog order={storeOrder} tenders={order.payments} refunds={refunds} resume={resume}
-      onClose={() => setRefunding(false)} /> : null}
+    {typeof refunding === 'string' && order && storeOrder && refunds && input?.offered ? <OrderRefundModal order={storeOrder} clientRefundId={refunding}
+      tenders={order.payments} refunds={refunds} input={input} onClose={() => setRefunding(null)}
+      onUnanswered={(message, record) => { setHandoff(message); setRefunding(record); }} /> : null}
+    {refunding && typeof refunding === 'object' && order && storeOrder && refunds ? <OrderRefundDialog key={refunding.id} order={storeOrder}
+      tenders={order.payments} refunds={refunds} resume={refunding} notice={handoff || undefined}
+      onClose={() => { setRefunding(null); setHandoff(''); }} /> : null}
   </>;
 }

@@ -5,6 +5,7 @@ import { buildReceiptDataFromStoreOrder, orderFiltersQuery, type OrderFilterValu
 import { loadOrderBilling } from './order-billing';
 import { ordersScreenFilterFields } from './order-filters';
 import { authHeaders, createPosConnector, storeOrderFilters } from './pos-connector';
+import { PARTIAL_REFUND_PLUGIN_CONTRACT, REFUND_LINES_PLUGIN_CONTRACT } from './plugin-contract';
 import type { Session } from './session';
 
 // listOrders' own default page size (its max is 100); WCPOS v2 pages its Orders list the same way.
@@ -158,4 +159,31 @@ export function useStoreOrders(session: Session, search: string, filters: OrderF
     unreadable: result?.unreadable ?? 0, loading, failure, loadMore, retry, filterFields,
     billing: billing.context === context ? billing.byId : NO_BILLING,
   };
+}
+
+// Reread the open order with capabilities for refund lines at contract 6, and for sold figures and returned quantities
+// at 7 even without a till refund. Until it arrives or if it fails, the form refuses any missing figures on the list copy.
+export function useStoreOrderWithRefundLines(session: Session, storeOrder: StoreOrder | null, appliedCount: number): StoreOrder | null {
+  const connector = useMemo(() => createPosConnector(), []);
+  const id = storeOrder?.id;
+  const refundCount = storeOrder?.refunds.length ?? 0;
+  const contract = session.capabilities?.pluginContract ?? 0;
+  const wanted = !!id && (contract >= PARTIAL_REFUND_PLUGIN_CONTRACT || (refundCount > 0 && contract >= REFUND_LINES_PLUGIN_CONTRACT));
+  const key = `${id}\n${refundCount}\n${appliedCount}`;
+  const [read, setRead] = useState<StoreOrder | null>(null);
+  useEffect(() => {
+    const getOrders = connector.getOrders;
+    if (!wanted || !id || !getOrders) return;
+    const controller = new AbortController();
+    getOrders({ connectorId: connector.id, baseUrl: session.baseUrl, headers: authHeaders(session.token),
+      capabilities: session.capabilities, signal: controller.signal }, [id]).then((orders) => {
+      if (!controller.signal.aborted) setRead(orders.find((order) => order.id === id) ?? null);
+    }, () => {
+      if (!controller.signal.aborted) setRead(null);
+    });
+    // A newer read aborts this one, and its late answer is dropped.
+    return () => controller.abort();
+  }, [connector, wanted, id, key, session.baseUrl, session.token, session.capabilities]);
+  if (!wanted || !storeOrder) return storeOrder;
+  return read?.id === storeOrder.id ? read : storeOrder;
 }

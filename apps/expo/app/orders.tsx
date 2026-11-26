@@ -5,6 +5,7 @@ import { Button, OrderFilterBar, SearchInput, Text as ButtonText } from '@tallyu
 import { getDeviceId, needsAttention, type OrderFilterValue } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, frameStep, useFrameMenu } from '../components/app-frame';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
+import { useAppliedRefundCount } from '../components/order-refund-dialog';
 import { OrdersTable } from '../components/orders-table';
 import { StoreOrderDetailSheet } from '../components/store-order-detail-sheet';
 import { StripHeightContext } from '../components/store-refused';
@@ -15,7 +16,7 @@ import { useTillName } from '../lib/till-name';
 import { formatDate } from '../lib/format-date';
 import { refundsCollection } from '../lib/order-store';
 import { filterOrders, orderFilterOptions } from '../lib/order-filters';
-import { mergeOrderRows, useStoreOrders, type OrdersRow } from '../lib/store-orders';
+import { mergeOrderRows, useStoreOrders, useStoreOrderWithRefundLines, type OrdersRow } from '../lib/store-orders';
 import { orderBillingCell } from '../lib/orders-table';
 import { requestReopen } from '../lib/reopen-order';
 
@@ -38,8 +39,11 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   const [filters, setFilters] = useState<OrderFilterValue>({});
   const [openId, setOpenId] = useState<string | null>(null);
   const [openStoreId, setOpenStoreId] = useState<string | null>(null);
-  // A sale reaching the store changes this count, and the store's first page is read again to list it.
-  const appliedCount = useMemo(() => recent.filter((order) => order.syncStatus === 'applied').length, [recent]);
+  // A sale reaching the store, or a refund the store applied, changes this count, and the store's first page is read again
+  // to list it: the refund form reads what is left of each line from the store's copy.
+  const appliedRefunds = useAppliedRefundCount(refundsCollection(localOrders));
+  const appliedSales = useMemo(() => recent.filter((order) => order.syncStatus === 'applied').length, [recent]);
+  const appliedCount = appliedSales + appliedRefunds;
   const store = useStoreOrders(session, search, filters, appliedCount, onUnauthorized);
   // The Register pill's one option is this till: its sales carry its device id (outbox-context.tsx), as tally_register_id.
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
@@ -64,6 +68,8 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   const topInset = useContext(StripHeightContext);
   const openSale = recent.find((order) => order.id === openId) ?? null;
   const openSaleStore = openId ? store.orders.find((order) => order.clientOrderId === openId) ?? null : null;
+  // The sheet's copy is read again with its refunds' lines, which the refund form needs and the list's read leaves out.
+  const sheetStore = useStoreOrderWithRefundLines(session, openSaleStore, appliedCount);
   const openStore = store.orders.find((order) => order.id === openStoreId) ?? null;
   return <View className="flex-1 bg-background" role="main" aria-label="Orders">
     <Stack.Screen options={{ title: 'Orders', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
@@ -104,7 +110,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
     {/* Looked up in `recent`, not the filtered list: the sheet shows live sync status and survives a search. Each sheet gets
         the Billing Address its table row shows, which a phone's row leaves out. */}
     <OrderDetailSheet order={openSale} onClose={() => setOpenId(null)}
-      storeOrder={openSaleStore} refunds={refundsCollection(localOrders)}
+      storeOrder={sheetStore} refunds={refundsCollection(localOrders)}
       billing={openSale ? orderBillingCell({ kind: 'local', key: openSale.id, order: openSale, storeId: openSaleStore?.id }, store.billing) : undefined}
       formatDate={formatDate} onRetry={requeue} onFlush={flush} stuck={state.stuck} />
     <StoreOrderDetailSheet order={openStore} onClose={() => setOpenStoreId(null)} formatDate={formatDate}

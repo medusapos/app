@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, cartTab, createAdminCustomer, createStoreOnlyOrder, discount, inventoryLevel, openArea, openRegisterPanel, productsTab, sellBySku, setInventoryLevel, signIn } from '../helpers';
+import { addE2E1, adminToken, backend, cartTab, createAdminCustomer, createStoreOnlyOrder, discount, inventoryLevel, openArea, openRegisterPanel, productsTab, refundInModal, sellBySku, setInventoryLevel, signIn } from '../helpers';
 
 export type Size = 'desktop' | 'tablet' | 'phone';
 export type CaptureRow = {
@@ -514,7 +514,7 @@ export const rows: CaptureRow[] = [
     await expect(page.getByTestId('closures-view')).toBeVisible();
   } },
   { id: '13.1', title: 'Reports refunds', state: 'Reports after a refunded sale', only: ['desktop'], reach: async (page, size) => {
-    // Refund all on the newest sale from its Orders sheet, as e2e/refund.spec.ts does; E2E-2's stock is put back.
+    // The whole of the newest sale refunded from its Orders sheet, as e2e/reports.spec.ts does; E2E-2's stock is put back.
     const token = await adminToken();
     const start = await inventoryLevel(token, 'E2E-2');
     try {
@@ -525,10 +525,7 @@ export const rows: CaptureRow[] = [
       const sheet = page.getByTestId('order-detail-sheet');
       await expect(sheet.getByTestId('order-detail-refund')).toBeVisible({ timeout: 15_000 });
       await sheet.getByTestId('order-detail-refund').click();
-      const dialog = page.getByTestId('order-refund-dialog');
-      await dialog.getByTestId('order-refund-reason').fill('capture refund');
-      await dialog.getByTestId('order-refund-confirm').click();
-      await expect(dialog).toHaveCount(0, { timeout: 15_000 });
+      await refundInModal(page, { reason: 'capture refund' });
       await sheet.getByTestId('order-detail-close').click();
     } finally {
       const now = await inventoryLevel(token, 'E2E-2');
