@@ -145,7 +145,7 @@ medusaIntegrationTestRunner({
           lineTax: { none: false, classes: false },
           coupons: true,
           registerApproval: { thresholdMinor: 500 },
-          pluginContract: 6,
+          pluginContract: 7,
           customerDisplay: { v: 1, iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 },
         }])
       }
@@ -169,7 +169,7 @@ medusaIntegrationTestRunner({
         lineTax: { none: false, classes: false },
         coupons: true,
         registerApproval: { thresholdMinor: 500 },
-        pluginContract: 6,
+        pluginContract: 7,
         customerDisplay: { v: 1, iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 },
       })
     })
@@ -1191,18 +1191,19 @@ medusaIntegrationTestRunner({
     describe('needs_admin', () => {
       const built = '../../.medusa/server/src'
       const detail = 'payment collection pay_col_admin is refunded'
+      const parkedSale = (id: string) => ({ code: 'needs_admin', id, reason: 'admin_check', message: 'A manager must check this sale in the store admin.' })
       function spyRun() {
         const run = require(`${built}/workflows/tally-order-create/run`) as typeof import('../../src/workflows/tally-order-create/run')
         return jest.spyOn(run, 'runOrderCreate')
       }
-      async function park() {
+      async function park(claimLost = false) {
         const { NeedsAdminError } = require(`${built}/workflows/tally-order-create/needs-admin-error`) as
           typeof import('../../src/workflows/tally-order-create/needs-admin-error')
         const spy = spyRun().mockRejectedValueOnce(new NeedsAdminError('order_admin', detail))
         const log = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'error')
         const sale = command()
         const response = await post([sale])
-        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        expect([response.status, response.data]).toEqual([409, claimLost ? { code: 'in_progress', id: sale.id } : parkedSale(sale.id)])
         return { sale, spy, log }
       }
       async function resolve(id: string, action: string, message?: string) {
@@ -1220,12 +1221,21 @@ medusaIntegrationTestRunner({
         ])
       })
 
+      it('N4: resending a parked sale after admin rejection returns the stored result', async () => {
+        const { sale } = await park()
+        await resolve(sale.id, 'reject')
+        const row = await ledger.retrieveTallyCommand(sale.id)
+        expect(row).toMatchObject({ status: 'rejected', result: { id: sale.id, status: 'rejected' } })
+        const resend = await post([sale])
+        expect([resend.status, resend.data]).toEqual([200, { results: [row.result] }])
+      })
+
       it('a needs_admin row past the lease is never reclaimed: the resend gets 409 without running the recipe', async () => {
         const { sale, spy } = await park()
         const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
         await knex('tally_command').where({ id: sale.id }).update({ updated_at: knex.raw("now() - interval '1 hour'") })
         const response = await post([sale])
-        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        expect([response.status, response.data]).toEqual([409, parkedSale(sale.id)])
         expect(spy).toHaveBeenCalledTimes(1)
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
       })
@@ -1268,7 +1278,7 @@ medusaIntegrationTestRunner({
         const { orderId, collectionId } = await halfWrittenOrder(sale, topUp)
         await container.resolve(Modules.PAYMENT).updatePaymentCollections(collectionId, { status: 'partially_captured' })
         const response = await post([sale])
-        expect([response.status, response.data]).toEqual([409, { code: 'in_progress', id: sale.id }])
+        expect([response.status, response.data]).toEqual([409, parkedSale(sale.id)])
         expect(await ledger.retrieveTallyCommand(sale.id)).toMatchObject({ status: 'needs_admin' })
         return { sale, orderId, collectionId }
       }
@@ -1276,7 +1286,7 @@ medusaIntegrationTestRunner({
       it('a claim lost while parking logs a warning, not needs admin, and neither releases nor parks the row', async () => {
         jest.spyOn(ledger, 'markNeedsAdmin').mockResolvedValueOnce(false)
         const warn = jest.spyOn(container.resolve(ContainerRegistrationKeys.LOGGER), 'warn')
-        const { sale, log } = await park()
+        const { sale, log } = await park(true)
         expect(warn).toHaveBeenCalledWith(
           `tally order.create: claim lost while parking command ${sale.id} for an admin (order order_admin: ${detail})`)
         expect(log.mock.calls.filter(([line]) => String(line).includes('needs admin'))).toEqual([])

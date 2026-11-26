@@ -12,6 +12,15 @@ jest.setTimeout(240000)
 const openedAt = '2026-01-01T08:00:00.000Z'
 const closedAt = '2026-01-01T10:00:00.000Z'
 const built = '../../.medusa/server/src'
+
+const refundMessages = {
+  session_closed: 'The register session closed before this refund finished, so no money was refunded. A manager can finish it in the store admin.',
+  money_unconfirmed: 'The store could not confirm whether this refund went through. A manager must check it in the store admin.',
+  refund_unrecorded: "This order's refunds do not match the till's records. A manager must check them in the store admin.",
+  park_unrecorded: 'The store could not finish recording this refund. A manager must check it in the store admin.',
+  admin_check: 'A manager must check this refund in the store admin.',
+}
+const parkedRefund = (id: string, reason: keyof typeof refundMessages) => ({ code: 'needs_admin', id, reason, message: refundMessages[reason] })
 // query.graph rows, read loosely: the assertions check their shape.
 type Row = Record<string, any>
 type Rows = { data: Row[] }
@@ -126,7 +135,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       expect(await stockA()).toBe(stock + 1)
       expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { step: 'refund', reason: 'money_unconfirmed' } })
       if (close) {
@@ -499,6 +508,20 @@ medusaIntegrationTestRunner({
       expect([await stockA(), (await returns(till.orderId)).length, (await medusaRefunds(till.orderId)).length]).toEqual([stock + 2, 2, 2])
     })
 
+    it.each([['I-C7-1', true], ['I-C7-2', false]] as const)('%s: orders preserve the as-sold split and count the return (restock=%s)', async (_tag, restock) => {
+      const till = await twoOfA()
+      const readLine = async () => (await api.get(`/tally/v1/orders?ids=${till.orderId}&allChannels=true`, { headers })).data.orders[0].lines[0]
+      const sold = { id: till.lineId, soldTotalMinor: 1681, soldTaxMinor: 319 }
+      expect(await readLine()).toMatchObject({ ...sold, totalMinor: 1681, taxMinor: 319, returnedQuantity: 0 })
+
+      const unit = unitsOf(till, 1, 1001)
+      unit.payload.lines[0].restock = restock
+      expect((await applied([unit]))[0].refund.totalMinor).toBe(1001)
+      const after = await readLine()
+      expect(after).toMatchObject({ ...sold, returnedQuantity: 1 })
+      if (restock) expect(after.totalMinor + after.taxMinor).not.toBe(2000)
+    })
+
     /** #583: one unit refund of `till`'s single line, priced at totalMinor. */
     const unitsOf = (till: { orderId: string; registerId: string; sessionId: string; lineId: string }, quantity: number, totalMinor: number) =>
       command('order.refund', { clientRefundId: randomUUID(), orderId: till.orderId, registerId: till.registerId, sessionId: till.sessionId,
@@ -583,7 +606,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const first = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      expect((await post([first])).data).toEqual({ code: 'in_progress', id: first.id })
+      expect((await post([first])).data).toEqual(parkedRefund(first.id, 'money_unconfirmed'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const row = await knex('tally_refund').where({ command_id: first.id }).first()
       expect(row).toMatchObject({ status: 'needs_admin', medusa_refund_id: null })
@@ -695,14 +718,14 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       const parked = await commandRow(order.id)
       expect(parked).toMatchObject({ status: 'needs_admin', needs_admin_reason: { orderId: till.orderId,
         clientRefundId: order.payload.clientRefundId, step: 'refund', reason: 'money_unconfirmed', message: expect.stringMatching(/^money probe\. /) } })
       expect(parked.needs_admin_reason.message.endsWith("An earlier attempt at this refund may still be running: wait a few minutes, then look at the order's refunds in Medusa. A till sale is paid through Medusa's manual payment, so Medusa only records a refund and sends no money; the till hands the money back. If Medusa shows this refund, use tally-ledger-resolve apply <medusaRefundId>. If it does not, use tally-ledger-resolve resume money-not-sent to record it. Do this before the register session closes: until then the session's expected figures leave this refund out, so the count will not match (cash shows short by the refund's cash part).")).toBe(true)
       expect(await stockA()).toBe(before)
       expect(await medusaRefunds(till.orderId)).toEqual([])
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       // A new command id with the parked clientRefundId is in progress too, and starts no second workflow.
       const reused = { ...refund(till), payload: order.payload }
       expect((await post([reused])).data).toEqual({ code: 'in_progress', id: reused.id })
@@ -722,7 +745,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const row = await knex('tally_refund').where({ command_id: order.id }).first()
       expect(row.received_at).not.toBeNull()
@@ -748,10 +771,46 @@ medusaIntegrationTestRunner({
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin',
         needs_admin_reason: { step: 'session', reason: 'session_closed',
           message: `session_closed: refund ${row.id} did not finish before its register session closed; this run moved no money and no stock. Check the order's refunds in Medusa Admin and finish it there.` } })
+      const resend = await post([order])
+      expect([resend.status, resend.data]).toEqual([409, parkedRefund(order.id, 'money_unconfirmed')])
       expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', medusa_refund_id: null })
       expect(await medusaRefunds(till.orderId)).toEqual([])
       expect(await stockA()).toBe(stock)
       expect(await loadSessionFigures(container, till.sessionId)).toEqual(figures)
+    })
+
+    it('N2: a hand refund invalidates session_closed proof on resend, including after a refused apply', async () => {
+      const { till, order, row } = await parkedReceived()
+      expect(row.money_started_at).toBeNull()
+      const before = await post([order])
+      expect([before.status, before.data]).toEqual([409, parkedRefund(order.id, 'session_closed')])
+
+      const { loadRefundOrder } = require(`${built}/workflows/tally-order-refund/execute`) as typeof import('../../src/workflows/tally-order-refund/execute')
+      const paymentId = (await loadRefundOrder(container, till.orderId))!.payment!.id
+      const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
+      await refundPaymentWorkflow(container).run({ input: { payment_id: paymentId, amount: Number(row.total_minor) / 100, note: 'by hand' } })
+      const after = await post([order])
+      expect([after.status, after.data]).toEqual([409, parkedRefund(order.id, 'money_unconfirmed')])
+
+      const medusa = await knexOf()('refund').where({ payment_id: paymentId }).whereNull('deleted_at').first('id')
+      await expect(resolve(order.id, 'apply', medusa.id)).rejects.toThrow(/session is closed.*stays parked/)
+      expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'session_closed' } })
+      const final = await post([order])
+      expect([final.status, final.data]).toEqual([409, parkedRefund(order.id, 'money_unconfirmed')])
+    })
+
+    it('N3: unknown and missing reasons use the fixed admin_check notice, never stored text', async () => {
+      const { order } = await parkedReceived(false)
+      const { reason, ...stored } = (await commandRow(order.id)).needs_admin_reason
+      expect(reason).toBe('money_unconfirmed')
+      for (const fields of [{ reason: 'brand_new_reason' }, {}]) {
+        await knexOf()('tally_command').where({ id: order.id }).update({ needs_admin_reason: JSON.stringify({
+          ...stored, ...fields, message: 'internal tally-ledger-resolve detail',
+        }) })
+        const resend = await post([order])
+        expect([resend.status, resend.data]).toEqual([409, parkedRefund(order.id, 'admin_check')])
+        expect(JSON.stringify(resend.data)).not.toContain('internal')
+      }
     })
 
     it.each([true, false])('F1-apply-closed: apply refuses a filed closure without moving figures (closed=%s)', async closed => {
@@ -759,7 +818,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const row = await knex('tally_refund').where({ command_id: order.id }).first()
       expect(row.received_at).not.toBeNull()
@@ -793,7 +852,7 @@ medusaIntegrationTestRunner({
         ...till.full.payload, clientRefundId: randomUUID(), lines: [line], totalMinor: 118 }))
       for (const order of orders) {
         jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
-        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+        expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       }
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const first = await knex('tally_refund').where({ command_id: orders[0].id }).first()
@@ -832,7 +891,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const row = await knex('tally_refund').where({ command_id: order.id }).first()
       expect(row.received_at).not.toBeNull()
@@ -851,7 +910,7 @@ medusaIntegrationTestRunner({
       jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new Error('request probe'))
       jest.spyOn(workflow, 'cancelReturn').mockRejectedValueOnce(new Error('cancel probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'admin_check'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const row = await knex('tally_refund').where({ command_id: order.id }).first()
       const [begun] = await returns(till.orderId)
@@ -862,7 +921,7 @@ medusaIntegrationTestRunner({
         updated_at: knex.raw("now() - interval '1 hour'") })
       await applied([command('register.session.transition', { sessionId: till.sessionId, status: 'closed',
         at: closedAt, counted: { cash: 500 } })])
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'session_closed'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'session',
         reason: 'session_closed', message: expect.stringMatching(/^session_closed: refund /) } })
       expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', received_at: null,
@@ -881,7 +940,7 @@ medusaIntegrationTestRunner({
       jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new Error('request probe'))
       jest.spyOn(workflow, 'cancelReturn').mockRejectedValueOnce(new Error('cancel probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'admin_check'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const row = await knex('tally_refund').where({ command_id: order.id }).first()
       const begun = await knex('return').where({ order_id: till.orderId }).first()
@@ -942,7 +1001,7 @@ medusaIntegrationTestRunner({
     it('W1-lookup-fails-parks: a lookup that throws parks at the return step and never deletes the row', async () => {
       const { till, workflow, order, knex, row, begun } = await crashed()
       jest.spyOn(workflow, 'findOwnOpenReturn').mockRejectedValueOnce(new Error('lookup probe'))
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'admin_check'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'return',
         message: 'lookup probe' } })
       expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', return_id: null })
@@ -981,7 +1040,7 @@ medusaIntegrationTestRunner({
       const { till, workflow, order, knex, row, begun } = await orphaned()
       const stock = await stockA()
       jest.spyOn(workflow, 'cancelOrphanReturn').mockRejectedValueOnce(new Error('orphan cancel probe'))
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'admin_check'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'return',
         message: expect.stringMatching(new RegExp(`${begun.id}.*orphan cancel probe`)) } })
       expect(await knex('tally_refund').where({ id: row.id }).first()).toMatchObject({ status: 'needs_admin', return_id: null })
@@ -1120,7 +1179,7 @@ medusaIntegrationTestRunner({
       } finally {
         pause.release()
       }
-      expect((await first).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await first).data).toEqual(parkedRefund(order.id, 'refund_unrecorded'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { orderId: till.orderId,
         clientRefundId: order.payload.clientRefundId, step: 'refund', reason: 'refund_unrecorded' } })
       const hand = await knexOf()('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
@@ -1229,7 +1288,7 @@ medusaIntegrationTestRunner({
       }
       await first
       expect(await medusaRefunds(till.orderId)).toEqual([{ paymentId: till.paymentId, amount: 1.18 }])
-      expect(retry).toEqual({ code: 'in_progress', id: order.id })
+      expect(retry).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       expect(parked).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'refund', reason: 'money_unconfirmed',
         message: expect.stringContaining('tally-ledger-resolve resume money-not-sent') } })
       expect(during).toEqual([])
@@ -1258,7 +1317,7 @@ medusaIntegrationTestRunner({
       expect(row).toMatchObject({ status: 'in_progress', received_at: expect.any(Date), money_started_at: expect.any(Date), medusa_refund_id: null })
       expect(await medusaRefunds(till.orderId)).toEqual([])
       await ageClaim(order.id)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       const unconfirmed = { status: 'needs_admin', needs_admin_reason: { refundId: row.id, step: 'refund', reason: 'money_unconfirmed' } }
       expect(await commandRow(order.id)).toMatchObject(unconfirmed)
       await resolve(order.id, 'resume')
@@ -1320,7 +1379,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
       jest.spyOn(workflow, 'receiveStep').mockRejectedValueOnce(new Error('receive probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'admin_check'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'receive' } })
       const [row] = await bytes(order.id)
       const before = await returns(till.orderId)
@@ -1338,7 +1397,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'money_unconfirmed' } })
       const started = (await knexOf()('tally_refund').where({ command_id: order.id }).first()).money_started_at
       expect(started).toEqual(expect.any(Date))
@@ -1386,7 +1445,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as Workflow
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = oneLine(till, 0)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'money_unconfirmed' } })
       const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
       await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
@@ -1432,7 +1491,7 @@ medusaIntegrationTestRunner({
       const row = await knexOf()('tally_refund').where({ command_id: order.id }).first()
       expect(row).toMatchObject({ status: 'needs_admin', medusa_refund_id: null })
       expect(await commandRow(order.id)).toBeUndefined()
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'park_unrecorded'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { refundId: row.id,
         clientRefundId: order.payload.clientRefundId, step: 'park', reason: 'park_unrecorded' } })
       const hand = await knexOf()('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
@@ -1448,7 +1507,7 @@ medusaIntegrationTestRunner({
       await knex('tally_refund').where({ id: row.id }).update({ status: 'needs_admin', return_id: begun.id })
       await knex('tally_command').where({ id: order.id }).update({ claim_token: randomUUID() })
       const stock = await stockA()
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'park_unrecorded'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { refundId: row.id,
         step: 'park', reason: 'park_unrecorded' } })
       expect(await knex('tally_refund').where({ order_id: till.orderId })).toEqual([expect.objectContaining({ id: row.id,
@@ -1493,7 +1552,7 @@ medusaIntegrationTestRunner({
         throw new Error('record probe')
       })
       const first = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      expect((await post([first])).data).toEqual({ code: 'in_progress', id: first.id })
+      expect((await post([first])).data).toEqual(parkedRefund(first.id, 'money_unconfirmed'))
       if (resumeFirst) {
         await resolve(first.id, 'resume')
         expect(await commandRow(first.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { reason: 'refund_unrecorded' } })
@@ -1526,7 +1585,7 @@ medusaIntegrationTestRunner({
       const spy = jest.spyOn(workflow, 'receiveStep').mockRejectedValueOnce(new Error('receive probe'))
       const first = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
       try {
-        expect((await post([first])).data).toEqual({ code: 'in_progress', id: first.id })
+        expect((await post([first])).data).toEqual(parkedRefund(first.id, 'admin_check'))
       } finally {
         spy.mockRestore()
       }
@@ -1548,7 +1607,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const row = await knex('tally_refund').where({ command_id: order.id }).first()
       expect(row.received_at).not.toBeNull()
@@ -1591,7 +1650,7 @@ medusaIntegrationTestRunner({
       if (received) jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       else refundAfterPricing(till.paymentId, 0.01)
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, received ? 'money_unconfirmed' : 'refund_unrecorded'))
       if (received) await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 0.01, note: 'by hand' } })
       const row = await knex('tally_refund').where({ command_id: order.id }).first(), parked = await commandRow(order.id)
       expect(row).toMatchObject({ status: 'needs_admin', medusa_refund_id: null })
@@ -1616,7 +1675,7 @@ medusaIntegrationTestRunner({
       const workflow = require(`${built}/workflows/tally-order-refund/workflow`) as typeof import('../../src/workflows/tally-order-refund/workflow')
       jest.spyOn(workflow, 'moneyStep').mockRejectedValueOnce(new Error('money probe'))
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
       await refundPaymentWorkflow(container).run({ input: { payment_id: till.paymentId, amount: 1.18, note: 'by hand' } })
@@ -1644,7 +1703,7 @@ medusaIntegrationTestRunner({
       jest.spyOn(workflow, 'requestReturn').mockRejectedValueOnce(new Error('request probe'))
       jest.spyOn(workflow, 'cancelReturn').mockRejectedValueOnce(new Error('cancel probe'))
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'admin_check'))
       expect(await commandRow(order.id)).toMatchObject({ status: 'needs_admin', needs_admin_reason: { step: 'return' } })
       const [begun] = await returns(till.orderId)
       expect(begun).toMatchObject({ status: 'open' })
@@ -1666,7 +1725,7 @@ medusaIntegrationTestRunner({
         throw new Error('record probe')
       })
       const order = refund(till)
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       expect(await medusaRefunds(till.orderId)).toHaveLength(1)
       await resolve(order.id, 'resume')
       expect(await medusaRefunds(till.orderId)).toHaveLength(1)
@@ -1740,7 +1799,7 @@ medusaIntegrationTestRunner({
       const till = await remainderSale()
       refundAfterPricing(till.paymentId, 0.01)
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'refund_unrecorded'))
       expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { reason: 'refund_unrecorded' } })
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
@@ -1781,7 +1840,7 @@ medusaIntegrationTestRunner({
           await original(...args)
           throw new Error('record probe')
         })
-        expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+        expect((await post([order])).data).toEqual(parkedRefund(order.id, 'money_unconfirmed'))
       } else {
         const { refundPaymentWorkflow } = require('@medusajs/medusa/core-flows')
         await refundPaymentWorkflow(container).run({ input: { payment_id: paymentId, amount: 0.01, note: 'by hand' } })
@@ -1809,7 +1868,7 @@ medusaIntegrationTestRunner({
       const till = await remainderSale()
       refundAfterPricing(till.paymentId, 1.18)
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'refund_unrecorded'))
       expect(await commandRow(order.id)).toMatchObject({ needs_admin_reason: { reason: 'refund_unrecorded' } })
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
@@ -1847,7 +1906,7 @@ medusaIntegrationTestRunner({
       const till = await remainderSale()
       refundAfterPricing(till.paymentId, 0.01)
       const order = { ...till.full, payload: { ...till.full.payload, lines: [till.full.payload.lines[0]], totalMinor: 118 } }
-      expect((await post([order])).data).toEqual({ code: 'in_progress', id: order.id })
+      expect((await post([order])).data).toEqual(parkedRefund(order.id, 'refund_unrecorded'))
       const knex = container.resolve(ContainerRegistrationKeys.PG_CONNECTION)
       const hand = await knex('refund').where({ payment_id: till.paymentId }).whereNull('deleted_at').first('id')
       await refundsScript('baseline', till.orderId, hand.id, 'ticket', 1234)

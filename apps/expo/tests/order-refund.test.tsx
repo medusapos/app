@@ -9,7 +9,7 @@ import {
   formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder, type StoreOrderLine, type StoreOrderRefund,
 } from '@tallyui/core';
 import {
-  createOrderBuilder, finalizeOrder, posRefundCollection, type PosOrder, type PosRefundCollection, type TransportOutcome,
+  createOrderBuilder, finalizeOrder, posRefundCollection, refundNeedsAdminLine, type PosOrder, type PosRefundCollection, type TransportOutcome,
 } from '@tallyui/pos';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
 import { useRegister } from '../lib/register-context';
@@ -88,6 +88,11 @@ const submit = async (form: Awaited<ReturnType<typeof modal>>) => {
   fireEvent.click(form.getByTestId('refund-submit'));
   fireEvent.click(await form.findByTestId('refund-confirm'));
 };
+const parked = (reason: string, message: string) => async (batch: OrderRefundEnvelope[]): Promise<TransportOutcome> => ({
+  kind: 'retry', reason: `needs_admin:${reason}`, needsAdmin: { id: batch[0].id, reason, message },
+});
+const confirm = () => screen.getByTestId('order-refund-confirm');
+const giveReason = async () => fireEvent.change(await screen.findByTestId('order-refund-reason'), { target: { value: ' Damaged ' } });
 
 beforeEach(async () => {
   sessionState.session = { baseUrl: 'https://store.test', email: 'admin@store.test', token: 't', capabilities: REFUND_ON };
@@ -365,5 +370,85 @@ describe('Refund in the Orders sheet (#569)', () => {
     expect(form.getByTestId('refund-error').textContent).toBe('Open the register to refund');
     expect(send).not.toHaveBeenCalled();
     expect(await refunds.count().exec()).toBe(0);
+  });
+});
+
+describe('needs_admin (#545)', () => {
+  it.each(['session_closed', 'money_unconfirmed'])('shows the store message and the notice for %s instead of Confirm', async (reason) => {
+    const message = `Store response: ${reason}`;
+    send.mockImplementationOnce(parked(reason, message));
+    render(sheet());
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    await giveReason();
+    fireEvent.click(confirm());
+    expect((await screen.findByTestId('refund-needs-admin-line')).textContent).toBe(refundNeedsAdminLine(reason));
+    expect(screen.getByTestId('refund-needs-admin-message').textContent).toBe(message);
+    expect(screen.queryByTestId('order-refund-error')).toBeNull();
+    expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
+  });
+
+  it('Check again applies the same envelope and closes the dialog', async () => {
+    send.mockImplementationOnce(parked('session_closed', 'Store response')).mockImplementationOnce(async (batch) => applied(batch));
+    render(sheet());
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    await giveReason();
+    fireEvent.click(confirm());
+    fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
+    await screen.findByTestId('order-detail-refunded');
+    expect(screen.queryByTestId('order-refund-dialog')).toBeNull();
+    expect(send).toHaveBeenCalledTimes(2);
+    const [first, second] = send.mock.calls.map(([batch]) => batch[0]);
+    expect(second.id).toBe(first.id);
+    expect(await refunds.count().exec()).toBe(1);
+  });
+
+  it('reopens on the stored notice without sending until Check again', async () => {
+    send.mockImplementationOnce(parked('session_closed', 'Stored response')).mockImplementationOnce(async (batch) => applied(batch));
+    const view = render(sheet());
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    await giveReason();
+    fireEvent.click(confirm());
+    await screen.findByTestId('refund-needs-admin-line');
+    const record = await refunds.findOne().exec();
+    view.rerender(sheet(false));
+    view.rerender(sheet());
+    expect((await screen.findByTestId('refund-needs-admin-line')).textContent).toBe(refundNeedsAdminLine('session_closed'));
+    expect(screen.getByTestId('refund-needs-admin-message').textContent).toBe('Stored response');
+    expect(send).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByTestId('refund-needs-admin-check-again'));
+    await screen.findByTestId('order-detail-refunded');
+    expect(send.mock.calls[1][0][0].id).toBe(record?.envelope.id);
+  });
+
+  it('keeps the notice alongside the error after an unreachable store', async () => {
+    send.mockImplementationOnce(parked('money_unconfirmed', 'Store response')).mockResolvedValueOnce({ kind: 'retry', reason: 'network' });
+    render(sheet());
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    await giveReason();
+    fireEvent.click(confirm());
+    fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
+    expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store did not answer. Try again.');
+    expect(screen.getByTestId('refund-needs-admin-line').textContent).toBe(refundNeedsAdminLine('money_unconfirmed'));
+    expect(screen.getByTestId('refund-needs-admin-message').textContent).toBe('Store response');
+    expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
+  });
+
+  it('clears the notice after rejection and Confirm sends a new command', async () => {
+    send.mockImplementationOnce(parked('money_unconfirmed', 'Store response'))
+      .mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch)).mockImplementationOnce(async (batch) => applied(batch));
+    render(sheet());
+    fireEvent.click(await screen.findByTestId('order-detail-refund'));
+    await giveReason();
+    fireEvent.click(confirm());
+    fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
+    expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: amount_mismatch');
+    expect(screen.queryByTestId('refund-needs-admin-line')).toBeNull();
+    expect(screen.queryByTestId('refund-needs-admin-check-again')).toBeNull();
+    fireEvent.click(confirm());
+    await screen.findByTestId('order-detail-refunded');
+    const [first, second, third] = send.mock.calls.map(([batch]) => batch[0]);
+    expect(second.id).toBe(first.id);
+    expect(third.id).not.toBe(second.id);
+    expect(third.payload.clientRefundId).toBe(first.payload.clientRefundId);
   });
 });

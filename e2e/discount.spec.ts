@@ -22,7 +22,7 @@ test('a discounted sale is applied as order.create v4, with a "POS discount" adj
   // with its default STUN servers (PR #538).
   expect((await (await info).json()).customerDisplay).toEqual({ v: 1,
     iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 });
-  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 6, orderRefund: 1,
+  expect(await capabilities(page)).toEqual({ orderCreate: 7, register: 3, pluginContract: 7, orderRefund: 1,
     coupons: true,
     taxRounding: { granularity: 'per_order', mode: 'half_away_from_zero' }, lineTax: { none: false, classes: false },
     registerApproval: { thresholdMinor: 500 } });

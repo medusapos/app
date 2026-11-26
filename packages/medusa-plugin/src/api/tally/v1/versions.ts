@@ -21,7 +21,8 @@ export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
 // Contract 4 adds allChannels=true on GET /tally/v1/orders
 // Contract 5 adds order.refund v1 (ADR 0026)
 // Contract 6 adds region_id and terminal on GET /tally/v1/payment-providers, and ids= with refunds[].lines on GET /tally/v1/orders (TallyUI#1324)
-export const PLUGIN_CONTRACT = 6
+// Contract 7 adds soldTotalMinor, soldTaxMinor and returnedQuantity on each GET /tally/v1/orders line (medusapos/app#636)
+export const PLUGIN_CONTRACT = 7
 
 export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
   const value = options.approvalThresholdMinor
