@@ -17,9 +17,10 @@ const NOT_READY = 'Open the register to refund';
  * Amendment 3); each confirm is a new command built from the form's current values, and only a rejection keeps the
  * modal open for another. A refund sent without a final answer goes to the sheet, which resumes it on its own envelope.
  */
-export function OrderRefundModal({ order, refunds, input, onClose, onUnanswered }: {
+export function OrderRefundModal({ order, refunds, input, clientRefundId, onClose, onUnanswered }: {
   order: StoreOrder; tenders: PosOrder['payments']; refunds: PosRefundCollection;
   input: Extract<RefundFormInput, { offered: true }>;
+  clientRefundId: string;
   onClose: () => void;
   /** The refund was sent without a final answer; the sheet resumes it on its own envelope. */
   onUnanswered: (message: string, record: import('@tallyui/pos').PosRefund) => void;
@@ -27,7 +28,6 @@ export function OrderRefundModal({ order, refunds, input, onClose, onUnanswered 
   const { register, boundRegisterId, commandTransport } = useRegister();
   const online = useNetworkOnline();
   const [message, setMessage] = useState('');
-  const clientRefundId = useRef(mintUuid());
   const inFlight = useRef(false);
   const sessionId = register.session?.status === 'open' ? register.session.id : null;
   const ready = !!sessionId && !!boundRegisterId;
@@ -40,7 +40,7 @@ export function OrderRefundModal({ order, refunds, input, onClose, onUnanswered 
     const createdAt = new Date().toISOString();
     const envelope: OrderRefundEnvelope = { id: mintUuid(), type: 'order.refund', version: 1, createdAt,
       deviceId: getDeviceId(defaultStorage(), REGISTER_ID_KEY), attempt: 1,
-      payload: { clientRefundId: clientRefundId.current, orderId: order.id, clientOrderId: order.clientOrderId, lines: request.lines,
+      payload: { clientRefundId, orderId: order.id, clientOrderId: order.clientOrderId, lines: request.lines,
         shippingMinor: request.shippingMinor, adjustmentMinor: request.adjustmentMinor, totalMinor: request.totalMinor,
         destination: request.destination, reason: request.reason.trim(), registerId: boundRegisterId, sessionId, createdAt } };
     inFlight.current = true;

@@ -79,8 +79,8 @@ const rejected = (code: string) => (batch: OrderRefundEnvelope[]): TransportOutc
 const sheet = ({ open = true, store = storeOrder, local = order }: { open?: boolean; store?: StoreOrder; local?: PosOrder } = {}) => <>
   <OrderDetailSheet order={open ? local : null} onClose={vi.fn()} formatDate={(iso) => iso.slice(0, 10)}
     onRetry={vi.fn()} onFlush={vi.fn()} storeOrder={store} refunds={refunds} /><PortalHost /></>;
-function RereadSheet({ listed }: { listed: StoreOrder }) {
-  const store = useStoreOrderWithRefundLines(sessionState.session!, listed, 0);
+function RereadSheet({ listed, appliedCount = 0 }: { listed: StoreOrder; appliedCount?: number }) {
+  const store = useStoreOrderWithRefundLines(sessionState.session!, listed, appliedCount);
   return store && sheet({ store });
 }
 const money = (amount: number) => formatMoney({ amount, currency: 'EUR' });
@@ -449,6 +449,84 @@ describe('Contract 7 refunds in the Orders sheet (#636)', () => {
     expect(screen.getByTestId('order-detail')).toBeTruthy();
     expect(screen.queryByTestId('order-detail-refund')).toBeNull();
     expect(send).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Refund form across a reread (#636)', () => {
+  const listed: StoreOrder = { ...storeOrder, taxMinor: 60, totalMinor: 360, payments: [{ ...storeOrder.payments[0], amountMinor: 360 }],
+    lines: [{ ...storeOrder.lines[0], quantity: 3, subtotalMinor: 300, subtotalTaxMinor: 60, totalMinor: 300, taxMinor: 60,
+      soldTotalMinor: undefined, soldTaxMinor: undefined }] };
+  const read = { ...listed, lines: [{ ...listed.lines[0], soldTotalMinor: 300, soldTaxMinor: 60 }] };
+
+  async function openAcrossRead() {
+    let answer!: (orders: StoreOrder[]) => void;
+    let fail!: (error: Error) => void;
+    getOrders.mockResolvedValueOnce([read]).mockImplementationOnce(() => new Promise((resolve, reject) => { answer = resolve; fail = reject; }));
+    const view = render(<RereadSheet listed={listed} />);
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form, 'Damaged');
+    return { form, reread: (count: number) => view.rerender(<RereadSheet listed={listed} appliedCount={count} />),
+      answer: () => act(async () => answer([read])), fail: () => act(async () => fail(new Error('offline'))) };
+  }
+
+  it('R1: keeps the unit and reason during and after the reread', async () => {
+    const view = await openAcrossRead();
+    const expectEntries = () => {
+      expect(screen.queryByTestId('refund-modal')).not.toBeNull();
+      expect(within(screen.getByTestId('refund-qty-line_1')).getByText('1')).toBeTruthy();
+      expect((screen.getByTestId('refund-reason') as HTMLInputElement).value).toBe('Damaged');
+    };
+    view.reread(1);
+    expect(getOrders).toHaveBeenCalledTimes(2);
+    expectEntries();
+    await view.answer();
+    expectEntries();
+  });
+
+  it('R2: confirming after the reread cannot pay the pending refund twice', async () => {
+    let applyFirst!: () => void;
+    send.mockImplementationOnce((batch) => new Promise((resolve) => { applyFirst = () => resolve(applied(batch)); }))
+      .mockImplementation(async (batch) => applied(batch));
+    const view = await openAcrossRead();
+    await submit(view.form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+    view.reread(1);
+    await view.answer();
+    const current = await modal();
+    const confirm = current.queryByTestId('refund-confirm');
+    if (confirm) fireEvent.click(confirm);
+    else {
+      plus(current, 'line_1');
+      reason(current, 'Damaged');
+      await submit(current);
+      await waitFor(() => expect(screen.queryByTestId('refund-modal')).toBeNull());
+    }
+    const count = await refunds.count().exec();
+    await act(async () => applyFirst());
+    expect(count).toBe(1);
+    expect(send.mock.calls.flatMap(([batch]) => batch.map(({ payload }) => payload.clientRefundId))).toEqual([sent().payload.clientRefundId]);
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(120)}`);
+  });
+
+  it('R3: a failed reread cannot give the same opening another refund id', async () => {
+    send.mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch)).mockImplementationOnce(async (batch) => applied(batch));
+    const view = await openAcrossRead();
+    await submit(view.form);
+    await view.form.findByTestId('refund-error');
+    view.reread(1);
+    await view.fail();
+    if (!screen.queryByTestId('refund-modal')) {
+      expect(send).toHaveBeenCalledTimes(1);
+      getOrders.mockResolvedValueOnce([read]);
+      view.reread(2);
+    }
+    const current = await modal();
+    if (!within(current.getByTestId('refund-qty-line_1')).queryByText('1')) plus(current, 'line_1');
+    reason(current, 'Damaged');
+    await submit(current);
+    await screen.findByTestId('order-detail-refunded');
+    expect(sent(1).payload.clientRefundId).toBe(sent().payload.clientRefundId);
   });
 });
 

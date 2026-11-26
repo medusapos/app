@@ -170,20 +170,20 @@ export function useStoreOrderWithRefundLines(session: Session, storeOrder: Store
   const contract = session.capabilities?.pluginContract ?? 0;
   const wanted = !!id && (contract >= PARTIAL_REFUND_PLUGIN_CONTRACT || (refundCount > 0 && contract >= REFUND_LINES_PLUGIN_CONTRACT));
   const key = `${id}\n${refundCount}\n${appliedCount}`;
-  const [read, setRead] = useState<{ key: string; order: StoreOrder | null } | null>(null);
+  const [read, setRead] = useState<StoreOrder | null>(null);
   useEffect(() => {
     const getOrders = connector.getOrders;
     if (!wanted || !id || !getOrders) return;
     const controller = new AbortController();
     getOrders({ connectorId: connector.id, baseUrl: session.baseUrl, headers: authHeaders(session.token),
       capabilities: session.capabilities, signal: controller.signal }, [id]).then((orders) => {
-      if (!controller.signal.aborted) setRead({ key, order: orders.find((order) => order.id === id) ?? null });
+      if (!controller.signal.aborted) setRead(orders.find((order) => order.id === id) ?? null);
     }, () => {
-      if (!controller.signal.aborted) setRead({ key, order: null });
+      if (!controller.signal.aborted) setRead(null);
     });
     // A newer read aborts this one, and its late answer is dropped.
     return () => controller.abort();
   }, [connector, wanted, id, key, session.baseUrl, session.token, session.capabilities]);
   if (!wanted || !storeOrder) return storeOrder;
-  return read?.key === key && read.order?.id === storeOrder.id ? read.order : storeOrder;
+  return read?.id === storeOrder.id ? read : storeOrder;
 }
