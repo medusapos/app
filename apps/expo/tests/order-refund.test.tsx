@@ -3,18 +3,20 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testi
 import { createRxDatabase, randomToken, type RxDatabase } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
+import { Subject } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PortalHost } from '@tallyui/primitives';
 import {
   formatMoney, type OrderRefundEnvelope, type ServerCapabilities, type StoreOrder, type StoreOrderLine, type StoreOrderRefund, type SyncContext,
 } from '@tallyui/core';
 import {
-  createOrderBuilder, finalizeOrder, posRefundCollection, refundNeedsAdminLine, type PosOrder, type PosRefundCollection, type TransportOutcome,
+  createOrderBuilder, finalizeOrder, posRefundCollection, refundNeedsAdminLine, type PosOrder, type PosRefund, type PosRefundCollection, type TransportOutcome,
 } from '@tallyui/pos';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
 import { useRegister } from '../lib/register-context';
 import type { Session } from '../lib/session';
 import { useStoreOrderWithRefundLines } from '../lib/store-orders';
+import { useNetworkOnline } from '../lib/use-network-online';
 import { openRegisterFixture } from './register-fixture';
 
 const { sessionState } = vi.hoisted(() => ({ sessionState: { session: null as Session | null } }));
@@ -23,6 +25,7 @@ vi.mock('../lib/pos-connector', async (original) => ({
   ...await original<typeof import('../lib/pos-connector')>(), createPosConnector: () => ({ id: 'medusa', getOrders }),
 }));
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
+vi.mock('../lib/use-network-online', () => ({ useNetworkOnline: vi.fn(() => true) }));
 vi.mock('../lib/register-context', async (original) => ({
   ...await original<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
 }));
@@ -641,5 +644,97 @@ describe('needs_admin (#545)', () => {
     fireEvent.click(screen.getByTestId('order-refund-cancel'));
     await openModal();
     expect(send).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('Resume and records (#642)', () => {
+  it.each([
+    ['D1: Check again with a closed register resends the park and closes', 'refund-needs-admin-check-again'],
+    ['D2: Confirm with a closed register resends the unanswered refund', 'order-refund-confirm'],
+  ])('%s', async (_name, action) => {
+    if (action === 'order-refund-confirm') send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' });
+    else send.mockImplementationOnce(parked('session_closed', 'Stored response'));
+    send.mockImplementationOnce(async (batch) => applied(batch));
+    const view = render(sheet());
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    await screen.findByTestId(action);
+    const stored = (await refunds.findOne().exec())!.toJSON().envelope;
+    view.unmount();
+
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register, session: null }, boundRegisterId: null, commandTransport: () => ({ send }) });
+    render(sheet());
+    const button = await screen.findByTestId(action);
+    expect(screen.queryByTestId('order-refund-hold')).toBeNull();
+    expect(button.getAttribute('aria-disabled')).not.toBe('true');
+    fireEvent.click(button);
+    await screen.findByTestId('order-detail-refunded');
+    expect(screen.queryByTestId('order-refund-dialog')).toBeNull();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(sent(1)).toStrictEqual(stored);
+    expect(JSON.stringify(sent(1))).toBe(JSON.stringify(stored));
+  });
+
+  const createdAt = '2026-11-26T10:00:00.000Z';
+  const pending: PosRefund = {
+    id: 'refund-1', commandId: 'cmd-1', orderId: 'order_1', registerId: 'register-1', sessionId: 'session-1', status: 'pending', createdAt, updatedAt: createdAt,
+    envelope: { id: 'cmd-1', type: 'order.refund', version: 1, attempt: 1, deviceId: 'device-1', createdAt,
+      payload: { clientRefundId: 'refund-1', orderId: 'order_1', registerId: 'register-1', sessionId: 'session-1', createdAt,
+        lines: [{ orderLineId: 'line_1', quantity: 1, restock: true }], shippingMinor: 0, adjustmentMinor: 0, totalMinor: 1200, destination: 'cash', reason: 'Damaged' } },
+  };
+
+  it('D3: offline Check again shows the connection hold and sends nothing', async () => {
+    await refunds.insert({ ...pending, error: { code: 'needs_admin', message: 'Stored response', data: { reason: 'session_closed' } } });
+    vi.mocked(useNetworkOnline).mockReturnValue(false);
+    try {
+      render(sheet());
+      expect((await screen.findByTestId('order-refund-hold')).textContent).toBe('Refunds need a connection');
+      await act(async () => { fireEvent.click(screen.getByTestId('refund-needs-admin-check-again')); });
+      expect(send).not.toHaveBeenCalled();
+    } finally { vi.mocked(useNetworkOnline).mockReturnValue(true); }
+  });
+
+  it('D4: Refund and resume wait for the order’s first records emission', async () => {
+    const doc = await refunds.insert(pending);
+    const rows = new Subject<(typeof doc)[]>();
+    refunds = { find: () => ({ $: rows }) } as unknown as PosRefundCollection;
+    render(sheet());
+    expect(screen.getByTestId('order-detail-sheet')).toBeTruthy();
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    expect(screen.queryByTestId('order-refund-dialog')).toBeNull();
+    act(() => rows.next([]));
+    expect(screen.getByTestId('order-detail-refund')).toBeTruthy();
+    act(() => rows.next([doc]));
+    expect(await screen.findByTestId('order-refund-dialog')).toBeTruthy();
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+  });
+
+  it('D5: a non-string stored reason uses admin_check for the notice line', async () => {
+    await refunds.insert({ ...pending, error: { code: 'needs_admin', message: 'Stored response', data: { reason: 123 } } });
+    const expected = refundNeedsAdminLine('admin_check');
+    const line = vi.spyOn(await import('@tallyui/pos'), 'refundNeedsAdminLine');
+    try {
+      render(sheet());
+      expect((await screen.findByTestId('refund-needs-admin-line')).textContent).toBe(expected);
+      expect(line).toHaveBeenCalledWith('admin_check');
+    } finally { line.mockRestore(); }
+  });
+
+  it('D6: Check again rejected with unauthorized shows only the rejection', async () => {
+    send.mockImplementationOnce(parked('session_closed', 'Stored response')).mockImplementationOnce(async (batch) => rejected('unauthorized')(batch));
+    render(sheet());
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
+    expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: unauthorized');
+    expect(screen.queryByTestId('refund-needs-admin-line')).toBeNull();
+    expect(screen.queryByTestId('refund-needs-admin-message')).toBeNull();
+    expect(screen.queryByTestId('refund-needs-admin-check-again')).toBeNull();
+    expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
   });
 });

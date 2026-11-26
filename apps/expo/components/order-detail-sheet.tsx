@@ -88,13 +88,13 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   // Each sale opens on its detail; keyed on the id, so a live sync-status update keeps the receipt up.
   useEffect(() => { setReprint(false); setRefunding(null); setHandoff(''); }, [order?.id]);
   const records = useRefundRecords(refunds, storeOrder?.id ?? undefined);
-  const resume = records.find((record) => record.status === 'pending' || record.status === 'unsent') ?? null;
+  const resume = records?.find((record) => record.status === 'pending' || record.status === 'unsent') ?? null;
   const capabilities = session?.capabilities;
-  const gate = !!order && !!storeOrder && !!refunds && (capabilities?.orderRefund ?? 0) >= 1
+  const gate = !!order && !!storeOrder && records !== null && (capabilities?.orderRefund ?? 0) >= 1
     && (capabilities?.pluginContract ?? 0) >= PARTIAL_REFUND_PLUGIN_CONTRACT;
   const input = gate && order && storeOrder ? refundFormInput(storeOrder, order.payments) : null;
   // Until the store's copy carries each applied refund, the form would read stale remaining quantities: no new refund starts.
-  const unlanded = unlandedRefunds(records, storeOrder?.refunds ?? []);
+  const unlanded = unlandedRefunds(records ?? [], storeOrder?.refunds ?? []);
   const canRefund = gate && !resume && unlanded.length === 0 && !!input?.offered;
   const canResume = gate && !!resume;
   // A refund sent without a final answer opens again on its own envelope when its sale does; never over the open form,
@@ -168,7 +168,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
     {typeof refunding === 'string' && order && storeOrder && refunds && input?.offered ? <OrderRefundModal order={storeOrder} clientRefundId={refunding}
       tenders={order.payments} refunds={refunds} input={input} onClose={() => setRefunding(null)}
       onUnanswered={(message, record) => { setHandoff(message); setRefunding(record); }} /> : null}
-    {refunding && typeof refunding === 'object' && order && storeOrder && refunds ? <OrderRefundDialog key={refunding.id} order={storeOrder}
+    {refunding && typeof refunding === 'object' && order && storeOrder && refunds && records !== null ? <OrderRefundDialog key={refunding.id} order={storeOrder}
       tenders={order.payments} refunds={refunds} resume={refunding} notice={handoff || undefined}
       onClose={() => { setRefunding(null); setHandoff(''); }} /> : null}
   </>;
