@@ -10,6 +10,8 @@ export const MIN_PLUGIN_CONTRACT = 1;
 export const DEVICE_CLEAR_PLUGIN_CONTRACT = 2;
 // The plugin contract that prices and applies order.refund v1 (ADR 0026 decision 8); only Refund needs it.
 export const REFUND_PLUGIN_CONTRACT = 5;
+// The plugin contract that adds `region_id` and `terminal` on GET /tally/v1/payment-providers; only Card readers needs it.
+export const CARD_READERS_PLUGIN_CONTRACT = 6;
 
 /** `unknown`: the read was inconclusive (offline, a timeout, a non-2xx, not an info body) and never latches. */
 export type PluginContractStatus = 'ok' | 'too_old' | 'unknown';

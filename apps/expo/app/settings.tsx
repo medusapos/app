@@ -1,4 +1,4 @@
-import { useContext, useMemo, useRef, useState, type ComponentProps } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState, type ComponentProps } from 'react';
 import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, type NativeSyntheticEvent, type TextInputKeyPressEventData } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
@@ -37,6 +37,8 @@ import { averageKeyMs, stripScanAffixes } from '../lib/use-wedge-scan';
 import { playScanBeep } from '../lib/scan-beep';
 import { currencyFormat, separatorLabel } from '../lib/currency-format';
 import { cardPaymentMode, TILL_PAYMENT_METHODS } from '../lib/card-payments';
+import { fetchPaymentProviders, type PaymentProvider } from '../lib/payment-providers';
+import { CARD_READERS_PLUGIN_CONTRACT, readPluginContractVersion } from '../lib/plugin-contract';
 
 const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 // Shown for any value this till does not hold.
@@ -330,25 +332,31 @@ function PrintingSection({ session }: { session: Session }) {
 }
 function CardReadersSection({ session }: { session: Session }) {
   const mode = cardPaymentMode(TILL_PAYMENT_METHODS);
-  return <><SettingsGroup title="Card readers" testID="settings-card-readers" description="How this till takes card payments. Read-only.">
-    {mode ? <>
-      <SettingsRow label="Card method" action={
-        <Text testID="settings-card-readers-method" className="max-w-40 text-right text-sm text-foreground">{mode.method}</Text>
-      } />
-      <SettingsRow label="Taken on" divider action={
-        <Text testID="settings-card-readers-capture" className="max-w-40 text-right text-sm text-foreground">{mode.capture}</Text>
-      } />
-      <SettingsRow label="Readers" divider action={
-        <Text testID="settings-card-readers-readers" className="max-w-40 text-right text-sm text-foreground">{mode.readers}</Text>
-      } />
-      {mode.manual ? <View className="px-4 pb-4">
-        <Text testID="settings-card-readers-how" className="text-sm text-muted-foreground">{`At checkout, pick ${mode.method}, take the payment on the terminal, then type its receipt number in Terminal reference. The terminal works on its own: there is nothing to pair with this till.`}</Text>
-      </View> : null}
-    </> : <View className="px-4 pb-4">
+  const [read, setRead] = useState<{ providers: PaymentProvider[] | null; contract: number | null }>({ providers: null, contract: null });
+  useEffect(() => {
+    let mounted = true;
+    const regionId = loadCachedPricing(defaultStorage(), session.baseUrl)?.pricingContext?.region_id;
+    Promise.all([fetchPaymentProviders(session, undefined, regionId), readPluginContractVersion(session)])
+      .then(([providers, contract]) => { if (mounted) setRead({ providers, contract }); });
+    return () => { mounted = false; };
+  }, [session.baseUrl, session.token]);
+  // Only a plugin on contract 6 marks its terminal providers and answers for the till's region.
+  const current = read.contract !== null && read.contract >= CARD_READERS_PLUGIN_CONTRACT;
+  const readers = current ? (read.providers ?? []).filter((provider) => provider.terminal) : [];
+  return <><SettingsGroup title="Card readers" testID="settings-card-readers" description="Readers this till can take card payments with.">
+    {readers.map((reader, index) => <SettingsRow key={reader.id} label={reader.name} testID={`settings-card-reader-${reader.id}`} divider={index > 0} action={
+      <Text testID={`settings-card-reader-${reader.id}-state`} className="max-w-40 text-right text-sm text-muted-foreground">Not paired</Text>
+    } />)}
+    {mode ? <View className={`gap-2 px-4 pb-4${readers.length ? ' pt-2' : ''}`}>
+      <Text testID="settings-card-readers-how" className="text-sm text-muted-foreground">{readers.length
+        ? 'Pairing a reader with this till isn\'t available yet. Take the payment on the reader, then type its receipt number in Terminal reference at checkout.'
+        : `No card readers are set up for this store. At checkout, pick ${mode.method}, take the payment on the card terminal, then type its receipt number in Terminal reference.`}</Text>
+      {read.contract !== null && !current ? <Text testID="settings-card-readers-update" className="text-sm text-muted-foreground">Update the MedusaPOS plugin on the store to list its card readers here.</Text> : null}
+    </View> : <View className="px-4 pb-4">
       <Text testID="settings-card-readers-none" className="text-sm text-muted-foreground">This till takes no card payments.</Text>
     </View>}
   </SettingsGroup>
-  <PaymentProvidersGroup session={session} />
+  <PaymentProvidersGroup providers={read.providers ?? []} />
   </>;
 }
 function ScannerSection({ session }: { session: Session }) {

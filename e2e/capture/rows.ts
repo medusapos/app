@@ -163,6 +163,19 @@ async function picturesOn(page: Page): Promise<() => Promise<void>> {
   return async () => { for (const sku of Object.keys(SHAPES)) await set(sku, null); };
 }
 
+// The e2e store's only payment provider is Manual payment, with no terminal provider, so row 15d adds a Stripe terminal
+// row to the plugin's real answer; the section keeps it on screen for the shot after the route is gone.
+async function stripeReader(page: Page): Promise<() => Promise<void>> {
+  const providers = (url: URL) => url.pathname.endsWith('/tally/v1/payment-providers');
+  await page.route(providers, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, providers: [...body.providers,
+      { id: 'pp_stripe_stripe', name: 'Stripe', tillCanTake: false, terminal: true }] } });
+  });
+  return () => page.unroute(providers);
+}
+
 async function customer(email: string) {
   await createAdminCustomer(await adminToken(), email, 'Ada', 'Lovelace');
 }
@@ -529,7 +542,16 @@ export const rows: CaptureRow[] = [
     await form.getByTestId('printer-form-drawer-pin2').scrollIntoViewIfNeeded();
     await expect(form.getByTestId('printer-form-drawer-pin2')).toBeInViewport();
   } },
-  { id: '15d', title: 'Settings, card readers', state: 'Settings › Card readers', reach: (page, size) => settings(page, size, 'card-readers') },
+  { id: '15d', title: 'Settings, card readers', state: 'Settings › Card readers, a Stripe reader Not paired', reach: async (page, size) => {
+    const undo = await stripeReader(page);
+    try {
+      await settings(page, size, 'card-readers');
+      await expect(page.getByTestId('settings-card-reader-pp_stripe_stripe-state')).toHaveText('Not paired');
+      await expect(page.getByTestId('settings-payment-provider-pp_system_default')).toBeVisible();
+    } finally {
+      await undo();
+    }
+  } },
   skip('15e', 'Settings, customer display', 'gap, no section: no customer-facing display'),
   { id: '15f', title: 'Settings, barcode scanning', state: 'Settings › Barcode Scanning', reach: (page, size) => settings(page, size, 'scanner') },
   { id: '15f.2', title: 'Settings, barcode scanning: Use camera', state: 'Settings › Barcode Scanning, Use camera on', only: ['desktop'], reach: (page, size) => cameraOn(page, size, '15f.2') },
