@@ -6,10 +6,12 @@ import { DetailLine } from './order-detail-sheet';
 
 // An order only the store has, read-only, in the same right-hand sheet as the till's own sales. It has no Receipt,
 // Sync or Refund: the till didn't ring it up, so there is nothing of its own to print, send or refund.
-export function StoreOrderDetailSheet({ order, onClose, formatDate, billing }: {
+// `onReopen` draws v2's Re-open: a new sale with the order's lines and customer (lib/reopen-order.ts), never an edit.
+export function StoreOrderDetailSheet({ order, onClose, formatDate, billing, onReopen }: {
   order: StoreOrder | null; onClose: () => void; formatDate: (iso: string) => string;
   /** The Billing Address the order's table row shows ('—' when it has none). */
   billing?: string;
+  onReopen?: (order: StoreOrder) => void;
 }) {
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';
   return <Dialog open={order !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
@@ -24,6 +26,7 @@ export function StoreOrderDetailSheet({ order, onClose, formatDate, billing }: {
       </View>
       <OrderDetail testID="store-order-detail" orderNumber={`Order #${order.reference}`} status={storeOrderStatus(order.status)}
         {...storeOrderDetailFigures(order)}
+        onReopen={onReopen ? () => onReopen(order) : undefined}
         customerSlot={<View className="gap-1">
           <Text className="text-sm text-muted-foreground">{formatDate(order.placedAt)}</Text>
           <Text className="text-sm text-foreground">{order.customer?.name || order.customer?.email || 'Guest'}</Text>
