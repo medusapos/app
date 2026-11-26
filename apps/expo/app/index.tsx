@@ -462,7 +462,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     {/* v2's Open orders list takes the cart's place beside the strip. */}
     {ordersListOpen ? <OpenOrdersList sales={tillSales} currency={pricing.currency}
       onSelect={(id) => { setOrdersListOpen(false); switchTo(id); }} onClose={() => setOrdersListOpen(false)} /> : <>
-    <View className="flex-row items-center justify-end gap-4 px-3">
+    {/* v2's header: "Customer" and its chip from the left edge, "+" and Cart settings at the right (row 04a). */}
+    <View testID="cart-header" className="flex-row items-center gap-4 px-3">
       {/* v2's chip drops its search list in place, Guest first; a new customer stays under the "+" menu. */}
       {connector.searchCustomers && <CustomerDropdown testID="customer-chip" className="min-w-0 shrink"
         selected={sale.order.customer ?? null} online={online}
@@ -473,8 +474,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         onEditAddress={sale.order.customer && online && connector.getCustomer && connector.updateCustomer
           ? () => setAddressCustomerId(sale.order.customer?.id ?? null) : undefined}
         hasAddress={Object.values(sale.order.customer?.billing ?? {}).some(Boolean)} />}
-      <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined} />
-      <CartSettingsButton {...cartSettings} phone={phone} />
+      {/* ml-auto keeps this group at the right with or without the chip; shrink-0 so a long name never pushes it off. */}
+      <View className="ml-auto shrink-0 flex-row items-center gap-4">
+        <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined} />
+        <CartSettingsButton {...cartSettings} phone={phone} />
+      </View>
     </View>
     {/* Medusa keeps the note in the order's metadata.tally_note, seen only in Admin, so it is an order note (ADR 0024). */}
     {noteSet && !hasLines && <View className="px-3">{noteRow}</View>}

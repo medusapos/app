@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 import { addE2E1, adminToken, backend, captureCommands, createAdminCustomer, credentials, inventoryLevel, openArea, ordersByClientId, setInventoryLevel, signIn,
-  tenderCash, test } from './helpers';
+  cartTab, tenderCash, test } from './helpers';
 
 type Sale = { clientOrderId: string; customer: { customerId: string } };
 async function payCash(page: Page) {
@@ -167,4 +167,38 @@ test('the cart\'s Add new customer is v2\'s Add Customer form', async ({ page })
   const { customers } = await response.json();
   expect(customers).toHaveLength(1);
   expect(customers[0]).toMatchObject({ email, first_name: 'Nia' });
+});
+
+// Row 04a: v2's cart header, "Customer" and its chip from the left edge, "+" and Cart settings at the right.
+// The column is the header row itself (cart-header), which stretches across the cart column.
+async function expectCartHeader(page: Page) {
+  const header = page.getByTestId('cart-header');
+  const box = async (testId: string) => (await page.getByTestId(testId).boundingBox())!;
+  const column = (await header.boundingBox())!;
+  const label = (await header.getByText('Customer', { exact: true }).boundingBox())!;
+  const [chip, add, settings] = [await box('customer-chip'), await box('cart-add-menu'), await box('cart-settings-button')];
+  // TallyUI's CustomerDropdown draws its "Customer" label before the chip, so the label starts at the left edge.
+  expect(label.x - column.x).toBeLessThanOrEqual(24);
+  expect(chip.x - (label.x + label.width)).toBeLessThanOrEqual(24);
+  expect(column.x + column.width - (settings.x + settings.width)).toBeLessThanOrEqual(24);
+  expect(settings.x + settings.width).toBeLessThanOrEqual(column.x + column.width);
+  expect(chip.x + chip.width).toBeLessThan(add.x);
+  expect(add.x).toBeLessThan(settings.x);
+}
+
+test('the cart header puts Customer and its chip at the left, and + and Cart settings at the right', async ({ page }) => {
+  const token = await adminToken();
+  const email = `header-${crypto.randomUUID()}@example.com`;
+  await createAdminCustomer(token, email, 'Ada', 'Lovelace');
+  await signIn(page);
+  await expectCartHeader(page);
+  await page.getByRole('button', { name: 'Customer: Guest', exact: true }).click();
+  await page.getByTestId('customer-dropdown-search').fill(email);
+  await page.getByLabel(`Ada Lovelace, ${email}`, { exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Customer: Ada Lovelace', exact: true })).toBeVisible();
+  await expectCartHeader(page);
+  // A phone reaches the cart from its Cart tab. (A name too long for the chip overflows it: TallyUI's trigger does not shrink.)
+  await page.setViewportSize({ width: 390, height: 844 });
+  await cartTab(page).click();
+  await expectCartHeader(page);
 });
