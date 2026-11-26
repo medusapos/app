@@ -70,7 +70,7 @@ beforeEach(() => {
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   vi.mocked(useParkedSales).mockReturnValue({ parked: [], discard: vi.fn() });
   vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [],
-    savesInFlight: 0, stuckCommandIds: [], record: vi.fn(), flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), isStored: vi.fn() });
+    savesInFlight: 0, stuckCommandIds: [], record: vi.fn(), flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), reverseOnStore: vi.fn(), isStored: vi.fn() });
 });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); vi.clearAllMocks(); });
 

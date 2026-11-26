@@ -116,7 +116,7 @@ beforeEach(() => {
   vi.mocked(useReplicatedProducts).mockReturnValue(replicated({}));
   vi.mocked(useRegister).mockReturnValue(openRegisterFixture());
   // Not null by default: the order store is open unless a test says otherwise (#86 review, item 5).
-  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
+  vi.mocked(useOutboxContext).mockReturnValue({ orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight: 0, stuckCommandIds: [], record: vi.fn().mockResolvedValue(undefined), flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), reverseOnStore: vi.fn(), isStored: vi.fn().mockResolvedValue(false) });
 });
 
 describe('ProductsScreen catalogue', () => {
@@ -1774,7 +1774,7 @@ describe('ProductsScreen Sign out while a sale is saving', () => {
       const [savesInFlight, setSavesInFlight] = useState(0);
       // Not null: these tests are about the hung-save mechanics, not the order-store-open gate (#86 review, item 5).
       return { orders: {} as never, state: { pending: 0, sending: false }, recent: [], savesInFlight, stuckCommandIds: [], isStored,
-        flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(),
+        flush: vi.fn().mockResolvedValue(undefined), requeue: vi.fn().mockResolvedValue(0), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), reverseOnStore: vi.fn(),
         async record(order: PosOrder) {
           setSavesInFlight((count) => count + 1);
           try { await record(order); } finally { setSavesInFlight((count) => count - 1); }
