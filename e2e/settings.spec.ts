@@ -329,3 +329,33 @@ test('Health shows the store URL, plugin contract, storage used, waiting sales a
   await expect(page.getByTestId('settings-health-logs-empty').or(page.getByTestId('settings-health-log-line').first())).toBeVisible();
   await expect(page.getByTestId('settings-health-copy')).toBeVisible();
 });
+
+// Settings › Card readers (ready item 24): the till's region's terminal providers, each Not paired. The e2e store's only
+// provider is Manual payment, so the second half adds a Stripe terminal row to the real answer.
+test('Card readers: reads the till\'s region\'s providers; a terminal provider reads Not paired', async ({ page }) => {
+  await signIn(page);
+  const read = page.waitForRequest((request) => new URL(request.url()).pathname.endsWith('/tally/v1/payment-providers'));
+  await openSettings(page, 'Card readers');
+  expect((await read).url()).toContain('region_id=');
+  await expect(page.getByTestId('settings-payment-providers')).toContainText('Manual payment');
+  await expect(page.getByTestId('settings-card-readers-how')).toContainText('No card readers');
+  await expect(page.getByTestId(/^settings-card-reader-pp_/)).toHaveCount(0);
+
+  const providers = (url: URL) => url.pathname.endsWith('/tally/v1/payment-providers');
+  await page.route(providers, async (route) => {
+    const response = await route.fetch();
+    const body = await response.json();
+    await route.fulfill({ response, json: { ...body, providers: [...body.providers,
+      { id: 'pp_stripe_stripe', name: 'Stripe', tillCanTake: false, terminal: true }] } });
+  });
+  try {
+    await page.goBack();
+    await expect(page.getByTestId('settings-list')).toBeVisible();
+    await page.getByTestId('settings-list').getByRole('button', { name: 'Card readers', exact: true }).click();
+    await expect(page.getByTestId('settings-card-reader-pp_stripe_stripe')).toContainText('Stripe');
+    await expect(page.getByTestId('settings-card-reader-pp_stripe_stripe-state')).toHaveText('Not paired');
+    await expect(page.getByTestId('settings-payment-provider-pp_stripe_stripe')).toHaveCount(0);
+  } finally {
+    await page.unroute(providers);
+  }
+});

@@ -1,20 +1,13 @@
-import { useEffect, useState } from 'react';
 import { Text } from '@tallyui/components';
 import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
-import { fetchPaymentProviders, type PaymentProvider } from '../lib/payment-providers';
-import type { Session } from '../lib/session';
+import type { PaymentProvider } from '../lib/payment-providers';
 
-// v2's Settings › Card readers lists the store's readers; on Medusa that is the store's payment providers.
-export function PaymentProvidersGroup({ session }: { session: Session }) {
-  const [providers, setProviders] = useState<PaymentProvider[] | null>(null);
-  useEffect(() => {
-    let mounted = true;
-    fetchPaymentProviders(session).then((result) => { if (mounted) setProviders(result); });
-    return () => { mounted = false; };
-  }, [session.baseUrl, session.token]);
-  if (!providers?.length) return null;
+// The till region's payment providers that are not card readers; Card readers lists the terminal ones above it.
+export function PaymentProvidersGroup({ providers }: { providers: PaymentProvider[] }) {
+  const listed = providers.filter((provider) => provider.terminal === false);
+  if (!listed.length) return null;
   return <SettingsGroup title="Payment providers" testID="settings-payment-providers" description="The store's payment providers in Medusa. Read-only.">
-    {providers.map((provider, index) => <SettingsRow key={provider.id} label={provider.name} testID={`settings-payment-provider-${provider.id}`}
+    {listed.map((provider, index) => <SettingsRow key={provider.id} label={provider.name} testID={`settings-payment-provider-${provider.id}`}
       divider={index > 0} action={
         <Text testID={`settings-payment-provider-${provider.id}-state`}
           className={`max-w-40 text-right text-sm ${provider.tillCanTake ? 'text-foreground' : 'text-muted-foreground'}`}>
