@@ -11,6 +11,8 @@ export type ReportPanel = {
   more: number;
   status: string;
   filename: string;
+  /** What the sheet says when the panel has no rows; the sheet's own "None in this period" when absent. */
+  empty?: string;
 };
 
 // v2's Orders panel lists the 60 most recent orders of the period.
@@ -24,6 +26,8 @@ const right = (label: string): ReportColumn => ({ label, align: 'right' });
 export function reportPanel(card: SalesCardId, input: {
   figures: SalesFigures; orders: readonly PosOrder[];
   ctx: Pick<ClosureContext, 'formatMoney' | 'exponent' | 'locale'>; today: string;
+  /** The store's refunds could not be read, so an empty Refunds panel must not claim there were none. */
+  refundsUnread?: boolean;
 }): ReportPanel {
   const { figures, orders, ctx, today } = input;
   const { totals, range } = figures;
@@ -74,9 +78,11 @@ export function reportPanel(card: SalesCardId, input: {
       return panel('Taxes collected', 'taxes', [left('Rate'), right('Net'), right('Tax'), right('Gross')],
         figures.taxes.map((row) => [row.label || 'Tax', row.netMinor === null ? UNKNOWN : money(row.netMinor),
           money(row.taxMinor), row.netMinor === null ? UNKNOWN : money(row.netMinor + row.taxMinor)]));
-    case 'refunds':
-      return panel('Refunds', 'refunds', [left('Refunds'), right('Orders'), right('Amount')],
+    case 'refunds': {
+      const refunds = panel('Refunds', 'refunds', [left('Refunds'), right('Orders'), right('Amount')],
         figures.refunds.count > 0 ? [['Refunds', String(figures.refunds.count), money(figures.refunds.amountMinor)]] : []);
+      return refunds.rows.length === 0 && input.refundsUnread ? { ...refunds, empty: "Refunds couldn't be read from the store." } : refunds;
+    }
   }
 }
 

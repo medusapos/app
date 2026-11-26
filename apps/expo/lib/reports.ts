@@ -1,6 +1,8 @@
 import type { SalesFilters } from '@tallyui/components';
-import { clampClosureScope, closureVariance, comparisonRange, inRange, minorToDecimal, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureContext, type ClosureScope, type DatePreset, type DayRange, type PosOrder, type SalesFigures } from '@tallyui/pos';
+import type { ServerCapabilities, StoreOrder } from '@tallyui/core';
+import { clampClosureScope, closureVariance, comparisonRange, inRange, minorToDecimal, reportOrderFromPosOrder, salesFigures, type Closure, type ClosureContext, type ClosureScope, type DatePreset, type DayRange, type PosOrder, type ReportRefund, type SalesFigures } from '@tallyui/pos';
 import { dayBefore, type ClosureHistoryEntry } from './closure-history';
+import { REFUND_PLUGIN_CONTRACT } from './plugin-contract';
 
 export function localDay(at: Date): string {
   return `${String(at.getFullYear()).padStart(4, '0')}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
@@ -32,7 +34,31 @@ export function reportScope(filters: SalesFilters, registers: { id: string; name
   };
 }
 
-export function salesRoomFigures(orders: readonly PosOrder[], filters: SalesFilters, currency: string): {
+/** The store's refunds on the till's own sales, by the till's local `PosOrder.id`. */
+export type StoreRefunds = ReadonlyMap<string, ReadonlyArray<{ id: string; amountMinor: number }>>;
+
+/** A store order is a till sale's when it carries the sale's id, or the sale carries the store order's id. */
+export function storeRefundsByLocalOrder(local: readonly PosOrder[], store: readonly StoreOrder[]): StoreRefunds {
+  const byId = new Map(local.map((order) => [order.id, order]));
+  const byStoreId = new Map(local.filter((order) => order.storeOrderId).map((order) => [order.storeOrderId!, order]));
+  const refunds = new Map<string, Array<{ id: string; amountMinor: number }>>();
+  for (const order of store) {
+    if (!order.refunds?.length) continue;
+    const sale = (order.clientOrderId ? byId.get(order.clientOrderId) : undefined) ?? byStoreId.get(order.id);
+    if (!sale) continue;
+    const list = refunds.get(sale.id) ?? [];
+    for (const refund of order.refunds) list.push({ id: refund.id, amountMinor: Math.abs(refund.amountMinor) });
+    refunds.set(sale.id, list);
+  }
+  return refunds;
+}
+
+/** The store records refunds (the Orders sheet's own gate), so its orders' refunds can be read for Reports. */
+export function storeRefundsReadable(capabilities: ServerCapabilities | undefined): boolean {
+  return (capabilities?.orderRefund ?? 0) >= 1 && (capabilities?.pluginContract ?? 0) >= REFUND_PLUGIN_CONTRACT;
+}
+
+export function salesRoomFigures(orders: readonly PosOrder[], filters: SalesFilters, currency: string, refunds?: StoreRefunds): {
   figures: SalesFigures; notSentCount: number; leftOutCount: number; periodOrders: PosOrder[];
 } {
   const counted = orders.filter((order) => order.currency.toUpperCase() === currency.toUpperCase()
@@ -43,8 +69,13 @@ export function salesRoomFigures(orders: readonly PosOrder[], filters: SalesFilt
   const reportOrders = counted.map((order) => reportOrderFromPosOrder(order)).map((order) => ({
     ...order, payments: order.payments.map((payment) => ({ ...payment, label: payment.label || paymentMethodLabel(payment.method) })),
   }));
+  // connector-medusa drops each refund's own date, so a store refund is dated at its sale's instant and counts on the
+  // sale's day, as TallyUI counts a report order's embedded refunds; only counted sales' refunds are passed. Without
+  // store refunds no `refunds` key at all, so the report keeps its embedded basis.
+  const dated: ReportRefund[] | undefined = refunds && reportOrders.flatMap((order) => (refunds.get(order.id) ?? [])
+    .map((refund) => ({ id: refund.id, orderId: order.id, at: order.at, amountMinor: refund.amountMinor })));
   return {
-    figures: salesFigures({ orders: reportOrders, range: filters.range, compare, timezone: 'device' }),
+    figures: salesFigures({ orders: reportOrders, range: filters.range, compare, timezone: 'device', ...(dated ? { refunds: dated } : {}) }),
     notSentCount: counted.filter((order) => order.syncStatus === 'pending' && inRange(order.createdAt, filters.range, 'device')).length,
     leftOutCount: orders.filter((order) => order.currency.toUpperCase() !== currency.toUpperCase()
       && inRange(order.createdAt, filters.range, 'device')).length,

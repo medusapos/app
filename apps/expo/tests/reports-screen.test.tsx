@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ServerCapabilities, StoreOrder, StoreOrderPage } from '@tallyui/core';
 import { PortalHost } from '@tallyui/primitives';
 import { createOrderBuilder, finalizeOrder, type Closure, type PosOrder, type RegisterSession } from '@tallyui/pos';
 import ReportsScreen from '../app/reports';
@@ -38,6 +39,12 @@ function AccountPublisher({ open }: { open: () => void }) {
 }
 vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/register-context', () => ({ useRegister: vi.fn() }));
+// The store's orders read for the Refunds card: the real connector with its listOrders replaced.
+const listOrders = vi.hoisted(() => vi.fn<(...args: unknown[]) => Promise<StoreOrderPage>>());
+vi.mock('../lib/pos-connector', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/pos-connector')>();
+  return { ...actual, createPosConnector: () => ({ ...actual.createPosConnector(), listOrders }) };
+});
 vi.mock('../lib/reports', async (importOriginal) => ({
   ...await importOriginal<typeof import('../lib/reports')>(), downloadCsv: vi.fn(),
 }));
@@ -46,6 +53,7 @@ let n = 0;
 let baseUrl: string;
 let store: Awaited<ReturnType<typeof openOrderStore>>;
 beforeEach(async () => {
+  listOrders.mockReset();
   baseUrl = `https://reports-${++n}.test`;
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
@@ -668,5 +676,79 @@ describe('the Sales cashier menu', () => {
       .toEqual(['sales-filter-cashier-option-all', 'sales-filter-cashier-option-admin@store.test']);
     expect(screen.getByTestId('sales-filter-cashier-option-admin@store.test').textContent).toBe('admin');
     expect(fetchSpy.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('cashier'))).toEqual([]);
+  });
+});
+
+describe('the Refunds card', () => {
+  const ctx = closureContext('EUR', { name: 'Test shop' });
+  function storeOrder(overrides: Partial<StoreOrder> = {}): StoreOrder {
+    return { id: 'store-1', reference: '1001', status: 'completed', placedAt: new Date().toISOString(), currency: 'EUR',
+      pricesIncludeTax: false, customer: null, lines: [], fees: [], shipping: [], coupons: [], taxLines: [], discountMinor: 0,
+      discountTaxMinor: 0, taxMinor: 0, totalMinor: 1200, payments: [], refunds: [], ...overrides };
+  }
+  async function mountRefundable(capabilities: ServerCapabilities = { orderCreate: 1, orderRefund: 1, pluginContract: 5 }) {
+    await store.orders.insert(order(1200, 'cash', { id: 'sale-1' }));
+    saveSession(localStorage, { baseUrl, email: 'admin@store.test', token: 'token', capabilities });
+    render(<SessionProvider><ReportsScreen /><PortalHost /></SessionProvider>);
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('12.00')));
+  }
+
+  it('hides the Refunds card and reads nothing when the store cannot refund', async () => {
+    await mountRefundable({ orderCreate: 1, orderRefund: 1, pluginContract: 4 });
+    expect(screen.getByTestId('card-orders')).toBeTruthy();
+    expect(screen.queryByTestId('card-refunds')).toBeNull();
+    cleanup();
+    mount();
+    await waitFor(() => expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('12.00')));
+    expect(screen.queryByTestId('card-refunds')).toBeNull();
+    expect(listOrders).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('reports-refunds-unread')).toBeNull();
+  });
+
+  it('counts the store\'s refund on the till\'s sale', async () => {
+    listOrders.mockResolvedValue({ orders: [storeOrder({ clientOrderId: 'sale-1', refunds: [{ id: 'r1', amountMinor: 500 }] })], hasMore: false });
+    await mountRefundable();
+    await waitFor(() => expect(screen.getByTestId('card-refunds-figure').textContent).toBe(ctx.formatMoney('5.00')));
+    expect(screen.getByTestId('hero-total').textContent).toBe(ctx.formatMoney('12.00'));
+    fireEvent.click(screen.getByTestId('card-refunds-open'));
+    const sheet = await screen.findByTestId('report-sheet');
+    expect(within(sheet).getAllByTestId('report-sheet-row').map((row) => row.textContent))
+      .toEqual([`Refunds1${ctx.formatMoney('5.00')}`]);
+  });
+
+  it('says the refunds could not be read when the store read fails', async () => {
+    listOrders.mockRejectedValue(new TypeError('Failed to fetch'));
+    await mountRefundable();
+    expect((await screen.findByTestId('reports-refunds-unread')).textContent)
+      .toBe("Refunds couldn't be read from the store, so the Refunds card may be short.");
+    expect(screen.getByTestId('card-refunds-none')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('card-refunds-open'));
+    const sheet = await screen.findByTestId('report-sheet');
+    expect(within(sheet).getByTestId('report-sheet-empty').textContent).toBe("Refunds couldn't be read from the store.");
+  });
+
+  it('says the refunds could not be read when a store order in the window is unreadable', async () => {
+    // The medusa connector leaves an order it cannot parse out of `orders` and counts it in the page's `unreadable`.
+    listOrders.mockResolvedValue({ orders: [storeOrder({ clientOrderId: 'sale-1', refunds: [{ id: 'r1', amountMinor: 500 }] })],
+      hasMore: false, unreadable: 1 });
+    await mountRefundable();
+    expect((await screen.findByTestId('reports-refunds-unread')).textContent)
+      .toBe("Refunds couldn't be read from the store, so the Refunds card may be short.");
+    expect(screen.getByTestId('card-refunds-none')).toBeTruthy();
+    expect(screen.getByTestId('card-refunds-figure').textContent).not.toBe(ctx.formatMoney('5.00'));
+  });
+
+  it('attaches refunds only once the store read is complete', async () => {
+    let finish!: (page: StoreOrderPage) => void;
+    listOrders
+      .mockResolvedValueOnce({ orders: [storeOrder({ clientOrderId: 'sale-1', refunds: [{ id: 'r1', amountMinor: 500 }] })], hasMore: true, total: 2 })
+      .mockReturnValueOnce(new Promise<StoreOrderPage>((resolve) => { finish = resolve; }));
+    await mountRefundable();
+    await waitFor(() => expect(listOrders).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('card-refunds-none')).toBeTruthy();
+    expect(screen.queryByTestId('reports-refunds-unread')).toBeNull();
+    finish({ orders: [storeOrder({ id: 'store-2' })], hasMore: false });
+    await waitFor(() => expect(screen.getByTestId('card-refunds-figure').textContent).toBe(ctx.formatMoney('5.00')));
+    expect(listOrders).toHaveBeenCalledTimes(2);
   });
 });

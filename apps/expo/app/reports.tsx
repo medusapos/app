@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useMemo, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, Stack } from 'expo-router';
@@ -16,6 +16,7 @@ import { PRINT_FAILED, printHtml, printSalesSummary, printXReport, SUMMARY_PRINT
 import { useOutboxContext } from '../lib/outbox-context';
 import { useRegister } from '../lib/register-context';
 import { reportPanel, reportPanelCsv, reportPanelHtml } from '../lib/report-panels';
+import { useReportStoreRefunds } from '../lib/report-refunds';
 import { downloadCsv, localDay, localDayStartIso, reportScope, salesRoomFigures, STATUS_OPTIONS } from '../lib/reports';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
@@ -53,13 +54,18 @@ export default function ReportsScreen() {
   const closeCard = () => { setOpenCard(null); setPanelPrintError(null); };
   const showClosures = () => { closeCard(); setView('closures'); };
 
+  // Both periods' days: the local watch and the store's refunds read cover the same window.
+  const windowFrom = useMemo(() => {
+    const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
+    return filters.range.from < compare.from ? filters.range.from : compare.from;
+  }, [filters]);
   useEffect(() => {
     if (!orders) return;
-    const compare = comparisonRange(filters.range, filters.compare, filters.preset === 'custom' ? undefined : filters.preset);
-    const from = filters.range.from < compare.from ? filters.range.from : compare.from;
-    const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(from) } } }).subscribe(setSales);
+    const subscription = watchFresh(orders, { selector: { createdAt: { $gte: localDayStartIso(windowFrom) } } }).subscribe(setSales);
     return () => subscription.unsubscribe();
-  }, [orders, filters]);
+  }, [orders, windowFrom]);
+  const refundsWindow = useMemo(() => ({ from: windowFrom, to: filters.range.to }), [windowFrom, filters.range.to]);
+  const refundsRead = useReportStoreRefunds(session, refundsWindow, sales);
 
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
   const pricing = session?.baseUrl ? loadCachedPricing(defaultStorage(), session.baseUrl) : null;
@@ -72,11 +78,13 @@ export default function ReportsScreen() {
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
   const topInset = useContext(StripHeightContext);
   if (!session) return <Redirect href="/login" />;
-  const summary = currency ? salesRoomFigures(sales, filters, currency) : null;
+  const summary = currency
+    ? salesRoomFigures(sales, filters, currency, refundsRead.state === 'ready' ? refundsRead.refunds : undefined) : null;
   const scope = ctx ? reportScope(filters, registers, today, ctx.locale) : null;
   const covers = scope ? `${scope.period} · ${scope.registerLabel}` : '';
   const panel = openCard && ctx && summary
-    ? reportPanel(openCard, { figures: summary.figures, orders: summary.periodOrders, ctx, today }) : null;
+    ? reportPanel(openCard, { figures: summary.figures, orders: summary.periodOrders, ctx, today,
+      refundsUnread: refundsRead.state === 'failed' }) : null;
   // v2's closed strip offers Print closure where the open strip has Print X report (reports/index.mdx#closures).
   const lastClosure = register.lastClosure;
   const closurePrint = Platform.OS === 'web' && !!lastClosure
@@ -160,7 +168,12 @@ export default function ReportsScreen() {
             {Platform.OS === 'web' && summaryError ?
               <Text testID="reports-print-summary-error" accessibilityRole="alert">{summaryError}</Text> : null}
             <SalesHero figures={summary.figures} filters={filters} onFiltersChange={setFilters} currency={currency} />
-            <SalesCards figures={summary.figures} currency={currency} onOpenCard={setOpenCard} />
+            {/* A store that records no refunds has no Refunds card, rather than one that always reads 0. */}
+            <SalesCards figures={summary.figures} currency={currency} onOpenCard={setOpenCard}
+              hide={refundsRead.state === 'off' ? ['refunds'] : undefined} />
+            {refundsRead.state === 'failed' ? <Text testID="reports-refunds-unread" className="text-sm text-muted-foreground">
+              Refunds couldn't be read from the store, so the Refunds card may be short.
+            </Text> : null}
           </View>
           <ReportSheet panel={panel} covers={covers} onClose={closeCard} printing={panelPrinting} printError={panelPrintError}
             printIcon={<View className="text-primary-foreground"><PrinterIcon size={18} /></View>}

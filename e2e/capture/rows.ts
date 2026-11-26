@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, adminToken, backend, cartTab, createAdminCustomer, createStoreOnlyOrder, discount, openArea, openRegisterPanel, productsTab, sellBySku, signIn } from '../helpers';
+import { addE2E1, adminToken, backend, cartTab, createAdminCustomer, createStoreOnlyOrder, discount, inventoryLevel, openArea, openRegisterPanel, productsTab, sellBySku, setInventoryLevel, signIn } from '../helpers';
 
 export type Size = 'desktop' | 'tablet' | 'phone';
 export type CaptureRow = {
@@ -499,6 +499,33 @@ export const rows: CaptureRow[] = [
     await openArea(page, 'Reports');
     await page.getByTestId('register-strip-open-closures').click();
     await expect(page.getByTestId('closures-view')).toBeVisible();
+  } },
+  { id: '13.1', title: 'Reports refunds', state: 'Reports after a refunded sale', only: ['desktop'], reach: async (page, size) => {
+    // Refund all on the newest sale from its Orders sheet, as e2e/refund.spec.ts does; E2E-2's stock is put back.
+    const token = await adminToken();
+    const start = await inventoryLevel(token, 'E2E-2');
+    try {
+      await sell(page, size, 'E2E-2');
+      await expect(page.getByText('Sales are up to date.', { exact: true })).toBeVisible();
+      await openArea(page, 'Orders');
+      await page.getByRole('button', { name: /^Open order / }).first().click();
+      const sheet = page.getByTestId('order-detail-sheet');
+      await expect(sheet.getByTestId('order-detail-refund')).toBeVisible({ timeout: 15_000 });
+      await sheet.getByTestId('order-detail-refund').click();
+      const dialog = page.getByTestId('order-refund-dialog');
+      await dialog.getByTestId('order-refund-reason').fill('capture refund');
+      await dialog.getByTestId('order-refund-confirm').click();
+      await expect(dialog).toHaveCount(0, { timeout: 15_000 });
+      await sheet.getByTestId('order-detail-close').click();
+    } finally {
+      const now = await inventoryLevel(token, 'E2E-2');
+      if (now.stockedQuantity !== start.stockedQuantity) await setInventoryLevel(token, start.inventoryItemId, start.locationId, start.stockedQuantity);
+    }
+    await openArea(page, 'Reports');
+    const card = page.getByTestId('card-refunds');
+    await expect(card.getByTestId('card-refunds-figure')).toBeVisible();
+    await expect(card.getByTestId('card-refunds-none')).toHaveCount(0, { timeout: 15_000 });
+    await card.scrollIntoViewIfNeeded();
   } },
   { id: '14a', title: 'Navigation (rail / header)', state: 'The Sale shell (a phone: its header)', reach: async (page) => {
     await expect(page.getByTestId('user-menu')).toBeVisible();
