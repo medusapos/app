@@ -193,9 +193,12 @@ describe('toStoreOrder', () => {
       currency: 'eur', pricesIncludeTax: false, customer: { id: 'cus_1', name: 'Ann Lee', email: 'ann@example.com' },
       lines: [
         { id: 'item_a', clientLineId: 'line-a', productId: 'prod_tea', variantId: 'var_tea', name: 'Tea', sku: 'TEA-1',
-          quantity: 2, subtotalMinor: 2000, subtotalTaxMinor: 380, totalMinor: 1800, taxMinor: 342 },
+          quantity: 2, subtotalMinor: 2000, subtotalTaxMinor: 380, totalMinor: 1800, taxMinor: 342,
+          soldTotalMinor: 1800, soldTaxMinor: 342, returnedQuantity: 0 },
         { id: 'item_b', clientLineId: 'line-b', productId: 'prod_b', variantId: 'var_b', name: 'Biscuit',
-          quantity: 1, subtotalMinor: 334, subtotalTaxMinor: 63, totalMinor: 334, taxMinor: 63 },
+          quantity: 1, subtotalMinor: 334, subtotalTaxMinor: 63, totalMinor: 334, taxMinor: 63,
+          // Gross 3.96627 with tax 0.63327: refund net round(3.333 EUR) = 333 cents, tax 397 − 333 = 64, against live 334/63.
+          soldTotalMinor: 333, soldTaxMinor: 64, returnedQuantity: 0 },
       ],
       fees: [{ name: 'Service fee', totalMinor: 100, taxMinor: 19 }],
       shipping: [{ name: 'Courier', totalMinor: 500, taxMinor: 35 }],
@@ -211,6 +214,23 @@ describe('toStoreOrder', () => {
       refunds: [{ id: 'ref_1', amountMinor: 119, reason: 'Damaged' }],
     })
     expectGrossRoundedOnce(tillOrder, mapped)
+  })
+
+  it('U-C7-1: preserves the discounted as-sold figures after a received return and leaves fees unchanged', () => {
+    const item = { id: 'tea', title: 'Tea', quantity: 2, raw_quantity: raw(2), raw_unit_price: raw('10'), is_tax_inclusive: true,
+      raw_original_total: raw('20'), raw_original_tax_total: raw('3.193277'), raw_total: raw('9.52'), raw_tax_total: raw('1.52'),
+      tax_lines: [vat19], adjustments: [{ code: 'SAVE', raw_amount: raw('0.96'), is_tax_inclusive: true }],
+      detail: { return_received_quantity: 1 } }
+    const mapped = toStoreOrder({ ...tillOrder, items: [item, tillOrder.items![2]] })
+    // Sold gross = 2 × 10 − 0.96 = 19.04; net = 19.04 / 1.19 = 16.00 and tax = 3.04. The live split is half.
+    expect(mapped.lines).toMatchObject([{ totalMinor: 800, taxMinor: 152, soldTotalMinor: 1600, soldTaxMinor: 304, returnedQuantity: 1 }])
+    expect(mapped.fees).toEqual([{ name: 'Service fee', totalMinor: 100, taxMinor: 19 }])
+  })
+
+  it('U-C7-2: without a unit price or return detail, uses the refund split of the live gross', () => {
+    const mapped = toStoreOrder({ ...tillOrder, items: [tillOrder.items![1]] })
+    // Gross 3.96627 with tax 0.63327: refund net round(3.333 EUR) = 333 cents, tax 397 − 333 = 64, against live 334/63.
+    expect(mapped.lines).toMatchObject([{ totalMinor: 334, taxMinor: 63, soldTotalMinor: 333, soldTaxMinor: 64, returnedQuantity: 0 }])
   })
 
   // EUR, prices including tax. Coffee 11.90 at 19 % less coupon INCL5 (1.19 gross); Cake 12.00 under two rates (15 % and

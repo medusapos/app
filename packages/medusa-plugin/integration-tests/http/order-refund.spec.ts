@@ -499,6 +499,20 @@ medusaIntegrationTestRunner({
       expect([await stockA(), (await returns(till.orderId)).length, (await medusaRefunds(till.orderId)).length]).toEqual([stock + 2, 2, 2])
     })
 
+    it.each([['I-C7-1', true], ['I-C7-2', false]] as const)('%s: orders preserve the as-sold split and count the return (restock=%s)', async (_tag, restock) => {
+      const till = await twoOfA()
+      const readLine = async () => (await api.get(`/tally/v1/orders?ids=${till.orderId}&allChannels=true`, { headers })).data.orders[0].lines[0]
+      const sold = { id: till.lineId, soldTotalMinor: 1681, soldTaxMinor: 319 }
+      expect(await readLine()).toMatchObject({ ...sold, totalMinor: 1681, taxMinor: 319, returnedQuantity: 0 })
+
+      const unit = unitsOf(till, 1, 1001)
+      unit.payload.lines[0].restock = restock
+      expect((await applied([unit]))[0].refund.totalMinor).toBe(1001)
+      const after = await readLine()
+      expect(after).toMatchObject({ ...sold, returnedQuantity: 1 })
+      if (restock) expect(after.totalMinor + after.taxMinor).not.toBe(2000)
+    })
+
     /** #583: one unit refund of `till`'s single line, priced at totalMinor. */
     const unitsOf = (till: { orderId: string; registerId: string; sessionId: string; lineId: string }, quantity: number, totalMinor: number) =>
       command('order.refund', { clientRefundId: randomUUID(), orderId: till.orderId, registerId: till.registerId, sessionId: till.sessionId,
