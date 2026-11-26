@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { BehaviorSubject, map } from 'rxjs';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderReference } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
@@ -161,6 +162,27 @@ describe('Orders lists the whole store (row 10)', () => {
     expect(listOrders).toHaveBeenLastCalledWith(context, { page: 1, perPage: 25 });
     expect(openButtons()).toEqual([`Open order ${orderReference(applied)}`, 'Open order #1001']);
     expect(cell(pending.id, 'status')).toBe('Completed');
+  });
+
+  it('O1: an applied till refund reads page 1 again', async () => {
+    const records = new BehaviorSubject([{ status: 'pending' }]);
+    const refunds = {
+      count: ({ selector }: { selector: { status: string } }) => ({
+        $: records.pipe(map((rows) => rows.filter((row) => row.status === selector.status).length)),
+      }),
+    };
+    const outbox = useOutboxContext();
+    vi.mocked(useOutboxContext).mockReturnValue({ ...outbox,
+      orders: { database: { collections: { pos_refunds: refunds } } } as unknown as typeof outbox.orders,
+    });
+    listOrders.mockResolvedValue(page([storeOrder(1)]));
+    await mount();
+    expect(openButtons()).toEqual(['Open order #1001']);
+    expect(listOrders).toHaveBeenCalledExactlyOnceWith(context, { page: 1, perPage: 25 });
+    await act(async () => { records.next([{ status: 'applied' }]); });
+    await settle();
+    expect(listOrders).toHaveBeenCalledTimes(2);
+    expect(listOrders).toHaveBeenLastCalledWith(...listOrders.mock.calls[0]);
   });
 
   it('Load more appends page 2, with the store\'s count', async () => {

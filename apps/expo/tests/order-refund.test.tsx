@@ -435,6 +435,21 @@ describe('Contract 7 refunds in the Orders sheet (#636)', () => {
     expect(screen.getByTestId('order-detail')).toBeTruthy();
     expect(screen.queryByTestId('order-detail-refund')).toBeNull();
   });
+
+  it('C18: cancelling an unanswered refund closes the resume dialog without offering another refund', async () => {
+    send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' });
+    render(sheet({ store: twoUnits }));
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    const dialog = within(await screen.findByTestId('order-refund-dialog'));
+    fireEvent.click(dialog.getByTestId('order-refund-cancel'));
+    await waitFor(() => expect(screen.queryByTestId('order-refund-dialog')).toBeNull());
+    expect(screen.getByTestId('order-detail')).toBeTruthy();
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('needs_admin (#545)', () => {
