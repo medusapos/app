@@ -509,6 +509,32 @@ describe('Refund form across a reread (#636)', () => {
     expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(120)}`);
   });
 
+  it('R2b: a remounted form resumes the pending refund without a second send', async () => {
+    let answerFirst!: (outcome: TransportOutcome) => void;
+    send.mockImplementationOnce(() => new Promise((resolve) => { answerFirst = resolve; }))
+      .mockImplementation(async (batch) => applied(batch));
+    const view = await openAcrossRead();
+    await submit(view.form);
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(1));
+
+    view.reread(1);
+    await view.fail();
+    expect(screen.queryByTestId('refund-modal')).toBeNull();
+    getOrders.mockResolvedValueOnce([read]);
+    view.reread(2);
+    const remounted = await modal();
+    plus(remounted, 'line_1');
+    reason(remounted, 'Damaged');
+    await submit(remounted);
+
+    await waitFor(() => expect(screen.queryByTestId('refund-modal')).toBeNull());
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(await refunds.count().exec()).toBe(1);
+    expect(await screen.findByTestId('order-refund-dialog')).toBeTruthy();
+    await act(async () => answerFirst(applied([sent()])));
+    expect((await screen.findByTestId('order-detail-refunded')).textContent).toBe(`Refunded ${money(120)}`);
+  });
+
   it('R3: a failed reread cannot give the same opening another refund id', async () => {
     send.mockImplementationOnce(async (batch) => rejected('amount_mismatch')(batch)).mockImplementationOnce(async (batch) => applied(batch));
     const view = await openAcrossRead();
