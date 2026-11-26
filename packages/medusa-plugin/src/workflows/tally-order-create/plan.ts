@@ -67,7 +67,7 @@ export function planOrderCreate(payload: OrderCreatePayload, ctx: PlanContext, o
     fields.push([`lines[${i}].quantity`, line.quantity, 1], [`lines[${i}].unitPriceMinor`, line.unitPriceMinor, 0])
     if (line.discountMinor !== undefined) fields.push([`lines[${i}].discountMinor`, line.discountMinor, 1])
   })
-  for (const [name, charges] of [['fees', fees], ['shipping', shipping]] as const) {
+  for (const [name, charges] of [['fees', fees], ['shipping', shipping]] as [string, readonly { amountMinor: number }[]][]) {
     charges.forEach((charge, i) => fields.push([`${name}[${i}].amountMinor`, charge.amountMinor, 0]))
   }
   for (const field of ['subtotalMinor', 'taxMinor', 'totalMinor'] as const) {

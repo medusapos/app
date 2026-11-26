@@ -49,7 +49,7 @@ describe('OutboxProvider savesInFlight', () => {
     let outbox!: UseOrderOutboxResult;
     const next = (savesInFlight: number) => {
       outbox = { orders: null, state: { pending: 0, sending: false }, recent: [], record: vi.fn(),
-        isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), savesInFlight, stuckCommandIds: [] };
+        isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), reverseOnStore: vi.fn(), savesInFlight, stuckCommandIds: [] };
     };
     vi.mocked(useOrderOutbox).mockImplementation(() => outbox);
     let seen!: UseOrderOutboxResult;
@@ -88,7 +88,7 @@ describe('OutboxProvider savesInFlight', () => {
 describe('OutboxProvider POS access', () => {
   it('reports a 403 refusal but not other or absent refusals', async () => {
     let outbox: UseOrderOutboxResult = { orders: null, state: { pending: 0, sending: false }, recent: [],
-      record: vi.fn(), isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), savesInFlight: 0, stuckCommandIds: [] };
+      record: vi.fn(), isStored: vi.fn(), flush: vi.fn(), requeue: vi.fn(), discard: vi.fn(), cancelOnStore: vi.fn(), payRestOnStore: vi.fn(), reverseOnStore: vi.fn(), savesInFlight: 0, stuckCommandIds: [] };
     vi.mocked(useOrderOutbox).mockImplementation(() => outbox);
     const tree = () => <OutboxProvider>{null}</OutboxProvider>;
     let view!: ReturnType<typeof render>;
