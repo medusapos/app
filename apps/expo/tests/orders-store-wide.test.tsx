@@ -532,15 +532,15 @@ describe('Billing Address column and day headers (row 10.1)', () => {
     expect(billingFetch).not.toHaveBeenCalled();
   });
 
-  it('Needs attention has the Billing Address column and no day header', async () => {
+  it('Needs attention has the Billing Address column and day headers', async () => {
     const refused = { ...sale('Red hat', 'rejected'), error: { code: 'platform_error', message: 'Refused' } };
     withSales(refused);
     await mount();
     const attention = screen.getByTestId('orders-attention');
     expect(within(attention).getByText('Billing Address', { exact: true })).toBeTruthy();
     expect(screen.getByTestId(`orders-attention-row-${refused.id}-billing`).textContent).toBe('—');
-    expect(attention.querySelector('[data-testid^="orders-attention-row-day-"]')).toBeNull();
-    expect(within(attention).queryByRole('heading')).toBeNull();
+    expect(attention.querySelector('[data-testid^="orders-attention-row-day-"]')).not.toBeNull();
+    expect(within(attention).getByRole('heading')).toBeTruthy();
   });
 
   it('the Billing Address head and its cells take the same double width', async () => {

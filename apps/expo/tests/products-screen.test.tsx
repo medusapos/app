@@ -1146,7 +1146,8 @@ describe('Orders screen and sync status', () => {
           { code: 'total_mismatch', serverMinor: 1000, expectedMinor: 1200 }] }, order,
     ] });
     await mount(true, true);
-    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Today']);
+    // The first Today heads the attention group, the second the main table.
+    expect(screen.getAllByRole('heading').map((heading) => heading.textContent)).toEqual(['Needs attention', 'Today', 'Today']);
     // needsAttention takes the refused sale and the applied one with store warnings; the plain pending sale stays out.
     const attention = within(screen.getByTestId('orders-attention'));
     expect(attention.getByTestId('orders-attention-row-rejected')).toBeTruthy();

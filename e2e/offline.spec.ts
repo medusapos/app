@@ -93,6 +93,11 @@ test('25 sales, 20 offline, land exactly once', async ({ page, context }) => {
   await openArea(page, 'Orders');
   await expect(page.getByRole('heading', { name: 'Needs attention', exact: true })).toBeVisible();
   const row = page.getByTestId(`orders-attention-row-${shortSale.clientOrderId}`);
+  // Needs attention has the main table's day headers: the sale sits under its Today header.
+  const today = page.getByTestId('orders-attention').getByTestId(/^orders-attention-row-day-/)
+    .filter({ has: page.getByRole('heading', { name: 'Today', exact: true }) });
+  await expect(today).toBeVisible();
+  await expect(today.locator(`xpath=following::*[@data-testid="orders-attention-row-${shortSale.clientOrderId}"]`)).toHaveCount(1);
   await expect(row.getByRole('button', { name: `Open order ${shortSale.clientOrderId.slice(-8)} · #${shortOrder.display_id}`, exact: true })).toBeVisible();
   await expect(row.getByTestId(`orders-attention-row-${shortSale.clientOrderId}-status`)).toHaveText('Completed');
   await expect(page.getByTestId(`orders-attention-row-${shortSale.clientOrderId}-notices`)

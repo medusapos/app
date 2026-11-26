@@ -338,6 +338,26 @@ describe('orders table (row 10.1)', () => {
     expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
   });
 
+  it('Needs attention puts a day header before each day\'s stuck sales, and each notice stays under its sale', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(new Date(2026, 10, 25, 15, 0));
+      const error = { code: 'platform_error', message: 'Refused' };
+      const today = sale('Red hat', 'rejected', { error, createdAt: new Date(2026, 10, 25, 10, 0).toISOString() });
+      const older = sale('Green scarf', 'rejected', { error, createdAt: new Date(2026, 10, 20, 10, 0).toISOString() });
+      withSales(older, today);
+      await mount();
+      const attention = screen.getByTestId('orders-attention');
+      const keep = ['day-2026-11-25', today.id, `${today.id}-notices`, 'day-2026-11-20', older.id, `${older.id}-notices`];
+      const layout = Array.from(attention.querySelectorAll('[data-testid^="orders-attention-row-"]'),
+        (element) => element.getAttribute('data-testid')!.replace('orders-attention-row-', '')).filter((id) => keep.includes(id));
+      expect(layout).toEqual(keep);
+      const heading = (day: string) => within(screen.getByTestId(`orders-attention-row-day-${day}`)).getByRole('heading').textContent;
+      expect(heading('2026-11-25')).toBe('Today');
+      expect(heading('2026-11-20')).toBe(new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(new Date(2026, 10, 20, 10, 0)));
+    } finally { vi.useRealTimers(); }
+  });
+
   it('opening a stuck pending sale from the all-sales table shows its stuck-since notice in the sheet', async () => {
     const stuck = sale('Green scarf', 'pending');
     const waiting = sale('Blue shirt', 'pending');

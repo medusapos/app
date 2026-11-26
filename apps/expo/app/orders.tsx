@@ -79,7 +79,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
       {attention.length > 0 ? <>
         <Text accessibilityRole="header" className="text-xl font-semibold text-foreground">Needs attention</Text>
         <OrdersTable testID="orders-attention" orders={attention} onRetry={requeue} stuck={state.stuck}
-          formatDate={formatDate} onOpen={setOpenId} />
+          formatDate={formatDate} onOpen={setOpenId} days />
       </> : null}
       {fallback ? <View className="flex-row items-center gap-3">
         <Text role="alert" className="text-sm text-muted-foreground">
