@@ -3,6 +3,7 @@ import type {
 } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { MathBN } from '@medusajs/framework/utils'
 import { currencyDecimals, majorToMinor } from '../../../../workflows/tally-order-create/money'
+import { asSoldSplit, returnedQuantity, type SoldItem } from '../../../../workflows/tally-order-refund/as-sold'
 
 export const ORDERS_DEFAULT_PER_PAGE = 25
 // Core's ListOrdersQuery caps perPage at 100; it also bounds one query.graph read of whole orders with their relations.
@@ -106,6 +107,8 @@ export const ORDER_FIELDS = [
   'items.is_tax_inclusive', 'items.metadata', 'items.raw_total', 'items.raw_tax_total', 'items.raw_original_total',
   'items.raw_original_tax_total', 'items.tax_lines.rate', 'items.tax_lines.code', 'items.tax_lines.description',
   'items.adjustments.code', 'items.adjustments.raw_amount', 'items.adjustments.is_tax_inclusive',
+  'items.quantity', 'items.raw_unit_price', 'items.detail.return_requested_quantity',
+  'items.detail.return_received_quantity', 'items.detail.return_dismissed_quantity',
   'shipping_methods.name', 'shipping_methods.raw_total', 'shipping_methods.raw_tax_total', 'shipping_methods.tax_lines.rate',
   'shipping_methods.tax_lines.code', 'shipping_methods.tax_lines.description', 'shipping_methods.adjustments.code',
   'shipping_methods.adjustments.raw_amount', 'shipping_methods.adjustments.is_tax_inclusive',
@@ -119,7 +122,8 @@ type Raw = { value: string | number }
 type TaxLineRow = { rate: string | number; code?: string | null; description?: string | null }
 type AdjustmentRow = { code?: string | null; raw_amount: Raw; is_tax_inclusive?: boolean | null }
 type ChargeRow = { raw_total: Raw; raw_tax_total: Raw; tax_lines?: Array<TaxLineRow | null> | null; adjustments?: Array<AdjustmentRow | null> | null }
-type ItemRow = ChargeRow & {
+type ItemRow = ChargeRow & Parameters<typeof returnedQuantity>[0] & {
+  quantity?: number; raw_unit_price?: Raw | null
   id: string; title: string; product_id?: string | null; variant_id?: string | null; variant_sku?: string | null; raw_quantity: Raw
   is_tax_inclusive?: boolean | null; metadata?: Record<string, unknown> | null; raw_original_total: Raw; raw_original_tax_total: Raw
 }
@@ -127,6 +131,8 @@ type PaymentRow = {
   id: string; provider_id: string; raw_amount: Raw; canceled_at?: string | Date | null
   refunds?: Array<{ id: string; raw_amount: Raw; note?: string | null; refund_reason?: { label?: string | null } | null } | null> | null
 }
+// TallyUI maps the contract 7 line fields as optional.
+export type PluginStoreOrderLine = StoreOrderLine & { soldTotalMinor: number; soldTaxMinor: number; returnedQuantity: number }
 export type OrderRow = {
   id: string; display_id: number; status: string; created_at: string | Date; currency_code: string
   email?: string | null; customer_id?: string | null; metadata?: Record<string, unknown> | null
@@ -240,15 +246,17 @@ export function toStoreOrder(row: OrderRow, refundLines: ReadonlyMap<string, Sto
     pricesIncludeTax: items.length > 0 && items.every(item => item.is_tax_inclusive === true),
     customer: customerId || name || email
       ? { ...(customerId ? { id: customerId } : {}), ...(name ? { name } : {}), ...(email ? { email } : {}) } : null,
-    lines: items.filter(item => !isFee(item)).map((item): StoreOrderLine => {
+    lines: items.filter(item => !isFee(item)).map((item): PluginStoreOrderLine => {
       const before = split(item.raw_original_total, item.raw_original_tax_total, decimals)
       const after = split(item.raw_total, item.raw_tax_total, decimals)
+      const sold = asSoldSplit(item as SoldItem, decimals)
       const clientLineId = nonEmpty(item.metadata?.tally_line_uuid)
       const productId = nonEmpty(item.product_id), variantId = nonEmpty(item.variant_id), sku = nonEmpty(item.variant_sku)
       return {
         id: item.id, ...(clientLineId ? { clientLineId } : {}), ...(productId ? { productId } : {}),
         ...(variantId ? { variantId } : {}), name: item.title, ...(sku ? { sku } : {}), quantity: Number(item.raw_quantity.value),
         subtotalMinor: before.netMinor, subtotalTaxMinor: before.taxMinor, totalMinor: after.netMinor, taxMinor: after.taxMinor,
+        soldTotalMinor: sold.netMinor, soldTaxMinor: sold.taxMinor, returnedQuantity: returnedQuantity(item),
       }
     }),
     fees: items.filter(isFee).map(item => charge(item.title, item, decimals)),

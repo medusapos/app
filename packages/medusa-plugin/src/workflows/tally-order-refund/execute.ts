@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { Knex } from '@medusajs/framework/mikro-orm/knex'
 import type { MedusaContainer } from '@medusajs/framework/types'
-import { ContainerRegistrationKeys, MedusaError, generateEntityId, getLineItemTotals } from '@medusajs/framework/utils'
+import { ContainerRegistrationKeys, MedusaError, generateEntityId } from '@medusajs/framework/utils'
 import type { CommandEnvelope, CommandResult, OrderRefundPayload } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { TALLY_LEDGER_MODULE } from '../../modules/tally-ledger'
 import type TallyLedgerModuleService from '../../modules/tally-ledger/service'
@@ -15,7 +15,8 @@ import { currencyDecimals, minorToMajor } from '../tally-order-create/money'
 import { envelopeErrors, MAX_PAYLOAD_ERRORS } from '../tally-order-create/payload-shape'
 import { clientTimeStageErrors } from '../client-time'
 import { refundPayloadErrors } from './payload-shape'
-import { connectorSplit, medusaSumMinor, priceRefund, refundMoneyMinor, type PricedLine, type RefundableLine } from './price'
+import { asSoldSplit, returnedQuantity, type SoldItem } from './as-sold'
+import { medusaSumMinor, priceRefund, refundMoneyMinor, type PricedLine, type RefundableLine } from './price'
 import { splitRefund, type SplitEntry, type TillTender } from './split'
 import { beginReturn, cancelOrphanReturn, cancelReturn, findOrphanReturns, findOwnOpenReturn, moneyStep, receiveStep,
   requestReturn } from './workflow'
@@ -51,21 +52,6 @@ export interface RefundOrder {
 const rejected = (id: string, code: string, message: string, data?: Record<string, unknown>): ExecuteOutcome =>
   ({ kind: 'result', result: { id, status: 'rejected', error: { code, message, ...(data ? { data } : {}) } } as CommandResult })
 
-type SoldItem = { id: string; quantity: number; raw_total: Raw; raw_tax_total: Raw; raw_unit_price?: Raw | null; is_tax_inclusive?: boolean
-  tax_lines?: ({ rate: number } | null)[] | null; adjustments?: ({ raw_amount: Raw; is_tax_inclusive?: boolean } | null)[] | null }
-// #583: Medusa shrinks item totals as returns are received; refunds price from the totals as sold (the graph's adjustments are the current version's).
-function asSoldSplit(item: SoldItem, decimals: number): { netMinor: number; taxMinor: number } {
-  const live = () => connectorSplit(item.raw_total.value, item.raw_tax_total.value, decimals)
-  // Fallback: an item without a unit price, or one Medusa's totals refuse, keeps today's live split.
-  if (item.raw_unit_price?.value == null) return live()
-  try {
-    const sold = getLineItemTotals({ id: item.id, unit_price: item.raw_unit_price, quantity: item.quantity, is_tax_inclusive: item.is_tax_inclusive,
-      tax_lines: (item.tax_lines ?? []).flatMap(line => line ? [{ rate: line.rate }] : []), adjustments: (item.adjustments ?? []).flatMap(adj => adj ? [{ amount: adj.raw_amount, is_tax_inclusive: adj.is_tax_inclusive }] : []),
-    } as unknown as Parameters<typeof getLineItemTotals>[0], { includeTax: item.is_tax_inclusive })
-    return connectorSplit(sold.total.raw!.value, sold.tax_total.raw!.value, decimals)
-  } catch { return live() }
-}
-
 export async function loadRefundOrder(container: MedusaContainer, orderId: string): Promise<RefundOrder | null> {
   const { data: [order] } = await container.resolve(ContainerRegistrationKeys.QUERY).graph({ entity: 'order', fields: [
     'id', 'status', 'is_draft_order', 'currency_code', 'metadata', 'total', 'items.id', 'items.quantity', 'items.raw_total',
@@ -89,9 +75,8 @@ export async function loadRefundOrder(container: MedusaContainer, orderId: strin
     locationId: fulfillment?.location_id ?? undefined,
     // The till's own payment id is clientPaymentId (order.create's payload).
     tenders: tenders.map(tender => ({ ...tender, id: tender.clientPaymentId ?? tender.id }) as TillTender),
-    // A dismiss also adds to written_off_quantity (Medusa's receive-damaged action), so that field is not added again.
     lines: (order.items ?? []).filter(item => item !== null).filter(item => !item.metadata?.tally_fee_uuid).map(item => ({ id: item.id, quantity: Number(item.quantity),
-      returnedQuantity: Number(item.detail?.return_requested_quantity ?? 0) + Number(item.detail?.return_received_quantity ?? 0) + Number(item.detail?.return_dismissed_quantity ?? 0),
+      returnedQuantity: returnedQuantity(item),
       ...asSoldSplit(item as unknown as SoldItem, decimals) })),
     ...refundMoneyMinor(decimals, payment ? (payment.raw_amount as unknown as Raw).value : null,
       (order.shipping_methods ?? []).map(method => (method?.raw_total as unknown as Raw).value),
