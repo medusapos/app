@@ -1,5 +1,5 @@
 import type {
-  ListOrdersQuery, OrderFilterField, PaymentMethodKind, StoreOrder, StoreOrderCharge, StoreOrderLine, StoreOrderPage, StoreOrderPayment,
+  ListOrdersQuery, OrderFilterField, PaymentMethodKind, StoreOrder, StoreOrderCharge, StoreOrderLine, StoreOrderPage, StoreOrderPayment, StoreOrderRefundLine,
 } from '@tallyui/core' with { 'resolution-mode': 'import' }
 import { MathBN } from '@medusajs/framework/utils'
 import { currencyDecimals, majorToMinor } from '../../../../workflows/tally-order-create/money'
@@ -7,15 +7,17 @@ import { currencyDecimals, majorToMinor } from '../../../../workflows/tally-orde
 export const ORDERS_DEFAULT_PER_PAGE = 25
 // Core's ListOrdersQuery caps perPage at 100; it also bounds one query.graph read of whole orders with their relations.
 export const ORDERS_MAX_PER_PAGE = 100
+// connector-medusa sends at most 100 per call (REFUND_LINES_IDS_MAX); this bounds one query.graph id filter.
+export const ORDERS_MAX_IDS = 100
 // display_id is a Postgres integer: a longer run of digits matches no order rather than failing the query.
 const MAX_DISPLAY_ID = 2147483647
 
-export type OrdersQuery = ListOrdersQuery & { page: number; perPage: number; allChannels: boolean }
+export type OrdersQuery = ListOrdersQuery & { page: number; perPage: number; allChannels: boolean; ids?: string[] }
 export type OrdersQueryError =
   | { code: 'unsupported_order_filter'; fields: OrderFilterField[] }
   | { code: 'invalid_query'; message: string }
 
-const PARAMS = ['page', 'perPage', 'search', 'status', 'customerId', 'registerId', 'after', 'before', 'allChannels']
+const PARAMS = ['page', 'perPage', 'search', 'status', 'customerId', 'registerId', 'after', 'before', 'allChannels', 'ids']
 // Core's ORDER_FILTER_FIELDS order (the plugin imports core as types only); this route has no cashier, payment-method,
 // store or created-via filter.
 const UNSUPPORTED: readonly OrderFilterField[] = ['cashierId', 'paymentMethod', 'storeId', 'createdVia']
@@ -39,6 +41,11 @@ export function parseOrdersQuery(raw: Record<string, unknown>): { ok: true; quer
     return invalid('allChannels must be true or false')
   }
   const query: OrdersQuery = { page: 1, perPage: ORDERS_DEFAULT_PER_PAGE, allChannels: raw.allChannels === 'true' }
+  if (typeof raw.ids === 'string') {
+    const ids = raw.ids.split(',')
+    if (ids.includes('') || ids.length > ORDERS_MAX_IDS) return invalid('ids must be 1 to 100 comma-separated order ids')
+    query.ids = ids
+  }
   if (raw.page !== undefined) {
     const page = wholeNumber(raw.page)
     if (page === undefined || page < 1) return invalid('page must be an integer >= 1')
@@ -71,6 +78,7 @@ export function orderFilters(query: OrdersQuery, scope: { salesChannelId: string
   // An empty filter value is set, and no order has an empty status, customer or register.
   if (query.status === '' || query.customerId === '' || query.registerId === '') return null
   const filters: Record<string, unknown> = { is_draft_order: false }
+  if (query.ids) filters.id = query.ids
   if (scope !== 'all') filters.sales_channel_id = scope.salesChannelId
   if (query.status !== undefined) filters.status = query.status
   if (query.customerId !== undefined) filters.customer_id = query.customerId
@@ -156,7 +164,18 @@ function tillKind(metadata: Record<string, unknown>): PaymentMethodKind | undefi
   return kinds.size === 1 && TILL_KINDS.includes(kind as PaymentMethodKind) ? kind as PaymentMethodKind : undefined
 }
 
-export function toStoreOrder(row: OrderRow): StoreOrder {
+export function refundLinesById(rows: Array<{ medusa_refund_id: string; lines: unknown }>): Map<string, StoreOrderRefundLine[]> {
+  const byId = new Map<string, StoreOrderRefundLine[]>()
+  for (const row of rows) {
+    if (!Array.isArray(row.lines)) continue
+    const lines = row.lines.filter(line => Number.isInteger(line?.quantity) && line.quantity > 0)
+      .map(({ orderLineId, quantity, netMinor, taxMinor }) => ({ orderLineId, quantity, netMinor, taxMinor }))
+    if (lines.length) byId.set(row.medusa_refund_id, lines)
+  }
+  return byId
+}
+
+export function toStoreOrder(row: OrderRow, refundLines: ReadonlyMap<string, StoreOrderRefundLine[]> = new Map()): StoreOrder {
   const decimals = currencyDecimals(row.currency_code)
   const metadata = row.metadata ?? {}
   const items = present(row.items)
@@ -200,6 +219,15 @@ export function toStoreOrder(row: OrderRow): StoreOrder {
   const payments = present(row.payment_collections).flatMap(collection => present(collection.payments))
     .filter(payment => payment.canceled_at == null)
   const kind = payments.length === 1 ? tillKind(metadata) : undefined
+  const refunds = payments.flatMap(payment => present(payment.refunds))
+  const ordered = new Map(items.filter(item => !isFee(item)).map(item => [item.id, Number(item.raw_quantity.value)]))
+  const claimed = new Map<string, number>()
+  for (const refund of refunds) {
+    for (const { orderLineId, quantity } of refundLines.get(refund.id) ?? []) {
+      claimed.set(orderLineId, (claimed.get(orderLineId) ?? 0) + quantity)
+    }
+  }
+  const canAttach = [...claimed].every(([id, quantity]) => quantity <= (ordered.get(id) ?? 0))
   const discount = split(row.raw_discount_total, row.raw_discount_tax_total, decimals)
 
   return {
@@ -238,14 +266,16 @@ export function toStoreOrder(row: OrderRow): StoreOrder {
     payments: payments.map((payment): StoreOrderPayment => ({
       method: payment.provider_id, ...(kind ? { kind } : {}), amountMinor: majorToMinor(payment.raw_amount.value, decimals),
     })),
-    refunds: payments.flatMap(payment => present(payment.refunds)).map(refund => {
+    refunds: refunds.map(refund => {
       const reason = nonEmpty(refund.note) ?? nonEmpty(refund.refund_reason?.label)
-      return { id: refund.id, amountMinor: Math.abs(majorToMinor(refund.raw_amount.value, decimals)), ...(reason ? { reason } : {}) }
+      const lines = canAttach && refundLines.get(refund.id)
+      return { id: refund.id, amountMinor: Math.abs(majorToMinor(refund.raw_amount.value, decimals)), ...(reason ? { reason } : {}),
+        ...(lines ? { lines } : {}) }
     }),
   }
 }
 
-export function orderPage(rows: OrderRow[], count: number, query: OrdersQuery): StoreOrderPage {
-  const orders = rows.map(toStoreOrder)
+export function orderPage(rows: OrderRow[], count: number, query: OrdersQuery, refundLines: ReadonlyMap<string, StoreOrderRefundLine[]> = new Map()): StoreOrderPage {
+  const orders = rows.map(row => toStoreOrder(row, refundLines))
   return { orders, hasMore: (query.page - 1) * query.perPage + orders.length < count, total: count }
 }
