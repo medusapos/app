@@ -737,4 +737,38 @@ describe('Resume and records (#642)', () => {
     expect(screen.queryByTestId('refund-needs-admin-check-again')).toBeNull();
     expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
   });
+
+  it.each([
+    ['D6b', { kind: 'unauthorized' }, 'Sign in again, then try again.'],
+    ['D6c', { kind: 'refused', status: 403, reason: 'forbidden' }, 'The store refused the refund (forbidden). Try again.'],
+  ] as const)('%s: Check again keeps the parked notice after a transport error', async (_name, outcome, message) => {
+    send.mockImplementationOnce(parked('session_closed', 'Stored response')).mockResolvedValueOnce(outcome);
+    render(sheet());
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    fireEvent.click(await screen.findByTestId('refund-needs-admin-check-again'));
+    expect((await screen.findByTestId('order-refund-error')).textContent).toBe(message);
+    expect(screen.getByTestId('refund-needs-admin-line').textContent).toBe(refundNeedsAdminLine('session_closed'));
+    expect(screen.getByTestId('refund-needs-admin-check-again')).toBeTruthy();
+    expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
+    const records = (await refunds.find().exec()).map((doc) => doc.toJSON());
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ status: 'pending', error: { code: 'needs_admin' } });
+  });
+
+  it('D7: switching to another order waits for that order’s records', () => {
+    const rows = { order_1: new Subject<never[]>(), order_2: new Subject<never[]>() };
+    refunds = { find: ({ selector }: { selector: { orderId: keyof typeof rows } }) => ({ $: rows[selector.orderId] }) } as unknown as PosRefundCollection;
+    const view = render(sheet());
+    act(() => rows.order_1.next([]));
+    expect(screen.getByTestId('order-detail-refund')).toBeTruthy();
+
+    view.rerender(sheet({ store: { ...storeOrder, id: 'order_2' } }));
+    expect(screen.queryByTestId('order-detail-refund')).toBeNull();
+    expect(screen.queryByTestId('order-refund-dialog')).toBeNull();
+    act(() => rows.order_2.next([]));
+    expect(screen.getByTestId('order-detail-refund')).toBeTruthy();
+  });
 });
