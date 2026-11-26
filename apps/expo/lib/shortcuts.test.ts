@@ -33,6 +33,22 @@ describe('shortcutFor', () => {
   it('still matches a key of ƒ with code KeyF', () => {
     expect(press({ code: 'KeyF', key: 'ƒ', altKey: true })).toBe('search.focus');
   });
+  it('in a text field, a Mac Option chord that types a character is left to the field', () => {
+    for (const [code, key] of [['KeyN', 'Dead'], ['KeyN', 'ñ'], ['KeyO', 'ó'], ['KeyP', 'π']]) {
+      expect(press({ code, key, altKey: true, editable: true })).toBeNull();
+    }
+  });
+  it('in a text field, Alt+F and Alt+/ still map whatever they type', () => {
+    expect(press({ code: 'KeyF', key: 'ƒ', altKey: true, editable: true })).toBe('search.focus');
+    expect(press({ code: 'Slash', key: '÷', altKey: true, editable: true })).toBe('help.open');
+  });
+  it('in a text field, an Alt chord that types nothing still maps (Windows, Linux)', () => {
+    expect(press({ code: 'KeyN', key: 'n', altKey: true, editable: true })).toBe('sale.new');
+    expect(press({ code: 'KeyP', key: 'P', altKey: true, editable: true })).toBe('checkout.open');
+  });
+  it('outside a text field, Option chords map by code', () => {
+    expect(press({ code: 'KeyN', key: 'Dead', altKey: true })).toBe('sale.new');
+  });
 });
 
 describe('chordLabel', () => {
@@ -104,9 +120,12 @@ describe('useShortcutKeys on web', () => {
     expect(onHelp).toHaveBeenCalledTimes(1);
   });
 
-  it('a chord while the help sheet is open calls closeHelp, then runs', () => {
+  // As TallyUI's Dialog renders the sheet: its scrim holding the aria-modal overlay, then the content.
+  const sheetHtml = '<div><div aria-modal="true"></div></div><div role="dialog" data-testid="shortcuts-sheet"></div>';
+
+  it('with the sheet open and no other dialog, a chord still closes it and runs', () => {
     vi.useFakeTimers();
-    document.body.innerHTML = '<div role="dialog" data-testid="shortcuts-sheet"></div>';
+    document.body.innerHTML = sheetHtml;
     const { checkout, closeHelp } = keys(true);
     fire({ code: 'KeyP', altKey: true });
     expect(closeHelp).toHaveBeenCalledTimes(1);
@@ -115,6 +134,18 @@ describe('useShortcutKeys on web', () => {
     expect(checkout).toHaveBeenCalledTimes(1);
     fire({ code: 'Slash', altKey: true });
     expect(closeHelp).toHaveBeenCalledTimes(2);
+  });
+
+  it('with the sheet open over another dialog, a chord closes the sheet and runs nothing', () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `<div role="dialog" data-testid="new-customer"></div>${sheetHtml}`;
+    const newSale = vi.fn();
+    renderHook(() => useShortcut('sale.new', newSale));
+    const { closeHelp } = keys(true);
+    fire({ code: 'KeyN', key: 'n', altKey: true });
+    expect(closeHelp).toHaveBeenCalledTimes(1);
+    act(() => { vi.runAllTimers(); });
+    expect(newSale).not.toHaveBeenCalled();
   });
 
   it('? opens the help, but not from inside a text field; a chord in a field that stops the key still runs', () => {
@@ -126,7 +157,7 @@ describe('useShortcutKeys on web', () => {
     input.focus();
     act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: '?', code: 'Slash', bubbles: true })); });
     expect(onHelp).not.toHaveBeenCalled();
-    act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'π', code: 'KeyP', altKey: true, bubbles: true })); });
+    act(() => { input.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', altKey: true, bubbles: true })); });
     expect(checkout).toHaveBeenCalledTimes(1);
     input.blur();
     fire({ key: '?', code: 'Slash' });

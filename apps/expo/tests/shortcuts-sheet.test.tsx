@@ -16,7 +16,7 @@ const mount = (newSale: (() => void) | null = null) => {
   return { onOpenChange, checkout };
 };
 
-afterEach(() => { cleanup(); vi.useRealTimers(); });
+afterEach(() => { cleanup(); document.body.innerHTML = ''; vi.useRealTimers(); });
 
 describe('ShortcutsSheet', () => {
   it('lists the five rows plus Escape, each with its key caps', () => {
@@ -53,5 +53,22 @@ describe('ShortcutsSheet', () => {
     expect(checkout).not.toHaveBeenCalled();
     act(() => { vi.runAllTimers(); });
     expect(checkout).toHaveBeenCalledTimes(1);
+  });
+
+  it('with another dialog beneath, rows are unavailable and pressing one runs nothing', () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '<div role="dialog" data-testid="order-details"></div>';
+    const newSale = vi.fn();
+    const { onOpenChange, checkout } = mount(newSale);
+    for (const id of ['search.focus', 'sale.new', 'checkout.open', 'orders.open']) {
+      expect(screen.getByTestId(`shortcuts-row-${id}`).getAttribute('aria-disabled')).toBe('true');
+    }
+    expect(screen.getByTestId('shortcuts-row-escape').textContent).toBe('Close a sheetEsc');
+    fireEvent.click(screen.getByTestId('shortcuts-row-checkout.open'));
+    fireEvent.click(screen.getByTestId('shortcuts-row-sale.new'));
+    act(() => { vi.runAllTimers(); });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(checkout).not.toHaveBeenCalled();
+    expect(newSale).not.toHaveBeenCalled();
   });
 });

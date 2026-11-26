@@ -15,11 +15,14 @@ export const SHORTCUTS: readonly { id: ShortcutId; label: string; code: string }
   { id: 'help.open', label: 'Keyboard shortcuts', code: 'Slash' },
 ];
 
-/** The shortcut a keydown is, or null. `?` (v2 has only Alt+/) counts with no modifier and outside a text field. */
+/** The shortcut a keydown is, or null. `?` (v2 has only Alt+/) counts with no modifier and outside a text field. In a
+ * field, where a Mac's Option types (⌥N ñ, ⌥P π), only Alt+F, Alt+/ or an Alt that typed nothing (Windows) maps. */
 export function shortcutFor(event: { code: string; key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; editable: boolean }): ShortcutId | null {
   if (event.ctrlKey || event.metaKey) return null;
   if (!event.altKey) return event.key === '?' && !event.editable ? 'help.open' : null;
-  return SHORTCUTS.find((shortcut) => shortcut.code === event.code)?.id ?? null;
+  const id = SHORTCUTS.find((shortcut) => shortcut.code === event.code)?.id ?? null;
+  if (!id || !event.editable || id === 'search.focus' || id === 'help.open') return id;
+  return event.key.toLowerCase() === event.code.slice(3).toLowerCase() ? id : null;
 }
 
 /** The key caps: Option (⌥) on a Mac, Alt elsewhere. */
@@ -59,6 +62,16 @@ export function useAvailableShortcuts(): ReadonlySet<ShortcutId> {
   return useSyncExternalStore(subscribe, () => available, () => available);
 }
 
+// escapeBlocked's selector. The sheet is its root testID; its scrim (parent of TallyUI's aria-modal overlay) precedes it.
+const OVERLAY = '[role="dialog"], [role="alertdialog"], [aria-modal="true"], [role="menu"], [role="listbox"]';
+/** An open dialog, menu or listbox other than the shortcuts sheet and its own scrim. */
+export function otherOverlayOpen(): boolean {
+  if (typeof document === 'undefined') return false;
+  const sheet = document.querySelector('[data-testid="shortcuts-sheet"]');
+  const scrim = sheet?.previousElementSibling;
+  return Array.from(document.querySelectorAll(OVERLAY)).some((el) => !sheet?.contains(el) && el.parentElement !== scrim);
+}
+
 const isEditable = (t: EventTarget | null) => t instanceof HTMLElement
   && (['INPUT', 'TEXTAREA', 'SELECT'].includes(t.tagName) || t.isContentEditable);
 
@@ -67,7 +80,7 @@ const isEditable = (t: EventTarget | null) => t instanceof HTMLElement
 // scanner's `document` capture listener, which so still sees every key first.
 // An open dialog, menu or listbox (not this sheet) lets through only the help chord, and an alert dialog not even
 // that, so no chord can open payment under the Void confirm. Over the sheet (v2's hotkeys.web.tsx l.56-64), a chord
-// closes it, then runs on the next tick, once the sheet has gone.
+// closes it, then runs on the next tick, once the sheet has gone; with another dialog beneath the sheet it only closes it.
 export function useShortcutKeys(enabled: boolean, onHelp: () => void, helpOpen: boolean, closeHelp: () => void): void {
   const latest = useRef({ onHelp, helpOpen, closeHelp });
   latest.current = { onHelp, helpOpen, closeHelp };
@@ -83,8 +96,9 @@ export function useShortcutKeys(enabled: boolean, onHelp: () => void, helpOpen: 
       event.preventDefault();
       if (id === 'help.open') { if (helpOpen) closeHelp(); else onHelp(); return; }
       if (!helpOpen) { runShortcut(id); return; }
+      const blocked = otherOverlayOpen();
       closeHelp();
-      setTimeout(() => runShortcut(id), 0);
+      if (!blocked) setTimeout(() => runShortcut(id), 0);
     };
     const body = document.body;
     body.addEventListener('keydown', onKeyDown, true);
