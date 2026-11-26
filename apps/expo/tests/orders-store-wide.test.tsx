@@ -12,6 +12,7 @@ import { useOutboxContext } from '../lib/outbox-context';
 import { formatDate } from '../lib/format-date';
 import OrdersScreen, { ORDERS_EMPTY_TEXT, ORDERS_FAILED_TEXT, ORDERS_LOADING_TEXT, ORDERS_NO_MATCH_TEXT, ORDERS_OFFLINE_TEXT }
   from '../app/orders';
+import { setWindowWidth } from './window-width';
 
 const { listOrders, sessionState, connector } = vi.hoisted(() => ({
   listOrders: vi.fn(),
@@ -92,6 +93,8 @@ const openButtons = () => within(screen.getByTestId('orders-table')).getAllByRol
   .map((button) => button.getAttribute('aria-label'));
 
 beforeEach(() => {
+  // These are the table's tests; below 600 px Orders draws phone rows (orders-screen.test.tsx).
+  setWindowWidth(1024, 768);
   vi.useFakeTimers();
   listOrders.mockReset().mockResolvedValue(page([]));
   billingFetch.mockReset().mockImplementation(async () => billingAnswer([]));

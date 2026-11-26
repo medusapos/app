@@ -69,3 +69,31 @@ test('each row shows its Medusa order\'s billing address, under one Today header
   }, [`orders-row-${web.id}`, `orders-row-${clientId}`]);
   expect(headersAbove).toEqual([`orders-row-day-${today}`, `orders-row-day-${today}`]);
 });
+
+// Row 10.5: below 600 px the rows are two lines (number and total, then status, customer and date), not the 1160 px table.
+test('Orders on a phone opens on number, customer and total without scrolling sideways', async ({ page }) => {
+  await signIn(page);
+  await sellBySku(page, ['E2E-3'], 'exact');
+  await expect.poll(() => commands.length > 0 && commands.every(({ status }) => status === 'applied'), { timeout: 30_000 }).toBe(true);
+  const clientId = commands[0]!.payload.clientOrderId;
+
+  const viewport = { width: 390, height: 844 };
+  await page.setViewportSize(viewport);
+  await openArea(page, 'Orders');
+  const row = page.getByTestId('orders-table').getByTestId(`orders-row-${clientId}`);
+  await expect(row).toBeVisible();
+  for (const name of ['number', 'total', 'customer']) {
+    const text = row.getByTestId(`orders-row-${clientId}-${name}`);
+    await expect(text).not.toHaveText('');
+    const box = (await text.boundingBox())!;
+    expect(box.x, `${name} starts on screen`).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width, `${name} ends on screen`).toBeLessThanOrEqual(viewport.width);
+  }
+  const widths = await page.evaluate(() => ({ page: document.documentElement.scrollWidth, viewport: window.innerWidth }));
+  expect(widths.page).toBeLessThanOrEqual(widths.viewport);
+  const table = await page.getByTestId('orders-table').evaluate((element) => ({ scroll: element.scrollWidth, client: element.clientWidth }));
+  expect(table.scroll).toBeLessThanOrEqual(table.client);
+
+  await row.getByRole('button', { name: /^Open order / }).click();
+  await expect(page.getByTestId('order-detail-sheet')).toBeVisible();
+});
