@@ -23,7 +23,7 @@ type Migration = {
 // v0.1.0: @tallyui/pos 2.0.0 wrote these versions; 3.3.0 migrates orders to v8 with these outputs.
 // v0.2.0: @tallyui/pos 3.8.0's schemas (src/pos-order/schema.ts, src/register/schemas.ts, src/register/register-commands.ts,
 // src/order/order-drafts.ts) as the app's order-store.ts adds them; the current build stores the same, except pos_orders,
-// which moves to v21 (TallyUI 3.13.0 to v11, 3.19.0 to v12, 4.0.0 to v19, 4.2.0 to v20, 5.0.0 to v21), and register_sessions, which TallyUI 4.0.0 moves to v2.
+// which moves to v22 (TallyUI 3.13.0 to v11, 3.19.0 to v12, 4.0.0 to v19, 4.2.0 to v20, 5.0.0 to v21, 5.1.0 to v22), and register_sessions, which TallyUI 4.0.0 moves to v2.
 const RELEASE_EXPECTATIONS: Record<string, Migration | { kind: 'identity'; stored: Stored }> = {
   'v0.1.0': {
     kind: 'migration',
@@ -402,7 +402,7 @@ test('a 3.2.x till (pos_orders v7) upgrades to 3.3.0 (v8): sales, split payments
   }
 });
 
-test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades to TallyUI 5.0.0 with pos_orders moving to schema v21, register_sessions to v2 and its documents unchanged but for a null count_note on each session: sales, split payments, register history, a parked draft and queued register commands survive, and pending sales sync once', async ({ context }) => {
+test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades to TallyUI 5.1.0 with pos_orders moving to schema v22, register_sessions to v2 and its documents unchanged but for a null count_note on each session: sales, split payments, register history, a parked draft and queued register commands survive, and pending sales sync once', async ({ context }) => {
   test.setTimeout(15 * 60_000);
   const releasedRef = JSON.parse(readFileSync(resolve(released, 'BUILD_REF.json'), 'utf8'));
   test.skip(TALLYUI_32X_BASES.includes(releasedRef.commit), '3.2.x bases use the pos_orders v7 to v8 carry-over test.');
@@ -536,16 +536,16 @@ test('a v0.2.0-or-later till (TallyUI 3.8.x) upgrades to TallyUI 5.0.0 with pos_
     await server.stop();
     server = serve(current);
     await server.ready();
-    await test.step('C: pos_orders moves to schema v21, register_sessions to v2, and whole documents equal released documents but for count_note', async () => {
+    await test.step('C: pos_orders moves to schema v22, register_sessions to v2, and whole documents equal released documents but for count_note', async () => {
       const page = await context.newPage();
       const NEW = await dump(page);
       await closeGated(page);
       expect(NEW.rxdbVersion).toStrictEqual(currentRef.rxdb);
-      // TallyUI 3.13.0's identity migrations 9-11, 3.19.0's 12, 4.0.0's 13-19, 4.2.0's 20 and 5.0.0's 21 move pos_orders to v21; 4.0.0's
+      // TallyUI 3.13.0's identity migrations 9-11, 3.19.0's 12, 4.0.0's 13-19, 4.2.0's 20, 5.0.0's 21 and 5.1.0's 22 move pos_orders to v22; 4.0.0's
       // register_sessions migration 2 moves it to v2 and sets count_note to null on every row. Nothing else changes.
       // The app's printer_profiles collection (#472, Settings › Printing) is new to the current build, stored at v0.
       // #559's pos_refunds is new since the released build, stored at v0.
-      expect(NEW.stored).toStrictEqual([...OLD.stored.map(entry => entry.name === 'pos_orders' ? { ...entry, version: 21 }
+      expect(NEW.stored).toStrictEqual([...OLD.stored.map(entry => entry.name === 'pos_orders' ? { ...entry, version: 22 }
         : entry.name === 'register_sessions' ? { ...entry, version: 2 } : entry), { name: 'pos_refunds', version: 0 }, { name: 'printer_profiles', version: 0 }]
         .sort((a, b) => a.name.localeCompare(b.name)));
       expect(OLD.docs.register_sessions.filter(session => 'count_note' in session)).toStrictEqual([]);
