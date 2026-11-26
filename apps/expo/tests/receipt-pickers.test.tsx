@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
-import { createOrderBuilder, type PrinterProfile } from '@tallyui/pos';
+import { orderReference } from '@tallyui/components';
+import { createOrderBuilder, finalizeOrder, type PosOrder, type PrinterProfile } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReceiptPickers, ThermalPaidReceipt } from '../components/receipt-pickers';
 import { BUILT_IN_PRINTER } from '../lib/printers';
@@ -88,5 +89,36 @@ describe('ThermalPaidReceipt', () => {
     const newSale = mount();
     fireEvent.click(screen.getByText('New sale'));
     expect(newSale).toHaveBeenCalledTimes(1);
+  });
+
+  // The sale's PosOrder, under an id of its own so the page shows which id it prints.
+  const sent = order();
+  const posOrder = (serverRefs?: PosOrder['serverRefs']): PosOrder =>
+    ({ ...finalizeOrder(sent), id: 'pos-order-till-ab12cd34', syncStatus: serverRefs ? 'applied' : 'pending', serverRefs });
+  const frame = (pos?: PosOrder) => {
+    render(<ThermalPaidReceipt paper="80mm" order={sent} posOrder={pos} store={{ name: 'Corner Shop' }}
+      cashier="Brenda" registerId="register-1" newSale={vi.fn()} />);
+    return screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc') ?? '';
+  };
+
+  it("prints the store's reference, last 8 of the till id and the display number, when the store has the order", () => {
+    const pos = posOrder({ orderId: 'order_1', displayId: '42', totalMinor: 1200 });
+    const srcdoc = frame(pos);
+    expect(srcdoc).toContain(orderReference(pos));
+    expect(srcdoc).toContain('ab12cd34 · #42');
+    expect(srcdoc).not.toContain(sent.id);
+  });
+
+  it('prints the last 8 of the till id while the store has no display number yet', () => {
+    const srcdoc = frame(posOrder());
+    expect(srcdoc).toContain('ab12cd34');
+    expect(srcdoc).not.toMatch(/ab12cd34 · #/);
+    expect(srcdoc).not.toContain(sent.id);
+  });
+
+  it('without a posOrder the page keeps the order id buildReceiptData gives', () => {
+    const srcdoc = frame();
+    expect(srcdoc).toContain(sent.id);
+    expect(srcdoc).not.toContain('ab12cd34');
   });
 });

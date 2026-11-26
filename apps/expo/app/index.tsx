@@ -529,7 +529,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </View>}
     {pickers && <ReceiptPickers templateId={receiptTemplateId} onTemplateChange={setReceiptTemplateId} printers={printers}
       topInset={paidHeadline ? 0 : topInset} />}
-    {paper ? <ThermalPaidReceipt paper={paper} order={sale.stage.order} store={receiptStore} footerSlot={emailReceipt}
+    {paper ? <ThermalPaidReceipt paper={paper} order={sale.stage.order} posOrder={sale.stage.posOrder} store={receiptStore} footerSlot={emailReceipt}
       cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
       : <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
     store={receiptStore}
