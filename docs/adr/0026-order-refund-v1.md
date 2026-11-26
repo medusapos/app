@@ -55,7 +55,7 @@ The plugin still accepts and prices ADR-080's general payload: any line quantiti
 - **How it resumes.** Each step writes its outcome to the `tally_refund` row before the next step starts: `return_id`, then `received_at`, then `medusa_refund_id`. A retry reads the row and runs only the steps that are missing.
 - **A crash or timeout.** The ledger claim stays `in_progress`. After the stale-claim window, the till's retry takes the claim over, as order.create's does, and resumes.
   - 2026-11-24 (#543 window 2): a retry that takes over a stale claim while the order is locked keeps the command row when its refund row exists; the outcome is written by command id, only under the order lock, so the first run's result still lands.
-- **A failure that will not clear on retry.** The workflow parks the command as `needs_admin`, with the failing step in `needs_admin_reason`. Until an admin resolves it, the till's retry is answered `in_progress`, as for order.create. The admin uses `tally-ledger-resolve` with one of two actions:
+- **A failure that will not clear on retry.** The workflow parks the command as `needs_admin`, with the failing step in `needs_admin_reason`. Until an admin resolves it, the till's retry is answered `409 needs_admin` with a fixed reason and message, as for order.create (#545). The reason is `session_closed` only when, at answer time, no money can have moved. The admin uses `tally-ledger-resolve` with one of two actions:
   - `resume` runs the missing steps;
   - `apply` records a refund the admin made by hand, with its Medusa refund id;
   - `move [<sessionId>]` (#542, desk ruling 2026-11-24) changes a parked refund whose session no longer takes money to an open session, then resumes it.
@@ -203,5 +203,5 @@ Anyone else is refused `forbidden`, and the app shows TallyUI's own text for tha
   3. the app, last.
 - **One-way storage.** The `tally_refund` migration cannot be undone without losing refund records.
 - **Admin sees the real thing.** Each till refund appears in Admin as a Medusa return plus a refund on the order's payment. The till's per-tender split is visible only through the plugin.
-- **Repair is by hand.** A `needs_admin` refund waits for an admin with `tally-ledger-resolve`, and the till shows it as in progress meanwhile.
+- **Repair is by hand.** A `needs_admin` refund waits for an admin with `tally-ledger-resolve`, and meanwhile the till shows the manager notice for its `needs_admin` reason (#545).
 - **Partial refunds** are app work plus the per-line read, on this plugin. They are the next queue item.

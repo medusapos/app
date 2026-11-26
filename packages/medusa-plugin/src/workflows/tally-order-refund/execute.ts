@@ -93,7 +93,7 @@ export function refundResult(id: string, row: Pick<RefundRow, 'id' | 'total_mino
 }
 
 /** Medusa refunds the plugin records (rows with their refund, live baselines): one figure for the up-front refusal and the parks (#547). */
-async function recordedRefundsMinor(db: Knex, order: Pick<RefundOrder, 'id' | 'decimals'>, paymentId: string): Promise<number> {
+export async function recordedRefundsMinor(db: Knex, order: Pick<RefundOrder, 'id' | 'decimals'>, paymentId: string): Promise<number> {
   const [{ sum }] = await db('tally_refund').where({ order_id: order.id }).whereNotNull('medusa_refund_id').sum({ sum: 'total_minor' })
   const { metadata } = await db('order').where({ id: order.id }).first('metadata')
   const baselines = await db('refund').where({ payment_id: paymentId }).whereNull('deleted_at')
