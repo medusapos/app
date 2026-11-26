@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { View } from 'react-native';
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text } from '@tallyui/components';
-import { buildReceiptData, type PrinterProfile, type ReceiptPaper, type SentOrder } from '@tallyui/pos';
+import { Button, orderReference, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text } from '@tallyui/components';
+import { buildReceiptData, type PosOrder, type PrinterProfile, type ReceiptPaper, type SentOrder } from '@tallyui/pos';
 import { printSalePage, RECEIPT_TEMPLATES, receiptTemplatePage, type ReceiptTemplateId } from '../lib/receipt-templates';
 
 // The built-in's words, as Settings › Printing shows them.
@@ -46,9 +46,10 @@ type PrintStatus = 'idle' | 'printing' | 'failed';
 
 // The sale as a thermal template prints it, in place of the Standard receipt: the same buildReceiptData call and config
 // TallyUI's Receipt makes, rendered for the template's paper in a sandboxed frame (as Settings' preview does).
-export function ThermalPaidReceipt({ paper, order, store, cashier, registerId, footerSlot, newSale }: {
+export function ThermalPaidReceipt({ paper, order, posOrder, store, cashier, registerId, footerSlot, newSale }: {
   paper: ReceiptPaper;
   order: SentOrder;
+  posOrder?: PosOrder;
   store: { name: string; address?: string };
   cashier: string;
   registerId: string;
@@ -56,9 +57,11 @@ export function ThermalPaidReceipt({ paper, order, store, cashier, registerId, f
   newSale: () => void;
 }) {
   const [status, setStatus] = useState<PrintStatus>('idle');
-  const page = receiptTemplatePage(paper, buildReceiptData(order, {
+  const receipt = buildReceiptData(order, {
     storeName: store.name, storeAddress: store.address, cashier, register: registerId,
-  }));
+  });
+  const page = receiptTemplatePage(paper, posOrder
+    ? { ...receipt, header: { ...receipt.header, orderNumber: orderReference(posOrder) } } : receipt);
   const print = () => {
     setStatus('printing');
     printSalePage(page).then(() => setStatus('idle'), () => setStatus('failed'));
