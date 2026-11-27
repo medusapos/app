@@ -381,8 +381,9 @@ test('Card readers: reads the till\'s region\'s providers; a terminal provider r
 });
 
 // #660 item 5: from 600 px (where the actions leave the phone stack) up, each receipt template's printer select and
-// Preview stay inside their row and the card, clear of the template name, with no horizontal scroll.
-test('Printing: each receipt template\'s printer select and Preview fit their row from 600 to 1024 wide', async ({ page }) => {
+// Preview stay inside their row and the card, clear of the template name, with no horizontal scroll. Flat rows (768 up)
+// keep v2's convention, the actions starting beside the name, and the select keeps its full 224 px wherever it fits.
+test('Printing: each receipt template\'s printer select and Preview fit their row from 600 to 1440 wide', async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 900 });
   await signIn(page);
   await openArea(page, 'Settings');
@@ -391,7 +392,7 @@ test('Printing: each receipt template\'s printer select and Preview fit their ro
     box.x >= outer.x - 1 && box.y >= outer.y - 1 && box.x + box.width <= outer.x + outer.width + 1 && box.y + box.height <= outer.y + outer.height + 1;
   const overlaps = (a: { x: number; y: number; width: number; height: number }, b: typeof a) =>
     a.x < b.x + b.width - 1 && b.x < a.x + a.width - 1 && a.y < b.y + b.height - 1 && b.y < a.y + a.height - 1;
-  for (const width of [1024, 900, 800, 768, 700, 600]) {
+  for (const width of [1440, 1024, 900, 800, 768, 700, 600]) {
     await page.setViewportSize({ width, height: 900 });
     if (width >= 768) await page.getByTestId('settings-nav-printing').click();
     else {
@@ -402,12 +403,17 @@ test('Printing: each receipt template\'s printer select and Preview fit their ro
       if (!(await card.isVisible())) await list.getByRole('button', { name: 'Printing', exact: true }).click();
     }
     await expect(card).toBeVisible();
-    for (const [id, name] of [['standard', 'Standard Receipt'], ['thermal-80mm', 'Thermal Receipt (80mm)'], ['thermal-58mm', 'Thermal Receipt (58mm)']]) {
+    for (const [id, name, tag] of [['standard', 'Standard Receipt', 'Sales'], ['thermal-80mm', 'Thermal Receipt (80mm)', 'Thermal 80mm'],
+      ['thermal-58mm', 'Thermal Receipt (58mm)', 'Thermal 58mm']]) {
       const row = page.getByTestId(`settings-receipt-template-${id}`);
       await row.scrollIntoViewIfNeeded();
       const [rowBox, cardBox, nameBox] = [(await row.boundingBox())!, (await card.boundingBox())!, (await row.getByText(name, { exact: true }).boundingBox())!];
       // Squeezed out by the actions, the name wraps letter by letter in a column 0 px wide.
       expect.soft(nameBox.height, `${width} px: ${id}'s name keeps to two lines`).toBeLessThanOrEqual(40);
+      const [badgeBox, selectBox] = [(await row.getByText(tag, { exact: true }).boundingBox())!,
+        (await page.getByTestId(`settings-receipt-template-${id}-printer`).boundingBox())!];
+      if (width >= 768) expect.soft(badgeBox.x - nameBox.x, `${width} px: ${id}'s actions sit beside its name`).toBeLessThanOrEqual(320);
+      if (width >= 900) expect.soft(Math.abs(selectBox.width - 224), `${width} px: ${id}'s select keeps 224 px`).toBeLessThanOrEqual(1);
       for (const part of id === 'standard' ? ['printer'] : ['printer', 'preview']) {
         const box = (await page.getByTestId(`settings-receipt-template-${id}-${part}`).boundingBox())!;
         expect.soft(inside(box, rowBox), `${width} px: ${id} ${part} lies inside its row`).toBe(true);

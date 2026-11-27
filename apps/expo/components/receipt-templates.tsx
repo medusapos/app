@@ -87,7 +87,7 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
       return <Fragment key={template.id}>
         <SettingsRow label={template.name} testID={`settings-receipt-template-${template.id}`}
           divider={index > 0}
-          action={phone ? undefined : <View className={`flex-row flex-wrap items-center justify-end gap-3 ${flat ? 'w-full' : 'max-w-56'}`}>{actions}</View>} />
+          action={phone ? undefined : <View className={`flex-row flex-wrap items-center gap-3 ${flat ? 'w-full' : 'max-w-56 justify-end'}`}>{actions}</View>} />
         {phone ? <View testID={`settings-receipt-template-${template.id}-actions`}
           className="flex-row flex-wrap items-center gap-3 px-4 pb-3">{actions}</View> : null}
       </Fragment>;
