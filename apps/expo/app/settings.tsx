@@ -336,6 +336,11 @@ function PrintingSection({ session }: { session: Session }) {
 }
 function CustomerDisplaySection() {
   const { pairing, service, startPairing } = useCustomerDisplay();
+  useEffect(() => () => {
+    if (!pairing) return;
+    const { phase } = pairing;
+    if (phase.phase === 'minting' || phase.phase === 'code' || (phase.phase === 'idle' && phase.error !== undefined)) pairing.cancel();
+  }, [pairing]);
   return <CustomerDisplaySettings pairing={useTillPairing(pairing)} displays={useTillDisplays(service)} onStartPairing={startPairing}
     onConfirm={(id) => pairing?.confirm(id)} onDecline={(id) => pairing?.decline(id)}
     onCancelPairing={() => pairing?.cancel()} onForget={(id) => pairing?.forget(id)} />;
