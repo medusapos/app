@@ -12,6 +12,7 @@ import { OutboxStrip, StripHeightContext } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
 import { formatDate } from '../lib/format-date';
 import { useOutboxContext } from '../lib/outbox-context';
+import { saveReceiptPrinter, saveReceiptTemplate } from '../lib/receipt-templates';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
 import { sessionFixture } from './session-fixture';
@@ -20,7 +21,7 @@ import ProductsScreen from '../app/index';
 import { useRegister } from '../lib/register-context';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
-import { cartLineCells, keyIn, take, tenderBalance, tenderEntry } from './tender-pane';
+import { cartLineCells, keyIn, pickMethod, take, tenderBalance, tenderEntry } from './tender-pane';
 
 vi.mock('../lib/pos-connector', async (importOriginal) => (await import('./pos-connector-mock')).mockPosConnector(importOriginal));
 vi.mock('expo-router', () => ({ usePathname: () => '/', Redirect: () => null, router: { replace: vi.fn() }, Stack: { Screen: () => null } }));
@@ -426,6 +427,45 @@ describe('the cash drawer on Continue', () => {
       await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
       // Only the printer's ePOS calls: the till makes its own requests too.
       expect(pulses.mock.calls.map(([url]) => String(url)).filter((url) => url.includes('/epos/'))).toEqual([EPOS_URL]);
+    } finally {
+      shelf.products = [];
+      await db.close();
+    }
+  });
+});
+
+describe('the paid screen network receipt', () => {
+  it.each(['external', 'cash'] as const)('prints a %s sale directly, with only the cash sale opening the drawer', async (method) => {
+    const db = await createRxDatabase({ name: `paid${randomToken(8)}`, storage: getRxStorageMemory() });
+    try {
+      await (await addPrinterProfileCollection(db)).insert({ id: 'counter', name: 'Counter', connectionType: 'network',
+        vendor: 'epson', address: '10.0.0.5', port: 9100, language: 'esc-pos', autoOpenDrawer: true });
+      const requests = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 200, text: async () => '<response success="true"/>' }));
+      vi.stubGlobal('fetch', requests);
+      const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+      vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: { database: db } as unknown as RxCollection<PosOrder> });
+      setWindowWidth(1280, 800);
+      shelf.products = [{ ...product, variants: [product.variants[0]] }];
+      saveCachedSettings(localStorage, session.baseUrl, settings);
+      saveReceiptTemplate(localStorage, session.baseUrl, 'thermal-80mm');
+      saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
+      await act(async () => { render(<ProductsScreen />); });
+      fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
+      await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+      pickMethod(method);
+      take();
+      await act(async () => { click('Complete sale'); });
+      await act(async () => { click('Print receipt'); });
+      const epos = requests.mock.calls.filter(([url]) => String(url).includes('/epos/'));
+      const url = 'http://10.0.0.5:8008/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000';
+      expect(epos.map(([target]) => target)).toEqual(method === 'cash' ? [url, url] : [url]);
+      const commands = epos.map(([, init]) => String(init?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]);
+      if (method === 'cash') expect(commands[0]).toBe('1014010003');
+      const receipt = commands[commands.length - 1]!;
+      expect(Buffer.from(receipt, 'hex').toString('latin1')).toContain('Shirt');
+      expect(receipt).not.toContain('101401');
+      expect(receipt).not.toContain('1b70');
+      expect(dialog).not.toHaveBeenCalled();
     } finally {
       shelf.products = [];
       await db.close();

@@ -39,7 +39,7 @@ import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../lib/store-register-title';
 import { HeaderRegisterState, WideHeaderRegister, wideRegisterState } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
-import { ReceiptPickers, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
+import { paidReceiptData, ReceiptPickers, receiptPrintersFor, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
   GETTING_READY, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, useGatedSale,
@@ -65,12 +65,12 @@ import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
 import { printWindow, usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
 import { usePrinterProfiles } from '../lib/printers';
-import { isStoredOpensDrawer, useCashDrawerOnSale } from '../lib/thermal-printing';
+import { isStoredOpensDrawer, printReceiptToNetwork, useCashDrawerOnSale } from '../lib/thermal-printing';
 import { useProductSettings } from '../lib/product-settings';
 import { useProductCollections } from '../lib/product-collections';
 import { listProductCollections, listProductTags, productCollectionIds } from '../lib/products-area';
 import { isOnSale, loadSaleFilters, saleFilterItems, saveSaleFilters, type SaleFilters } from '../lib/sale-filters';
-import { printSalePage, RECEIPT_TEMPLATES, useReceiptTemplate } from '../lib/receipt-templates';
+import { printSalePage, RECEIPT_TEMPLATES, useReceiptPrinter, useReceiptTemplate } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { cameraScanSupported } from '../lib/camera-scan';
@@ -156,6 +156,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const { record, isStored, state: outboxState, recent, savesInFlight, orders } = useOutboxContext();
   // The paid screen and Orders share this till's saved template for the store.
   const { templateId: receiptTemplateId, save: setReceiptTemplateId } = useReceiptTemplate(defaultStorage(), session.baseUrl);
+  const { printerId: receiptPrinterId, save: setReceiptPrinterId } = useReceiptPrinter(defaultStorage(), session.baseUrl, receiptTemplateId);
   const printers = usePrinterProfiles(orders);
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {
@@ -560,9 +561,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     online={online} defaultEmail={paid?.customer?.email
       ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
     send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined;
-  const thermalPage = sale.stage.kind === 'receipt' && paper ? thermalPaidPage({ paper, order: sale.stage.order,
-    posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId }) : undefined;
-  const printPaidReceipt = thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow;
+  const thermalArgs = sale.stage.kind === 'receipt' && paper ? { paper, order: sale.stage.order,
+    posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId } : undefined;
+  const thermalPage = thermalArgs && thermalPaidPage(thermalArgs);
+  const networkPrinter = paper && receiptPrintersFor(receiptTemplateId, printers).find((p) => p.id === receiptPrinterId && p.connectionType === 'network');
+  const printPaidReceipt = thermalArgs && networkPrinter ? () => printReceiptToNetwork(networkPrinter, paidReceiptData(thermalArgs))
+    : thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow;
   // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
   // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
   useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
@@ -579,14 +583,14 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
       </View>}
       {pickers && <ReceiptPickers templateId={receiptTemplateId} onTemplateChange={setReceiptTemplateId} printers={printers}
-        topInset={paidHeadline ? 0 : leadInset} />}
+        printerId={receiptPrinterId} onPrinterChange={setReceiptPrinterId} topInset={paidHeadline ? 0 : leadInset} />}
       {thermalPage !== undefined ? <ThermalPaidReceipt page={thermalPage} />
         : <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder} store={receiptStore} actions={false}
           topInset={paidHeadline || pickers ? 0 : leadInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
           cashier={session.name || session.email} registerId={registerId} />}
     </ScrollView>
-    {/* Keyed on the template, so a thermal print's pending or failed status never carries over to another template. */}
-    <PaidFooter key={receiptTemplateId} emailReceipt={emailReceipt} newSale={sale.newSale}
+    {/* A pending or failed print belongs to this template and printer only. */}
+    <PaidFooter key={`${receiptTemplateId}:${networkPrinter?.id ?? 'system'}`} emailReceipt={emailReceipt} newSale={sale.newSale}
       print={printPaidReceipt} />
     <View dataSet={{ print: 'hide' }} className="absolute right-2" style={{ top: topInset + 8 }}>
       <IconButton testID="paid-close" accessibilityLabel="Close" className="h-11 w-11" onPress={sale.newSale}>

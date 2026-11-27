@@ -11,6 +11,7 @@ afterEach(cleanup);
 
 describe('ReceiptPickers', () => {
   const network: PrinterProfile = { id: 'kitchen', name: 'Kitchen printer', connectionType: 'network', address: '10.0.0.9' };
+  const epson: PrinterProfile = { ...network, id: 'counter', name: 'Counter', vendor: 'epson' };
   const mount = (onTemplateChange = vi.fn()) => {
     render(<><ReceiptPickers templateId="standard" onTemplateChange={onTemplateChange} printers={[BUILT_IN_PRINTER, network]} /><PortalHost /></>);
     return onTemplateChange;
@@ -38,6 +39,26 @@ describe('ReceiptPickers', () => {
     fireEvent.click(screen.getByTestId('receipt-printer-select'));
     expect(screen.getAllByText('Auto — Print dialog').length).toBeGreaterThan(1);
     expect(screen.queryByText('Kitchen printer')).toBeNull();
+  });
+
+  it('lists only the print dialog for Standard even with an Epson network printer', () => {
+    render(<><ReceiptPickers templateId="standard" onTemplateChange={vi.fn()} printers={[epson, BUILT_IN_PRINTER]} /><PortalHost /></>);
+    fireEvent.click(screen.getByTestId('receipt-printer-select'));
+    expect(screen.getAllByTestId(/^receipt-printer-option-/).map((item) => item.textContent)).toEqual(['Auto — Print dialog']);
+  });
+
+  it('shows the saved thermal printer, lists reachable options after the dialog and selects Epson', () => {
+    const onPrinterChange = vi.fn();
+    const picker = (printerId: string) => <><ReceiptPickers templateId="thermal-80mm" onTemplateChange={vi.fn()}
+      printers={[epson, network, BUILT_IN_PRINTER]} printerId={printerId} onPrinterChange={onPrinterChange} /><PortalHost /></>;
+    const { rerender } = render(picker('deleted'));
+    expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Auto — Print dialog');
+    fireEvent.click(screen.getByTestId('receipt-printer-select'));
+    expect(screen.getAllByTestId(/^receipt-printer-option-/).map((item) => item.textContent)).toEqual(['Auto — Print dialog', 'Counter']);
+    fireEvent.click(screen.getByTestId('receipt-printer-option-counter'));
+    expect(onPrinterChange).toHaveBeenCalledWith('counter');
+    rerender(picker('counter'));
+    expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Counter');
   });
 });
 

@@ -1,24 +1,25 @@
 import type { ReactNode } from 'react';
 import { View } from 'react-native';
 import { orderReference, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text } from '@tallyui/components';
-import { buildReceiptData, type PosOrder, type PrinterProfile, type ReceiptPaper, type SentOrder } from '@tallyui/pos';
+import { buildReceiptData, networkSinkFor, type PosOrder, type PrinterProfile, type ReceiptData, type ReceiptPaper, type SentOrder } from '@tallyui/pos';
 import { RECEIPT_TEMPLATES, receiptTemplatePage, type ReceiptTemplateId } from '../lib/receipt-templates';
 
 // The built-in's words, as Settings › Printing shows them.
 const printerLabel = (profile: PrinterProfile) => profile.isBuiltIn ? 'Auto — Print dialog' : profile.name;
 
 // v2's paid-screen Template and Printer selects, above the receipt; screen only, not printed.
-export function ReceiptPickers({ templateId, onTemplateChange, printers, topInset = 0 }: {
+export function ReceiptPickers({ templateId, onTemplateChange, printers, printerId, onPrinterChange, topInset = 0 }: {
   templateId: ReceiptTemplateId;
   onTemplateChange: (id: ReceiptTemplateId) => void;
   printers: PrinterProfile[];
+  printerId?: string;
+  onPrinterChange?: (printerId: string) => void;
   /** Space above the block when it leads the paid screen (no headline above it). */
   topInset?: number;
 }) {
   const template = RECEIPT_TEMPLATES.find((t) => t.id === templateId) ?? RECEIPT_TEMPLATES[0]!;
-  // Only the print dialog can print yet, so it is the one printer listed; it has nothing to change.
-  const system = printers.filter((profile) => profile.connectionType === 'system');
-  const printer = system[0];
+  const listed = receiptPrintersFor(templateId, printers);
+  const printer = listed.find((profile) => profile.id === printerId) ?? listed[0];
   const row = (label: string, select: ReactNode) => <View className="flex-row items-center gap-4">
     <Text className="w-20 text-sm text-muted-foreground">{label}</Text>
     <View className="flex-1">{select}</View>
@@ -33,30 +34,38 @@ export function ReceiptPickers({ templateId, onTemplateChange, printers, topInse
         </SelectItem>)}
       </SelectContent>
     </Select>)}
-    {printer ? row('Printer', <Select value={{ value: printer.id, label: printerLabel(printer) }}>
+    {printer ? row('Printer', <Select value={{ value: printer.id, label: printerLabel(printer) }} onValueChange={(option) => { if (option) onPrinterChange?.(option.value); }}>
       <SelectTrigger testID="receipt-printer-select" accessibilityLabel="Printer"><SelectValue placeholder="Printer" /></SelectTrigger>
       <SelectContent>
-        {system.map((p) => <SelectItem key={p.id} value={p.id} label={printerLabel(p)}><Text>{printerLabel(p)}</Text></SelectItem>)}
+        {listed.map((p) => <SelectItem key={p.id} testID={`receipt-printer-option-${p.id}`} value={p.id} label={printerLabel(p)}><Text>{printerLabel(p)}</Text></SelectItem>)}
       </SelectContent>
     </Select>) : null}
   </View>;
 }
 
+export function receiptPrintersFor(templateId: ReceiptTemplateId, printers: PrinterProfile[]): PrinterProfile[] {
+  const system = printers.filter((profile) => profile.connectionType === 'system');
+  return RECEIPT_TEMPLATES.find((template) => template.id === templateId)?.paper
+    ? system.concat(printers.filter((profile) => profile.connectionType === 'network' && networkSinkFor(profile) !== null)) : system;
+}
+
 // The sale as a thermal template prints it, in place of the Standard receipt: the same buildReceiptData call and config
 // TallyUI's Receipt makes, rendered for the template's paper.
-export function thermalPaidPage({ paper, order, posOrder, store, cashier, registerId }: {
-  paper: ReceiptPaper;
+export function paidReceiptData({ order, posOrder, store, cashier, registerId }: {
   order: SentOrder;
   posOrder?: PosOrder;
   store: { name: string; address?: string };
   cashier: string;
   registerId: string;
-}): string {
+}): ReceiptData {
   const receipt = buildReceiptData(order, {
     storeName: store.name, storeAddress: store.address, cashier, register: registerId,
   });
-  return receiptTemplatePage(paper, posOrder
-    ? { ...receipt, header: { ...receipt.header, orderNumber: orderReference(posOrder) } } : receipt);
+  return posOrder ? { ...receipt, header: { ...receipt.header, orderNumber: orderReference(posOrder) } } : receipt;
+}
+
+export function thermalPaidPage({ paper, ...args }: { paper: ReceiptPaper } & Parameters<typeof paidReceiptData>[0]): string {
+  return receiptTemplatePage(paper, paidReceiptData(args));
 }
 
 // The thermal page in a sandboxed frame (as Settings' preview does); the paid footer prints it.
