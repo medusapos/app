@@ -92,3 +92,11 @@ it('SD-3: the sale still takes items with no display service', async () => {
   expect(observed.sale!.order.lineItems).toMatchObject([{ name: 'Shirt' }]);
   expect(service.showCart).not.toHaveBeenCalled(); expect(service.showPayment).not.toHaveBeenCalled();
 });
+
+it('SD-4: neither the cart nor the payment screen receives the Shirt SKU', async () => {
+  await addShirt();
+  act(() => { observed.sale!.startTender('cash'); });
+  expect(service.showCart.mock.lastCall?.[0]).toMatchObject({ lineItems: [{ name: 'Shirt' }] });
+  expect(service.showPayment.mock.lastCall?.[0]).toMatchObject({ lineItems: [{ name: 'Shirt' }] });
+  expect(JSON.stringify([service.showCart.mock.calls, service.showPayment.mock.calls])).not.toContain('BLUE');
+});
