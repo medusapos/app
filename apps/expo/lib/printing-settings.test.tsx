@@ -80,6 +80,20 @@ describe('useAutoPrintReceipt', () => {
     expect(after).toHaveBeenCalledTimes(1);
   });
 
+  it('returns no promise for a later sale printed with auto-print off, at the same destination', async () => {
+    let fail!: (error: Error) => void;
+    const promise = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const { result, rerender } = renderHook(({ saleId, enabled }) =>
+      useAutoPrintReceipt(saleId, enabled, () => promise, undefined, 'system'),
+    { initialProps: { saleId: newId(), enabled: true } });
+    act(() => vi.advanceTimersByTime(50));
+    expect(result.current).toBe(promise);
+    await act(async () => { fail(new Error('no dialog')); });
+    rerender({ saleId: newId(), enabled: false });
+    act(() => vi.advanceTimersByTime(50));
+    expect(result.current).toBeNull();
+  });
+
   it('shares no promise when the print returns nothing', () => {
     const id = newId();
     const { result } = renderHook(() => useAutoPrintReceipt(id, true, print));
