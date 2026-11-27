@@ -49,6 +49,10 @@ export function receiptPrintersFor(templateId: ReceiptTemplateId, printers: Prin
     ? system.concat(printers.filter((profile) => profile.connectionType === 'network' && networkSinkFor(profile) !== null)) : system;
 }
 
+export function chosenNetworkPrinter(templateId: ReceiptTemplateId, printers: PrinterProfile[], printerId: string): PrinterProfile | undefined {
+  return receiptPrintersFor(templateId, printers).find((p) => p.id === printerId && p.connectionType === 'network');
+}
+
 // The sale as a thermal template prints it, in place of the Standard receipt: the same buildReceiptData call and config
 // TallyUI's Receipt makes, rendered for the template's paper.
 export function paidReceiptData({ order, posOrder, store, cashier, registerId }: {

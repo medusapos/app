@@ -1,15 +1,25 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { addRxPlugin, createRxDatabase, randomToken, type RxCollection, type RxDatabase } from 'rxdb';
+import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
+import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
+import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
 import { orderReference } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { formatMoney } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
+import { addPrinterProfileCollection, createOrderBuilder, finalizeOrder, SYSTEM_PRINTER_ID, type PosOrder } from '@tallyui/pos';
+import { useOutboxOrders } from '../lib/outbox-context';
+import { BUILT_IN_PRINTER } from '../lib/printers';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { saveCachedSettings, type StoreSettings } from '../lib/store-settings';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
-import { loadReceiptTemplate, printSalePage, saveReceiptTemplate } from '../lib/receipt-templates';
+import { loadReceiptPrinter, loadReceiptTemplate, printSalePage, saveReceiptPrinter, saveReceiptTemplate } from '../lib/receipt-templates';
+
+vi.mock('../lib/outbox-context', async (original) => ({
+  ...await original<typeof import('../lib/outbox-context')>(), useOutboxOrders: vi.fn(() => null),
+}));
 
 vi.mock('../lib/receipt-templates', async (original) => ({
   ...await original<typeof import('../lib/receipt-templates')>(), printSalePage: vi.fn(),
@@ -50,13 +60,13 @@ describe('order detail Receipt (row 10.3)', () => {
       onFlush={vi.fn()} /><PortalHost /></SessionProvider>;
   }
 
-  it('with no saved template the reprint is the Standard receipt and shows the Template picker on web', async () => {
+  it('with no saved template the reprint is the Standard receipt and shows the Template and Printer pickers on web', async () => {
     const order = sale();
     render(sheet(order));
     fireEvent.click(await screen.findByTestId('order-detail-receipt'));
     expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${orderReference(order)}`);
     expect(screen.getByTestId('receipt-template-select').textContent).toContain('Standard Receipt');
-    expect(screen.queryByTestId('receipt-printer-select')).toBeNull();
+    expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Auto — Print dialog');
     expect(screen.queryByTestId('receipt-thermal-frame')).toBeNull();
   });
 
@@ -157,5 +167,74 @@ describe('order detail Receipt (row 10.3)', () => {
     fireEvent.click(screen.getByTestId('order-detail-receipt'));
     await screen.findByTestId('order-detail-receipt-view');
     expect(document.getElementById(PRINT_STYLE_ID)?.textContent).toContain('@media print');
+  });
+
+  describe('the Orders reprint to a network printer', () => {
+    let db: RxDatabase;
+    beforeEach(async () => {
+      addRxPlugin(RxDBDevModePlugin);
+      db = await createRxDatabase({ name: `reprint${randomToken(8)}`, storage: wrappedValidateAjvStorage({ storage: getRxStorageMemory() }) });
+      const printers = await addPrinterProfileCollection(db);
+      await printers.insert(BUILT_IN_PRINTER);
+      await printers.insert({ id: 'counter', name: 'Counter', connectionType: 'network', vendor: 'epson',
+        address: '10.0.0.5', port: 9100, language: 'esc-pos', autoOpenDrawer: true });
+      vi.mocked(useOutboxOrders).mockReturnValue({ database: db } as unknown as RxCollection<PosOrder>);
+    });
+    afterEach(async () => { vi.mocked(useOutboxOrders).mockReturnValue(null); await db.close(); });
+
+    it('a thermal reprint goes to the chosen network printer without opening the drawer', async () => {
+      saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+      saveReceiptPrinter(localStorage, 'https://store.test', 'thermal-80mm', 'counter');
+      const requests = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 200, text: async () => '<response success="true"/>' }));
+      vi.stubGlobal('fetch', requests);
+      const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+      const order = sale();
+      render(sheet(order));
+      fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+      await waitFor(() => expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Counter'));
+      fireEvent.click(screen.getByTestId('paid-print'));
+      const epos = await waitFor(() => {
+        const calls = requests.mock.calls.filter(([url]) => String(url).includes('/epos/'));
+        expect(calls.map(([url]) => url)).toEqual(['http://10.0.0.5:8008/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000']);
+        return calls;
+      });
+      const hex = String(epos[0]![1]?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]!;
+      const text = Buffer.from(hex, 'hex').toString('latin1');
+      expect(text).toContain('Blue shirt');
+      expect(text).toContain(orderReference(order));
+      expect(text).not.toContain(order.id);
+      expect(hex).not.toContain('101401');
+      expect(hex).not.toContain('1b70');
+      expect(printSalePage).not.toHaveBeenCalled();
+      expect(dialog).not.toHaveBeenCalled();
+    });
+
+    it("the reprint's Printer select lists Counter for 80mm and saves the choice", async () => {
+      saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+      render(sheet(sale()));
+      fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+      fireEvent.click(screen.getByTestId('receipt-printer-select'));
+      await screen.findByTestId('receipt-printer-option-counter');
+      expect(screen.getAllByTestId(/^receipt-printer-option-/).map((option) => option.textContent)).toEqual(['Auto — Print dialog', 'Counter']);
+      fireEvent.click(screen.getByTestId('receipt-printer-option-counter'));
+      expect(loadReceiptPrinter(localStorage, 'https://store.test', 'thermal-80mm')).toBe('counter');
+      expect(loadReceiptPrinter(localStorage, 'https://store.test', 'thermal-58mm')).toBe(SYSTEM_PRINTER_ID);
+      expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Counter');
+    });
+
+    it('a reprint whose saved printer was deleted prints the page through the print dialog', async () => {
+      saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+      saveReceiptPrinter(localStorage, 'https://store.test', 'thermal-80mm', 'gone');
+      const requests = vi.fn(async (_url: string) => ({ ok: true, status: 200, text: async () => '<response success="true"/>' }));
+      vi.stubGlobal('fetch', requests);
+      render(sheet(sale()));
+      fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+      const page = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
+      fireEvent.click(screen.getByTestId('paid-print'));
+      expect(printSalePage).toHaveBeenCalledTimes(1);
+      expect(printSalePage).toHaveBeenCalledWith(page);
+      expect(requests.mock.calls.filter(([url]) => String(url).includes('/epos/'))).toHaveLength(0);
+      expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Auto — Print dialog');
+    });
   });
 });
