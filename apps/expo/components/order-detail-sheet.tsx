@@ -10,16 +10,19 @@ import {
 } from '../lib/order-detail';
 import { formatReceiptDate } from '../lib/format-date';
 import { ordersTableCells } from '../lib/orders-table';
+import { useOutboxOrders } from '../lib/outbox-context';
 import { PARTIAL_REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
-import { printSalePage, RECEIPT_TEMPLATES, receiptTemplatePage, useReceiptTemplate } from '../lib/receipt-templates';
+import { usePrinterProfiles } from '../lib/printers';
+import { printSalePage, RECEIPT_TEMPLATES, receiptTemplatePage, useReceiptPrinter, useReceiptTemplate } from '../lib/receipt-templates';
 import { refundFormInput } from '../lib/refund';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedSettings } from '../lib/store-settings';
+import { printReceiptToNetwork } from '../lib/thermal-printing';
 import { OrderRefundDialog, useRefundRecords } from './order-refund-dialog';
 import { OrderRefundModal } from './order-refund-modal';
 import { PaidFooter } from './paid-footer';
-import { ReceiptPickers, ThermalPaidReceipt } from './receipt-pickers';
+import { chosenNetworkPrinter, ReceiptPickers, ThermalPaidReceipt } from './receipt-pickers';
 
 // While a reprint shows, a print keeps only it: other branches collapse, its ancestors stop positioning, clipping and
 // painting, and it moves to the page's top left. Inert without a reprint on the page, so the paid screen prints as before.
@@ -110,15 +113,17 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
   const { templateId, save } = useReceiptTemplate(defaultStorage(), session?.baseUrl ?? '');
+  const printers = usePrinterProfiles(useOutboxOrders());
+  const { printerId, save: savePrinter } = useReceiptPrinter(defaultStorage(), session?.baseUrl ?? '', templateId);
   const pickers = Platform.OS === 'web';
   const paper = pickers ? RECEIPT_TEMPLATES.find((template) => template.id === templateId)?.paper : undefined;
   // A PosOrder keeps no cashier, so the reprint prints no Cashier line.
   const receipt = reprint && order ? buildReceiptDataFromPosOrder(order, {
     storeName: settings?.storeName ?? '', storeAddress: settings?.location.addressLine,
   }) : null;
-  const page = receipt && paper && order ? receiptTemplatePage(paper, {
-    ...receipt, header: { ...receipt.header, orderNumber: orderReference(order) },
-  }) : null;
+  const reprintReceipt = receipt && order ? { ...receipt, header: { ...receipt.header, orderNumber: orderReference(order) } } : null;
+  const page = paper && reprintReceipt ? receiptTemplatePage(paper, reprintReceipt) : null;
+  const networkPrinter = paper ? chosenNetworkPrinter(templateId, printers, printerId) : undefined;
   return <><Dialog open={order !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
     {order ? <DialogContent side="right" testID="order-detail-sheet" className="flex-col p-0">
       <View className="flex-row items-center justify-end px-4 pt-4">
@@ -130,9 +135,11 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
         </DialogClose>
       </View>
       {receipt ? <ScrollView testID="order-detail-receipt-view" dataSet={{ print: 'receipt' }} className="flex-1">
-        {pickers && <ReceiptPickers templateId={templateId} onTemplateChange={save} printers={[]} />}
+        {pickers && <ReceiptPickers templateId={templateId} onTemplateChange={save} printers={printers} printerId={printerId} onPrinterChange={savePrinter} />}
         {page ? <><ThermalPaidReceipt page={page} />
-          <PaidFooter key={templateId} print={() => printSalePage(page)} doneLabel="Back" newSale={() => setReprint(false)} />
+          <PaidFooter key={`${templateId}:${networkPrinter?.id ?? 'system'}`}
+            print={networkPrinter && reprintReceipt ? () => printReceiptToNetwork(networkPrinter, reprintReceipt) : () => printSalePage(page)}
+            doneLabel="Back" newSale={() => setReprint(false)} />
         </> : <Receipt receipt={receipt} posOrder={order} taxLabel={receiptTaxLabel} formatDate={formatReceiptDate}
           doneLabel="Back" newSale={() => setReprint(false)} />}
       </ScrollView> : <OrderDetail testID="order-detail" orderNumber={`Order ${orderReference(order)}`} status={orderStatusBadge(order)}

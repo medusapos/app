@@ -39,7 +39,7 @@ import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../lib/store-register-title';
 import { HeaderRegisterState, WideHeaderRegister, wideRegisterState } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
-import { paidReceiptData, ReceiptPickers, receiptPrintersFor, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
+import { chosenNetworkPrinter, paidReceiptData, ReceiptPickers, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
   GETTING_READY, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, useGatedSale,
@@ -564,7 +564,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const thermalArgs = sale.stage.kind === 'receipt' && paper ? { paper, order: sale.stage.order,
     posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId } : undefined;
   const thermalPage = thermalArgs && thermalPaidPage(thermalArgs);
-  const networkPrinter = paper && receiptPrintersFor(receiptTemplateId, printers).find((p) => p.id === receiptPrinterId && p.connectionType === 'network');
+  const networkPrinter = paper ? chosenNetworkPrinter(receiptTemplateId, printers, receiptPrinterId) : undefined;
   const printPaidReceipt = thermalArgs && networkPrinter ? () => printReceiptToNetwork(networkPrinter, paidReceiptData(thermalArgs))
     : thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow;
   // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
