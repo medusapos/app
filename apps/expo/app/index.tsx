@@ -12,10 +12,12 @@ import {
 import { ConnectorProvider, ConnectorUnauthorizedError, resolvePrice } from '@tallyui/core';
 import {
   capturedMinor, catalogueEntries, findEntryByCode, getDeviceId, needsAttention, openSales, REGISTER_CLOSING, saleLogger, SALE_SAVING, summarizeOutboxHealth, useParkedSales, useSale,
-  normalizeCatalogueViewState, useCameraScan, type CatalogueViewState,
+  normalizeCatalogueViewState, useCameraScan, useSaleDisplay, type CatalogueViewState,
 } from '@tallyui/pos';
 
 import { AccountButton } from '../components/account-button';
+import { customerSafeSale } from '../lib/customer-display';
+import { useCustomerDisplay } from '../lib/customer-display-context';
 import { FrameMenuButton, useFrameAccountPublisher, useFrameBadge } from '../components/app-frame';
 import { CartAddMenu } from '../components/cart-add-menu';
 import { CartNoteRow, CartNoteSheet } from '../components/cart-note';
@@ -227,6 +229,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       return entry ? resolvePrice(entry.variant.prices, pricing.currency)?.current.amount : undefined;
     } });
   const { sale: cartSale, refused } = useGatedSale(sale);
+  const display = useCustomerDisplay();
+  const displaySale = useMemo(() => customerSafeSale({ order: sale.order, stage: sale.stage }), [sale.order, sale.stage]);
+  useSaleDisplay(display.service, displaySale, { receipt: { storeName: settings.storeName } });
   // v2's cart foot: one "Checkout {total}" opens the tender on Cash through the register gate, where the cashier picks
   // the method (Card terminal included), and a ⋮ menu holds Order details (v2's sheet, holding the note) and Void,
   // which asks first: the open sale has no copy to restore.

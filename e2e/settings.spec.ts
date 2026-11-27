@@ -5,7 +5,7 @@ import { addE2E1, backend, captureCommands, cartLineQuantity, cartTab, closeStor
 // field judges a scan the same way, against the currently saved settings.
 test.use({ viewport: { width: 360, height: 740 } });
 
-const SECTION_LABELS = ['General', 'Tax', 'Printing', 'Card readers', 'Barcode Scanning', 'Theme', 'Register', 'Health', 'Danger zone'];
+const SECTION_LABELS = ['General', 'Tax', 'Printing', 'Card readers', 'Customer display', 'Barcode Scanning', 'Theme', 'Register', 'Health', 'Danger zone'];
 
 // A phone's Settings lists the sections; `section` (its label) opens that section's own page from the list.
 async function openSettings(page: Page, section?: string) {
@@ -32,6 +32,19 @@ async function openCart(page: Page) {
   await cartTab(page).click();
   await expect(cartTab(page)).toHaveAttribute('aria-selected', 'true');
 }
+
+test('Customer display: no display polling before pairing, and Pair a display shows a code', async ({ page }) => {
+  const requests: string[] = [];
+  page.on('request', (request) => { if (request.url().includes('/tally/v1/display')) requests.push(request.url()); });
+  await signIn(page);
+  await openSettings(page, 'Customer display');
+  expect(requests).toEqual([]);
+  await page.getByTestId('pairing-start').click();
+  await expect(page.getByTestId('pairing-code')).toBeVisible();
+  await expect(page.getByTestId('pairing-code')).toHaveText(/\S/);
+  await page.getByTestId('pairing-cancel').click();
+  await expect(page.getByTestId('pairing-start')).toBeVisible();
+});
 
 test('a saved minChars gates the wedge scan, and the test-scan field reports its verdict', async ({ page }) => {
   await signIn(page);

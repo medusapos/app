@@ -18,6 +18,7 @@ import { defaultStorage } from '../lib/session';
 import { loadThemeChoice, subscribeThemeChoice } from '../lib/theme-choice';
 import { SessionProvider, useSession } from '../lib/session-context';
 import { OutboxProvider } from '../lib/outbox-context';
+import { CustomerDisplayProvider } from '../lib/customer-display-context';
 import { OutboxStrip } from '../components/store-refused';
 
 // At module load, before the layout's first render, so the first frame uses this till's saved theme (Settings › Theme, one device-wide key).
@@ -36,7 +37,7 @@ function GatedApp() {
   const headerTitleStyle = useHeaderTitleStyle();
   return (
     <LiveTabGate scope={session?.baseUrl}>
-      <DeviceScannerProvider><StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><AppFrame signedIn={session !== null}><Stack
+      <DeviceScannerProvider><StorageHealth backendUrl={session?.baseUrl}><OutboxProvider><CustomerDisplayProvider><AppFrame signedIn={session !== null}><Stack
         screenLayout={({ children, options, navigation }) => <SafeAreaView style={{ flex: 1 }}
           edges={options.headerShown === false ? ['top', 'left', 'right'] : ['left', 'right']}>
           <OutboxStrip header={options.headerShown === false ? undefined : navigation}>{children}</OutboxStrip>
@@ -48,7 +49,7 @@ function GatedApp() {
           headerTitleStyle,
         }}
       ><Stack.Screen name="index" options={{ title: 'Sale' }} />
-      </Stack></AppFrame></OutboxProvider></StorageHealth></DeviceScannerProvider>
+      </Stack></AppFrame></CustomerDisplayProvider></OutboxProvider></StorageHealth></DeviceScannerProvider>
     </LiveTabGate>
   );
 }

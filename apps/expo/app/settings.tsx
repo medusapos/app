@@ -3,7 +3,9 @@ import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, 
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import { Path } from 'react-native-svg';
-import { Card, ChevronDownIcon, createSvgIcon, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsLayout, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { Card, ChevronDownIcon, createSvgIcon, CustomerDisplaySettings, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsLayout, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { useTillDisplays, useTillPairing } from '@tallyui/pos';
+import { useCustomerDisplay } from '../lib/customer-display-context';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
 import { ClearLocalDataSection } from '../components/clear-local-data';
 import { HealthSection } from '../components/health-section';
@@ -58,6 +60,7 @@ function Field({ label, help, ...input }: { label: string; help?: string } & Com
 }
 export default function SettingsScreen() {
   const { session } = useSession();
+  const { available } = useCustomerDisplay();
   const { width } = useWindowDimensions();
   const [chosenSection, setChosenSection] = useState('store');
   // A phone's section page is /settings?section=<id>, its own router entry, so browser and hardware back return to the list.
@@ -72,6 +75,7 @@ export default function SettingsScreen() {
     { id: 'tax', label: 'Tax', element: <TaxSection session={session} /> },
     { id: 'printing', label: 'Printing', element: <PrintingSection session={session} /> },
     { id: 'card-readers', label: 'Card readers', element: <CardReadersSection session={session} /> },
+    ...(available ? [{ id: 'customer-display', label: 'Customer display', element: <CustomerDisplaySection /> }] : []),
     { id: 'scanner', label: 'Barcode Scanning', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
@@ -330,6 +334,13 @@ function PrintingSection({ session }: { session: Session }) {
   <ReceiptTemplatesGroup session={session} />
   </>;
 }
+function CustomerDisplaySection() {
+  const { pairing, service, startPairing } = useCustomerDisplay();
+  return <CustomerDisplaySettings pairing={useTillPairing(pairing)} displays={useTillDisplays(service)} onStartPairing={startPairing}
+    onConfirm={(id) => pairing?.confirm(id)} onDecline={(id) => pairing?.decline(id)}
+    onCancelPairing={() => pairing?.cancel()} onForget={(id) => pairing?.forget(id)} />;
+}
+
 function CardReadersSection({ session }: { session: Session }) {
   const mode = cardPaymentMode(TILL_PAYMENT_METHODS);
   const [read, setRead] = useState<{ providers: PaymentProvider[] | null; contract: number | null }>({ providers: null, contract: null });
