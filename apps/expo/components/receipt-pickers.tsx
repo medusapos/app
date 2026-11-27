@@ -5,7 +5,7 @@ import { buildReceiptData, networkSinkFor, type PosOrder, type PrinterProfile, t
 import { RECEIPT_TEMPLATES, receiptTemplatePage, type ReceiptTemplateId } from '../lib/receipt-templates';
 
 // The built-in's words, as Settings › Printing shows them.
-const printerLabel = (profile: PrinterProfile) => profile.isBuiltIn ? 'Auto — Print dialog' : profile.name;
+export const printerLabel = (profile: PrinterProfile) => profile.isBuiltIn ? 'Auto — Print dialog' : profile.name;
 
 // v2's paid-screen Template and Printer selects, above the receipt; screen only, not printed.
 export function ReceiptPickers({ templateId, onTemplateChange, printers, printerId, onPrinterChange, topInset = 0 }: {

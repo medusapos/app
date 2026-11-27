@@ -8,12 +8,12 @@ import { addRxPlugin, createRxDatabase, randomToken, type RxCollection, type RxD
 import { RxDBDevModePlugin } from 'rxdb/plugins/dev-mode';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { wrappedValidateAjvStorage } from 'rxdb/plugins/validate-ajv';
-import { addPrinterProfileCollection, PrintError, type PosOrder, type PrinterProfile, type PrinterProfileCollection } from '@tallyui/pos';
+import { addPrinterProfileCollection, PrintError, SYSTEM_PRINTER_ID, type PosOrder, type PrinterProfile, type PrinterProfileCollection } from '@tallyui/pos';
 import { useOutboxOrders } from '../lib/outbox-context';
 import { loadPrintingSettings } from '../lib/printing-settings';
 import { BUILT_IN_PRINTER, PRINTER_REFUSALS, printTestPage } from '../lib/printers';
 import { printTestReceipt } from '../lib/thermal-printing';
-import { printReceiptPage } from '../lib/receipt-templates';
+import { loadReceiptPrinter, printReceiptPage, saveReceiptPrinter } from '../lib/receipt-templates';
 import { saveSession } from '../lib/session';
 import { saveCachedSettings } from '../lib/store-settings';
 import { SessionProvider } from '../lib/session-context';
@@ -389,6 +389,36 @@ describe('Settings › Printing › Printers, network printers', () => {
     return screen.getByTestId('settings-printers');
   }
   const saved = async () => (await printers.find().exec()).map((doc) => doc.toJSON() as PrinterProfile).filter((doc) => !doc.isBuiltIn);
+
+  it('each receipt template chooses its own printer, kept per store for the paid screen', async () => {
+    await printers.insert(counter);
+    await openPrinting();
+    const thermal = 'settings-receipt-template-thermal-80mm-printer';
+    fireEvent.click(screen.getByTestId(thermal));
+    await screen.findByTestId(`${thermal}-option-counter`);
+    expect(screen.getAllByTestId(/^settings-receipt-template-thermal-80mm-printer-option-/).map((item) => item.textContent))
+      .toEqual(['Auto — Print dialog', 'Counter']);
+    fireEvent.click(screen.getByTestId(`${thermal}-option-counter`));
+    expect(screen.getByTestId(thermal).textContent).toBe('Counter');
+    expect(loadReceiptPrinter(localStorage, baseUrl, 'thermal-80mm')).toBe('counter');
+    expect(loadReceiptPrinter(localStorage, baseUrl, 'thermal-58mm')).toBe(SYSTEM_PRINTER_ID);
+    expect(loadReceiptPrinter(localStorage, baseUrl, 'standard')).toBe(SYSTEM_PRINTER_ID);
+    expect(loadReceiptPrinter(localStorage, 'https://other.test', 'thermal-80mm')).toBe(SYSTEM_PRINTER_ID);
+    fireEvent.click(screen.getByTestId('settings-receipt-template-standard-printer'));
+    expect(screen.getAllByTestId(/^settings-receipt-template-standard-printer-option-/).map((item) => item.textContent))
+      .toEqual(['Auto — Print dialog']);
+  });
+
+  it('shows a printer the paid screen saved, and the print dialog once that printer is deleted', async () => {
+    await printers.insert(counter);
+    saveReceiptPrinter(localStorage, baseUrl, 'thermal-58mm', 'counter');
+    await openPrinting();
+    const thermal = 'settings-receipt-template-thermal-58mm-printer';
+    await waitFor(() => expect(screen.getByTestId(thermal).textContent).toBe('Counter'));
+    expect(screen.getByTestId('settings-receipt-template-thermal-80mm-printer').textContent).toBe('Auto — Print dialog');
+    await act(async () => { await (await printers.findOne('counter').exec())!.remove(); });
+    await waitFor(() => expect(screen.getByTestId(thermal).textContent).toBe('Auto — Print dialog'));
+  });
 
   it('Add printer saves an Epson printer with Open Cash Drawer on, and lists it', async () => {
     const group = await openPrinting();
