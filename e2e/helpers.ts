@@ -557,7 +557,7 @@ export async function discount(page: Page, opener: 'line' | 'order', type: 'Perc
  * then the reason, Process Refund and its confirmation. Polled as text, so a refusal fails with the form's own message.
  * Returns the form's Refund Total in minor units (the e2e store's currency has two decimals), read before submitting.
  */
-export async function refundInModal(page: Page, { units, reason }: { units?: number; reason: string }): Promise<number> {
+export async function refundInModal(page: Page, { units, reason, adjustment }: { units?: number; reason: string; adjustment?: string }): Promise<number> {
   const modal = page.getByTestId('refund-modal');
   await expect(modal).toBeVisible();
   const steppers = modal.locator('[data-testid^="refund-qty-"]');
@@ -568,6 +568,7 @@ export async function refundInModal(page: Page, { units, reason }: { units?: num
     const target = units ?? Number(await modal.getByTestId(`refund-remaining-${lineId}`).textContent());
     for (let press = 0; press < target; press++) await stepper.getByText('+', { exact: true }).click();
   }
+  if (adjustment !== undefined) await modal.getByTestId('refund-adjustment').fill(adjustment);
   await modal.getByTestId('refund-reason').fill(reason);
   const messages = async () => [...await modal.getByTestId('refund-error').allTextContents(),
     ...await modal.getByTestId('refund-invalid').allTextContents()].join(' | ');
