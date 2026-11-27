@@ -16,6 +16,8 @@ export const CARD_READERS_PLUGIN_CONTRACT = 6;
 export const REFUND_LINES_PLUGIN_CONTRACT = 6;
 // The Orders sheet's Refund needs each line's sold figures and returned quantity (#636).
 export const PARTIAL_REFUND_PLUGIN_CONTRACT = 7;
+// GET /tally/v1/promotions lists coupon codes for the till's Coupon tab.
+export const COUPON_LIST_PLUGIN_CONTRACT = 8;
 
 /** `unknown`: the read was inconclusive (offline, a timeout, a non-2xx, not an info body) and never latches. */
 export type PluginContractStatus = 'ok' | 'too_old' | 'unknown';

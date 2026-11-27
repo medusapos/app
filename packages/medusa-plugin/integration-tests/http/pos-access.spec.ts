@@ -48,6 +48,7 @@ medusaIntegrationTestRunner({
       for (const url of [
         '/tally/v1/info', '/tally/v1/registers/reg_x', '/tally/v1/changes', '/tally/v1/changes/tick',
         '/tally/v1/registers/reg_x/closures', '/tally/v1/payment-providers', '/tally/v1/display-pairings', '/tally/v1/displays',
+        '/tally/v1/promotions',
       ]) {
         const response = await api.get(url, { headers, validateStatus: () => true })
         expect(response.status).toBe(403)
