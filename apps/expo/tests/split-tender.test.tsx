@@ -193,6 +193,40 @@ it('shows the screen-only paid summary beside the receipt on wide windows', asyn
   expect(screen.getByLabelText('Total: €24.00')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'New sale' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+  // v2's footer bar is the left pane's, never the summary column's.
+  const footer = screen.getByTestId('paid-footer');
+  expect(summary.parentElement!.contains(footer)).toBe(false);
+  expect(screen.getByTestId('paid-pane').contains(footer)).toBe(true);
+}, 15000);
+
+// v2's footer bar: one Print receipt and one New sale, with Email receipt, along the bottom and outside the receipt card.
+it('puts Email receipt, Print receipt and New sale in the paid footer, not in the receipt', async () => {
+  await startSplit();
+  tender('cash', '30.00');
+  await complete();
+  const footer = screen.getByTestId('paid-footer');
+  const card = screen.getByTestId('receipt-order').parentElement!;
+  for (const name of ['Print receipt', 'New sale']) {
+    const buttons = screen.getAllByRole('button', { name });
+    expect(buttons).toHaveLength(1);
+    expect(footer.contains(buttons[0])).toBe(true);
+    expect(card.contains(buttons[0])).toBe(false);
+  }
+  expect(screen.queryByTestId('receipt-footer')).toBeNull();
+  expect(footer.contains(screen.getByTestId('receipt-email-open'))).toBe(true);
+  expect(card.contains(screen.getByTestId('receipt-email-open'))).toBe(false);
+}, 15000);
+
+it('starts a new sale from the ✕ at the top of the paid screen', async () => {
+  await startSplit();
+  tender('cash', '24.00');
+  await complete();
+  const close = screen.getByTestId('paid-close');
+  expect(close.getAttribute('aria-label')).toBe('Close');
+  expect(close.closest('[data-print="hide"]')).toBeTruthy();
+  await act(async () => { fireEvent.click(close); });
+  expect(screen.queryByTestId('paid-footer')).toBeNull();
+  expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
 }, 15000);
 
 // The keypad tender pane's steps exceed the 5 s default on CI runners.
@@ -229,4 +263,8 @@ it('keeps the receipt without a paid summary at column widths', async () => {
   expect(screen.queryByTestId('paid-summary')).toBeNull();
   expect(screen.queryByTestId('paid-layout')).toBeNull();
   expect(screen.getByRole('button', { name: 'New sale' })).toBeTruthy();
+  const footer = screen.getByTestId('paid-footer');
+  expect(screen.getAllByRole('button', { name: 'Print receipt' })).toEqual([within(footer).getByTestId('paid-print')]);
+  expect(screen.getAllByRole('button', { name: 'New sale' })).toEqual([within(footer).getByTestId('paid-new-sale')]);
+  expect(screen.getByTestId('paid-close')).toBeTruthy();
 }, 15000);

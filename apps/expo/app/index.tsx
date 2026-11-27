@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, useContext } from 'react';
-import { Platform, Pressable, View, useWindowDimensions } from 'react-native';
+import { Platform, Pressable, ScrollView, View, useWindowDimensions } from 'react-native';
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, usePathname } from 'expo-router';
 import { getCalendars } from 'expo-localization';
@@ -33,12 +33,13 @@ import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidAwaiting, useAwaitingStore } from '../components/paid-awaiting';
 import { PaidChange } from '../components/paid-change';
+import { PaidFooter } from '../components/paid-footer';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../lib/store-register-title';
 import { HeaderRegisterState, WideHeaderRegister, wideRegisterState } from '../components/header-register-state';
 import { PriceCheckBanner } from '../components/price-check-banner';
-import { ReceiptPickers, ThermalPaidReceipt } from '../components/receipt-pickers';
+import { ReceiptPickers, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
 import { ProductSettingsButton } from '../components/product-settings';
 import {
   GETTING_READY, RegisterClosedSheet, RegisterGate, RegisterPanelSheet, useGatedSale,
@@ -62,14 +63,14 @@ import { markBusy } from '../lib/live-tab';
 import { draftsCollection } from '../lib/order-store';
 import { receiptTaxLabel } from '../lib/order-detail';
 import { useOutboxContext } from '../lib/outbox-context';
-import { usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
+import { printWindow, usePrintingSettings, useAutoPrintReceipt } from '../lib/printing-settings';
 import { usePrinterProfiles } from '../lib/printers';
 import { isStoredOpensDrawer, useCashDrawerOnSale } from '../lib/thermal-printing';
 import { useProductSettings } from '../lib/product-settings';
 import { useProductCollections } from '../lib/product-collections';
 import { listProductCollections, listProductTags, productCollectionIds } from '../lib/products-area';
 import { isOnSale, loadSaleFilters, saleFilterItems, saveSaleFilters, type SaleFilters } from '../lib/sale-filters';
-import { RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
+import { printSalePage, RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { cameraScanSupported } from '../lib/camera-scan';
@@ -550,22 +551,34 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     online={online} defaultEmail={paid?.customer?.email
       ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
     send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined;
-  const paidReceipt = sale.stage.kind === 'receipt' ? <>
-    {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
-    {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-      {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
-        : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
-    </View>}
-    {pickers && <ReceiptPickers templateId={receiptTemplateId} onTemplateChange={setReceiptTemplateId} printers={printers}
-      topInset={paidHeadline ? 0 : topInset} />}
-    {paper ? <ThermalPaidReceipt paper={paper} order={sale.stage.order} posOrder={sale.stage.posOrder} store={receiptStore} footerSlot={emailReceipt}
-      cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />
-      : <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder}
-    store={receiptStore}
-    footerSlot={emailReceipt}
-    topInset={paidHeadline || pickers ? 0 : topInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
-    cashier={session.name || session.email} registerId={registerId} newSale={sale.newSale} />}
-  </> : null;
+  const thermalPage = sale.stage.kind === 'receipt' && paper ? thermalPaidPage({ paper, order: sale.stage.order,
+    posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId }) : undefined;
+  // With no headline beside the ✕, the leading block starts under it (the ✕ is 44 px, 8 px down).
+  const leadInset = topInset + (paidHeadline ? 0 : 52);
+  // v2's paid pane: the receipt scrolls above the footer bar pinned to the pane's bottom, and a ✕ at its top right starts
+  // the next sale as New sale does; the bar and the ✕ are screen only, not printed.
+  const paidReceipt = sale.stage.kind === 'receipt' ? <View testID="paid-pane" className="flex-1">
+    <ScrollView className="flex-1">
+      {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
+      {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
+        {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
+          : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
+      </View>}
+      {pickers && <ReceiptPickers templateId={receiptTemplateId} onTemplateChange={setReceiptTemplateId} printers={printers}
+        topInset={paidHeadline ? 0 : leadInset} />}
+      {thermalPage !== undefined ? <ThermalPaidReceipt page={thermalPage} />
+        : <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder} store={receiptStore} actions={false}
+          topInset={paidHeadline || pickers ? 0 : leadInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
+          cashier={session.name || session.email} registerId={registerId} />}
+    </ScrollView>
+    <PaidFooter emailReceipt={emailReceipt} newSale={sale.newSale}
+      print={thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow} />
+    <View dataSet={{ print: 'hide' }} className="absolute right-2" style={{ top: topInset + 8 }}>
+      <IconButton testID="paid-close" accessibilityLabel="Close" className="h-11 w-11" onPress={sale.newSale}>
+        <View className="text-foreground"><XIcon size={24} /></View>
+      </IconButton>
+    </View>
+  </View> : null;
   const phoneTender = phone && sale.stage.kind === 'tender';
   const offlineShown = offline.kind !== null && sale.stage.kind === 'cart' && (!phone || !cartOpen);
   const scanToastShown = scanToast.toast !== null && sale.stage.kind === 'cart';
@@ -617,8 +630,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         order={sale.order} store={receiptStore} cashier={session.name || session.email} registerId={registerId}
         onVoid={voidOffered ? () => setVoidOpen(true) : undefined} />
       <EarlierSaleNote saving={sale.saving} receipt={sale.stage.kind === 'receipt'} />
-      {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row items-start">
-        <View className="flex-1">{paidReceipt}</View>
+      {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row">
+        {paidReceipt}
         <View dataSet={{ print: 'hide' }} className="w-96 self-stretch" style={{ paddingTop: topInset }}>
           <PaidSummary order={sale.stage.order} posOrder={sale.stage.posOrder} storeName={receiptStore.name}
             taxLabel={taxLabel} formatDate={(iso) => formatPaidDate(iso)} awaiting={awaiting} />

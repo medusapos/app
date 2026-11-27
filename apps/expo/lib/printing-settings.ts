@@ -44,7 +44,7 @@ export function usePrintingSettings(storage: SessionStorage | null, baseUrl: str
 }
 
 // The same guarded call as TallyUI Receipt's "Print receipt" button.
-function printWindow() {
+export function printWindow() {
   if (typeof window !== 'undefined' && typeof window.print === 'function') window.print();
 }
 
