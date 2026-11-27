@@ -569,8 +569,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     : thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow;
   // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
   // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
-  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
-    printPaidReceipt, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
+  const footerKey = `${receiptTemplateId}:${networkPrinter?.id ?? 'system'}`;
+  const autoPrint = useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
+    printPaidReceipt, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale, footerKey);
   // With no headline beside the ✕, the leading block starts under it (the ✕ is 44 px, 8 px down).
   const leadInset = topInset + (paidHeadline ? 0 : 52);
   // v2's paid pane: the receipt scrolls above the footer bar pinned to the pane's bottom, and a ✕ at its top right starts
@@ -590,7 +591,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           cashier={session.name || session.email} registerId={registerId} />}
     </ScrollView>
     {/* A pending or failed print belongs to this template and printer only. */}
-    <PaidFooter key={`${receiptTemplateId}:${networkPrinter?.id ?? 'system'}`} emailReceipt={emailReceipt} newSale={sale.newSale}
+    <PaidFooter key={footerKey} autoPrint={autoPrint} emailReceipt={emailReceipt} newSale={sale.newSale}
       print={printPaidReceipt} />
     <View dataSet={{ print: 'hide' }} className="absolute right-2" style={{ top: topInset + 8 }}>
       <IconButton testID="paid-close" accessibilityLabel="Close" className="h-11 w-11" onPress={sale.newSale}>
