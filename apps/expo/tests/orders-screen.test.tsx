@@ -31,7 +31,7 @@ function AccountPublisher({ open }: { open: () => void }) {
   useFrameAccountPublisher({ displayName: 'Dana Cole', initials: 'DC', open });
   return null;
 }
-vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
+vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn(), useOutboxOrders: vi.fn(() => null) }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 // The store is out of reach here, so Orders shows this till's own sales, which these tests pin; the store-wide
 // list is orders-store-wide.test.tsx.

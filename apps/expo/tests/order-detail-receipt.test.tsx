@@ -229,12 +229,28 @@ describe('order detail Receipt (row 10.3)', () => {
       vi.stubGlobal('fetch', requests);
       render(sheet(sale()));
       fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+      fireEvent.click(screen.getByTestId('receipt-printer-select'));
+      await screen.findByTestId('receipt-printer-option-counter');
       const page = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
       fireEvent.click(screen.getByTestId('paid-print'));
       expect(printSalePage).toHaveBeenCalledTimes(1);
       expect(printSalePage).toHaveBeenCalledWith(page);
       expect(requests.mock.calls.filter(([url]) => String(url).includes('/epos/'))).toHaveLength(0);
       expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Auto — Print dialog');
+    });
+
+    it('a failed network reprint says it could not print and opens no print dialog', async () => {
+      saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+      saveReceiptPrinter(localStorage, 'https://store.test', 'thermal-80mm', 'counter');
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new TypeError('Failed to fetch'); }));
+      const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+      render(sheet(sale()));
+      fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+      await waitFor(() => expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Counter'));
+      fireEvent.click(screen.getByTestId('paid-print'));
+      expect((await screen.findByTestId('paid-print-status')).textContent).toBe("Couldn't print. Try again.");
+      expect(printSalePage).not.toHaveBeenCalled();
+      expect(dialog).not.toHaveBeenCalled();
     });
   });
 });

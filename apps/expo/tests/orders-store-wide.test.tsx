@@ -38,7 +38,7 @@ vi.mock('../lib/pos-connector', async (importOriginal) => {
   };
 });
 vi.mock('../lib/session-context', () => ({ useSession: () => sessionState }));
-vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
+vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn(), useOutboxOrders: vi.fn(() => null) }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
 // react-native-web drops className without NativeWind, so TableHead and TableCell echo it as data-class for the width check.
 vi.mock('@tallyui/components', async (importOriginal) => {
