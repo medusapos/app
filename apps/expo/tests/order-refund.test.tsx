@@ -792,7 +792,7 @@ describe('Resume and records (#642)', () => {
     if (action === 'order-refund-confirm') {
       send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' }).mockImplementationOnce(async (batch) => rejected('session_closed')(batch));
     } else {
-      send.mockImplementationOnce(parked('session_closed', 'Stored response')).mockImplementationOnce(parked('session_closed', 'Stored response'));
+      send.mockImplementationOnce(parked('session_closed', 'Stored response')).mockImplementationOnce(parked('admin_check', 'Check this refund in Admin'));
     }
     const view = render(sheet());
     const form = await openModal();
@@ -812,7 +812,8 @@ describe('Resume and records (#642)', () => {
       expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: session_closed');
       expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
     } else {
-      expect(screen.getByTestId('refund-needs-admin-line').textContent).toBe(refundNeedsAdminLine('session_closed'));
+      await waitFor(() => expect(screen.getByTestId('refund-needs-admin-line').textContent).toBe(refundNeedsAdminLine('admin_check')));
+      expect(screen.getByTestId('refund-needs-admin-message').textContent).toBe('Check this refund in Admin');
       expect(screen.getByTestId('refund-needs-admin-check-again')).toBeTruthy();
     }
     expect(send).toHaveBeenCalledTimes(2);
