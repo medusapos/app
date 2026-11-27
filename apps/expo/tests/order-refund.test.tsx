@@ -771,4 +771,52 @@ describe('Resume and records (#642)', () => {
     act(() => rows.order_2.next([]));
     expect(screen.getByTestId('order-detail-refund')).toBeTruthy();
   });
+
+  it('D8a: an open session without a bound register blocks a new refund', async () => {
+    vi.mocked(useRegister).mockReturnValue({ ...openRegisterFixture(), boundRegisterId: null, commandTransport: () => ({ send }) });
+    render(sheet());
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    await form.findByTestId('refund-submit');
+    expect(form.getByTestId('refund-error').textContent).toBe('Open the register to refund');
+    expect(send).not.toHaveBeenCalled();
+    expect(await refunds.count().exec()).toBe(0);
+  });
+
+  it.each([
+    ['D8b: Confirm with a closed register shows the rejection without retrying', 'order-refund-confirm'],
+    ['D8c: Check again with a closed register keeps the parked notice without retrying', 'refund-needs-admin-check-again'],
+  ])('%s', async (_name, action) => {
+    if (action === 'order-refund-confirm') {
+      send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' }).mockImplementationOnce(async (batch) => rejected('session_closed')(batch));
+    } else {
+      send.mockImplementationOnce(parked('session_closed', 'Stored response')).mockImplementationOnce(parked('session_closed', 'Stored response'));
+    }
+    const view = render(sheet());
+    const form = await openModal();
+    plus(form, 'line_1');
+    reason(form);
+    await submit(form);
+    await screen.findByTestId(action);
+    view.unmount();
+
+    const fixture = openRegisterFixture();
+    vi.mocked(useRegister).mockReturnValue({ ...fixture, register: { ...fixture.register, session: null }, boundRegisterId: null, commandTransport: () => ({ send }) });
+    render(sheet());
+    const button = await screen.findByTestId(action);
+    expect(send).toHaveBeenCalledTimes(1);
+    await act(async () => { fireEvent.click(button); });
+    if (action === 'order-refund-confirm') {
+      expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: session_closed');
+      expect(screen.queryByTestId('order-refund-confirm')).toBeNull();
+    } else {
+      expect(screen.getByTestId('refund-needs-admin-line').textContent).toBe(refundNeedsAdminLine('session_closed'));
+      expect(screen.getByTestId('refund-needs-admin-check-again')).toBeTruthy();
+    }
+    expect(send).toHaveBeenCalledTimes(2);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(send).toHaveBeenCalledTimes(2);
+  });
 });
