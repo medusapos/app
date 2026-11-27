@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
 import { toOrderCreateEnvelope, type PosOrder } from '@tallyui/pos';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -12,6 +12,7 @@ import { sessionFixture } from './session-fixture';
 import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { printSalePage } from '../lib/receipt-templates';
+import { savePrintingSettings } from '../lib/printing-settings';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
@@ -285,6 +286,37 @@ async function chooseTemplate(id: 'standard' | 'thermal-80mm' | 'thermal-58mm') 
   await act(async () => { fireEvent.click(screen.getByTestId(`receipt-template-option-${id}`)); });
 }
 const printButton = () => screen.getByTestId('paid-print');
+
+it('auto-prints a Standard sale through the window, once', async () => {
+  savePrintingSettings(localStorage, useSession().session!.baseUrl, { autoPrintReceipt: true });
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  await paidCash();
+  await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+  expect(printSalePage).not.toHaveBeenCalled();
+}, 15000);
+
+it('auto-prints the next sale through the 80mm template the paid screen chose', async () => {
+  savePrintingSettings(localStorage, useSession().session!.baseUrl, { autoPrintReceipt: true });
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  vi.mocked(printSalePage).mockResolvedValue();
+  await paidCash();
+  await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+  await chooseTemplate('thermal-80mm');
+  const firstPage = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
+  print.mockClear();
+  await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New sale' })); });
+  add();
+  add();
+  await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+  tender('cash', '48.00');
+  await act(async () => { fireEvent.click(screen.getByTestId('tender-complete')); });
+  const secondPage = (await screen.findByTestId('receipt-thermal-frame')).getAttribute('srcdoc');
+  expect(secondPage).toContain('Shirt');
+  expect(secondPage).not.toBe(firstPage);
+  await waitFor(() => expect(printSalePage).toHaveBeenCalledTimes(1));
+  expect(printSalePage).toHaveBeenCalledWith(secondPage);
+  expect(print).not.toHaveBeenCalled();
+}, 15000);
 
 it('prints the window once from Print receipt on the Standard template', async () => {
   const print = vi.spyOn(window, 'print').mockImplementation(() => {});

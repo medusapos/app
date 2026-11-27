@@ -354,10 +354,6 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     return lines === cartSale.order.lineItems ? cartSale
       : { ...cartSale, order: { ...cartSale.order, lineItems: lines as typeof cartSale.order.lineItems } };
   }, [cartSale, cartSettings.settings.sortItems]);
-  // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
-  // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
-  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
-    undefined, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
   // A cash sale opens the drawer of a network printer with Open Cash Drawer on, once per sale, never from a reprint.
   useCashDrawerOnSale(sale.stage, orders);
   const onScan = (code: string) => {
@@ -566,6 +562,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined;
   const thermalPage = sale.stage.kind === 'receipt' && paper ? thermalPaidPage({ paper, order: sale.stage.order,
     posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId }) : undefined;
+  const printPaidReceipt = thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow;
+  // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
+  // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
+  useAutoPrintReceipt(sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined, printingSettings.autoPrintReceipt,
+    printPaidReceipt, cartSettings.settings.autoShowReceipt ? undefined : sale.newSale);
   // With no headline beside the ✕, the leading block starts under it (the ✕ is 44 px, 8 px down).
   const leadInset = topInset + (paidHeadline ? 0 : 52);
   // v2's paid pane: the receipt scrolls above the footer bar pinned to the pane's bottom, and a ✕ at its top right starts
@@ -586,7 +587,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </ScrollView>
     {/* Keyed on the template, so a thermal print's pending or failed status never carries over to another template. */}
     <PaidFooter key={receiptTemplateId} emailReceipt={emailReceipt} newSale={sale.newSale}
-      print={thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow} />
+      print={printPaidReceipt} />
     <View dataSet={{ print: 'hide' }} className="absolute right-2" style={{ top: topInset + 8 }}>
       <IconButton testID="paid-close" accessibilityLabel="Close" className="h-11 w-11" onPress={sale.newSale}>
         <View className="text-foreground"><XIcon size={24} /></View>
