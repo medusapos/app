@@ -42,8 +42,7 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
   const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= 5;
   const coupons = couponsEnabled(sale.capabilities);
   const close = () => setKind(null);
-  const title = kind === 'discount' ? 'Order discount' : kind === 'fee' ? 'Add fee'
-    : kind === 'shipping' ? 'Add shipping' : 'Add custom item';
+  const title = kind === 'fee' ? 'Add fee' : kind === 'shipping' ? 'Add shipping' : 'Add custom item';
   return <>
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
@@ -79,16 +78,14 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
           <View className="text-foreground"><TruckIcon size={16} /></View><Text>Add Shipping</Text></DropdownMenuItem>}
       </DropdownMenuContent>
     </DropdownMenu>
-    <Dialog open={kind !== null} onOpenChange={(open) => { if (!open) close(); }}>
+    <Dialog open={kind !== null && kind !== 'discount'} onOpenChange={(open) => { if (!open) close(); }}>
       <DialogContent testID="cart-add-dialog">
         {kind === 'coupon' ? <>
           <DialogHeader><DialogTitle>Add coupon</DialogTitle></DialogHeader>
           <CouponDialogBody sale={sale} onClose={close} />
           <DialogFooter><Button variant="outline" onPress={close}><Text>Cancel</Text></Button></DialogFooter>
         </> : <DialogTitle className="sr-only">{title}</DialogTitle>}
-        {kind === 'discount' ? <DiscountForm title="Order discount" currency={sale.order.currency}
-          onApply={(discount) => sale.applyDiscount(null, discount)} onClose={close} />
-          : kind !== null && kind !== 'coupon' && <ChargeForm kind={kind} currency={sale.order.currency} lineTax={sale.capabilities?.lineTax}
+        {kind !== null && kind !== 'coupon' && kind !== 'discount' && <ChargeForm kind={kind} currency={sale.order.currency} lineTax={sale.capabilities?.lineTax}
             shippingTaxFromStore={sale.capabilities?.taxRounding?.granularity === 'woocommerce'} onClose={close}
             onApply={({ kind, name, amountMinor, taxStatus, taxClass }) => {
               const result = kind === 'custom' ? sale.addCustomLine({ name, priceMinor: amountMinor, taxStatus, taxClass })
@@ -96,6 +93,15 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
                   : sale.addShipping({ name, amountMinor, taxStatus, taxClass });
               return typeof result === 'string' ? result : null;
             }} />}
+      </DialogContent>
+    </Dialog>
+    {/* v2's Add Discount: a sheet from the left, the value field then the Percent / Amount switch, Cancel and Add discount
+        below. No onApplyCoupon, so no Coupon tab: the store serves no coupon list yet (Add Coupon keeps its own dialog). */}
+    <Dialog open={kind === 'discount'} onOpenChange={(open) => { if (!open) close(); }}>
+      <DialogContent side="left" showClose testID="cart-add-discount-sheet">
+        <DialogHeader><DialogTitle>Add Discount</DialogTitle></DialogHeader>
+        <DiscountForm layout="dialog" title="Add Discount" currency={sale.order.currency}
+          onApply={(discount) => sale.applyDiscount(null, discount)} onClose={close} />
       </DialogContent>
     </Dialog>
   </>;

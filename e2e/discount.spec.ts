@@ -110,6 +110,22 @@ test('a 10% order discount reads once, as the totals\' "Discount (10%)" row, and
   await expect(checkout).toHaveText(/\D9\.38$/);
 });
 
+// v2's Add Discount slides in from the left at max-w-lg. TallyUI gives left and right the same translateX and jsdom
+// has no layout, so only a real browser tells the sides apart.
+test('Add Discount opens as a sheet on the left edge, at most 512 px wide on desktop', async ({ page }) => {
+  await signIn(page);
+  await addE2E1(page);
+  await page.getByTestId('cart-add-menu').click();
+  await page.getByRole('menuitem', { name: 'Add Discount', exact: true }).click();
+  const sheet = page.getByTestId('cart-add-discount-sheet');
+  await expect(sheet).toBeVisible();
+  // Polled: the sheet's 200 ms slide-in ends at translateX(0).
+  await expect.poll(async () => (await sheet.boundingBox())?.x).toBe(0);
+  expect((await sheet.boundingBox())!.width).toBeLessThanOrEqual(512);
+  await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+  await expect(sheet).toHaveCount(0);
+});
+
 test('below order.create v2 the till refuses a discount when it is applied, and the sale completes without it', async ({ page }) => {
   // An old plugin: GET /tally/v1/info is a 404 (the real response's CORS headers kept).
   await page.route(`${backend}/tally/v1/info`, async (route) => route.fulfill({ response: await route.fetch(), status: 404, body: '{}' }));

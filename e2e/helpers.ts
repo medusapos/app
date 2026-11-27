@@ -547,7 +547,9 @@ export async function discount(page: Page, opener: 'line' | 'order', type: 'Perc
   }
   await page.getByRole('button', { name: type, exact: true }).click();
   await page.getByLabel('Discount value', { exact: true }).fill(value);
-  await page.getByRole('button', { name: 'Apply', exact: true }).click();
+  // The line keeps the inline form's Apply; the + menu's left sheet has v2's "Add discount" footer.
+  if (opener === 'line') await page.getByRole('button', { name: 'Apply', exact: true }).click();
+  else await page.getByTestId('add-discount-submit').click();
 }
 
 /**

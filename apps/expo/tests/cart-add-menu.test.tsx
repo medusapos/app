@@ -177,17 +177,66 @@ it.each([
   expect((item === 'Add Fee' ? screen.getByTestId('cart-fee-0') : cartLine(name)).textContent).toContain(name);
   expect(screen.queryByTestId('cart-add-dialog')).toBeNull();
 });
-it('applies an order discount and closes the dialog', async () => {
+const discountSheet = () => screen.queryByTestId('cart-add-discount-sheet');
+function addDiscount(type: 'Percent' | 'Amount', value: string) {
+  const sheet = within(discountSheet()!);
+  fireEvent.click(sheet.getByRole('button', { name: type }));
+  fireEvent.change(sheet.getByLabelText('Discount value'), { target: { value } });
+  fireEvent.click(sheet.getByRole('button', { name: 'Add discount' }));
+}
+it('Add Discount opens v2\'s left sheet: its title and ✕, the value field then the switch, Cancel and Add discount', async () => {
   await start();
   fireEvent.click(screen.getByTestId('product-tile-Shirt'));
   openMenu('Add Discount');
-  click('Percent');
-  fireEvent.change(screen.getByLabelText('Discount value'), { target: { value: '10' } });
-  click('Apply');
+  expect(screen.queryByTestId('cart-add-dialog')).toBeNull();
+  // A side sheet slides in on translateX; TallyUI's centred dialog fades and scales instead.
+  expect(discountSheet()!.getAttribute('style')).toMatch(/translateX/);
+  const sheet = within(discountSheet()!);
+  expect(sheet.getByRole('heading', { name: 'Add Discount' })).toBeTruthy();
+  expect(sheet.getByRole('group', { name: 'Add Discount' })).toBeTruthy();
+  const field = sheet.getByLabelText('Discount value');
+  expect(field.compareDocumentPosition(sheet.getByTestId('discount-percent-switch')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(sheet.getAllByRole('button').map((button) => button.textContent || button.getAttribute('aria-label')))
+    .toEqual(['Percent', 'Amount', 'Cancel', 'Add discount', 'Close']);
+  // No Coupon tab: the store serves no coupon list yet.
+  expect(sheet.queryByText('Coupon')).toBeNull();
+  fireEvent.click(sheet.getByRole('button', { name: 'Close' }));
+  expect(discountSheet()).toBeNull();
+});
+it('applies a 10% order discount and closes the sheet', async () => {
+  await start();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  openMenu('Add Discount');
+  addDiscount('Percent', '10');
   // v2's "Discount (10%) ✕" row in the totals, not a chip under the lines.
   expect(screen.getByTestId('order-discount-row-0').textContent).toMatch(/^Discount \(10%\)−/);
   expect(screen.queryByRole('button', { name: /^Remove discount Order discount/ })).toBeNull();
-  expect(screen.queryByTestId('cart-add-dialog')).toBeNull();
+  expect(discountSheet()).toBeNull();
+});
+// The sheet's layout="dialog" opens on Amount (v2's $-first sheet); the old inline form opened on Percent. A typed "5" is €5.
+it('the sheet opens on Amount: 5 with no switch press is a −€5.00 order discount', async () => {
+  await start();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €19.20');
+  openMenu('Add Discount');
+  const sheet = within(discountSheet()!);
+  expect(sheet.getByRole('button', { name: 'Amount' }).getAttribute('aria-selected')).toBe('true');
+  expect(sheet.getByRole('button', { name: 'Percent' }).getAttribute('aria-selected')).not.toBe('true');
+  fireEvent.change(sheet.getByLabelText('Discount value'), { target: { value: '5' } });
+  fireEvent.click(sheet.getByRole('button', { name: 'Add discount' }));
+  expect(screen.getByTestId('order-discount-row-0').textContent).toBe('Discount−€5.00');
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €14.20');
+});
+it('keeps the sheet open with the refusal inline for an amount above the order, and Cancel applies nothing', async () => {
+  await start();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  openMenu('Add Discount');
+  addDiscount('Amount', '50');
+  expect(within(discountSheet()!).getByRole('alert').textContent).toBe('The discount is more than the order');
+  fireEvent.click(within(discountSheet()!).getByRole('button', { name: 'Cancel' }));
+  expect(discountSheet()).toBeNull();
+  expect(screen.queryByTestId('order-discount-row-0')).toBeNull();
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €19.20');
 });
 it('below order.create 5 offers only Add new customer and a discount, on an empty cart too', async () => {
   const context = vi.mocked(useSession).getMockImplementation()!();
