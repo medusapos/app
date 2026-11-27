@@ -191,24 +191,24 @@ describe('SessionProvider', () => {
   });
   const pluginRead = { orderCreate: 3, register: 3, coupons: true, pluginContract: 5 };
   const customerDisplay = { iceServers: [], snapshot: true };
-  it("U-554-1: a launch's first fresh read with customerDisplay keeps the restored session", async () => {
-    await mount({ ...stored, capabilities: pluginRead });
+  it("U-D1: a launch's first equal display read keeps the restored session", async () => {
+    await mount({ ...stored, capabilities: { ...pluginRead, customerDisplay: { iceServers: [], snapshot: true } } });
     const before = context.session;
     storage.setItem.mockClear();
     act(() => context.mergeCapabilities({ ...pluginRead, customerDisplay }));
     expect(context.session).toBe(before);
     expect(storage.setItem).not.toHaveBeenCalled();
   });
-  it('U-554-2: a real change alongside customerDisplay updates the session without it', async () => {
+  it('U-D2: a fresh read adding customerDisplay updates the stored session', async () => {
     await mount({ ...stored, capabilities: pluginRead });
     const before = context.session;
-    const read = { ...pluginRead, coupons: false };
-    act(() => context.mergeCapabilities({ ...read, customerDisplay }));
+    const read = { ...pluginRead, customerDisplay };
+    act(() => context.mergeCapabilities(read));
     expect(context.session).not.toBe(before);
     expect(context.session?.capabilities).toEqual(read);
     expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(read);
   });
-  it('U-554-3: a sign-in keeps customerDisplay out, so the next read keeps the session', async () => {
+  it('U-D3: sign-in stores customerDisplay and inconclusive or equal reads keep the session', async () => {
     const info = '{"contracts":{"order.create":[3]},"customerDisplay":{"v":1,"iceServers":[],"snapshot":1}}';
     fetchImpl.mockImplementation(async (url) => new Response(String(url).endsWith('/tally/v1/info') ? info
       : String(url).endsWith('/auth/user/emailpass') ? JSON.stringify({ token: stored.token }) : '{}'));
@@ -217,14 +217,24 @@ describe('SessionProvider', () => {
     expect(display).toBeDefined();
     await mount(null);
     await act(async () => { await context.signIn(stored.baseUrl, stored.email, 'secret'); });
-    expect(context.session?.capabilities).toEqual({ orderCreate: 3 });
-    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual({ orderCreate: 3 });
+    expect(context.session?.capabilities).toEqual({ orderCreate: 3, customerDisplay });
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual({ orderCreate: 3, customerDisplay });
     const before = context.session;
     storage.setItem.mockClear();
     act(() => context.mergeCapabilities(undefined));
+    expect(context.session).toBe(before);
     act(() => context.mergeCapabilities({ orderCreate: 3, customerDisplay: display }));
     expect(context.session).toBe(before);
     expect(storage.setItem).not.toHaveBeenCalled();
+  });
+  it('U-D4: a fresh read without customerDisplay removes the advertisement', async () => {
+    await mount({ ...stored, capabilities: { ...pluginRead, customerDisplay } });
+    const before = context.session;
+    expect(before?.capabilities?.customerDisplay).toEqual(customerDisplay);
+    act(() => context.mergeCapabilities(pluginRead));
+    expect(context.session).not.toBe(before);
+    expect(context.session?.capabilities).toStrictEqual(pluginRead);
+    expect(JSON.parse(storage.getItem('medusapos.session')!).capabilities).toEqual(pluginRead);
   });
   it('a fresh read in a different key order keeps the session', async () => {
     await mount({ ...stored, capabilities: { orderCreate: 6, coupons: true, lineTax: { none: true, classes: false } } });

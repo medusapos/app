@@ -1,4 +1,4 @@
-import { parseLineTax, parseTaxRounding, SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
+import { parseDisplayAdvertisement, parseLineTax, parseTaxRounding, SignInError, type ServerCapabilities, type SignInResult } from '@tallyui/core';
 import { medusaAdminUserAuth } from '@tallyui/connector-medusa';
 import { authHeaders } from './pos-connector';
 
@@ -152,12 +152,16 @@ export function loadSession(storage: SessionStorage | null): Session | null {
     const versions = (['register', 'orderRefund', 'orderReopen', 'orderUpdate', 'receiptEmail', 'pluginContract'] as const)
       .flatMap((key) => positiveVersion(stored[key]) === undefined ? [] : [[key, stored[key]]]);
     const flags = (['coupons', 'multiplePayments'] as const).flatMap((key) => typeof stored[key] === 'boolean' ? [[key, stored[key]]] : []);
-    // customerDisplay is not restored: the app does not wire it yet, and its shape is still in flight.
+    // Use core's wire parser so restore and a fresh read share one validation and return the same shape.
+    const display = stored.customerDisplay;
+    const customerDisplay = isRecord(display) && !Array.isArray(display)
+      ? parseDisplayAdvertisement({ v: 1, iceServers: display.iceServers, snapshot: display.snapshot === true ? 1 : 0 }) : undefined;
     return { baseUrl: value.baseUrl, email: value.email, token: value.token,
       name: typeof value.name === 'string' ? value.name : undefined,
       tokenExpiresAt: typeof value.tokenExpiresAt === 'number' ? value.tokenExpiresAt : undefined,
       capabilities: typeof stored.orderCreate === 'number'
         ? { orderCreate: stored.orderCreate, ...Object.fromEntries(versions), ...Object.fromEntries(flags),
+          ...(customerDisplay ? { customerDisplay } : {}),
           ...(parseTaxRounding(stored.taxRounding) ? { taxRounding: parseTaxRounding(stored.taxRounding) } : {}),
           ...(parseLineTax(stored.lineTax) ? { lineTax: parseLineTax(stored.lineTax) } : {}),
           ...(parseRegisterApproval(stored.registerApproval) ? { registerApproval: parseRegisterApproval(stored.registerApproval) } : {}),
