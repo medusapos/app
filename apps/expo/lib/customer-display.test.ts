@@ -1,7 +1,7 @@
 import { buildReceiptData, createOrderBuilder, finalizeOrder } from '@tallyui/pos';
 import { expect, it } from 'vitest';
 import { clearDisplayStore, customerSafeSale, DISPLAY_STORE_KEY, displayConfigFor, displayKeyStore, displayTokenStore,
-  hasDisplayDeviceKey, loadDisplayStore, saveDisplayStore } from './customer-display';
+  hasDisplayDeviceKey, loadDisplayPaired, loadDisplayStore, saveDisplayPaired, saveDisplayStore } from './customer-display';
 
 it('D-1: device keys are stored and cleared per store', async () => {
   const data = new Map<string, string>();
@@ -26,6 +26,27 @@ it('D-2: storage errors resolve as a missing key or a no-op', async () => {
   await expect(keys.save('key')).resolves.toBeUndefined();
   await expect(keys.clear()).resolves.toBeUndefined();
   expect(hasDisplayDeviceKey(storage, 'https://store.test')).toBe(false);
+});
+
+it('DP-1: the per-store paired hint distinguishes true, false and unknown', () => {
+  const baseUrl = 'https://store.test';
+  const key = `medusapos.display-paired.${baseUrl}`;
+  const data = new Map<string, string>();
+  const storage = { getItem: (key: string) => data.get(key) ?? null, setItem: data.set.bind(data), removeItem: data.delete.bind(data) };
+  expect(loadDisplayPaired(storage, baseUrl)).toBeNull();
+  data.set(key, 'unknown');
+  expect(loadDisplayPaired(storage, baseUrl)).toBeNull();
+  for (const paired of [true, false]) {
+    saveDisplayPaired(storage, baseUrl, paired);
+    expect(data.get(key)).toBe(paired ? '1' : '0');
+    expect(loadDisplayPaired(storage, baseUrl)).toBe(paired);
+    expect(loadDisplayPaired(storage, 'https://other.test')).toBeNull();
+  }
+  const fail = () => { throw Error('storage unavailable'); };
+  for (const unavailable of [null, { getItem: fail, setItem: fail, removeItem: fail }]) {
+    expect(loadDisplayPaired(unavailable, baseUrl)).toBeNull();
+    expect(saveDisplayPaired(unavailable, baseUrl, true)).toBeUndefined();
+  }
 });
 
 it('D-3: strips only private fields on both orders, without mutating either', () => {
