@@ -7,7 +7,7 @@ export type StoreCoupon = {
 };
 
 function isCoupon(row: unknown): row is StoreCoupon {
-  if (!row || typeof row !== 'object' || Object.keys(row).length !== 6) return false;
+  if (!row || typeof row !== 'object') return false;
   const coupon = row as Record<string, unknown>;
   return typeof coupon.code === 'string' && (coupon.label === null || typeof coupon.label === 'string') &&
     ((coupon.type === 'fixed' && typeof coupon.currency === 'string') || (coupon.type === 'percentage' && coupon.currency === null)) &&
@@ -25,9 +25,11 @@ export async function readStoreCoupons(session: Pick<Session, 'baseUrl' | 'token
         .then(response => response.ok ? response.json() : null),
       new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); }),
     ]);
-    if (!body || Object.keys(body).length !== 3 || typeof body.limit !== 'number' || typeof body.truncated !== 'boolean' ||
+    if (!body || typeof body.limit !== 'number' || typeof body.truncated !== 'boolean' ||
       !Array.isArray(body.coupons) || !body.coupons.every(isCoupon)) return null;
-    return { coupons: body.coupons, truncated: body.truncated };
+    const coupons = body.coupons.map(({ code, label, type, value, currency, endsAt }: StoreCoupon) =>
+      ({ code, label, type, value, currency, endsAt }));
+    return { coupons, truncated: body.truncated };
   } catch {
     return null;
   } finally { clearTimeout(timer); }

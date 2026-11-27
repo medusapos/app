@@ -58,6 +58,14 @@ medusaIntegrationTestRunner({
       ], limit: 100, truncated: false })
     })
 
+    it('lists a percentage promotion with its stored value', async () => {
+      const code = 'ten-percent'
+      await promotions.createPromotions({ code, type: 'standard', status: 'active',
+        application_method: { type: 'percentage', target_type: 'items', allocation: 'across', value: 10 } })
+      const response = await api.get(url, { headers })
+      expect(response.data.coupons).toStrictEqual([{ code, label: null, type: 'percentage', value: 10, currency: null, endsAt: null }])
+    })
+
     it('rejects an anonymous request and a signed-in customer with 401', async () => {
       expect((await api.get(url, { validateStatus: () => true })).status).toBe(401)
       const body = { email: 'coupon-customer@example.com', password: 'integration-test-password' }

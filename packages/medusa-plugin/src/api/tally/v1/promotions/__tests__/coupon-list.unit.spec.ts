@@ -11,7 +11,7 @@ const campaign = (type: CampaignBudgetDTO['type'], used = 2, limit = 2) => ({ id
 it('lists only the six public fields, including the inclusive campaign end', () => {
   const ends_at = new Date(options.now)
   const result = tillCoupons([{ ...promotion, rules: [rule('eq', 'till')], campaign: { id: 'campaign', name: 'Winter', ends_at } }], options)
-  expect(result).toEqual({ limit: 100, truncated: false, coupons: [
+  expect(result).toStrictEqual({ limit: 100, truncated: false, coupons: [
     { code: 'TEN', label: 'Winter', type: 'percentage', value: 10, currency: null, endsAt: ends_at.toISOString() },
   ] })
 })

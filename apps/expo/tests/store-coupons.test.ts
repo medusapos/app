@@ -36,3 +36,8 @@ it('requests the currency with staff auth and returns the coupons and truncation
 it('rejects the whole answer if one coupon has the wrong value type', async () => {
   expect(await readStoreCoupons(session, 8, 'EUR', reply({ ...body, coupons: [coupon, { ...coupon, value: '10' }] }))).toBeNull();
 });
+
+it('accepts extra response and coupon fields without returning them', async () => {
+  const fetchImpl = reply({ ...body, total: 1, coupons: [{ ...coupon, colour: 'red' }] });
+  expect(await readStoreCoupons(session, 8, 'EUR', fetchImpl)).toStrictEqual({ coupons: [coupon], truncated: true });
+});
