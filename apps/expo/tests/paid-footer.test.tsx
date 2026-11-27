@@ -84,6 +84,75 @@ describe('PaidFooter', () => {
     expect(screen.queryByTestId('paid-print-status')).toBeNull();
   });
 
+  it('a remount after a successful retry shows no failure', async () => {
+    let fail!: (error: Error) => void;
+    const autoPrint = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const footer = <PaidFooter autoPrint={autoPrint} print={() => Promise.resolve()} newSale={vi.fn()} />;
+    const view = render(footer);
+    await act(async () => { fail(new Error('no dialog')); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+    await act(async () => { fireEvent.click(printButton()); });
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+    view.unmount();
+    await act(async () => { render(footer); });
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+    expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
+  });
+
+  it('a remount while the auto-print is pending holds Print, then shows its failure', async () => {
+    let fail!: (error: Error) => void;
+    const autoPrint = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const footer = <PaidFooter autoPrint={autoPrint} print={vi.fn()} newSale={vi.fn()} />;
+    render(footer).unmount();
+    render(footer);
+    expect(printButton().getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { fail(new Error('no dialog')); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+  });
+
+  it('a different auto-print promise starts fresh', async () => {
+    let fail!: (error: Error) => void;
+    const first = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const props = { print: vi.fn(), newSale: vi.fn() };
+    const view = render(<PaidFooter {...props} autoPrint={first} />);
+    await act(async () => { fail(new Error('no dialog')); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+    view.unmount();
+    render(<PaidFooter {...props} autoPrint={new Promise<void>(() => {})} />);
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+    expect(printButton().getAttribute('aria-disabled')).toBe('true');
+  });
+
+  it("the latest print decides: an earlier press settling later does not hide the auto-print's failure", async () => {
+    let finishPress!: () => void;
+    const props = { print: () => new Promise<void>((resolve) => { finishPress = resolve; }), newSale: vi.fn() };
+    const view = render(<PaidFooter {...props} />);
+    fireEvent.click(printButton());
+    let failAuto!: (error: Error) => void;
+    const autoPrint = new Promise<void>((_resolve, reject) => { failAuto = reject; });
+    view.rerender(<PaidFooter {...props} autoPrint={autoPrint} />);
+    await act(async () => { failAuto(new Error('no dialog')); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+    await act(async () => { finishPress(); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+  });
+
+  it("the latest print decides: an earlier press failing does not end the auto-print's hold", async () => {
+    let failPress!: (error: Error) => void;
+    const props = { print: () => new Promise<void>((_resolve, reject) => { failPress = reject; }), newSale: vi.fn() };
+    const view = render(<PaidFooter {...props} />);
+    fireEvent.click(printButton());
+    let finishAuto!: () => void;
+    const autoPrint = new Promise<void>((resolve) => { finishAuto = resolve; });
+    view.rerender(<PaidFooter {...props} autoPrint={autoPrint} />);
+    await act(async () => { failPress(new Error('no dialog')); });
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+    expect(printButton().getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { finishAuto(); });
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+    expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
+  });
+
   it('releases Print without a message when an auto-print succeeds', async () => {
     let finish!: () => void;
     const autoPrint = new Promise<void>((resolve) => { finish = resolve; });
