@@ -11,7 +11,7 @@ import { useSession } from '../lib/session-context';
 import { sessionFixture } from './session-fixture';
 import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
-import { printSalePage } from '../lib/receipt-templates';
+import { loadReceiptTemplate, printSalePage } from '../lib/receipt-templates';
 import { savePrintingSettings } from '../lib/printing-settings';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
@@ -286,6 +286,21 @@ async function chooseTemplate(id: 'standard' | 'thermal-80mm' | 'thermal-58mm') 
   await act(async () => { fireEvent.click(screen.getByTestId(`receipt-template-option-${id}`)); });
 }
 const printButton = () => screen.getByTestId('paid-print');
+
+it('a template chosen on the paid screen is saved, and the next app load opens on it', async () => {
+  vi.mocked(printSalePage).mockResolvedValue();
+  await paidCash();
+  await chooseTemplate('thermal-80mm');
+  expect(loadReceiptTemplate(localStorage, useSession().session!.baseUrl)).toBe('thermal-80mm');
+  cleanup();
+  record.mockClear();
+  await paidCash();
+  const page = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
+  expect(page).toContain('width: 48ch');
+  await act(async () => { fireEvent.click(printButton()); });
+  expect(printSalePage).toHaveBeenCalledOnce();
+  expect(printSalePage).toHaveBeenCalledWith(page);
+}, 15000);
 
 it('auto-prints a Standard sale through the window, once', async () => {
   savePrintingSettings(localStorage, useSession().session!.baseUrl, { autoPrintReceipt: true });
