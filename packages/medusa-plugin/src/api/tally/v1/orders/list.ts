@@ -176,7 +176,7 @@ export function refundLinesById(rows: Array<{ medusa_refund_id: string; lines: u
     if (!Array.isArray(row.lines)) continue
     const lines = row.lines.filter(line => Number.isInteger(line?.quantity) && line.quantity > 0)
       .map(({ orderLineId, quantity, netMinor, taxMinor }) => ({ orderLineId, quantity, netMinor, taxMinor }))
-    if (lines.length) byId.set(row.medusa_refund_id, lines)
+    if (row.lines.length === 0 || lines.length) byId.set(row.medusa_refund_id, lines)
   }
   return byId
 }
