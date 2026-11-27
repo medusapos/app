@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { webcrypto } from 'node:crypto';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { DisplaySignallingError } from '@tallyui/core';
 import { createMemoryDisplaySignalling } from '@tallyui/core/server';
 import { Platform } from 'react-native';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -28,7 +29,7 @@ beforeEach(async () => {
   headers = (await memory.harness.till({ cashierId: 'staff', canPair: true })).headers;
   setWindowWidth(1280, 800);
 });
-afterEach(() => { cleanup(); Platform.OS = platform; vi.unstubAllGlobals(); setWindowWidth(0); });
+afterEach(() => { cleanup(); Platform.OS = platform; vi.useRealTimers(); vi.unstubAllGlobals(); setWindowWidth(0); });
 
 async function mount(advertised: boolean) {
   saveSession(localStorage, { baseUrl: 'https://store.test', email: 'staff@example.test', token: 'jwt', tokenExpiresAt: Date.now() + 86400000,
@@ -51,4 +52,118 @@ it.each([['SC-2', 'web', false], ['SC-3', 'ios', true]] as const)('%s: no Custom
   await mount(advertised);
   expect(screen.getByTestId('settings-nav-card-readers')).toBeTruthy();
   expect(screen.queryByText('Customer display')).toBeNull();
+});
+
+it.each(['SX-1: live code', 'SX-2: expired code'])('%s stops polling after leaving the section and receiving an empty list', async (scenario) => {
+  vi.useFakeTimers();
+  const mint = vi.spyOn(memory.signalling, 'mint');
+  let finishList!: (empty: []) => void;
+  const list = vi.spyOn(memory.signalling, 'list').mockReturnValueOnce(new Promise((resolve) => { finishList = resolve; }));
+  await mount(true);
+  fireEvent.click(screen.getByTestId('settings-nav-customer-display'));
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await act(async () => {
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce());
+    await mint.mock.results[0].value;
+  });
+  const { code, expiresAt } = await mint.mock.results[0].value;
+  expect(screen.getByTestId('pairing-code').textContent).toBe(code);
+  if (scenario.startsWith('SX-2')) {
+    await act(() => vi.advanceTimersByTimeAsync(Date.parse(expiresAt) - Date.now() + 1));
+    await vi.waitFor(() => expect(screen.getByTestId('pairing-error').textContent).toMatch(/expired/i));
+  }
+  fireEvent.click(screen.getByTestId('settings-nav-store'));
+  expect(list).toHaveBeenCalledOnce();
+  await act(async () => finishList([]));
+  list.mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(list).not.toHaveBeenCalled();
+});
+
+it('SX-3: leaving while confirming preserves the paired hint and polling', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('RTCPeerConnection', class {
+    createDataChannel() { return { readyState: 'connecting', close() {} }; }
+    createOffer() { return new Promise<never>(() => {}); }
+    close() {}
+  });
+  const list = vi.spyOn(memory.signalling, 'list');
+  const pending = vi.spyOn(memory.signalling, 'pending');
+  const mint = vi.spyOn(memory.signalling, 'mint');
+  const realConfirm = memory.signalling.confirm;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const confirm = vi.spyOn(memory.signalling, 'confirm').mockImplementation(async (...args) => { await gate; return realConfirm(...args); });
+  await mount(true);
+  fireEvent.click(screen.getByTestId('settings-nav-customer-display'));
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await act(async () => {
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce());
+    await Promise.all([mint.mock.results[0].value, list.mock.results[0].value]);
+  });
+  const code = screen.getByTestId('pairing-code').textContent!;
+  await memory.signalling.claim(memory.harness.display('counter'), { code, displayName: 'Counter' });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+    await pending.mock.results[0].value;
+  });
+  fireEvent.click(screen.getByText('Confirm'));
+  await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByTestId('settings-nav-store'));
+  list.mockClear();
+  await act(async () => {
+    release();
+    await confirm.mock.results[0].value;
+    await vi.waitFor(() => expect(list).toHaveBeenCalled());
+    await list.mock.results[0].value;
+  });
+  expect(localStorage.getItem('medusapos.display-paired.https://store.test')).toBe('1');
+  list.mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(list).toHaveBeenCalled();
+});
+
+it('SX-4: leaving after a lost confirm response preserves the paired hint and polling', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('RTCPeerConnection', class {
+    createDataChannel() { return { readyState: 'connecting', close() {} }; }
+    createOffer() { return new Promise<never>(() => {}); }
+    close() {}
+  });
+  const list = vi.spyOn(memory.signalling, 'list');
+  const pending = vi.spyOn(memory.signalling, 'pending');
+  const mint = vi.spyOn(memory.signalling, 'mint');
+  const realConfirm = memory.signalling.confirm;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const confirm = vi.spyOn(memory.signalling, 'confirm').mockImplementation(async (...args) => {
+    await gate;
+    await realConfirm(...args);
+    throw new DisplaySignallingError('network');
+  });
+  await mount(true);
+  fireEvent.click(screen.getByTestId('settings-nav-customer-display'));
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await act(async () => {
+    await vi.waitFor(() => expect(mint).toHaveBeenCalledOnce());
+    await Promise.all([mint.mock.results[0].value, list.mock.results[0].value]);
+  });
+  const code = screen.getByTestId('pairing-code').textContent!;
+  await memory.signalling.claim(memory.harness.display('counter'), { code, displayName: 'Counter' });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+    await pending.mock.results[0].value;
+  });
+  fireEvent.click(screen.getByText('Confirm'));
+  await vi.waitFor(() => expect(confirm).toHaveBeenCalledOnce());
+  await act(async () => {
+    release();
+    await expect(confirm.mock.results[0].value).rejects.toThrow(DisplaySignallingError);
+  });
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-error')).toBeTruthy());
+  fireEvent.click(screen.getByTestId('settings-nav-store'));
+  expect(localStorage.getItem('medusapos.display-paired.https://store.test')).toBe('1');
+  list.mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(list).toHaveBeenCalled();
 });
