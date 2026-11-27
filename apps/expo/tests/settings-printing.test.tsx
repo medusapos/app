@@ -273,7 +273,11 @@ describe('Settings › Printing › Receipt templates', () => {
 
   it('sandboxes the preview frame, so a script in a receipt cannot run', async () => {
     const sheet = await openPreview('Thermal Receipt (58mm)');
-    expect(within(sheet).getByTestId('receipt-template-preview-frame').getAttribute('sandbox')).toBe('');
+    const sandbox = within(sheet).getByTestId('receipt-template-preview-frame').getAttribute('sandbox');
+    expect(sandbox).not.toBeNull();
+    const tokens = sandbox!.split(/\s+/).filter(Boolean);
+    expect(tokens).not.toContain('allow-scripts');
+    expect(tokens).toContain('allow-same-origin');
   });
 
   it('on a native till lists the templates with no printer and no Preview', async () => {

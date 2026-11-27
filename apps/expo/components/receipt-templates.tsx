@@ -10,7 +10,7 @@ import { SettingsFlatContext, SettingsGroup, SettingsRow } from '../lib/settings
 import { printReceiptPage, RECEIPT_TEMPLATES, receiptTemplatePage, sampleReceipt, useReceiptPrinter } from '../lib/receipt-templates';
 import { defaultStorage, type Session } from '../lib/session';
 import { loadCachedSettings } from '../lib/store-settings';
-import { printerLabel, receiptPrintersFor } from './receipt-pickers';
+import { FittedReceiptFrame, printerLabel, receiptPrintersFor } from './receipt-pickers';
 
 type Template = (typeof RECEIPT_TEMPLATES)[number];
 type PrintStatus = 'idle' | 'printing' | 'sent' | 'failed';
@@ -104,8 +104,7 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
           </DialogClose>
         </View>
         <View className="flex-1">
-          {web ? <iframe srcDoc={preview.page} sandbox="" title="Receipt preview" data-testid="receipt-template-preview-frame"
-            style={{ flex: 1, width: '100%', height: '100%', border: 0, background: '#fff' }} /> : null}
+          {web ? <FittedReceiptFrame page={preview.page} title="Receipt preview" testID="receipt-template-preview-frame" /> : null}
         </View>
         <View className="gap-3 border-t border-border p-4">
           {status === 'sent' ? <Text testID="receipt-template-print-status" className="text-sm text-muted-foreground">Sent to Print dialog</Text>

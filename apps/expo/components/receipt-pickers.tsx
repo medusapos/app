@@ -74,28 +74,37 @@ export function thermalPaidPage({ paper, ...args }: { paper: ReceiptPaper } & Pa
   return receiptTemplatePage(paper, paidReceiptData(args));
 }
 
-// The thermal page in a sandboxed frame (as Settings' preview does); the paid footer prints it.
+// The thermal page in a sandboxed frame, filling the box its parent gives it; the paid footer and Settings' preview show it.
 // The page is a fixed-width column (48ch at 80mm, ~400px), wider than a phone's frame: the frame takes the page's own
-// width and is scaled down to the bordered box, never up. allow-same-origin (never allow-scripts, so nothing runs in the
-// frame) lets onLoad measure the loaded page's right edge plus its scrollbar; srcDoc stays the printed page untouched.
-export function ThermalPaidReceipt({ page }: { page: string }) {
+// width and is scaled down to the box, never up, its layout height grown by 1/scale so the drawn height fills the box.
+// allow-same-origin (never allow-scripts, so nothing runs in the frame) lets onLoad measure the loaded page's right edge
+// plus its scrollbar; srcDoc stays the printed page untouched.
+export function FittedReceiptFrame({ page, title, testID }: { page: string; title: string; testID: string }) {
   const [natural, setNatural] = useState(0);
-  const [inner, setInner] = useState(0);
-  const scale = natural && inner ? Math.min(1, inner / natural) : 1;
+  const [box, setBox] = useState({ width: 0, height: 0 });
+  const scale = natural && box.width ? Math.min(1, box.width / natural) : 1;
   const measure = (frame: HTMLIFrameElement) => {
     const doc = frame.contentDocument;
     if (!doc?.body || !frame.contentWindow) return;
     const right = Math.max(0, ...Array.from(doc.body.children, (el) => el.getBoundingClientRect().right));
     setNatural(Math.ceil(right + frame.contentWindow.innerWidth - doc.documentElement.clientWidth));
   };
+  // The scaled frame's taller layout box is clipped, not grown into.
+  return <View className="flex-1 overflow-hidden"
+    onLayout={(event) => setBox({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}>
+    <iframe srcDoc={page} sandbox="allow-same-origin" title={title} data-testid={testID}
+      onLoad={(event) => measure(event.currentTarget)}
+      style={{ width: scale < 1 ? natural : '100%', height: box.height ? box.height / scale : '100%', flexShrink: 0, border: 0,
+        background: '#fff', transform: scale < 1 ? `scale(${scale})` : undefined, transformOrigin: '0 0' }} />
+  </View>;
+}
+
+// The paid footer's thermal receipt: the fitted frame in a bordered box.
+export function ThermalPaidReceipt({ page }: { page: string }) {
   return <View className="w-full max-w-md self-center p-4">
-    {/* 520 visible + the 1px borders; the scaled frame's taller layout box is clipped, not grown into. */}
-    <View className="overflow-hidden rounded-md border border-border" style={{ height: 522 }}
-      onLayout={(event) => setInner(event.nativeEvent.layout.width - 2)}>
-      <iframe srcDoc={page} sandbox="allow-same-origin" title="Receipt" data-testid="receipt-thermal-frame"
-        onLoad={(event) => measure(event.currentTarget)}
-        style={{ width: scale < 1 ? natural : '100%', height: 520 / scale, flexShrink: 0, border: 0, background: '#fff',
-          transform: scale < 1 ? `scale(${scale})` : undefined, transformOrigin: '0 0' }} />
+    {/* 520 visible + the 1px borders. */}
+    <View className="overflow-hidden rounded-md border border-border" style={{ height: 522 }}>
+      <FittedReceiptFrame page={page} title="Receipt" testID="receipt-thermal-frame" />
     </View>
   </View>;
 }
