@@ -787,7 +787,7 @@ describe('Resume and records (#642)', () => {
 
   it.each([
     ['D8b: Confirm with a closed register shows the rejection without retrying', 'order-refund-confirm'],
-    ['D8c: Check again with a closed register keeps the parked notice without retrying', 'refund-needs-admin-check-again'],
+    ['D8c: Check again with a closed register shows the store\'s new park without retrying', 'refund-needs-admin-check-again'],
   ])('%s', async (_name, action) => {
     if (action === 'order-refund-confirm') {
       send.mockResolvedValueOnce({ kind: 'retry', reason: 'network' }).mockImplementationOnce(async (batch) => rejected('session_closed')(batch));
@@ -807,6 +807,8 @@ describe('Resume and records (#642)', () => {
     render(sheet());
     const button = await screen.findByTestId(action);
     expect(send).toHaveBeenCalledTimes(1);
+    using _restoreTimers = { [Symbol.dispose]: () => vi.useRealTimers() };
+    vi.useFakeTimers({ toFake: ['setTimeout', 'setInterval'], shouldAdvanceTime: true });
     await act(async () => { fireEvent.click(button); });
     if (action === 'order-refund-confirm') {
       expect((await screen.findByTestId('order-refund-error')).textContent).toBe('The store refused: session_closed');
@@ -817,7 +819,7 @@ describe('Resume and records (#642)', () => {
       expect(screen.getByTestId('refund-needs-admin-check-again')).toBeTruthy();
     }
     expect(send).toHaveBeenCalledTimes(2);
-    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
     expect(send).toHaveBeenCalledTimes(2);
   });
 });
