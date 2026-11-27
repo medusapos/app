@@ -77,17 +77,22 @@ export function thermalPaidPage({ paper, ...args }: { paper: ReceiptPaper } & Pa
 // The thermal page in a sandboxed frame, filling the box its parent gives it; the paid footer and Settings' preview show it.
 // The page is a fixed-width column (48ch at 80mm, ~400px), wider than a phone's frame: the frame takes the page's own
 // width and is scaled down to the box, never up, its layout height grown by 1/scale so the drawn height fills the box.
-// allow-same-origin (never allow-scripts, so nothing runs in the frame) lets onLoad measure the loaded page's right edge
-// plus its scrollbar; srcDoc stays the printed page untouched.
+// allow-same-origin (never allow-scripts, so nothing runs in the frame) lets onLoad measure the loaded page's right edge,
+// its height and its scrollbar (0 when it does not scroll, or the scrollbar overlays); srcDoc stays the printed page untouched.
 export function FittedReceiptFrame({ page, title, testID }: { page: string; title: string; testID: string }) {
-  const [natural, setNatural] = useState(0);
+  const [measured, setMeasured] = useState({ right: 0, bar: 0, height: 0 });
   const [box, setBox] = useState({ width: 0, height: 0 });
+  // The frame's width: the page's own, plus the scrollbar only while the frame, at the height that width gives it,
+  // still scrolls (a classic scrollbar, #667); in between, just wide (so tall) enough that the frame no longer scrolls.
+  const { right, bar, height } = measured;
+  const natural = box.height ? Math.min(right + bar, Math.max(right, Math.ceil(box.width * height / box.height))) : right + bar;
   const scale = natural && box.width ? Math.min(1, box.width / natural) : 1;
   const measure = (frame: HTMLIFrameElement) => {
     const doc = frame.contentDocument;
     if (!doc?.body || !frame.contentWindow) return;
-    const right = Math.max(0, ...Array.from(doc.body.children, (el) => el.getBoundingClientRect().right));
-    setNatural(Math.ceil(right + frame.contentWindow.innerWidth - doc.documentElement.clientWidth));
+    const edge = Math.max(0, ...Array.from(doc.body.children, (el) => el.getBoundingClientRect().right));
+    setMeasured({ right: Math.ceil(edge), bar: frame.contentWindow.innerWidth - doc.documentElement.clientWidth,
+      height: doc.documentElement.getBoundingClientRect().height });
   };
   // The scaled frame's taller layout box is clipped, not grown into.
   return <View className="flex-1 overflow-hidden"
