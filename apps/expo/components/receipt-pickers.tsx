@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { View } from 'react-native';
 import { orderReference, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text } from '@tallyui/components';
 import { buildReceiptData, networkSinkFor, type PosOrder, type PrinterProfile, type ReceiptData, type ReceiptPaper, type SentOrder } from '@tallyui/pos';
@@ -75,11 +75,27 @@ export function thermalPaidPage({ paper, ...args }: { paper: ReceiptPaper } & Pa
 }
 
 // The thermal page in a sandboxed frame (as Settings' preview does); the paid footer prints it.
+// The page is a fixed-width column (48ch at 80mm, ~400px), wider than a phone's frame: the frame takes the page's own
+// width and is scaled down to the bordered box, never up. allow-same-origin (never allow-scripts, so nothing runs in the
+// frame) lets onLoad measure the loaded page's right edge plus its scrollbar; srcDoc stays the printed page untouched.
 export function ThermalPaidReceipt({ page }: { page: string }) {
+  const [natural, setNatural] = useState(0);
+  const [inner, setInner] = useState(0);
+  const scale = natural && inner ? Math.min(1, inner / natural) : 1;
+  const measure = (frame: HTMLIFrameElement) => {
+    const doc = frame.contentDocument;
+    if (!doc?.body || !frame.contentWindow) return;
+    const right = Math.max(0, ...Array.from(doc.body.children, (el) => el.getBoundingClientRect().right));
+    setNatural(Math.ceil(right + frame.contentWindow.innerWidth - doc.documentElement.clientWidth));
+  };
   return <View className="w-full max-w-md self-center p-4">
-    <View className="overflow-hidden rounded-md border border-border">
-      <iframe srcDoc={page} sandbox="" title="Receipt" data-testid="receipt-thermal-frame"
-        style={{ width: '100%', height: 520, border: 0, background: '#fff' }} />
+    {/* 520 visible + the 1px borders; the scaled frame's taller layout box is clipped, not grown into. */}
+    <View className="overflow-hidden rounded-md border border-border" style={{ height: 522 }}
+      onLayout={(event) => setInner(event.nativeEvent.layout.width - 2)}>
+      <iframe srcDoc={page} sandbox="allow-same-origin" title="Receipt" data-testid="receipt-thermal-frame"
+        onLoad={(event) => measure(event.currentTarget)}
+        style={{ width: scale < 1 ? natural : '100%', height: 520 / scale, flexShrink: 0, border: 0, background: '#fff',
+          transform: scale < 1 ? `scale(${scale})` : undefined, transformOrigin: '0 0' }} />
     </View>
   </View>;
 }
