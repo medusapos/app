@@ -45,6 +45,11 @@ export function CustomerDisplayProvider({ children }: { children: ReactNode }) {
     const pairing = createTillPairing({ signalling, context, device, service });
     let listed = false;
     const syncPaired = (serviceChanged = false) => {
+      if (pairing.phase.phase === 'confirming') {
+        saveDisplayPaired(storage, baseUrl, true);
+        setPairedStore(baseUrl);
+        return;
+      }
       if (service.status !== 'online') return;
       if (serviceChanged) listed = true;
       if (!listed) return;
@@ -55,7 +60,7 @@ export function CustomerDisplayProvider({ children }: { children: ReactNode }) {
       if (!paired) setStartedStore(undefined);
     };
     const offService = service.onChange(() => syncPaired(true));
-    const offPairing = pairing.onChange(syncPaired);
+    const offPairing = pairing.onChange(() => syncPaired());
     setLive({ baseUrl, signature, service, pairing });
     if (pending.current === baseUrl) { pending.current = undefined; void pairing.start(); }
     return () => { offService(); offPairing(); pairing.close(); service.close(); };

@@ -230,3 +230,15 @@ it('IT-9: cancelling before the first list resolves preserves the paired hint', 
   await act(async () => finishList([]));
   expect(result.current.service).toBeNull();
 });
+
+it('IT-10: a confirmed display stays active across reload when lists fail', async () => {
+  await storeDevice(); localStorage.setItem(hint, '0');
+  vi.spyOn(memory.signalling, 'list').mockRejectedValue(new DisplaySignallingError('network'));
+  const { result, pairing } = await confirmDisplay();
+  expect(pairing.phase).toEqual({ phase: 'idle' });
+  expect(localStorage.getItem(hint)).toBe('1');
+  expect(result.current.service).not.toBeNull();
+  expect(result.current.service?.status).toBe('offline');
+  cleanup();
+  expect(mount().result.current.service).not.toBeNull();
+});
