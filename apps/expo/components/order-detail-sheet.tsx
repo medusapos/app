@@ -116,7 +116,9 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   const receipt = reprint && order ? buildReceiptDataFromPosOrder(order, {
     storeName: settings?.storeName ?? '', storeAddress: settings?.location.addressLine,
   }) : null;
-  const page = receipt && paper ? receiptTemplatePage(paper, receipt) : null;
+  const page = receipt && paper && order ? receiptTemplatePage(paper, {
+    ...receipt, header: { ...receipt.header, orderNumber: orderReference(order) },
+  }) : null;
   return <><Dialog open={order !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
     {order ? <DialogContent side="right" testID="order-detail-sheet" className="flex-col p-0">
       <View className="flex-row items-center justify-end px-4 pt-4">

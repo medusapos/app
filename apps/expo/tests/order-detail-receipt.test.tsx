@@ -22,6 +22,7 @@ const settings: StoreSettings = {
 const PRINT_STYLE_ID = 'order-receipt-print-style';
 
 beforeEach(() => {
+  vi.mocked(printSalePage).mockClear();
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -62,10 +63,13 @@ describe('order detail Receipt (row 10.3)', () => {
   it('with Thermal 80mm saved, the reprint shows the 80mm page of this sale and prints it through the queue', async () => {
     saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
     const print = vi.spyOn(window, 'print').mockImplementation(() => {});
-    render(sheet(sale()));
+    const order = sale();
+    render(sheet(order));
     fireEvent.click(await screen.findByTestId('order-detail-receipt'));
     const page = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
     expect(page).toContain('width: 48ch');
+    expect(page).toContain(orderReference(order));
+    expect(page).not.toContain(order.id);
     expect(page).toContain('Blue shirt');
     expect(page).toContain(settings.storeName);
     expect(page).toContain(settings.location.addressLine);
@@ -75,6 +79,14 @@ describe('order detail Receipt (row 10.3)', () => {
     expect(printSalePage).toHaveBeenCalledOnce();
     expect(printSalePage).toHaveBeenCalledWith(page);
     expect(print).not.toHaveBeenCalled();
+  });
+
+  it("a synced sale's thermal reprint prints the same order reference as its other receipts", async () => {
+    saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+    const order = { ...sale(), serverRefs: { orderId: 'server-order', displayId: '1042', totalMinor: 1200 } };
+    render(sheet(order));
+    fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+    expect(screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc')).toContain(orderReference(order));
   });
 
   it('Back on a thermal reprint returns to the order detail', async () => {
