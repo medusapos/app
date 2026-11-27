@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, renderHook, screen } from '@testing-library/react';
 import { StrictMode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -64,6 +64,29 @@ describe('useAutoPrintReceipt', () => {
 
   beforeEach(() => { vi.useFakeTimers(); print.mockClear(); });
   afterEach(() => { cleanup(); vi.useRealTimers(); });
+
+  it('shares the print promise after the delay and calls after without waiting for rejection', async () => {
+    const id = newId();
+    let fail!: (error: Error) => void;
+    const promise = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const after = vi.fn();
+    const { result } = renderHook(() => useAutoPrintReceipt(id, true, () => promise, after));
+    act(() => vi.advanceTimersByTime(49));
+    expect(result.current).toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(result.current).toBe(promise);
+    expect(after).toHaveBeenCalledTimes(1);
+    await act(async () => { fail(new Error('no dialog')); });
+    expect(after).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares no promise when the print returns nothing', () => {
+    const id = newId();
+    const { result } = renderHook(() => useAutoPrintReceipt(id, true, print));
+    act(() => vi.advanceTimersByTime(50));
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(result.current).toBeNull();
+  });
 
   it('prints once after the settle delay, never again for the same sale', () => {
     const id = newId();

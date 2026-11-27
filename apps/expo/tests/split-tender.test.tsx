@@ -11,7 +11,7 @@ import { useSession } from '../lib/session-context';
 import { sessionFixture } from './session-fixture';
 import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
-import { loadReceiptTemplate, printSalePage } from '../lib/receipt-templates';
+import { loadReceiptTemplate, printSalePage, saveReceiptTemplate } from '../lib/receipt-templates';
 import { savePrintingSettings } from '../lib/printing-settings';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
@@ -307,16 +307,18 @@ it('auto-prints a Standard sale through the window, once', async () => {
   const print = vi.spyOn(window, 'print').mockImplementation(() => {});
   await paidCash();
   await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+  await act(() => new Promise<void>((resolve) => setTimeout(resolve, 120)));
+  expect(print).toHaveBeenCalledTimes(1);
   expect(printSalePage).not.toHaveBeenCalled();
 }, 15000);
 
-it('auto-prints the next sale through the 80mm template the paid screen chose', async () => {
+it.each(['thermal-80mm', 'thermal-58mm'] as const)('auto-prints the next sale through the %s template the paid screen chose', async (template) => {
   savePrintingSettings(localStorage, useSession().session!.baseUrl, { autoPrintReceipt: true });
   const print = vi.spyOn(window, 'print').mockImplementation(() => {});
   vi.mocked(printSalePage).mockResolvedValue();
   await paidCash();
   await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
-  await chooseTemplate('thermal-80mm');
+  await chooseTemplate(template);
   const firstPage = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
   print.mockClear();
   await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'New sale' })); });
@@ -331,6 +333,23 @@ it('auto-prints the next sale through the 80mm template the paid screen chose', 
   await waitFor(() => expect(printSalePage).toHaveBeenCalledTimes(1));
   expect(printSalePage).toHaveBeenCalledWith(secondPage);
   expect(print).not.toHaveBeenCalled();
+}, 15000);
+
+it('holds Print during a thermal auto-print and clears its failure when the template changes', async () => {
+  const { baseUrl } = useSession().session!;
+  savePrintingSettings(localStorage, baseUrl, { autoPrintReceipt: true });
+  saveReceiptTemplate(localStorage, baseUrl, 'thermal-80mm');
+  let fail!: (error: Error) => void;
+  vi.mocked(printSalePage).mockReturnValueOnce(new Promise<void>((_resolve, reject) => { fail = reject; }));
+  await paidCash();
+  await waitFor(() => expect(printButton().getAttribute('aria-disabled')).toBe('true'));
+  await act(async () => { fail(new Error('no dialog')); });
+  expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+  expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
+  await chooseTemplate('thermal-58mm');
+  expect(screen.queryByTestId('paid-print-status')).toBeNull();
+  await chooseTemplate('thermal-80mm');
+  expect(screen.queryByTestId('paid-print-status')).toBeNull();
 }, 15000);
 
 it('prints the window once from Print receipt on the Standard template', async () => {

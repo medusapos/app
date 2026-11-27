@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SessionStorage } from './session';
 
 export type PrintingSettings = { autoPrintReceipt: boolean };
@@ -57,8 +57,11 @@ let seenSaleId: string | undefined;
  * runs once per sale, after the print (or at once when not printing): the next sale after an unshown receipt.
  */
 export function useAutoPrintReceipt(
-  saleId: string | undefined, enabled: boolean, print: () => void = printWindow, after?: () => void,
-): void {
+  saleId: string | undefined, enabled: boolean, print: () => void | Promise<void> = printWindow, after?: () => void, destination?: string,
+) {
+  // Returns the original print promise for this sale and destination, or null when there is none.
+  const owner = useMemo(() => ({ saleId, destination }), [saleId, destination]);
+  const [job, setJob] = useState<{ owner: typeof owner; promise: Promise<void> }>();
   // The latest `after`, so the call never uses one from an earlier render.
   const afterRef = useRef(after);
   afterRef.current = after;
@@ -66,7 +69,12 @@ export function useAutoPrintReceipt(
     if (!saleId || saleId === seenSaleId) return;
     seenSaleId = saleId;
     // Not cleared on cleanup: StrictMode's second effect run is then a no-op, not a cancelled print.
-    if (enabled) setTimeout(() => { print(); afterRef.current?.(); }, AUTO_PRINT_SETTLE_MS);
+    if (enabled) setTimeout(() => {
+      const promise = print();
+      if (promise) { promise.catch(() => {}); setJob({ owner, promise }); }
+      afterRef.current?.();
+    }, AUTO_PRINT_SETTLE_MS);
     else afterRef.current?.();
-  }, [saleId, enabled, print]);
+  }, [saleId, enabled, print, owner]);
+  return job?.owner === owner ? job.promise : null;
 }

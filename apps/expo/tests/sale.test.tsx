@@ -14,6 +14,7 @@ import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
 import { formatDate } from '../lib/format-date';
 import { useOutboxContext } from '../lib/outbox-context';
 import { loadReceiptPrinter, saveReceiptPrinter, saveReceiptTemplate } from '../lib/receipt-templates';
+import { savePrintingSettings } from '../lib/printing-settings';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
 import { sessionFixture } from './session-fixture';
@@ -475,6 +476,19 @@ describe('the paid screen network receipt', () => {
     expect(Buffer.from(receipt, 'hex').toString('latin1')).toContain('Shirt');
     expect(receipt).not.toContain('101401');
     expect(receipt).not.toContain('1b70');
+    expect(dialog).not.toHaveBeenCalled();
+  });
+
+  it('shows a failed network auto-print without opening the print dialog', async () => {
+    savePrintingSettings(localStorage, session.baseUrl, { autoPrintReceipt: true });
+    saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
+    const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+    vi.stubGlobal('fetch', async (url: string, init?: RequestInit) => {
+      if (String(url).includes('/epos/')) throw new TypeError('Failed to fetch');
+      return requests(url, init);
+    });
+    await completeSale('external');
+    expect((await screen.findByTestId('paid-print-status')).textContent).toBe("Couldn't print. Try again.");
     expect(dialog).not.toHaveBeenCalled();
   });
 

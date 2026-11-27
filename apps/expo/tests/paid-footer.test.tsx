@@ -69,6 +69,31 @@ describe('PaidFooter', () => {
     expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
   });
 
+  it('holds Print during an auto-print and offers a retry when it fails', async () => {
+    let fail!: (error: Error) => void;
+    const autoPrint = new Promise<void>((_resolve, reject) => { fail = reject; });
+    const print = vi.fn();
+    render(<PaidFooter autoPrint={autoPrint} print={print} newSale={vi.fn()} />);
+    expect(printButton().getAttribute('aria-disabled')).toBe('true');
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+    await act(async () => { fail(new Error('no dialog')); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+    expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
+    fireEvent.click(printButton());
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+  });
+
+  it('releases Print without a message when an auto-print succeeds', async () => {
+    let finish!: () => void;
+    const autoPrint = new Promise<void>((resolve) => { finish = resolve; });
+    render(<PaidFooter autoPrint={autoPrint} print={vi.fn()} newSale={vi.fn()} />);
+    expect(printButton().getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { finish(); });
+    expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
+  });
+
   it('prints a thermal page through the print dialog queue', async () => {
     vi.mocked(printSalePage).mockResolvedValue();
     const builder = createOrderBuilder({ currency: 'EUR', taxContext: { pricesIncludeTax: false, getTaxRatePpm: () => 0 } });
