@@ -1411,7 +1411,7 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
     expect(lastLine.compareDocumentPosition(screen.getByTestId('cart-footer')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     openMenu('Add Discount');
-    fireEvent.click(within(screen.getByTestId('cart-add-dialog')).getByRole('button', { name: 'Cancel' }));
+    fireEvent.click(within(screen.getByTestId('cart-add-discount-sheet')).getByRole('button', { name: 'Cancel' }));
     const footer = within(screen.getByTestId('cart-footer'));
     expect(footer.getByTestId('cart-checkout').textContent).toBe('Checkout €15.00');
     expect(footer.queryByText('Total')).toBeNull(); // v2's cart: the total is on Checkout, no Total row
