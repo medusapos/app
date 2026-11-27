@@ -1,18 +1,11 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { PortalHost } from '@tallyui/primitives';
 import { orderReference } from '@tallyui/components';
 import { createOrderBuilder, finalizeOrder, type PosOrder, type PrinterProfile } from '@tallyui/pos';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ReceiptPickers, ThermalPaidReceipt } from '../components/receipt-pickers';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ReceiptPickers, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
 import { BUILT_IN_PRINTER } from '../lib/printers';
-import { printSalePage } from '../lib/receipt-templates';
-
-// The print dialog, observed; the rest of the module (templates, page) stays real.
-vi.mock('../lib/receipt-templates', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../lib/receipt-templates')>(),
-  printSalePage: vi.fn(),
-}));
 
 afterEach(cleanup);
 
@@ -55,40 +48,31 @@ describe('ThermalPaidReceipt', () => {
     builder.addPayment({ method: 'cash', amountMinor: 1500 });
     return builder.getSnapshot();
   };
-  const mount = (newSale = vi.fn()) => {
-    render(<ThermalPaidReceipt paper="80mm" order={order()} store={{ name: 'Corner Shop', address: '1 High St' }}
-      cashier="Brenda" registerId="register-1" footerSlot={<span>email slot</span>} newSale={newSale} />);
-    return newSale;
+  const mount = () => {
+    const page = thermalPaidPage({ paper: '80mm', order: order(), store: { name: 'Corner Shop', address: '1 High St' },
+      cashier: 'Brenda', registerId: 'register-1' });
+    render(<ThermalPaidReceipt page={page} />);
+    return page;
   };
-  beforeEach(() => { vi.mocked(printSalePage).mockReset(); });
 
-  it('shows the sale as the template prints it, with the email slot', () => {
-    mount();
+  // The paid footer (paid-footer.test.tsx) now holds the email slot, Print receipt and New sale; the frame holds none.
+  it('shows the sale as the template prints it, with no buttons of its own', () => {
+    const page = mount();
     const srcdoc = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc') ?? '';
+    expect(srcdoc).toBe(page);
     expect(srcdoc).toContain('Blue shirt');
     expect(srcdoc).toContain('Corner Shop');
-    expect(screen.getByText('email slot')).toBeTruthy();
+    expect(screen.queryByRole('button')).toBeNull();
   });
 
-  it('prints the page through the print dialog queue', async () => {
-    vi.mocked(printSalePage).mockResolvedValue();
-    mount();
-    await act(async () => { fireEvent.click(screen.getByTestId('receipt-thermal-print')); });
-    expect(printSalePage).toHaveBeenCalledWith(screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc'));
-    expect(screen.queryByText("Couldn't print. Try again.")).toBeNull();
-  });
-
-  it('says so when the print fails', async () => {
-    vi.mocked(printSalePage).mockRejectedValue(new Error('no dialog'));
-    mount();
-    await act(async () => { fireEvent.click(screen.getByTestId('receipt-thermal-print')); });
-    expect(screen.getByText("Couldn't print. Try again.")).toBeTruthy();
-  });
-
-  it('starts a new sale', () => {
-    const newSale = mount();
-    fireEvent.click(screen.getByText('New sale'));
-    expect(newSale).toHaveBeenCalledTimes(1);
+  it('builds the page with the store name, the line and the posOrder reference', () => {
+    const sent = order();
+    const pos: PosOrder = { ...finalizeOrder(sent), id: 'pos-order-till-ab12cd34', syncStatus: 'pending' };
+    const page = thermalPaidPage({ paper: '80mm', order: sent, posOrder: pos, store: { name: 'Corner Shop' },
+      cashier: 'Brenda', registerId: 'register-1' });
+    expect(page).toContain('Corner Shop');
+    expect(page).toContain('Blue shirt');
+    expect(page).toContain(orderReference(pos));
   });
 
   // The sale's PosOrder, under an id of its own so the page shows which id it prints.
@@ -96,8 +80,8 @@ describe('ThermalPaidReceipt', () => {
   const posOrder = (serverRefs?: PosOrder['serverRefs']): PosOrder =>
     ({ ...finalizeOrder(sent), id: 'pos-order-till-ab12cd34', syncStatus: serverRefs ? 'applied' : 'pending', serverRefs });
   const frame = (pos?: PosOrder) => {
-    render(<ThermalPaidReceipt paper="80mm" order={sent} posOrder={pos} store={{ name: 'Corner Shop' }}
-      cashier="Brenda" registerId="register-1" newSale={vi.fn()} />);
+    render(<ThermalPaidReceipt page={thermalPaidPage({ paper: '80mm', order: sent, posOrder: pos, store: { name: 'Corner Shop' },
+      cashier: 'Brenda', registerId: 'register-1' })} />);
     return screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc') ?? '';
   };
 

@@ -11,6 +11,7 @@ import { useSession } from '../lib/session-context';
 import { sessionFixture } from './session-fixture';
 import { fetchStoreSettings } from '../lib/store-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
+import { printSalePage } from '../lib/receipt-templates';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import { openRegisterFixture } from './register-fixture';
 import { setWindowWidth } from './window-width';
@@ -24,6 +25,10 @@ vi.mock('../lib/outbox-context', () => ({ useOutboxContext: vi.fn() }));
 vi.mock('../lib/use-replicated-products', () => ({ useReplicatedProducts: vi.fn() }));
 vi.mock('../lib/register-context', async (original) => ({
   ...await original<typeof import('../lib/register-context')>(), useRegister: vi.fn(),
+}));
+// The thermal print queue, observed; the templates and the page stay real.
+vi.mock('../lib/receipt-templates', async (original) => ({
+  ...await original<typeof import('../lib/receipt-templates')>(), printSalePage: vi.fn(),
 }));
 vi.mock('../lib/store-settings', async (original) => ({
   ...await original<typeof import('../lib/store-settings')>(), fetchStoreSettings: vi.fn(),
@@ -193,6 +198,40 @@ it('shows the screen-only paid summary beside the receipt on wide windows', asyn
   expect(screen.getByLabelText('Total: €24.00')).toBeTruthy();
   expect(screen.getByRole('button', { name: 'New sale' })).toBeTruthy();
   expect(screen.getByRole('button', { name: 'Print receipt' })).toBeTruthy();
+  // v2's footer bar is the left pane's, never the summary column's.
+  const footer = screen.getByTestId('paid-footer');
+  expect(summary.parentElement!.contains(footer)).toBe(false);
+  expect(screen.getByTestId('paid-pane').contains(footer)).toBe(true);
+}, 15000);
+
+// v2's footer bar: one Print receipt and one New sale, with Email receipt, along the bottom and outside the receipt card.
+it('puts Email receipt, Print receipt and New sale in the paid footer, not in the receipt', async () => {
+  await startSplit();
+  tender('cash', '30.00');
+  await complete();
+  const footer = screen.getByTestId('paid-footer');
+  const card = screen.getByTestId('receipt-order').parentElement!;
+  for (const name of ['Print receipt', 'New sale']) {
+    const buttons = screen.getAllByRole('button', { name });
+    expect(buttons).toHaveLength(1);
+    expect(footer.contains(buttons[0])).toBe(true);
+    expect(card.contains(buttons[0])).toBe(false);
+  }
+  expect(screen.queryByTestId('receipt-footer')).toBeNull();
+  expect(footer.contains(screen.getByTestId('receipt-email-open'))).toBe(true);
+  expect(card.contains(screen.getByTestId('receipt-email-open'))).toBe(false);
+}, 15000);
+
+it('starts a new sale from the ✕ at the top of the paid screen', async () => {
+  await startSplit();
+  tender('cash', '24.00');
+  await complete();
+  const close = screen.getByTestId('paid-close');
+  expect(close.getAttribute('aria-label')).toBe('Close');
+  expect(close.closest('[data-print="hide"]')).toBeTruthy();
+  await act(async () => { fireEvent.click(close); });
+  expect(screen.queryByTestId('paid-footer')).toBeNull();
+  expect(screen.getByText('Tap a product to start a sale')).toBeTruthy();
 }, 15000);
 
 // The keypad tender pane's steps exceed the 5 s default on CI runners.
@@ -229,4 +268,67 @@ it('keeps the receipt without a paid summary at column widths', async () => {
   expect(screen.queryByTestId('paid-summary')).toBeNull();
   expect(screen.queryByTestId('paid-layout')).toBeNull();
   expect(screen.getByRole('button', { name: 'New sale' })).toBeTruthy();
+  const footer = screen.getByTestId('paid-footer');
+  expect(screen.getAllByRole('button', { name: 'Print receipt' })).toEqual([within(footer).getByTestId('paid-print')]);
+  expect(screen.getAllByRole('button', { name: 'New sale' })).toEqual([within(footer).getByTestId('paid-new-sale')]);
+  expect(screen.getByTestId('paid-close')).toBeTruthy();
+}, 15000);
+
+// The paid screen's Print receipt: Standard prints the window, a thermal template prints its own page through the queue.
+async function paidCash() {
+  await startSplit();
+  tender('cash', '30.00');
+  await complete();
+}
+async function chooseTemplate(id: 'standard' | 'thermal-80mm' | 'thermal-58mm') {
+  await act(async () => { fireEvent.click(screen.getByTestId('receipt-template-select')); });
+  await act(async () => { fireEvent.click(screen.getByTestId(`receipt-template-option-${id}`)); });
+}
+const printButton = () => screen.getByTestId('paid-print');
+
+it('prints the window once from Print receipt on the Standard template', async () => {
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  await paidCash();
+  print.mockClear();
+  await act(async () => { fireEvent.click(printButton()); });
+  expect(print).toHaveBeenCalledTimes(1);
+  expect(printSalePage).not.toHaveBeenCalled();
+}, 15000);
+
+it('prints the 80mm page the frame shows through the print queue, not the window', async () => {
+  const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+  vi.mocked(printSalePage).mockResolvedValue();
+  await paidCash();
+  await chooseTemplate('thermal-80mm');
+  const srcdoc = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
+  expect(srcdoc).toContain('Shirt');
+  print.mockClear();
+  await act(async () => { fireEvent.click(printButton()); });
+  expect(printSalePage).toHaveBeenCalledTimes(1);
+  expect(printSalePage).toHaveBeenCalledWith(srcdoc);
+  expect(print).not.toHaveBeenCalled();
+}, 15000);
+
+it("clears a failed thermal print's message when the template changes", async () => {
+  vi.spyOn(window, 'print').mockImplementation(() => {});
+  vi.mocked(printSalePage).mockRejectedValue(new Error('no dialog'));
+  await paidCash();
+  await chooseTemplate('thermal-80mm');
+  await act(async () => { fireEvent.click(printButton()); });
+  expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+  await chooseTemplate('standard');
+  expect(screen.queryByTestId('paid-print-status')).toBeNull();
+}, 15000);
+
+it('does not hold Print on the new template while a thermal print is still pending', async () => {
+  vi.spyOn(window, 'print').mockImplementation(() => {});
+  vi.mocked(printSalePage).mockReturnValue(new Promise<void>(() => {}));
+  await paidCash();
+  await chooseTemplate('thermal-80mm');
+  await act(async () => { fireEvent.click(printButton()); });
+  expect(printButton().getAttribute('aria-disabled')).toBe('true');
+  await chooseTemplate('thermal-58mm');
+  expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
+  await chooseTemplate('standard');
+  expect(printButton().getAttribute('aria-disabled')).not.toBe('true');
 }, 15000);

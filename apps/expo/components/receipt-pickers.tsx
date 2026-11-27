@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { View } from 'react-native';
-import { Button, orderReference, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text } from '@tallyui/components';
+import { orderReference, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text } from '@tallyui/components';
 import { buildReceiptData, type PosOrder, type PrinterProfile, type ReceiptPaper, type SentOrder } from '@tallyui/pos';
-import { printSalePage, RECEIPT_TEMPLATES, receiptTemplatePage, type ReceiptTemplateId } from '../lib/receipt-templates';
+import { RECEIPT_TEMPLATES, receiptTemplatePage, type ReceiptTemplateId } from '../lib/receipt-templates';
 
 // The built-in's words, as Settings › Printing shows them.
 const printerLabel = (profile: PrinterProfile) => profile.isBuiltIn ? 'Auto — Print dialog' : profile.name;
@@ -42,44 +42,29 @@ export function ReceiptPickers({ templateId, onTemplateChange, printers, topInse
   </View>;
 }
 
-type PrintStatus = 'idle' | 'printing' | 'failed';
-
 // The sale as a thermal template prints it, in place of the Standard receipt: the same buildReceiptData call and config
-// TallyUI's Receipt makes, rendered for the template's paper in a sandboxed frame (as Settings' preview does).
-export function ThermalPaidReceipt({ paper, order, posOrder, store, cashier, registerId, footerSlot, newSale }: {
+// TallyUI's Receipt makes, rendered for the template's paper.
+export function thermalPaidPage({ paper, order, posOrder, store, cashier, registerId }: {
   paper: ReceiptPaper;
   order: SentOrder;
   posOrder?: PosOrder;
   store: { name: string; address?: string };
   cashier: string;
   registerId: string;
-  footerSlot?: ReactNode;
-  newSale: () => void;
-}) {
-  const [status, setStatus] = useState<PrintStatus>('idle');
+}): string {
   const receipt = buildReceiptData(order, {
     storeName: store.name, storeAddress: store.address, cashier, register: registerId,
   });
-  const page = receiptTemplatePage(paper, posOrder
+  return receiptTemplatePage(paper, posOrder
     ? { ...receipt, header: { ...receipt.header, orderNumber: orderReference(posOrder) } } : receipt);
-  const print = () => {
-    setStatus('printing');
-    printSalePage(page).then(() => setStatus('idle'), () => setStatus('failed'));
-  };
-  return <View className="w-full max-w-md self-center gap-3 p-4">
+}
+
+// The thermal page in a sandboxed frame (as Settings' preview does); the paid footer prints it.
+export function ThermalPaidReceipt({ page }: { page: string }) {
+  return <View className="w-full max-w-md self-center p-4">
     <View className="overflow-hidden rounded-md border border-border">
       <iframe srcDoc={page} sandbox="" title="Receipt" data-testid="receipt-thermal-frame"
         style={{ width: '100%', height: 520, border: 0, background: '#fff' }} />
-    </View>
-    {footerSlot ? <View className="items-center border-t border-dashed border-border pt-3">{footerSlot}</View> : null}
-    <View dataSet={{ print: 'hide' }} className="gap-3">
-      <View className="flex-row gap-4">
-        <Button variant="outline" testID="receipt-thermal-print" disabled={status === 'printing'} onPress={print}>
-          <Text>Print receipt</Text>
-        </Button>
-        <Button testID="receipt-thermal-new-sale" onPress={newSale}><Text>New sale</Text></Button>
-      </View>
-      {status === 'failed' ? <Text testID="receipt-thermal-print-status" className="text-sm text-destructive">Couldn't print. Try again.</Text> : null}
     </View>
   </View>;
 }
