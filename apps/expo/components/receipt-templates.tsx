@@ -1,12 +1,16 @@
 import { Fragment, useRef, useState } from 'react';
 import { Platform, useWindowDimensions, View } from 'react-native';
 import {
-  Badge, Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, Text, XIcon,
+  Badge, Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text, XIcon,
 } from '@tallyui/components';
+import type { PrinterProfile } from '@tallyui/pos';
+import { useOutboxOrders } from '../lib/outbox-context';
+import { usePrinterProfiles } from '../lib/printers';
 import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
-import { printReceiptPage, RECEIPT_TEMPLATES, receiptTemplatePage, sampleReceipt } from '../lib/receipt-templates';
+import { printReceiptPage, RECEIPT_TEMPLATES, receiptTemplatePage, sampleReceipt, useReceiptPrinter } from '../lib/receipt-templates';
 import { defaultStorage, type Session } from '../lib/session';
 import { loadCachedSettings } from '../lib/store-settings';
+import { printerLabel, receiptPrintersFor } from './receipt-pickers';
 
 type Template = (typeof RECEIPT_TEMPLATES)[number];
 type PrintStatus = 'idle' | 'printing' | 'sent' | 'failed';
@@ -14,9 +18,27 @@ type PrintStatus = 'idle' | 'printing' | 'sent' | 'failed';
 // A phone stacks the actions under the template name, since TU SettingsRow keeps its action beside the label.
 const PHONE_BREAKPOINT = 600;
 
-// v2's Settings › Printing "Receipt templates": each template, its format and the printer it goes to. A browser till
-// has one printer, the print dialog; a native till has none yet.
+function TemplatePrinterSelect({ session, template, printers }: { session: Session; template: Template; printers: PrinterProfile[] }) {
+  const { printerId, save } = useReceiptPrinter(defaultStorage(), session.baseUrl, template.id);
+  const listed = receiptPrintersFor(template.id, printers);
+  const printer = listed.find((profile) => profile.id === printerId) ?? listed.find((profile) => profile.connectionType === 'system');
+  if (!printer) return null;
+  const testID = `settings-receipt-template-${template.id}-printer`;
+  return <View className="w-56">
+    <Select value={{ value: printer.id, label: printerLabel(printer) }} onValueChange={(option) => { if (option) save(option.value); }}>
+      <SelectTrigger testID={testID} accessibilityLabel={`Printer for ${template.name}`}><SelectValue placeholder="Printer" /></SelectTrigger>
+      <SelectContent>
+        {listed.map((profile) => <SelectItem key={profile.id} testID={`${testID}-option-${profile.id}`} value={profile.id} label={printerLabel(profile)}>
+          <Text>{printerLabel(profile)}</Text>
+        </SelectItem>)}
+      </SelectContent>
+    </Select>
+  </View>;
+}
+
+// v2's Settings › Printing "Receipt templates": each template, its format and the printer it goes to.
 export function ReceiptTemplatesGroup({ session }: { session: Session }) {
+  const printers = usePrinterProfiles(useOutboxOrders());
   const web = Platform.OS === 'web';
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
   const [preview, setPreview] = useState<{ template: Template; page: string } | null>(null);
@@ -47,13 +69,14 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
     );
   };
   return <SettingsGroup title="Receipt templates" testID="settings-receipt-templates"
-    description="Each template and the printer it prints to. Sales print the Standard Receipt.">
+    description="Choose which printer each template prints to.">
     {RECEIPT_TEMPLATES.map((template, index) => {
       const actions = <>
         <Badge variant="secondary" label={template.tag} />
-        <Text testID={`settings-receipt-template-${template.id}-printer`} className="text-right text-sm text-foreground">
-          {web ? 'Auto — Print dialog' : 'Not available on this device'}
-        </Text>
+        {web ? <TemplatePrinterSelect session={session} template={template} printers={printers} /> :
+          <Text testID={`settings-receipt-template-${template.id}-printer`} className="text-right text-sm text-foreground">
+            Not available on this device
+          </Text>}
         {web && template.paper ? <Button variant="outline" size="sm" testID={`settings-receipt-template-${template.id}-preview`}
           accessibilityLabel={`Preview ${template.name}`} onPress={() => open(template)}>
           <Text>Preview</Text>
