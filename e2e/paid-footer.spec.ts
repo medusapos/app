@@ -119,3 +119,55 @@ test('a receipt sent to a long address stays inside the phone', async ({ page })
   const email = await box(page, 'receipt-email-open');
   expect(email.x + email.width).toBeLessThanOrEqual(390);
 });
+
+// #658: the paid screen's thermal frame at a viewport size, once its page has loaded and the frame has fitted it.
+async function thermalFrame(page: Page, templateId: string, size: { width: number; height: number }) {
+  await paidWithChange(page);
+  await page.setViewportSize(size);
+  await page.getByTestId('receipt-template-select').click();
+  await page.getByTestId(`receipt-template-option-${templateId}`).click();
+  const frame = page.getByTestId('receipt-thermal-frame');
+  await expect(frame).toBeVisible();
+  const inside = (await (await frame.elementHandle())!.contentFrame())!;
+  await inside.waitForLoadState('load');
+  await expect(inside.locator('body > div').first()).toBeVisible();
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  // The frame's drawn box, its applied scale (drawn width over layout width) and the bordered box that clips it;
+  // height is the drawn height the clip shows, 520 whatever the scale.
+  const outer = await frame.evaluate((el) => {
+    const drawn = el.getBoundingClientRect();
+    const clip = el.parentElement!;
+    return { left: drawn.left, right: drawn.right, scale: drawn.width / el.offsetWidth,
+      visible: Math.min(drawn.width, clip.clientWidth), height: Math.min(drawn.height, clip.clientHeight) };
+  });
+  const doc = await inside.evaluate(() => ({
+    pageRight: Math.max(...Array.from(document.body.children, (el) => el.getBoundingClientRect().right)),
+    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
+  }));
+  return { ...outer, ...doc };
+}
+
+test('the 80mm thermal page fits a phone frame whole, scaled down', async ({ page }) => {
+  const fit = await thermalFrame(page, 'thermal-80mm', { width: 390, height: 844 });
+  expect(Math.abs(fit.height - 520)).toBeLessThanOrEqual(1);
+  expect(fit.pageRight * fit.scale).toBeLessThanOrEqual(fit.visible + 0.5);
+  expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+  expect(fit.left).toBeGreaterThanOrEqual(0);
+  expect(fit.right).toBeLessThanOrEqual(390);
+  expect(fit.scale).toBeLessThan(1);
+});
+
+test('the 80mm thermal page shows unscaled on a desktop', async ({ page }) => {
+  const fit = await thermalFrame(page, 'thermal-80mm', { width: 1280, height: 720 });
+  expect(Math.abs(fit.height - 520)).toBeLessThanOrEqual(1);
+  expect(fit.scale).toBeCloseTo(1, 3);
+  expect(fit.pageRight).toBeLessThanOrEqual(fit.visible + 0.5);
+});
+
+test('the 58mm thermal page fits a phone frame unscaled', async ({ page }) => {
+  const fit = await thermalFrame(page, 'thermal-58mm', { width: 390, height: 844 });
+  expect(Math.abs(fit.height - 520)).toBeLessThanOrEqual(1);
+  expect(fit.scale).toBeCloseTo(1, 3);
+  expect(fit.pageRight).toBeLessThanOrEqual(fit.visible + 0.5);
+  expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+});
