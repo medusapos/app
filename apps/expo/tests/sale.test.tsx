@@ -478,6 +478,19 @@ describe('the paid screen network receipt', () => {
     expect(dialog).not.toHaveBeenCalled();
   });
 
+  it('prints a 58mm sale to Counter at 32 columns', async () => {
+    saveReceiptTemplate(localStorage, session.baseUrl, 'thermal-58mm');
+    saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-58mm', 'counter');
+    await completeSale('external');
+    await act(async () => { click('Print receipt'); });
+    const calls = eposCalls();
+    expect(calls).toHaveLength(1);
+    const hex = String(calls[0]![1]?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]!;
+    const lines = Buffer.from(hex, 'hex').toString('latin1').split('\n');
+    expect(lines).toContain('-'.repeat(32));
+    expect(lines).not.toContain('-'.repeat(42));
+  });
+
   it('prints the same order reference as the thermal page instead of the full sale id', async () => {
     saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
     await completeSale('external');
