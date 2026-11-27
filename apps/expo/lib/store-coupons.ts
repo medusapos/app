@@ -19,15 +19,16 @@ export async function readStoreCoupons(session: Pick<Session, 'baseUrl' | 'token
   if (pluginContract < COUPON_LIST_PLUGIN_CONTRACT) return null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    const controller = new AbortController();
     const query = currency === undefined ? '' : `?currency=${encodeURIComponent(currency)}`;
     const body = await Promise.race([
-      fetchImpl(`${session.baseUrl}/tally/v1/promotions${query}`, { method: 'GET', headers: authHeaders(session.token) })
+      fetchImpl(`${session.baseUrl}/tally/v1/promotions${query}`, { method: 'GET', headers: authHeaders(session.token), signal: controller.signal })
         .then(response => response.ok ? response.json() : null),
-      new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), timeoutMs); }),
+      new Promise<null>(resolve => { timer = setTimeout(() => { controller.abort(); resolve(null); }, timeoutMs); }),
     ]);
-    if (!body || typeof body.limit !== 'number' || typeof body.truncated !== 'boolean' ||
-      !Array.isArray(body.coupons) || !body.coupons.every(isCoupon)) return null;
-    const coupons = body.coupons.map(({ code, label, type, value, currency, endsAt }: StoreCoupon) =>
+    if (!body || typeof body !== 'object' || typeof body.limit !== 'number' || typeof body.truncated !== 'boolean' ||
+      !Array.isArray(body.coupons)) return null;
+    const coupons = body.coupons.filter(isCoupon).map(({ code, label, type, value, currency, endsAt }: StoreCoupon) =>
       ({ code, label, type, value, currency, endsAt }));
     return { coupons, truncated: body.truncated };
   } catch {

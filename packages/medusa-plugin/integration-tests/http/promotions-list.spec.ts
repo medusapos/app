@@ -45,6 +45,7 @@ medusaIntegrationTestRunner({
       const buyRule = { attribute: 'items.product.id', operator: 'in' as const, values: [variant.product_id!] }
       await promotions.createPromotions([
         { ...fixed('usable'), rules: [{ attribute: 'sales_channel_id', operator: 'in', values: [data.channelId] }] },
+        { ...fixed('usd-percent'), application_method: { type: 'percentage', target_type: 'items', allocation: 'across', value: 10, currency_code: 'usd' } },
         { ...fixed('automatic'), is_automatic: true }, { ...fixed('inactive'), status: 'inactive' },
         { ...fixed('buyget'), type: 'buyget', application_method: { type: 'percentage', target_type: 'items', allocation: 'each',
           value: 100, max_quantity: 1, buy_rules_min_quantity: 1, apply_to_quantity: 1, buy_rules: [buyRule], target_rules: [buyRule] } },

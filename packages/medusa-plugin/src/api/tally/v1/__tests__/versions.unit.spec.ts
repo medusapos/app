@@ -30,7 +30,7 @@ it('accepts supported register versions, subject to the optional minimum', () =>
 })
 
 // The connector gates allChannels=true on plugin contract 4 or later; the app gates Refund on 5 (ADR 0026).
-it('V1: advertises plugin contract 7 and order.refund [1] on /info', async () => {
+it('V1: advertises plugin contract 8 and order.refund [1] on /info', async () => {
   expect(PLUGIN_CONTRACT).toBe(8)
   expect(SUPPORTED_ORDER_REFUND_VERSIONS).toEqual([1])
   const req = { scope: { resolve: () => ({ getPluginOptions: () => ({}), customerDisplay: () => undefined }) } }
