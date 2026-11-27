@@ -1,6 +1,6 @@
 import '../global.css';
 import '../lib/app-store-dump';
-import { Stack } from 'expo-router';
+import { Slot, Stack, usePathname } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { PortalHost } from '@tallyui/primitives';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -55,6 +55,12 @@ function GatedApp() {
 }
 
 export default function RootLayout() {
+  // The display device has no login, so it renders outside the till's session and gates.
+  if (usePathname() === '/display') return (
+    <AppScale><AppFontProvider><ClearLocalDataGate>
+      <StatusBar style="auto" /><Slot /><PortalHost />
+    </ClearLocalDataGate></AppFontProvider></AppScale>
+  );
   // Above PortalHost so dialogs and sheets get the chosen font too.
   return (
     <AppScale><AppFontProvider><ClearLocalDataGate><SessionProvider>
