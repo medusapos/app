@@ -9,6 +9,11 @@ import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { saveCachedSettings, type StoreSettings } from '../lib/store-settings';
 import { OrderDetailSheet } from '../components/order-detail-sheet';
+import { loadReceiptTemplate, printSalePage, saveReceiptTemplate } from '../lib/receipt-templates';
+
+vi.mock('../lib/receipt-templates', async (original) => ({
+  ...await original<typeof import('../lib/receipt-templates')>(), printSalePage: vi.fn(),
+}));
 
 const settings: StoreSettings = {
   storeName: 'Default Store', currency: 'EUR',
@@ -17,6 +22,7 @@ const settings: StoreSettings = {
 const PRINT_STYLE_ID = 'order-receipt-print-style';
 
 beforeEach(() => {
+  vi.mocked(printSalePage).mockClear();
   const data = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => data.get(key) ?? null,
@@ -43,6 +49,64 @@ describe('order detail Receipt (row 10.3)', () => {
     return <SessionProvider><OrderDetailSheet order={order} onClose={vi.fn()} formatDate={formatDate} onRetry={vi.fn()}
       onFlush={vi.fn()} /><PortalHost /></SessionProvider>;
   }
+
+  it('with no saved template the reprint is the Standard receipt and shows the Template picker on web', async () => {
+    const order = sale();
+    render(sheet(order));
+    fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+    expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${orderReference(order)}`);
+    expect(screen.getByTestId('receipt-template-select').textContent).toContain('Standard Receipt');
+    expect(screen.queryByTestId('receipt-printer-select')).toBeNull();
+    expect(screen.queryByTestId('receipt-thermal-frame')).toBeNull();
+  });
+
+  it('with Thermal 80mm saved, the reprint shows the 80mm page of this sale and prints it through the queue', async () => {
+    saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+    const print = vi.spyOn(window, 'print').mockImplementation(() => {});
+    const order = sale();
+    render(sheet(order));
+    fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+    const page = screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc');
+    expect(page).toContain('width: 48ch');
+    expect(page).toContain(orderReference(order));
+    expect(page).not.toContain(order.id);
+    expect(page).toContain('Blue shirt');
+    expect(page).toContain(settings.storeName);
+    expect(page).toContain(settings.location.addressLine);
+    expect(page).toContain('Copy 1');
+    expect(page).not.toContain('Cashier');
+    fireEvent.click(screen.getByTestId('paid-print'));
+    expect(printSalePage).toHaveBeenCalledOnce();
+    expect(printSalePage).toHaveBeenCalledWith(page);
+    expect(print).not.toHaveBeenCalled();
+  });
+
+  it("a synced sale's thermal reprint prints the same order reference as its other receipts", async () => {
+    saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+    const order = { ...sale(), serverRefs: { orderId: 'server-order', displayId: '1042', totalMinor: 1200 } };
+    render(sheet(order));
+    fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+    expect(screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc')).toContain(orderReference(order));
+  });
+
+  it('Back on a thermal reprint returns to the order detail', async () => {
+    saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
+    render(sheet(sale()));
+    fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+    const back = screen.getByTestId('paid-new-sale');
+    expect(back.textContent).toBe('Back');
+    fireEvent.click(back);
+    expect(await screen.findByTestId('order-detail-receipt')).toBeTruthy();
+  });
+
+  it("choosing 58mm in the reprint's picker shows the 58mm page and saves the choice", async () => {
+    render(sheet(sale()));
+    fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+    fireEvent.click(screen.getByTestId('receipt-template-select'));
+    fireEvent.click(await screen.findByTestId('receipt-template-option-thermal-58mm'));
+    expect(screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc')).toContain('width: 32ch');
+    expect(loadReceiptTemplate(localStorage, 'https://store.test')).toBe('thermal-58mm');
+  });
 
   it('Receipt swaps the detail for TallyUI\'s receipt of the sale, with the cached store name', async () => {
     const order = sale();

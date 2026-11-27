@@ -70,7 +70,7 @@ import { useProductSettings } from '../lib/product-settings';
 import { useProductCollections } from '../lib/product-collections';
 import { listProductCollections, listProductTags, productCollectionIds } from '../lib/products-area';
 import { isOnSale, loadSaleFilters, saleFilterItems, saveSaleFilters, type SaleFilters } from '../lib/sale-filters';
-import { printSalePage, RECEIPT_TEMPLATES, type ReceiptTemplateId } from '../lib/receipt-templates';
+import { printSalePage, RECEIPT_TEMPLATES, useReceiptTemplate } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { cameraScanSupported } from '../lib/camera-scan';
@@ -154,8 +154,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [registerId] = useState(() => getDeviceId(defaultStorage(), REGISTER_ID_KEY));
   const topInset = useContext(StripHeightContext);
   const { record, isStored, state: outboxState, recent, savesInFlight, orders } = useOutboxContext();
-  // v2's paid-screen Template and Printer: the choice lasts until the app reloads, across sales; never saved.
-  const [receiptTemplateId, setReceiptTemplateId] = useState<ReceiptTemplateId>('standard');
+  // The paid screen and Orders share this till's saved template for the store.
+  const { templateId: receiptTemplateId, save: setReceiptTemplateId } = useReceiptTemplate(defaultStorage(), session.baseUrl);
   const printers = usePrinterProfiles(orders);
   const stockWarned = useRef(new Set<string>());
   useEffect(() => {

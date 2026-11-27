@@ -9,10 +9,11 @@ type PrintStatus = 'idle' | 'printing' | 'failed';
  * screen only, not printed. A print that returns a promise (a thermal page through the print queue) holds Print until it
  * settles and says so when it fails; the plain window.print returns nothing and shows no status.
  */
-export function PaidFooter({ emailReceipt, print, newSale }: {
+export function PaidFooter({ emailReceipt, print, newSale, doneLabel = 'New sale' }: {
   emailReceipt?: ReactNode;
   print: () => void | Promise<void>;
   newSale: () => void;
+  doneLabel?: string;
 }) {
   const [status, setStatus] = useState<PrintStatus>('idle');
   const onPrint = () => {
@@ -27,7 +28,7 @@ export function PaidFooter({ emailReceipt, print, newSale }: {
     <Button variant="outline" testID="paid-print" disabled={status === 'printing'} onPress={onPrint}>
       <Text>Print receipt</Text>
     </Button>
-    <Button testID="paid-new-sale" onPress={newSale}><Text>New sale</Text></Button>
+    <Button testID="paid-new-sale" onPress={newSale}><Text>{doneLabel}</Text></Button>
     {status === 'failed' ? <Text testID="paid-print-status" className="w-full text-sm text-destructive">Couldn't print. Try again.</Text> : null}
   </View>;
 }

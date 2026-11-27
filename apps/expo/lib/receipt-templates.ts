@@ -1,7 +1,9 @@
+import { useSyncExternalStore } from 'react';
 import {
   createPrintQueue, createSystemPrintTransport, RECEIPT_SCHEMA_VERSION, renderReceiptHtml, SYSTEM_PRINTER_ID,
   type PrintTransport, type ReceiptData, type ReceiptPaper,
 } from '@tallyui/pos';
+import type { SessionStorage } from './session';
 
 export type ReceiptTemplateId = 'standard' | 'thermal-80mm' | 'thermal-58mm';
 
@@ -12,6 +14,32 @@ export const RECEIPT_TEMPLATES: readonly { id: ReceiptTemplateId; name: string; 
   { id: 'thermal-80mm', name: 'Thermal Receipt (80mm)', tag: 'Thermal 80mm', paper: '80mm' },
   { id: 'thermal-58mm', name: 'Thermal Receipt (58mm)', tag: 'Thermal 58mm', paper: '58mm' },
 ];
+
+// v2 keeps the template choice per device; Medusa has no store setting for it.
+const PREFIX = 'medusapos.receipt-template.';
+const listeners = new Set<() => void>();
+const subscribe = (listener: () => void) => {
+  listeners.add(listener);
+  return () => { listeners.delete(listener); };
+};
+
+export function loadReceiptTemplate(storage: SessionStorage | null, baseUrl: string): ReceiptTemplateId {
+  try {
+    const id: unknown = JSON.parse(storage?.getItem(PREFIX + baseUrl) ?? 'null');
+    return RECEIPT_TEMPLATES.find((template) => template.id === id)?.id ?? 'standard';
+  } catch { return 'standard'; }
+}
+
+export function saveReceiptTemplate(storage: SessionStorage | null, baseUrl: string, id: ReceiptTemplateId): void {
+  storage?.setItem(PREFIX + baseUrl, JSON.stringify(id));
+  listeners.forEach((listener) => listener());
+}
+
+export function useReceiptTemplate(storage: SessionStorage | null, baseUrl: string) {
+  const read = () => loadReceiptTemplate(storage, baseUrl);
+  const templateId = useSyncExternalStore(subscribe, read, read);
+  return { templateId, save: (id: ReceiptTemplateId) => saveReceiptTemplate(storage, baseUrl, id) };
+}
 
 // A fixed sale for previews and test prints: two lines, paid in cash with change, no tax.
 export function sampleReceipt(store: { name: string; address?: string; currency: string }, now: Date = new Date()): ReceiptData {

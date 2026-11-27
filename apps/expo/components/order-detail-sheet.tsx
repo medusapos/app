@@ -11,12 +11,15 @@ import {
 import { formatReceiptDate } from '../lib/format-date';
 import { ordersTableCells } from '../lib/orders-table';
 import { PARTIAL_REFUND_PLUGIN_CONTRACT } from '../lib/plugin-contract';
+import { printSalePage, RECEIPT_TEMPLATES, receiptTemplatePage, useReceiptTemplate } from '../lib/receipt-templates';
 import { refundFormInput } from '../lib/refund';
 import { defaultStorage } from '../lib/session';
 import { useSession } from '../lib/session-context';
 import { loadCachedSettings } from '../lib/store-settings';
 import { OrderRefundDialog, useRefundRecords } from './order-refund-dialog';
 import { OrderRefundModal } from './order-refund-modal';
+import { PaidFooter } from './paid-footer';
+import { ReceiptPickers, ThermalPaidReceipt } from './receipt-pickers';
 
 // While a reprint shows, a print keeps only it: other branches collapse, its ancestors stop positioning, clipping and
 // painting, and it moves to the page's top left. Inert without a reprint on the page, so the paid screen prints as before.
@@ -106,6 +109,16 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
   useEffect(() => { if (reprint) injectReceiptPrintStyle(); }, [reprint]);
   const money = (amount: number) => (order ? formatMoney({ amount, currency: order.currency }) : undefined) ?? '';
   const settings = session?.baseUrl ? loadCachedSettings(defaultStorage(), session.baseUrl) : null;
+  const { templateId, save } = useReceiptTemplate(defaultStorage(), session?.baseUrl ?? '');
+  const pickers = Platform.OS === 'web';
+  const paper = pickers ? RECEIPT_TEMPLATES.find((template) => template.id === templateId)?.paper : undefined;
+  // A PosOrder keeps no cashier, so the reprint prints no Cashier line.
+  const receipt = reprint && order ? buildReceiptDataFromPosOrder(order, {
+    storeName: settings?.storeName ?? '', storeAddress: settings?.location.addressLine,
+  }) : null;
+  const page = receipt && paper && order ? receiptTemplatePage(paper, {
+    ...receipt, header: { ...receipt.header, orderNumber: orderReference(order) },
+  }) : null;
   return <><Dialog open={order !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
     {order ? <DialogContent side="right" testID="order-detail-sheet" className="flex-col p-0">
       <View className="flex-row items-center justify-end px-4 pt-4">
@@ -116,10 +129,12 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
           </IconButton>
         </DialogClose>
       </View>
-      {reprint ? <ScrollView testID="order-detail-receipt-view" dataSet={{ print: 'receipt' }} className="flex-1">
-        {/* A PosOrder keeps no cashier, so the reprint prints no Cashier line. */}
-        <Receipt receipt={buildReceiptDataFromPosOrder(order, { storeName: settings?.storeName ?? '', storeAddress: settings?.location.addressLine })}
-          posOrder={order} taxLabel={receiptTaxLabel} formatDate={formatReceiptDate} doneLabel="Back" newSale={() => setReprint(false)} />
+      {receipt ? <ScrollView testID="order-detail-receipt-view" dataSet={{ print: 'receipt' }} className="flex-1">
+        {pickers && <ReceiptPickers templateId={templateId} onTemplateChange={save} printers={[]} />}
+        {page ? <><ThermalPaidReceipt page={page} />
+          <PaidFooter key={templateId} print={() => printSalePage(page)} doneLabel="Back" newSale={() => setReprint(false)} />
+        </> : <Receipt receipt={receipt} posOrder={order} taxLabel={receiptTaxLabel} formatDate={formatReceiptDate}
+          doneLabel="Back" newSale={() => setReprint(false)} />}
       </ScrollView> : <OrderDetail testID="order-detail" orderNumber={`Order ${orderReference(order)}`} status={orderStatusBadge(order)}
         {...orderDetailFigures(order)}
         customerSlot={<View className="gap-1">

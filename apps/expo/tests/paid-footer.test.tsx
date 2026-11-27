@@ -24,6 +24,14 @@ describe('PaidFooter', () => {
   const printButton = () => screen.getByRole('button', { name: 'Print receipt' });
   beforeEach(() => { vi.mocked(printSalePage).mockReset(); });
 
+  it('the done button reads doneLabel when given, New sale otherwise', () => {
+    const props = { print: vi.fn(), newSale: vi.fn() };
+    const { rerender } = render(<PaidFooter {...props} doneLabel="Back" />);
+    expect(screen.getByTestId('paid-new-sale').textContent).toBe('Back');
+    rerender(<PaidFooter {...props} />);
+    expect(screen.getByTestId('paid-new-sale').textContent).toBe('New sale');
+  });
+
   it('holds the email slot, then Print receipt, then New sale, in one print-hidden bar', () => {
     mount();
     const footer = screen.getByTestId('paid-footer');
