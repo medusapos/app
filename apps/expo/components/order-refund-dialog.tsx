@@ -13,14 +13,14 @@ import { useNetworkOnline } from '../lib/use-network-online';
 export const REFUND_IN_PROGRESS = 'This refund is still in progress. Try again in a moment.';
 
 /** This till's refund records for one store order, live from `pos_refunds`. */
-export function useRefundRecords(refunds: PosRefundCollection | undefined, orderId: string | undefined): PosRefund[] {
-  const [records, setRecords] = useState<{ orderId?: string; list: PosRefund[] }>({ list: [] });
+export function useRefundRecords(refunds: PosRefundCollection | undefined, orderId: string | undefined): PosRefund[] | null {
+  const [records, setRecords] = useState<{ refunds: PosRefundCollection; orderId: string; list: PosRefund[] } | null>(null);
   useEffect(() => {
     if (!refunds || !orderId) return;
-    const subscription = refunds.find({ selector: { orderId } }).$.subscribe((docs) => setRecords({ orderId, list: docs.map((doc) => doc.toJSON() as PosRefund) }));
+    const subscription = refunds.find({ selector: { orderId } }).$.subscribe((docs) => setRecords({ refunds, orderId, list: docs.map((doc) => doc.toJSON() as PosRefund) }));
     return () => subscription.unsubscribe();
   }, [refunds, orderId]);
-  return refunds && records.orderId === orderId ? records.list : [];
+  return records && records.refunds === refunds && records.orderId === orderId ? records.list : null;
 }
 
 /** How many of this till's `pos_refunds` the store has applied, live. */
@@ -53,7 +53,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, no
   /** Shown as the first error message: why a refund form handed this refund over unanswered. */
   notice?: string;
 }) {
-  const { register, boundRegisterId, commandTransport } = useRegister();
+  const { commandTransport } = useRegister();
   const online = useNetworkOnline();
   const { lines, shippingMinor, totalMinor, destination, reason } = resume.envelope.payload;
   const restock = lines.every((line) => line.restock);
@@ -69,11 +69,9 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, no
   const label = destination === 'cash' ? 'Cash'
     : [...new Set(tenders.filter((tender) => tender.method !== 'cash').map((tender) => paymentLabel(tender.method)))].join(', ');
   const money = (amount: number) => formatMoney({ amount, currency: order.currency }) ?? '';
-  const sessionId = register.session?.status === 'open' ? register.session.id : null;
-  const ready = !!sessionId && !!boundRegisterId;
 
   async function confirm() {
-    if (inFlight.current || !online || !sessionId || !boundRegisterId) return;
+    if (inFlight.current || !online) return;
     inFlight.current = true;
     setPending(true);
     setMessage('');
@@ -94,7 +92,7 @@ export function OrderRefundDialog({ order, tenders, refunds, resume, onClose, no
     }
   }
 
-  const hold = !ready ? 'Open the register to refund' : !online ? 'Refunds need a connection' : null;
+  const hold = !online ? 'Refunds need a connection' : null;
   return <Dialog open onOpenChange={(next) => { if (!next && !pending) onClose(); }}>
     <DialogContent testID="order-refund-dialog" className="gap-4">
       <DialogTitle>{`Refund order ${order.reference}`}</DialogTitle>
