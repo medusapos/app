@@ -1,4 +1,4 @@
-import { Fragment, useRef, useState } from 'react';
+import { Fragment, useContext, useRef, useState } from 'react';
 import { Platform, useWindowDimensions, View } from 'react-native';
 import {
   Badge, Button, Dialog, DialogClose, DialogContent, DialogTitle, IconButton, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text, XIcon,
@@ -6,7 +6,7 @@ import {
 import type { PrinterProfile } from '@tallyui/pos';
 import { useOutboxOrders } from '../lib/outbox-context';
 import { usePrinterProfiles } from '../lib/printers';
-import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
+import { SettingsFlatContext, SettingsGroup, SettingsRow } from '../lib/settings-layout';
 import { printReceiptPage, RECEIPT_TEMPLATES, receiptTemplatePage, sampleReceipt, useReceiptPrinter } from '../lib/receipt-templates';
 import { defaultStorage, type Session } from '../lib/session';
 import { loadCachedSettings } from '../lib/store-settings';
@@ -24,7 +24,7 @@ function TemplatePrinterSelect({ session, template, printers }: { session: Sessi
   const printer = listed.find((profile) => profile.id === printerId) ?? listed.find((profile) => profile.connectionType === 'system');
   if (!printer) return null;
   const testID = `settings-receipt-template-${template.id}-printer`;
-  return <View className="w-56">
+  return <View className="w-56 max-w-full">
     <Select value={{ value: printer.id, label: printerLabel(printer) }} onValueChange={(option) => { if (option) save(option.value); }}>
       <SelectTrigger testID={testID} accessibilityLabel={`Printer for ${template.name}`}><SelectValue placeholder="Printer" /></SelectTrigger>
       <SelectContent>
@@ -41,6 +41,8 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
   const printers = usePrinterProfiles(useOutboxOrders());
   const web = Platform.OS === 'web';
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
+  // A flat row's actions fill its value column, so the select can shrink; a boxed row's wrap at the select's width.
+  const flat = useContext(SettingsFlatContext);
   const [preview, setPreview] = useState<{ template: Template; page: string } | null>(null);
   const [status, setStatus] = useState<PrintStatus>('idle');
   // Each opening is its own; a print still pending from an earlier opening never shows its outcome here.
@@ -85,7 +87,7 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
       return <Fragment key={template.id}>
         <SettingsRow label={template.name} testID={`settings-receipt-template-${template.id}`}
           divider={index > 0}
-          action={phone ? undefined : <View className="flex-row flex-wrap items-center justify-end gap-3">{actions}</View>} />
+          action={phone ? undefined : <View className={`flex-row flex-wrap items-center justify-end gap-3 ${flat ? 'w-full' : 'max-w-56'}`}>{actions}</View>} />
         {phone ? <View testID={`settings-receipt-template-${template.id}-actions`}
           className="flex-row flex-wrap items-center gap-3 px-4 pb-3">{actions}</View> : null}
       </Fragment>;
