@@ -43,7 +43,7 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
       setSending(false);
     }
   }
-  return <View dataSet={{ print: 'hide' }} className="gap-2">
+  return <View dataSet={{ print: 'hide' }} className="max-w-full shrink items-start gap-2">
     <Button variant="outline" testID="receipt-email-open" onPress={openDialog}>
       <Text>Email receipt</Text>
     </Button>

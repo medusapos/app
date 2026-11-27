@@ -101,3 +101,21 @@ test('the paid receipt prints whole on a short window', async ({ page }) => {
   expect(metrics.height).toBeGreaterThanOrEqual(metrics.scrollHeight - 1);
   await expect(page.getByTestId('paid-pane').getByText('Change', { exact: true })).toBeVisible();
 });
+
+test('a receipt sent to a long address stays inside the phone', async ({ page }) => {
+  // The store's send, stubbed: a 200 that the app's cross-origin fetch accepts.
+  await page.route('**/receipt-email', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{}',
+    headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' } }));
+  // The sale at the desktop size (the cart's Checkout), then the paid screen on a phone.
+  await paidWithChange(page);
+  await page.setViewportSize({ width: 390, height: 844 });
+  const address = 'accounts.payable.department@very-long-company-name.example.com';
+  await page.getByTestId('receipt-email-open').click();
+  await page.getByTestId('receipt-email-field').fill(address);
+  await page.getByTestId('receipt-email-send').click();
+  // The sent line wraps inside the bar, and the Email receipt button keeps its own width.
+  await expect(page.getByTestId('paid-footer').getByText(`Receipt sent to ${address}.`)).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  const email = await box(page, 'receipt-email-open');
+  expect(email.x + email.width).toBeLessThanOrEqual(390);
+});

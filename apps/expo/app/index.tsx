@@ -584,7 +584,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
           topInset={paidHeadline || pickers ? 0 : leadInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
           cashier={session.name || session.email} registerId={registerId} />}
     </ScrollView>
-    <PaidFooter emailReceipt={emailReceipt} newSale={sale.newSale}
+    {/* Keyed on the template, so a thermal print's pending or failed status never carries over to another template. */}
+    <PaidFooter key={receiptTemplateId} emailReceipt={emailReceipt} newSale={sale.newSale}
       print={thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow} />
     <View dataSet={{ print: 'hide' }} className="absolute right-2" style={{ top: topInset + 8 }}>
       <IconButton testID="paid-close" accessibilityLabel="Close" className="h-11 w-11" onPress={sale.newSale}>
