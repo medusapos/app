@@ -121,8 +121,8 @@ test('a receipt sent to a long address stays inside the phone', async ({ page })
 });
 
 // #658: the paid screen's thermal frame at a viewport size, once its page has loaded and the frame has fitted it.
-async function thermalFrame(page: Page, templateId: string, size: { width: number; height: number }) {
-  await paidWithChange(page);
+async function thermalFrame(page: Page, templateId: string, size: { width: number; height: number }, sell = paidWithChange) {
+  await sell(page);
   await page.setViewportSize(size);
   await page.getByTestId('receipt-template-select').click();
   await page.getByTestId(`receipt-template-option-${templateId}`).click();
@@ -140,10 +140,19 @@ async function thermalFrame(page: Page, templateId: string, size: { width: numbe
     return { left: drawn.left, right: drawn.right, scale: drawn.width / el.offsetWidth,
       visible: Math.min(drawn.width, clip.clientWidth), height: Math.min(drawn.height, clip.clientHeight) };
   });
-  const doc = await inside.evaluate(() => ({
-    pageRight: Math.max(...Array.from(document.body.children, (el) => el.getBoundingClientRect().right)),
-    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
-  }));
+  // Also the page's height, the frame's own vertical scrollbar now (0 when it does not scroll, or the scrollbar
+  // overlays), and the width a classic scrollbar takes in this frame, read off a scrolling probe added and removed.
+  const doc = await inside.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('div'));
+    probe.style.cssText = 'position: absolute; width: 100px; height: 50px; overflow-y: scroll';
+    const classicBar = probe.offsetWidth - probe.clientWidth;
+    probe.remove();
+    return {
+      pageRight: Math.max(...Array.from(document.body.children, (el) => el.getBoundingClientRect().right)),
+      scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
+      pageHeight: document.documentElement.getBoundingClientRect().height, bar: innerWidth - document.documentElement.clientWidth, classicBar,
+    };
+  });
   return { ...outer, ...doc };
 }
 
@@ -170,4 +179,76 @@ test('the 58mm thermal page fits a phone frame unscaled', async ({ page }) => {
   expect(fit.scale).toBeCloseTo(1, 3);
   expect(fit.pageRight).toBeLessThanOrEqual(fit.visible + 0.5);
   expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+});
+
+// #667 items 2-3: with a classic scrollbar (Windows, desktop Linux) the frame counts the scrollbar's width only while
+// the frame, at its final size, still scrolls. Headless Chromium hides scrollbars, so a test without one proves nothing.
+// A launch option cannot be set for one describe group, so these tests take their context from a browser launched
+// without --hide-scrollbars (headless Chromium's default), which draws classic 15px scrollbars on macOS and Linux alike.
+const classic = test.extend({
+  context: async ({ playwright, launchOptions, baseURL, viewport, userAgent, deviceScaleFactor }, use) => {
+    const browser = await playwright.chromium.launch({ ...launchOptions, ignoreDefaultArgs: ['--hide-scrollbars'] });
+    await use(await browser.newContext({ baseURL, viewport, userAgent, deviceScaleFactor }));
+    await browser.close();
+  },
+});
+classic.describe('with a classic scrollbar', () => {
+  // This sale sells E2E-2 to E2E-5 too (and E2E-4B for six lines): give them back as well.
+  const more = ['E2E-2', 'E2E-3', 'E2E-4', 'E2E-5'];
+  let levels: typeof level[] | undefined;
+  classic.beforeEach(async () => {
+    levels = undefined;
+    levels = await Promise.all([...more, 'E2E-4B'].map((sku) => inventoryLevel(token, sku)));
+  });
+  // A level that failed to read leaves nothing to give back; the read's own error is the one to see. A level read below
+  // 0 (earlier specs sell these with backorders and never give them back) is left alone: the API refuses a negative
+  // stocked_quantity, and clamping to 0 would add stock nobody gave back.
+  classic.afterEach(async () => {
+    for (const l of levels ?? []) {
+      if (l.stockedQuantity >= 0) await setInventoryLevel(token, l.inventoryItemId, l.locationId, l.stockedQuantity);
+    }
+  });
+
+  // Five lines, paid exactly: an 80mm page about 548px tall. That is taller than the unscaled 520px frame, so the frame
+  // scrolls when its page loads, but no taller than the frame once scaled to the page's own 399px at 390 wide
+  // (520 x 399 / 356, about 583px): at its final size the frame does not scroll.
+  async function paidFiveLines(page: Page, extra: string[] = []) {
+    await signIn(page);
+    const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
+    for (const sku of ['E2E-1', ...more, ...extra]) {
+      await search.fill(sku);
+      await search.press('Enter');
+      await expect(search).toHaveValue('');
+    }
+    await startTender(page, 'cash');
+    await tenderCash(page, 'exact');
+    const applied = appliedResponse(page);
+    await page.getByTestId('tender-complete').click();
+    await expect(page.getByRole('button', { name: 'New sale', exact: true })).toBeVisible();
+    await applied;
+  }
+
+  classic('scrollbar: an 80mm page the scaled frame no longer scrolls fills the frame, with no strip for a stale scrollbar', async ({ page }) => {
+    const fit = await thermalFrame(page, 'thermal-80mm', { width: 390, height: 844 }, paidFiveLines);
+    expect(fit.classicBar).toBeGreaterThan(0);
+    expect(fit.pageHeight).toBeGreaterThan(520);
+    expect(fit.bar).toBe(0);
+    expect(fit.scale).toBeLessThan(1);
+    expect(fit.pageRight * fit.scale).toBeLessThanOrEqual(fit.visible + 0.5);
+    expect(fit.visible - fit.pageRight * fit.scale).toBeLessThanOrEqual(1);
+    expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+  });
+
+  // #677: six lines, an 80mm page about 584px tall. That is in the band between the frame's height at the page's own
+  // 399px (520 x 399 / 356, about 583px) and at 399px plus the 15px scrollbar (520 x 414 / 356, about 605px): the
+  // frame is widened just enough to stop scrolling, and Chromium's whole-pixel viewport must not leave it scrolling.
+  classic('scrollbar: an 80mm page in the band between the two widths widens the frame until it no longer scrolls', async ({ page }) => {
+    const fit = await thermalFrame(page, 'thermal-80mm', { width: 390, height: 844 }, (p) => paidFiveLines(p, ['E2E-4B']));
+    expect(fit.classicBar).toBeGreaterThan(0);
+    expect(fit.pageHeight).toBeGreaterThan(520 * Math.ceil(fit.pageRight) / 356);
+    expect(fit.pageHeight).toBeLessThan(520 * (Math.ceil(fit.pageRight) + fit.classicBar) / 356);
+    expect(fit.bar).toBe(0);
+    expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+    expect(fit.pageRight * fit.scale).toBeLessThanOrEqual(fit.visible + 0.5);
+  });
 });

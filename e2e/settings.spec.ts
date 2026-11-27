@@ -440,25 +440,42 @@ async function previewFrame(page: Page, templateId: string, size: { width: numbe
   const inside = (await (await frame.elementHandle())!.contentFrame())!;
   await inside.waitForLoadState('load');
   await expect(inside.locator('body > div').first()).toBeVisible();
-  // The sheet slides in from the right, and the frame rides it: measure once two reads a frame apart agree and the
-  // frame lies inside the viewport, so a run never catches the slide (or the fit) still moving.
-  await expect.poll(() => frame.evaluate((el) => new Promise<boolean>((done) => {
+  // The sheet slides in from the right, and the frame rides it: measure once two reads a frame apart agree, the frame
+  // is on screen and the next poll reads it in the same place, so a run never catches the slide (or the fit) still
+  // moving or not yet begun. Whether it fits inside the viewport is each test's own assertion, so a real overflow
+  // fails there, not here.
+  let previous = '';
+  await expect.poll(() => frame.evaluate((el) => new Promise<string>((done) => {
     const a = el.getBoundingClientRect();
     requestAnimationFrame(() => {
       const b = el.getBoundingClientRect();
-      done(a.left === b.left && a.right === b.right && a.width === b.width && a.height === b.height && b.right <= innerWidth);
+      const still = a.left === b.left && a.right === b.right && a.width === b.width && a.height === b.height && b.left < innerWidth;
+      done(still ? `${b.left} ${b.right} ${b.width} ${b.height}` : '');
     });
-  })), { message: 'the preview sheet comes to rest inside the viewport' }).toBe(true);
+  })).then((rect) => {
+    const rest = rect !== '' && rect === previous;
+    previous = rect;
+    return rest;
+  }), { message: 'the preview sheet comes to rest on screen' }).toBe(true);
   const outer = await frame.evaluate((el) => {
     const drawn = el.getBoundingClientRect();
     const clip = el.parentElement!;
     return { left: drawn.left, right: drawn.right, scale: drawn.width / el.offsetWidth, visible: Math.min(drawn.width, clip.clientWidth),
       height: drawn.height, area: clip.parentElement!.getBoundingClientRect().height };
   });
-  const doc = await inside.evaluate(() => ({
-    pageRight: Math.max(...Array.from(document.body.children, (el) => el.getBoundingClientRect().right)),
-    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
-  }));
+  // Also as paid-footer.spec.ts reads them: the page's height, the frame's own vertical scrollbar now and the width a
+  // classic scrollbar takes in this frame.
+  const doc = await inside.evaluate(() => {
+    const probe = document.body.appendChild(document.createElement('div'));
+    probe.style.cssText = 'position: absolute; width: 100px; height: 50px; overflow-y: scroll';
+    const classicBar = probe.offsetWidth - probe.clientWidth;
+    probe.remove();
+    return {
+      pageRight: Math.max(...Array.from(document.body.children, (el) => el.getBoundingClientRect().right)),
+      scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
+      pageHeight: document.documentElement.getBoundingClientRect().height, bar: innerWidth - document.documentElement.clientWidth, classicBar,
+    };
+  });
   return { ...outer, ...doc };
 }
 
@@ -469,8 +486,10 @@ test('Printing: the 80mm preview fits a phone whole, scaled down', async ({ page
   expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
   expect(fit.left).toBeGreaterThanOrEqual(0);
   expect(fit.right).toBeLessThanOrEqual(390);
-  // Neither short of the Test print bar nor spilling over it.
+  // Neither short of the Test print bar nor spilling over it, and the bar itself on the phone.
   expect(Math.abs(fit.height - fit.area)).toBeLessThanOrEqual(1);
+  const print = (await page.getByTestId('receipt-template-test-print').boundingBox())!;
+  expect(print.y + print.height).toBeLessThanOrEqual(844);
 });
 
 test('Printing: the 80mm preview shows unscaled on a desktop', async ({ page }) => {
@@ -484,4 +503,31 @@ test('Printing: the 58mm preview fits a phone unscaled', async ({ page }) => {
   expect(fit.scale).toBeCloseTo(1, 3);
   expect(fit.pageRight).toBeLessThanOrEqual(fit.visible + 0.5);
   expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+});
+
+// #667 item 2: with a classic scrollbar (see paid-footer.spec.ts) a page that still scrolls at the frame's final size
+// gets the scrollbar's width on top of its own, so nothing of the amount column lies under the scrollbar.
+// A launch option cannot be set for one describe group, so these tests take their context from a browser launched
+// without --hide-scrollbars (headless Chromium's default), which draws classic 15px scrollbars on macOS and Linux alike.
+const classic = test.extend({
+  context: async ({ playwright, launchOptions, baseURL, viewport, userAgent, deviceScaleFactor }, use) => {
+    const browser = await playwright.chromium.launch({ ...launchOptions, ignoreDefaultArgs: ['--hide-scrollbars'] });
+    await use(await browser.newContext({ baseURL, viewport, userAgent, deviceScaleFactor }));
+    await browser.close();
+  },
+});
+classic.describe('with a classic scrollbar', () => {
+  classic('Printing: scrollbar: an 80mm preview that scrolls on a short phone shows its whole width beside the scrollbar', async ({ page }) => {
+    // At 390 x 520 the preview area is about 345px tall: the sample receipt (about 420px) scrolls even in the frame
+    // scaled to the page plus its scrollbar (345 x 414 / 389, about 367px).
+    const fit = await previewFrame(page, 'thermal-80mm', { width: 390, height: 520 });
+    expect(fit.classicBar).toBeGreaterThan(0);
+    expect(fit.bar).toBeGreaterThan(0);
+    expect(fit.scale).toBeLessThan(1);
+    expect(fit.pageRight).toBeLessThanOrEqual(fit.clientWidth + 0.5);
+    expect(fit.pageRight * fit.scale).toBeLessThanOrEqual(fit.visible + 0.5);
+    expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+    expect(fit.left).toBeGreaterThanOrEqual(0);
+    expect(fit.right).toBeLessThanOrEqual(390);
+  });
 });

@@ -4,7 +4,7 @@ import { PortalHost } from '@tallyui/primitives';
 import { orderReference } from '@tallyui/components';
 import { createOrderBuilder, finalizeOrder, type PosOrder, type PrinterProfile } from '@tallyui/pos';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ReceiptPickers, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
+import { fittedFrameWidth, ReceiptPickers, ThermalPaidReceipt, thermalPaidPage } from '../components/receipt-pickers';
 import { BUILT_IN_PRINTER } from '../lib/printers';
 
 afterEach(cleanup);
@@ -132,5 +132,32 @@ describe('ThermalPaidReceipt', () => {
     const srcdoc = frame();
     expect(srcdoc).toContain(sent.id);
     expect(srcdoc).not.toContain('ab12cd34');
+  });
+});
+
+// #677: Chromium sizes the frame's viewport in whole pixels, so a width that makes the frame only a fraction of a pixel
+// taller than its page still leaves it scrolling, with no room counted for the scrollbar.
+describe('fittedFrameWidth', () => {
+  const right = 399;
+  const bar = 15;
+  // The frame's final height as FittedReceiptFrame sets it: the box's height over the scale.
+  const finalHeight = (natural: number, box: { width: number; height: number }) => box.height / Math.min(1, box.width / natural);
+
+  it.each([{ width: 356, height: 520 }, { width: 389, height: 345.5 }])('never leaves a %o frame scrolling at its final size', (box) => {
+    const scrolls: number[] = [];
+    // Page heights in steps of 0.01 from below the box's height to past the band where the scrollbar is counted.
+    for (let i = Math.floor(box.height * 100) - 4000; i <= Math.ceil(box.height * 1.25 * 100); i++) {
+      const height = i / 100;
+      const natural = fittedFrameWidth({ right, bar, height }, box);
+      if (natural !== right + bar && Math.floor(finalHeight(natural, box)) < Math.ceil(height)) scrolls.push(height);
+      expect(natural).toBeGreaterThanOrEqual(right);
+      expect(natural).toBeLessThanOrEqual(right + bar);
+    }
+    expect(scrolls).toEqual([]);
+  });
+
+  it('takes the page width under an overlay scrollbar, and counts the scrollbar before the box is laid out', () => {
+    expect(fittedFrameWidth({ right, bar: 0, height: 590 }, { width: 356, height: 520 })).toBe(right);
+    expect(fittedFrameWidth({ right, bar, height: 590 }, { width: 0, height: 0 })).toBe(right + bar);
   });
 });

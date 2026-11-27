@@ -138,7 +138,7 @@ export function OrderDetailSheet({ order, onClose, formatDate, onRetry, onFlush,
         {pickers && <ReceiptPickers templateId={templateId} onTemplateChange={save} printers={printers} printerId={printerId} onPrinterChange={savePrinter} />}
         {page ? <><ThermalPaidReceipt page={page} />
           <PaidFooter key={`${templateId}:${networkPrinter?.id ?? 'system'}`}
-            print={networkPrinter && reprintReceipt ? () => printReceiptToNetwork(networkPrinter, reprintReceipt, paper!) : () => printSalePage(page)}
+            print={paper && networkPrinter && reprintReceipt ? () => printReceiptToNetwork(networkPrinter, reprintReceipt, paper) : () => printSalePage(page)}
             doneLabel="Back" newSale={() => setReprint(false)} />
         </> : <Receipt receipt={receipt} posOrder={order} taxLabel={receiptTaxLabel} formatDate={formatReceiptDate}
           doneLabel="Back" newSale={() => setReprint(false)} />}
