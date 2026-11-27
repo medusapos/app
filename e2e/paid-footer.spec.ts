@@ -87,3 +87,17 @@ test('the thermal template keeps one Print receipt and one New sale in the foote
   await footer.getByRole('button', { name: 'New sale', exact: true }).click();
   await expect(page.getByTestId('cart-empty')).toBeVisible();
 });
+
+test('the paid receipt prints whole on a short window', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 420 });
+  await paidWithChange(page);
+  await page.emulateMedia({ media: 'print' });
+  // On screen the receipt scrolls above the bar; a print unclips it, so the tender and change rows reach the page.
+  const scroll = page.getByTestId('paid-scroll');
+  const metrics = await scroll.evaluate((el) => ({
+    overflowY: getComputedStyle(el).overflowY, height: el.getBoundingClientRect().height, scrollHeight: el.scrollHeight,
+  }));
+  expect(metrics.overflowY).toBe('visible');
+  expect(metrics.height).toBeGreaterThanOrEqual(metrics.scrollHeight - 1);
+  await expect(page.getByTestId('paid-pane').getByText('Change', { exact: true })).toBeVisible();
+});

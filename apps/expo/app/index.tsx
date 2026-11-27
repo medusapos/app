@@ -103,6 +103,18 @@ const PHONE_BREAKPOINT = 600;
 // ADR 0009: from 600 px, products and cart stack in a column below 900 px and sit in a row from 900 px.
 const ROW_BREAKPOINT = 900;
 
+// The paid receipt scrolls on screen above the pinned footer bar; a print unclips that pane so the page holds the whole receipt.
+const PAID_SCROLL_PRINT_CSS = `@media print {
+  [data-print="scroll"] { overflow: visible !important; height: auto !important; max-height: none !important; flex: none !important }
+}`;
+function injectPaidScrollPrintStyle() {
+  if (Platform.OS !== 'web' || typeof document === 'undefined' || document.getElementById('paid-scroll-print-style')) return;
+  const style = document.createElement('style');
+  style.id = 'paid-scroll-print-style';
+  style.textContent = PAID_SCROLL_PRINT_CSS;
+  document.head.appendChild(style);
+}
+
 // The rate arrives in parts per million (10 000 ppm = 1%).
 const taxLabel = receiptTaxLabel;
 
@@ -541,6 +553,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
   // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
   const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
+  useEffect(() => { if (sale.stage.kind === 'receipt') injectPaidScrollPrintStyle(); }, [sale.stage.kind]);
   const wide = width >= ROW_BREAKPOINT;
   const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || changeDueMinor(sale.stage.order) > 0);
   // Settings shows printers only in a browser, so the paid screen's pickers are there alone (and a thermal choice with them).
@@ -558,7 +571,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // v2's paid pane: the receipt scrolls above the footer bar pinned to the pane's bottom, and a ✕ at its top right starts
   // the next sale as New sale does; the bar and the ✕ are screen only, not printed.
   const paidReceipt = sale.stage.kind === 'receipt' ? <View testID="paid-pane" className="flex-1">
-    <ScrollView className="flex-1">
+    <ScrollView testID="paid-scroll" dataSet={{ print: 'scroll' }} className="flex-1">
       {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
       {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
         {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
