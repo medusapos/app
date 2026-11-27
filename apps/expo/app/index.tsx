@@ -79,6 +79,7 @@ import { forgetDeletedDefaultCustomer, useDefaultCustomer } from '../lib/default
 import { forgetDeletedCashierCustomer, useCashierCustomer } from '../lib/cashier-customer';
 import { defaultStorage, REGISTER_ID_KEY } from '../lib/session';
 import { useSession } from '../lib/session-context';
+import { readStoreCoupons } from '../lib/store-coupons';
 import { useReplicatedProducts, type SyncState } from '../lib/use-replicated-products';
 import { buildReopenCart, takeReopen, useReopenRequest } from '../lib/reopen-order';
 import { useDeviceScans } from '../lib/use-device-scans';
@@ -515,7 +516,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         hasAddress={Object.values(sale.order.customer?.billing ?? {}).some(Boolean)} />}
       {/* ml-auto keeps this group at the right with or without the chip; shrink-0 so a long name never pushes it off. */}
       <View className="ml-auto shrink-0 flex-row items-center gap-4">
-        <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined} />
+        <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined}
+          readCoupons={() => readStoreCoupons(session, session.capabilities?.pluginContract ?? 0, pricing.currency)} />
         <CartSettingsButton {...cartSettings} phone={phone} />
       </View>
     </View>

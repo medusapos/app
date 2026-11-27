@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Circle, Line, Path } from 'react-native-svg';
+import { formatMoney } from '@tallyui/core';
 import type { useSale } from '@tallyui/pos';
 import { Portal } from '@tallyui/primitives';
 import {
@@ -8,6 +9,7 @@ import {
   DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, IconButton, Text,
 } from '@tallyui/components';
 import { CouponCodeInput, couponsEnabled, useCouponEntry } from './coupon-field';
+import type { StoreCoupon } from '../lib/store-coupons';
 
 const PlusIcon = createSvgIcon('PlusIcon', () => <><Line x1={12} y1={5} x2={12} y2={19} /><Line x1={5} y1={12} x2={19} y2={12} /></>);
 // lucide user-plus
@@ -36,12 +38,23 @@ function CouponDialogBody({ sale, onClose }: { sale: ReturnType<typeof useSale>;
 }
 
 /** v2's cart "+" menu: Add new customer, then the charges and the order discount (offered on an empty cart too). */
-export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof useSale>; onAddCustomer?: () => void }) {
+export function CartAddMenu({ sale, onAddCustomer, readCoupons }: { sale: ReturnType<typeof useSale>; onAddCustomer?: () => void;
+  readCoupons?: () => Promise<{ coupons: StoreCoupon[]; truncated: boolean } | null> }) {
   const [kind, setKind] = useState<'custom' | 'fee' | 'discount' | 'coupon' | 'shipping' | null>(null);
   const [open, setOpen] = useState(false);
   const chargesOffered = (sale.capabilities?.orderCreate ?? 0) >= 5;
   const coupons = couponsEnabled(sale.capabilities);
-  const close = () => setKind(null);
+  const [listed, setListed] = useState<StoreCoupon[] | null>(null);
+  const opening = useRef(0);
+  const close = () => { opening.current++; setKind(null); };
+  const openDiscount = () => {
+    const current = ++opening.current;
+    setListed(null);
+    setKind('discount');
+    if (coupons && readCoupons) void readCoupons().catch(() => null).then(result => {
+      if (opening.current === current) setListed(result?.coupons ?? null);
+    });
+  };
   const title = kind === 'fee' ? 'Add fee' : kind === 'shipping' ? 'Add shipping' : 'Add custom item';
   return <>
     <DropdownMenu open={open} onOpenChange={setOpen}>
@@ -69,7 +82,7 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
           <View className="text-foreground"><BoxIcon size={16} /></View><Text>Add Miscellaneous Product</Text></DropdownMenuItem>}
         {chargesOffered && <DropdownMenuItem className="gap-2" onPress={() => setKind('fee')}>
           <View className="text-foreground"><ReceiptIcon size={16} /></View><Text>Add Fee</Text></DropdownMenuItem>}
-        <DropdownMenuItem className="gap-2" onPress={() => setKind('discount')}>
+        <DropdownMenuItem className="gap-2" onPress={openDiscount}>
           <View className="text-foreground"><TagIcon size={16} /></View><Text>Add Discount</Text></DropdownMenuItem>
         {/* Greyed when the till does not offer coupons: the rule that hides the inline coupon field. */}
         <DropdownMenuItem testID="cart-add-coupon" disabled={!coupons} className={coupons ? 'gap-2' : 'gap-2 opacity-50'}
@@ -95,12 +108,17 @@ export function CartAddMenu({ sale, onAddCustomer }: { sale: ReturnType<typeof u
             }} />}
       </DialogContent>
     </Dialog>
-    {/* v2's Add Discount: a sheet from the left, the value field then the Percent / Amount switch, Cancel and Add discount
-        below. No onApplyCoupon, so no Coupon tab: the store serves no coupon list yet (Add Coupon keeps its own dialog). */}
+    {/* Add Discount offers the Coupon tab when the store returns its list. TU's tab only picks listed codes,
+        so typed codes stay on Add Coupon and the inline field. */}
     <Dialog open={kind === 'discount'} onOpenChange={(open) => { if (!open) close(); }}>
       <DialogContent side="left" showClose testID="cart-add-discount-sheet">
         <DialogHeader><DialogTitle>Add Discount</DialogTitle></DialogHeader>
         <DiscountForm layout="dialog" title="Add Discount" currency={sale.order.currency}
+          {...(listed !== null && { onApplyCoupon: (code: string) => sale.applyCoupon(code),
+            coupons: listed.map(({ code, type, value, label, endsAt }) => ({ code,
+              amountLabel: type === 'percentage' ? `${value}%` : formatMoney({ amount: value, currency: sale.order.currency }),
+              detail: [label, endsAt === null ? null : `Ends ${new Date(endsAt).toLocaleDateString()}`].filter(part => part !== null).join(' · ') || undefined,
+            })) })}
           onApply={(discount) => sale.applyDiscount(null, discount)} onClose={close} />
       </DialogContent>
     </Dialog>
