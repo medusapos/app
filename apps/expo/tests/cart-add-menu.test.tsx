@@ -213,6 +213,20 @@ it('applies a 10% order discount and closes the sheet', async () => {
   expect(screen.queryByRole('button', { name: /^Remove discount Order discount/ })).toBeNull();
   expect(discountSheet()).toBeNull();
 });
+// The sheet's layout="dialog" opens on Amount (v2's $-first sheet); the old inline form opened on Percent. A typed "5" is €5.
+it('the sheet opens on Amount: 5 with no switch press is a −€5.00 order discount', async () => {
+  await start();
+  fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €19.20');
+  openMenu('Add Discount');
+  const sheet = within(discountSheet()!);
+  expect(sheet.getByRole('button', { name: 'Amount' }).getAttribute('aria-selected')).toBe('true');
+  expect(sheet.getByRole('button', { name: 'Percent' }).getAttribute('aria-selected')).not.toBe('true');
+  fireEvent.change(sheet.getByLabelText('Discount value'), { target: { value: '5' } });
+  fireEvent.click(sheet.getByRole('button', { name: 'Add discount' }));
+  expect(screen.getByTestId('order-discount-row-0').textContent).toBe('Discount−€5.00');
+  expect(screen.getByTestId('cart-checkout').textContent).toBe('Checkout €14.20');
+});
 it('keeps the sheet open with the refusal inline for an amount above the order, and Cancel applies nothing', async () => {
   await start();
   fireEvent.click(screen.getByTestId('product-tile-Shirt'));
