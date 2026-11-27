@@ -55,9 +55,13 @@ describe('TallyUI dependencies', () => {
     expect(allPins.filter(([, version]) => !EXACT_VERSION.test(version))).toEqual([]);
   });
 
-  it('all @tallyui/* pins share one version', () => {
-    const versions = [...new Set(allPins.map(([, version]) => version))];
-    expect(versions).toEqual([allPins[0][1]]);
+  // Each package has one version everywhere it is pinned. Packages may differ: TallyUI publishes only the packages that
+  // changed, so @tallyui/components sits at 5.3.0 beside 5.4.0 (#644).
+  it('each @tallyui/* package is pinned to one version everywhere', () => {
+    const byName = new Map<string, Set<string>>();
+    for (const [name, version] of allPins) byName.set(name, (byName.get(name) ?? new Set()).add(version));
+    expect([...byName].filter(([, versions]) => versions.size > 1)).toEqual([]);
+    expect(byName.size).toBeGreaterThanOrEqual(8);
   });
 
   it('pnpm.overrides and apps/expo/package.json list the same @tallyui/* packages', () => {

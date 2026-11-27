@@ -41,7 +41,10 @@ export function tenderLegs() {
 
 /** The cart line's cells for the line named `name`, in column order: quantity, name, unit price (when shown), total. */
 export function cartLineCells(name: string) {
-  return Array.from(cartLine(name).children[0].children).map((cell) => cell.textContent);
+  // Components 5.3.0 wraps a product line's cells beside its strip: cart-line-row > [strip, slide > cells].
+  const first = cartLine(name).children[0];
+  const row = first.getAttribute('data-testid') === 'cart-line-row' ? first.lastElementChild!.children[0] : first;
+  return Array.from(row.children).map((cell) => cell.textContent);
 }
 
 /**
