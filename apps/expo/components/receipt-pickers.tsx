@@ -74,6 +74,16 @@ export function thermalPaidPage({ paper, ...args }: { paper: ReceiptPaper } & Pa
   return receiptTemplatePage(paper, paidReceiptData(args));
 }
 
+// The frame's width: the page's own, plus the scrollbar only while the frame, at the height that width gives it,
+// still scrolls (a classic scrollbar, #667); in between, just wide (so tall) enough that the frame no longer scrolls.
+// Chromium sizes the frame's viewport in whole pixels, so the frame must be at least ceil(height) tall once fitted;
+// the extra pixel keeps it there through floating-point error in the box's height over the scale (#677).
+export function fittedFrameWidth({ right, bar, height }: { right: number; bar: number; height: number },
+  box: { width: number; height: number }) {
+  if (!box.height) return right + bar;
+  return Math.min(right + bar, Math.max(right, Math.ceil(box.width * (Math.ceil(height) + 1) / box.height)));
+}
+
 // The thermal page in a sandboxed frame, filling the box its parent gives it; the paid footer and Settings' preview show it.
 // The page is a fixed-width column (48ch at 80mm, ~400px), wider than a phone's frame: the frame takes the page's own
 // width and is scaled down to the box, never up, its layout height grown by 1/scale so the drawn height fills the box.
@@ -82,10 +92,7 @@ export function thermalPaidPage({ paper, ...args }: { paper: ReceiptPaper } & Pa
 export function FittedReceiptFrame({ page, title, testID }: { page: string; title: string; testID: string }) {
   const [measured, setMeasured] = useState({ right: 0, bar: 0, height: 0 });
   const [box, setBox] = useState({ width: 0, height: 0 });
-  // The frame's width: the page's own, plus the scrollbar only while the frame, at the height that width gives it,
-  // still scrolls (a classic scrollbar, #667); in between, just wide (so tall) enough that the frame no longer scrolls.
-  const { right, bar, height } = measured;
-  const natural = box.height ? Math.min(right + bar, Math.max(right, Math.ceil(box.width * height / box.height))) : right + bar;
+  const natural = fittedFrameWidth(measured, box);
   const scale = natural && box.width ? Math.min(1, box.width / natural) : 1;
   const measure = (frame: HTMLIFrameElement) => {
     const doc = frame.contentDocument;

@@ -193,21 +193,29 @@ const classic = test.extend({
   },
 });
 classic.describe('with a classic scrollbar', () => {
-  // This sale sells E2E-2 to E2E-5 too: give them back as well.
+  // This sale sells E2E-2 to E2E-5 too (and E2E-4B for six lines): give them back as well.
   const more = ['E2E-2', 'E2E-3', 'E2E-4', 'E2E-5'];
-  let levels: typeof level[];
-  classic.beforeEach(async () => { levels = await Promise.all(more.map((sku) => inventoryLevel(token, sku))); });
+  let levels: typeof level[] | undefined;
+  classic.beforeEach(async () => {
+    levels = undefined;
+    levels = await Promise.all([...more, 'E2E-4B'].map((sku) => inventoryLevel(token, sku)));
+  });
+  // A level that failed to read leaves nothing to give back; the read's own error is the one to see. A level read below
+  // 0 (earlier specs sell these with backorders and never give them back) is left alone: the API refuses a negative
+  // stocked_quantity, and clamping to 0 would add stock nobody gave back.
   classic.afterEach(async () => {
-    for (const l of levels) await setInventoryLevel(token, l.inventoryItemId, l.locationId, l.stockedQuantity);
+    for (const l of levels ?? []) {
+      if (l.stockedQuantity >= 0) await setInventoryLevel(token, l.inventoryItemId, l.locationId, l.stockedQuantity);
+    }
   });
 
   // Five lines, paid exactly: an 80mm page about 548px tall. That is taller than the unscaled 520px frame, so the frame
   // scrolls when its page loads, but no taller than the frame once scaled to the page's own 399px at 390 wide
   // (520 x 399 / 356, about 583px): at its final size the frame does not scroll.
-  async function paidFiveLines(page: Page) {
+  async function paidFiveLines(page: Page, extra: string[] = []) {
     await signIn(page);
     const search = page.getByPlaceholder('Search or scan barcode / SKU', { exact: true });
-    for (const sku of ['E2E-1', ...more]) {
+    for (const sku of ['E2E-1', ...more, ...extra]) {
       await search.fill(sku);
       await search.press('Enter');
       await expect(search).toHaveValue('');
@@ -229,5 +237,18 @@ classic.describe('with a classic scrollbar', () => {
     expect(fit.pageRight * fit.scale).toBeLessThanOrEqual(fit.visible + 0.5);
     expect(fit.visible - fit.pageRight * fit.scale).toBeLessThanOrEqual(1);
     expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+  });
+
+  // #677: six lines, an 80mm page about 584px tall. That is in the band between the frame's height at the page's own
+  // 399px (520 x 399 / 356, about 583px) and at 399px plus the 15px scrollbar (520 x 414 / 356, about 605px): the
+  // frame is widened just enough to stop scrolling, and Chromium's whole-pixel viewport must not leave it scrolling.
+  classic('scrollbar: an 80mm page in the band between the two widths widens the frame until it no longer scrolls', async ({ page }) => {
+    const fit = await thermalFrame(page, 'thermal-80mm', { width: 390, height: 844 }, (p) => paidFiveLines(p, ['E2E-4B']));
+    expect(fit.classicBar).toBeGreaterThan(0);
+    expect(fit.pageHeight).toBeGreaterThan(520 * Math.ceil(fit.pageRight) / 356);
+    expect(fit.pageHeight).toBeLessThan(520 * (Math.ceil(fit.pageRight) + fit.classicBar) / 356);
+    expect(fit.bar).toBe(0);
+    expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+    expect(fit.pageRight * fit.scale).toBeLessThanOrEqual(fit.visible + 0.5);
   });
 });
