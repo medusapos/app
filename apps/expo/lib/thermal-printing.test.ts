@@ -11,7 +11,8 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAutoPrintReceipt } from './printing-settings';
 import { BUILT_IN_PRINTER } from './printers';
-import { drawerPrinter, isStoredOpensDrawer, openCashDrawer, printTestReceipt, printToNetwork, useCashDrawerOnSale } from './thermal-printing';
+import { sampleReceipt } from './receipt-templates';
+import { drawerPrinter, isStoredOpensDrawer, openCashDrawer, printReceiptToNetwork, printTestReceipt, printToNetwork, useCashDrawerOnSale } from './thermal-printing';
 
 addRxPlugin(RxDBDevModePlugin);
 
@@ -58,6 +59,15 @@ async function bytesSent(profile: PrinterProfile): Promise<number[]> {
 }
 
 describe('drawer pulse bytes', () => {
+  it('sends the sale receipt without either drawer pulse', async () => {
+    const writes: Uint8Array[] = [];
+    await printReceiptToNetwork(epson, sampleReceipt({ name: 'Shop', currency: 'EUR' }), { write: async (bytes) => { writes.push(bytes); } });
+    const sent = Buffer.concat(writes);
+    expect(sent.toString('latin1')).toContain('Sample item');
+    expect(sent.toString('hex')).not.toContain('101401');
+    expect(sent.toString('hex')).not.toContain('1b70');
+  });
+
   it('Epson is DLE DC4 1 m 3, pin 2 then pin 5', async () => {
     expect(await bytesSent(epson)).toEqual([0x10, 0x14, 0x01, 0x00, 0x03]);
     expect(await bytesSent({ ...epson, drawerConnector: 'pin5' })).toEqual([0x10, 0x14, 0x01, 0x01, 0x03]);

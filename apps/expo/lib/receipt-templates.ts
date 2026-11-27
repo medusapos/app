@@ -41,6 +41,30 @@ export function useReceiptTemplate(storage: SessionStorage | null, baseUrl: stri
   return { templateId, save: (id: ReceiptTemplateId) => saveReceiptTemplate(storage, baseUrl, id) };
 }
 
+const PRINTER_PREFIX = 'medusapos.receipt-printer.';
+function receiptPrinters(storage: SessionStorage | null, baseUrl: string): Record<string, unknown> {
+  try {
+    const saved = JSON.parse(storage?.getItem(PRINTER_PREFIX + baseUrl) ?? 'null');
+    return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  } catch { return {}; }
+}
+
+export function loadReceiptPrinter(storage: SessionStorage | null, baseUrl: string, templateId: ReceiptTemplateId): string {
+  const id = receiptPrinters(storage, baseUrl)[templateId];
+  return typeof id === 'string' && id ? id : SYSTEM_PRINTER_ID;
+}
+
+export function saveReceiptPrinter(storage: SessionStorage | null, baseUrl: string, templateId: ReceiptTemplateId, printerId: string): void {
+  if (!storage) return;
+  storage.setItem(PRINTER_PREFIX + baseUrl, JSON.stringify({ ...receiptPrinters(storage, baseUrl), [templateId]: printerId }));
+  listeners.forEach((listener) => listener());
+}
+
+export function useReceiptPrinter(storage: SessionStorage | null, baseUrl: string, templateId: ReceiptTemplateId) {
+  const read = () => loadReceiptPrinter(storage, baseUrl, templateId);
+  return { printerId: useSyncExternalStore(subscribe, read, read), save: (id: string) => saveReceiptPrinter(storage, baseUrl, templateId, id) };
+}
+
 // A fixed sale for previews and test prints: two lines, paid in cash with change, no tax.
 export function sampleReceipt(store: { name: string; address?: string; currency: string }, now: Date = new Date()): ReceiptData {
   return {

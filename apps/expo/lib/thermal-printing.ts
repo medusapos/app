@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import type { RxCollection } from 'rxdb';
 import {
   canOpenDrawer, createEscPosTransport, createPrintQueue, networkSinkFor, openDrawerJob, PrintError,
-  type EscPosSink, type PosOrder, type PrinterProfile, type PrintJob, type PrintTransport, type useSale,
+  type EscPosSink, type PosOrder, type PrinterProfile, type PrintJob, type PrintTransport, type ReceiptData, type useSale,
 } from '@tallyui/pos';
 import { printerProfilesOf } from './printers';
 import { sampleReceipt } from './receipt-templates';
@@ -24,6 +24,11 @@ export function printToNetwork(profile: PrinterProfile, job: PrintJob, sink?: Es
   if (!target) return Promise.reject(new PrintError('unsupported', `${profile.name} is not an Epson or Star network printer`));
   jobTransports.set(job.id, createEscPosTransport({ sink: target, profile }));
   return queue.print(profile.id, job).finally(() => jobTransports.delete(job.id));
+}
+
+/** The cash sale opens its drawer in a separate job; printing the receipt must never open it again. */
+export function printReceiptToNetwork(profile: PrinterProfile, receipt: ReceiptData, sink?: EscPosSink | null): Promise<void> {
+  return printToNetwork({ ...profile, autoOpenDrawer: false }, { id: `receipt-${++jobCount}`, kind: 'receipt', receipt }, sink);
 }
 
 /** The printer that kicks the drawer: switch on, ESC/POS and reachable from a browser; the default one first. */
