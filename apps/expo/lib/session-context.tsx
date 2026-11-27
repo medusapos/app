@@ -35,9 +35,6 @@ export type SaleHold = 'saving' | 'receipt' | null;
 // value and an absent key compare equal too.
 const canonicalJson = (value: unknown) => JSON.stringify(value, (_key, item: unknown) => item && typeof item === 'object' &&
   !Array.isArray(item) ? Object.fromEntries(Object.keys(item).sort().map((k) => [k, (item as Record<string, unknown>)[k]])) : item);
-// #554: customerDisplay is dropped, as loadSession does, so sign-in, a fresh read and a restore give the same capabilities.
-const withoutDisplay = (capabilities: ServerCapabilities | undefined) =>
-  capabilities && (({ customerDisplay: _display, ...rest }) => rest)(capabilities);
 const SessionContext = createContext<SessionContextValue | null>(null);
 
 export function SessionProvider({ children }: { children: ReactNode }) {
@@ -91,7 +88,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [session?.token]);
   const mergeCapabilities = useCallback((fresh: ServerCapabilities | undefined) => {
     const current = currentSession.current;
-    const capabilities = withoutDisplay(resolveCapabilities(fresh, current?.capabilities));
+    const capabilities = resolveCapabilities(fresh, current?.capabilities);
     // Unchanged keeps the session's identity, so nothing that depends on it re-runs.
     if (!current || canonicalJson(capabilities) === canonicalJson(current.capabilities)) return;
     const next = { ...current, capabilities };
@@ -100,8 +97,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setSession(next);
   }, []);
   async function signIn(baseUrl: string, email: string, password: string) {
-    const result = await login(baseUrl, email, password);
-    const next = { ...result, capabilities: withoutDisplay(result.capabilities) };
+    const next = await login(baseUrl, email, password);
     saveSession(defaultStorage(), next);
     currentSession.current = next;
     setSession(next);

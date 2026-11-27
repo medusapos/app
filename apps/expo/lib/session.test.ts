@@ -277,6 +277,37 @@ describe('token expiry', () => {
 });
 
 describe('session storage', () => {
+  it.each([true, false])('S-D1: round-trips customerDisplay with snapshot %s', (snapshot) => {
+    const storage = memoryStorage();
+    const customerDisplay = { iceServers: [{ urls: 'stun:stun.example.test:3478' },
+      { urls: ['turn:turn.example.test'], username: 'u', credential: 'c' }], snapshot };
+    const saved = { ...session, capabilities: { orderCreate: 3, customerDisplay } };
+    saveSession(storage, saved);
+    expect(loadSession(storage)).toEqual(saved);
+  });
+  it.each([[null], ['x'], [[1]], [42]])('S-D2: drops malformed customerDisplay %j', (customerDisplay) => {
+    const storage = memoryStorage();
+    const kept = { orderCreate: 3, register: 3, coupons: true };
+    storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { ...kept, customerDisplay } }));
+    expect(loadSession(storage)?.capabilities).toStrictEqual(kept);
+  });
+  it('S-D3: restores core’s default STUN servers when iceServers is missing', () => {
+    const storage = memoryStorage();
+    storage.setItem('medusapos.session', JSON.stringify({ ...session, capabilities: { orderCreate: 3, customerDisplay: {} } }));
+    expect(loadSession(storage)?.capabilities?.customerDisplay).toEqual({ iceServers: [
+      { urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: false });
+  });
+  it('S-D4: stores the customerDisplay the sign-in read', async () => {
+    const info = new Response('{"contracts":{"order.create":[3]},"customerDisplay":{"v":1,"iceServers":[],"snapshot":1}}');
+    const fetchImpl = vi.fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ token: 'jwt' }))).mockResolvedValueOnce(info)
+      .mockResolvedValueOnce(new Response('{}')).mockResolvedValueOnce(new Response('{}'));
+    const result = await login(session.baseUrl, session.email, 'secret', fetchImpl);
+    expect(result.capabilities?.customerDisplay).toEqual({ iceServers: [], snapshot: true });
+    const storage = memoryStorage();
+    saveSession(storage, result);
+    expect(loadSession(storage)).toEqual(result);
+  });
   it('round-trips and clears the session without saving a password', () => {
     const storage = memoryStorage();
     expect(loadSession(storage)).toBeNull();
