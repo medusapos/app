@@ -424,3 +424,64 @@ test('Printing: each receipt template\'s printer select and Preview fit their ro
     expect.soft(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), `${width} px: no horizontal scroll`).toBe(true);
   }
 });
+
+// #667 item 1: Settings' receipt preview at a viewport size, once its page has loaded and the frame has fitted it. The
+// same quantities as paid-footer.spec.ts's thermalFrame; `area` is the sheet's preview area the frame fills.
+async function previewFrame(page: Page, templateId: string, size: { width: number; height: number }) {
+  await page.setViewportSize(size);
+  await signIn(page);
+  if (size.width >= 768) {
+    await openArea(page, 'Settings');
+    await page.getByTestId('settings-nav-printing').click();
+  } else await openSettings(page, 'Printing');
+  await page.getByTestId(`settings-receipt-template-${templateId}-preview`).click();
+  const frame = page.getByTestId('receipt-template-preview-frame');
+  await expect(frame).toBeVisible();
+  const inside = (await (await frame.elementHandle())!.contentFrame())!;
+  await inside.waitForLoadState('load');
+  await expect(inside.locator('body > div').first()).toBeVisible();
+  // The sheet slides in from the right, and the frame rides it: measure once two reads a frame apart agree and the
+  // frame lies inside the viewport, so a run never catches the slide (or the fit) still moving.
+  await expect.poll(() => frame.evaluate((el) => new Promise<boolean>((done) => {
+    const a = el.getBoundingClientRect();
+    requestAnimationFrame(() => {
+      const b = el.getBoundingClientRect();
+      done(a.left === b.left && a.right === b.right && a.width === b.width && a.height === b.height && b.right <= innerWidth);
+    });
+  })), { message: 'the preview sheet comes to rest inside the viewport' }).toBe(true);
+  const outer = await frame.evaluate((el) => {
+    const drawn = el.getBoundingClientRect();
+    const clip = el.parentElement!;
+    return { left: drawn.left, right: drawn.right, scale: drawn.width / el.offsetWidth, visible: Math.min(drawn.width, clip.clientWidth),
+      height: drawn.height, area: clip.parentElement!.getBoundingClientRect().height };
+  });
+  const doc = await inside.evaluate(() => ({
+    pageRight: Math.max(...Array.from(document.body.children, (el) => el.getBoundingClientRect().right)),
+    scrollWidth: document.documentElement.scrollWidth, clientWidth: document.documentElement.clientWidth,
+  }));
+  return { ...outer, ...doc };
+}
+
+test('Printing: the 80mm preview fits a phone whole, scaled down', async ({ page }) => {
+  const fit = await previewFrame(page, 'thermal-80mm', { width: 390, height: 844 });
+  expect(fit.scale).toBeLessThan(1);
+  expect(fit.pageRight * fit.scale).toBeLessThanOrEqual(fit.visible + 0.5);
+  expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+  expect(fit.left).toBeGreaterThanOrEqual(0);
+  expect(fit.right).toBeLessThanOrEqual(390);
+  // Neither short of the Test print bar nor spilling over it.
+  expect(Math.abs(fit.height - fit.area)).toBeLessThanOrEqual(1);
+});
+
+test('Printing: the 80mm preview shows unscaled on a desktop', async ({ page }) => {
+  const fit = await previewFrame(page, 'thermal-80mm', { width: 1280, height: 800 });
+  expect(fit.scale).toBeCloseTo(1, 3);
+  expect(fit.pageRight).toBeLessThanOrEqual(fit.visible + 0.5);
+});
+
+test('Printing: the 58mm preview fits a phone unscaled', async ({ page }) => {
+  const fit = await previewFrame(page, 'thermal-58mm', { width: 390, height: 844 });
+  expect(fit.scale).toBeCloseTo(1, 3);
+  expect(fit.pageRight).toBeLessThanOrEqual(fit.visible + 0.5);
+  expect(fit.scrollWidth).toBeLessThanOrEqual(fit.clientWidth);
+});
