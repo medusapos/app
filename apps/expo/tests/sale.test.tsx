@@ -1,18 +1,19 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { useContext } from 'react';
-import { createRxDatabase, randomToken, type RxCollection } from 'rxdb';
+import { createRxDatabase, randomToken, type RxCollection, type RxDatabase } from 'rxdb';
 import { getRxStorageMemory } from 'rxdb/plugins/storage-memory';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { formatMoney, type StoreSettings as PricingSettings } from '@tallyui/core';
 import { medusaConnector } from '@tallyui/connector-medusa';
 import { addPrinterProfileCollection, catalogueEntries, countsTowardPaid, createOrderBuilder, TaxProvider, taxProviderProps, useSale, useStoreSettings, type PosOrder } from '@tallyui/pos';
-import { Cart, Receipt, Tender } from '@tallyui/components';
+import { Cart, orderReference, Receipt, Tender } from '@tallyui/components';
+import { PortalHost } from '@tallyui/primitives';
 import { OutboxStrip, StripHeightContext } from '../components/store-refused';
 import { COLLAPSED_STRIP_HEIGHT } from '../components/sign-in-again';
 import { formatDate } from '../lib/format-date';
 import { useOutboxContext } from '../lib/outbox-context';
-import { saveReceiptPrinter, saveReceiptTemplate } from '../lib/receipt-templates';
+import { loadReceiptPrinter, saveReceiptPrinter, saveReceiptTemplate } from '../lib/receipt-templates';
 import { fetchStoreSettings, loadCachedSettings, saveCachedSettings, StoreSettingsError, type StoreSettings } from '../lib/store-settings';
 import { useSession } from '../lib/session-context';
 import { sessionFixture } from './session-fixture';
@@ -435,40 +436,93 @@ describe('the cash drawer on Continue', () => {
 });
 
 describe('the paid screen network receipt', () => {
+  let db: RxDatabase;
+  const requests = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 200, text: async () => '<response success="true"/>' }));
+  const eposCalls = () => requests.mock.calls.filter(([url]) => String(url).includes('/epos/'));
+  beforeEach(async () => {
+    db = await createRxDatabase({ name: `paid${randomToken(8)}`, storage: getRxStorageMemory() });
+    await (await addPrinterProfileCollection(db)).insert({ id: 'counter', name: 'Counter', connectionType: 'network',
+      vendor: 'epson', address: '10.0.0.5', port: 9100, language: 'esc-pos', autoOpenDrawer: true });
+    vi.stubGlobal('fetch', requests);
+    vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: { database: db } as unknown as RxCollection<PosOrder> });
+    setWindowWidth(1280, 800);
+    shelf.products = [{ ...product, variants: [product.variants[0]] }];
+    saveCachedSettings(localStorage, session.baseUrl, settings);
+    saveReceiptTemplate(localStorage, session.baseUrl, 'thermal-80mm');
+  });
+  afterEach(async () => { shelf.products = []; await db.close(); });
+
+  async function completeSale(method: 'external' | 'cash') {
+    await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
+    fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
+    await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
+    pickMethod(method);
+    take();
+    await act(async () => { click('Complete sale'); });
+  }
+
   it.each(['external', 'cash'] as const)('prints a %s sale directly, with only the cash sale opening the drawer', async (method) => {
-    const db = await createRxDatabase({ name: `paid${randomToken(8)}`, storage: getRxStorageMemory() });
-    try {
-      await (await addPrinterProfileCollection(db)).insert({ id: 'counter', name: 'Counter', connectionType: 'network',
-        vendor: 'epson', address: '10.0.0.5', port: 9100, language: 'esc-pos', autoOpenDrawer: true });
-      const requests = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 200, text: async () => '<response success="true"/>' }));
-      vi.stubGlobal('fetch', requests);
-      const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
-      vi.mocked(useOutboxContext).mockReturnValue({ ...useOutboxContext(), orders: { database: db } as unknown as RxCollection<PosOrder> });
-      setWindowWidth(1280, 800);
-      shelf.products = [{ ...product, variants: [product.variants[0]] }];
-      saveCachedSettings(localStorage, session.baseUrl, settings);
-      saveReceiptTemplate(localStorage, session.baseUrl, 'thermal-80mm');
-      saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
-      await act(async () => { render(<ProductsScreen />); });
-      fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
-      await act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
-      pickMethod(method);
-      take();
-      await act(async () => { click('Complete sale'); });
-      await act(async () => { click('Print receipt'); });
-      const epos = requests.mock.calls.filter(([url]) => String(url).includes('/epos/'));
-      const url = 'http://10.0.0.5:8008/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000';
-      expect(epos.map(([target]) => target)).toEqual(method === 'cash' ? [url, url] : [url]);
-      const commands = epos.map(([, init]) => String(init?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]);
-      if (method === 'cash') expect(commands[0]).toBe('1014010003');
-      const receipt = commands[commands.length - 1]!;
-      expect(Buffer.from(receipt, 'hex').toString('latin1')).toContain('Shirt');
-      expect(receipt).not.toContain('101401');
-      expect(receipt).not.toContain('1b70');
-      expect(dialog).not.toHaveBeenCalled();
-    } finally {
-      shelf.products = [];
-      await db.close();
-    }
+    saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
+    const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+    await completeSale(method);
+    await act(async () => { click('Print receipt'); });
+    const epos = eposCalls();
+    const url = 'http://10.0.0.5:8008/cgi-bin/epos/service.cgi?devid=local_printer&timeout=10000';
+    expect(epos.map(([target]) => target)).toEqual(method === 'cash' ? [url, url] : [url]);
+    const commands = epos.map(([, init]) => String(init?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]);
+    if (method === 'cash') expect(commands[0]).toBe('1014010003');
+    const receipt = commands[commands.length - 1]!;
+    expect(Buffer.from(receipt, 'hex').toString('latin1')).toContain('Shirt');
+    expect(receipt).not.toContain('101401');
+    expect(receipt).not.toContain('1b70');
+    expect(dialog).not.toHaveBeenCalled();
+  });
+
+  it('prints a 58mm sale to Counter at 32 columns', async () => {
+    saveReceiptTemplate(localStorage, session.baseUrl, 'thermal-58mm');
+    saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-58mm', 'counter');
+    await completeSale('external');
+    await act(async () => { click('Print receipt'); });
+    const calls = eposCalls();
+    expect(calls).toHaveLength(1);
+    const hex = String(calls[0]![1]?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]!;
+    const lines = Buffer.from(hex, 'hex').toString('latin1').split('\n');
+    expect(lines).toContain('-'.repeat(32));
+    expect(lines).not.toContain('-'.repeat(42));
+  });
+
+  it('prints the same order reference as the thermal page instead of the full sale id', async () => {
+    saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
+    await completeSale('external');
+    const order = vi.mocked(useOutboxContext().record).mock.calls[0]![0];
+    expect(screen.getByTestId('receipt-thermal-frame').getAttribute('srcdoc')).toContain(orderReference(order));
+    await act(async () => { click('Print receipt'); });
+    const hex = String(eposCalls()[0]![1]?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]!;
+    const text = Buffer.from(hex, 'hex').toString('latin1');
+    expect(text).toContain(orderReference(order));
+    expect(text).not.toContain(order.saleId!);
+  });
+
+  it('saves the paid screen printer selection and prints directly to Counter', async () => {
+    const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+    await completeSale('external');
+    fireEvent.click(screen.getByTestId('receipt-printer-select'));
+    fireEvent.click(await screen.findByTestId('receipt-printer-option-counter'));
+    expect(loadReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm')).toBe('counter');
+    await act(async () => { click('Print receipt'); });
+    expect(eposCalls()).toHaveLength(1);
+    expect(document.getElementById('tallyui-print-frame')).toBeNull();
+    expect(dialog).not.toHaveBeenCalled();
+  });
+
+  it('clears a failed print status when switching from Counter to the print dialog', async () => {
+    saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
+    await completeSale('external');
+    requests.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await act(async () => { click('Print receipt'); });
+    expect((await screen.findByTestId('paid-print-status')).textContent).toBe("Couldn't print. Try again.");
+    fireEvent.click(screen.getByTestId('receipt-printer-select'));
+    fireEvent.click(await screen.findByTestId('receipt-printer-option-system'));
+    expect(screen.queryByTestId('paid-print-status')).toBeNull();
   });
 });

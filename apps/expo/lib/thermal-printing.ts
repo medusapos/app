@@ -1,8 +1,8 @@
 import { useEffect } from 'react';
 import type { RxCollection } from 'rxdb';
 import {
-  canOpenDrawer, createEscPosTransport, createPrintQueue, networkSinkFor, openDrawerJob, PrintError,
-  type EscPosSink, type PosOrder, type PrinterProfile, type PrintJob, type PrintTransport, type ReceiptData, type useSale,
+  canOpenDrawer, createEscPosTransport, createPrintQueue, networkSinkFor, openDrawerJob, PrintError, templateColumns,
+  type EscPosSink, type PosOrder, type PrinterProfile, type PrintJob, type PrintTransport, type ReceiptData, type ReceiptPaper, type useSale,
 } from '@tallyui/pos';
 import { printerProfilesOf } from './printers';
 import { sampleReceipt } from './receipt-templates';
@@ -26,9 +26,9 @@ export function printToNetwork(profile: PrinterProfile, job: PrintJob, sink?: Es
   return queue.print(profile.id, job).finally(() => jobTransports.delete(job.id));
 }
 
-/** The cash sale opens its drawer in a separate job; printing the receipt must never open it again. */
-export function printReceiptToNetwork(profile: PrinterProfile, receipt: ReceiptData, sink?: EscPosSink | null): Promise<void> {
-  return printToNetwork({ ...profile, autoOpenDrawer: false }, { id: `receipt-${++jobCount}`, kind: 'receipt', receipt }, sink);
+/** Prints without opening the drawer, using the template's columns unless the profile sets its own. */
+export function printReceiptToNetwork(profile: PrinterProfile, receipt: ReceiptData, paper: ReceiptPaper, sink?: EscPosSink | null): Promise<void> {
+  return printToNetwork({ ...profile, autoOpenDrawer: false, columns: profile.columns ?? templateColumns(paper)[0] }, { id: `receipt-${++jobCount}`, kind: 'receipt', receipt }, sink);
 }
 
 /** The printer that kicks the drawer: switch on, ESC/POS and reachable from a browser; the default one first. */

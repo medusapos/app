@@ -58,10 +58,23 @@ async function bytesSent(profile: PrinterProfile): Promise<number[]> {
   return writes.flatMap((bytes) => [...bytes]);
 }
 
+describe('network receipt width', () => {
+  const receipt = sampleReceipt({ name: 'Shop', currency: 'EUR' });
+  it.each([
+    ['58mm paper prints at 32 columns', '58mm', epson, 32],
+    ['80mm paper prints at 42 columns', '80mm', epson, 42],
+    ['58mm paper keeps the printer profile’s 42 columns', '58mm', { ...epson, columns: 42 }, 42],
+  ] as const)('%s', async (_name, paper, profile, width) => {
+    const writes: Uint8Array[] = [];
+    await printReceiptToNetwork(profile, receipt, paper, { write: async (bytes) => { writes.push(bytes); } });
+    expect(Buffer.concat(writes).toString('latin1').split('\n')).toContain('-'.repeat(width));
+  });
+});
+
 describe('drawer pulse bytes', () => {
   it('sends the sale receipt without either drawer pulse', async () => {
     const writes: Uint8Array[] = [];
-    await printReceiptToNetwork(epson, sampleReceipt({ name: 'Shop', currency: 'EUR' }), { write: async (bytes) => { writes.push(bytes); } });
+    await printReceiptToNetwork(epson, sampleReceipt({ name: 'Shop', currency: 'EUR' }), '80mm', { write: async (bytes) => { writes.push(bytes); } });
     const sent = Buffer.concat(writes);
     expect(sent.toString('latin1')).toContain('Sample item');
     expect(sent.toString('hex')).not.toContain('101401');
