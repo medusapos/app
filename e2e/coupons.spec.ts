@@ -25,6 +25,37 @@ async function applyCode(page: Page, code: string) {
   await page.getByTestId('coupon-apply').click();
 }
 
+test('a listed coupon applies from the Add Discount Coupon tab', async ({ page }) => {
+  const promotion = await createPromotion(await adminToken(), { code: uniqueCode('E2E-LIST'), amount: 1 });
+  await signIn(page);
+  await addE2E1(page);
+  await page.getByTestId('cart-add-menu').click();
+  await page.getByRole('menuitem', { name: 'Add Discount' }).click();
+  await page.getByTestId('add-discount-kind-coupon').click();
+  await page.getByTestId('add-coupon-combobox').click();
+  await page.getByTestId('add-coupon-search-input').fill(promotion.code);
+  await page.getByTestId(`add-coupon-option-${promotion.code}`).click();
+  await page.getByTestId('add-coupon-submit').click();
+  await expect(page.getByTestId('cart-add-discount-sheet')).toHaveCount(0);
+  await expect(couponRows(page)).toHaveCount(1);
+  await expect(couponRows(page)).toContainText(promotion.code);
+});
+
+test('an older plugin leaves Add Discount without a Coupon tab', async ({ page }) => {
+  const listPath = (url: URL) => url.pathname === '/tally/v1/promotions';
+  await page.route(listPath, async route => {
+    if (route.request().method() !== 'GET') return route.continue();
+    await route.fulfill({ response: await route.fetch(), status: 404, body: '{}' });
+  });
+  await signIn(page);
+  await addE2E1(page);
+  await page.getByTestId('cart-add-menu').click();
+  await Promise.all([page.waitForResponse(response => listPath(new URL(response.url())) && response.request().method() === 'GET' && response.status() === 404),
+    page.getByRole('menuitem', { name: 'Add Discount' }).click()]);
+  await expect(page.getByTestId('discount-amount-input')).toBeVisible();
+  await expect(page.getByTestId('add-discount-kind-coupon')).toHaveCount(0);
+});
+
 test('a €1.00 coupon typed in lower case prices the cart at €3.75, and Medusa writes the same order with the promotion\'s adjustment', async ({ page }) => {
   const token = await adminToken();
   // The suite shares E2E-1 stock (as order-note.spec.ts does): read its level before this test sells anything, and give
