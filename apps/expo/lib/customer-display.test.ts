@@ -127,3 +127,14 @@ it('DS-2: the saved display store round-trips and tolerates unavailable storage'
   expect(saveDisplayStore(unavailable, 'https://shop.test')).toBeUndefined();
   expect(clearDisplayStore(unavailable)).toBeUndefined();
 });
+
+it.each([
+  ['not a url', null],
+  ['http://shop.example.com', null],
+  ['ftp://x', null],
+  ['https://shop.test/', 'https://shop.test'],
+  ['http://192.168.1.20:9000', 'http://192.168.1.20:9000'],
+] as const)('DS-3: validates and normalizes the saved store %s', (stored, expected) => {
+  const storage = { ...unavailable, getItem: (key: string) => key === DISPLAY_STORE_KEY ? stored : null };
+  expect(loadDisplayStore(storage)).toBe(expected);
+});

@@ -48,6 +48,7 @@ async function pairAndShowCart(page: Page, snapshotOnly: boolean) {
 test('CD-E1: a second page pairs, shows the live cart and loses its token when forgotten', async ({ page }) => {
   const display = await pairAndShowCart(page, false);
   await openSettings(page, 'Customer display');
+  expect(await display.evaluate((url) => localStorage.getItem(`medusapos.display.${url}`), backend)).toMatch(/./s);
   await page.getByTestId(/^forget-/).click();
   await page.getByTestId(/^forget-confirm-/).click();
   await expect(display.getByTestId('pairing-error')).toContainText('removed from its till');

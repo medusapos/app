@@ -1,6 +1,6 @@
 import type { DisplayRecord } from '@tallyui/core';
 import type { DisplayConfig, DisplayTokenStore, SaleDisplayInput, SentOrder, TillDeviceKeyStore } from '@tallyui/pos';
-import type { SessionStorage } from './session';
+import { normalizeBaseUrl, type SessionStorage } from './session';
 import type { StoreSettings } from './store-settings';
 
 const deviceKey = (baseUrl: string) => `medusapos.display-device-key.${baseUrl}`;
@@ -20,7 +20,10 @@ export function hasDisplayDeviceKey(storage: SessionStorage | null, baseUrl: str
 
 export const DISPLAY_STORE_KEY = 'medusapos.display-store';
 export function loadDisplayStore(storage: SessionStorage | null): string | null {
-  try { return storage?.getItem(DISPLAY_STORE_KEY) ?? null; } catch { return null; }
+  try {
+    const stored = storage?.getItem(DISPLAY_STORE_KEY);
+    return stored == null ? null : normalizeBaseUrl(stored);
+  } catch { return null; }
 }
 export function saveDisplayStore(storage: SessionStorage | null, baseUrl: string): void {
   try { storage?.setItem(DISPLAY_STORE_KEY, baseUrl); } catch {}
