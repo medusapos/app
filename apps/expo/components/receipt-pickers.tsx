@@ -3,6 +3,7 @@ import { View } from 'react-native';
 import { orderReference, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Text } from '@tallyui/components';
 import { buildReceiptData, networkSinkFor, type PosOrder, type PrinterProfile, type ReceiptData, type ReceiptPaper, type SentOrder } from '@tallyui/pos';
 import { RECEIPT_TEMPLATES, receiptTemplatePage, type ReceiptTemplateId } from '../lib/receipt-templates';
+import { BUILT_IN_PRINTER } from '../lib/printers';
 
 // The built-in's words, as Settings › Printing shows them.
 export const printerLabel = (profile: PrinterProfile) => profile.isBuiltIn ? 'Auto — Print dialog' : profile.name;
@@ -45,6 +46,7 @@ export function ReceiptPickers({ templateId, onTemplateChange, printers, printer
 
 export function receiptPrintersFor(templateId: ReceiptTemplateId, printers: PrinterProfile[]): PrinterProfile[] {
   const system = printers.filter((profile) => profile.connectionType === 'system');
+  if (!system.length) system.push(BUILT_IN_PRINTER);
   return RECEIPT_TEMPLATES.find((template) => template.id === templateId)?.paper
     ? system.concat(printers.filter((profile) => profile.connectionType === 'network' && networkSinkFor(profile) !== null)) : system;
 }

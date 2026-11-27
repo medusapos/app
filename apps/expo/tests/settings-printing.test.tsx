@@ -409,6 +409,16 @@ describe('Settings › Printing › Printers, network printers', () => {
       .toEqual(['Auto — Print dialog']);
   });
 
+  it('choosing Counter for the 58mm template leaves the 80mm template on the print dialog', async () => {
+    await printers.insert(counter);
+    await openPrinting();
+    const thermal = 'settings-receipt-template-thermal-58mm-printer';
+    fireEvent.click(screen.getByTestId(thermal));
+    fireEvent.click(await screen.findByTestId(`${thermal}-option-counter`));
+    expect(loadReceiptPrinter(localStorage, baseUrl, 'thermal-58mm')).toBe('counter');
+    expect(loadReceiptPrinter(localStorage, baseUrl, 'thermal-80mm')).toBe(SYSTEM_PRINTER_ID);
+  });
+
   it('shows a printer the paid screen saved, and the print dialog once that printer is deleted', async () => {
     await printers.insert(counter);
     saveReceiptPrinter(localStorage, baseUrl, 'thermal-58mm', 'counter');

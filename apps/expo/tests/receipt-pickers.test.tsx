@@ -41,6 +41,13 @@ describe('ReceiptPickers', () => {
     expect(screen.queryByText('Kitchen printer')).toBeNull();
   });
 
+  it('selects and lists the print dialog first when only an Epson profile is stored', () => {
+    render(<><ReceiptPickers templateId="thermal-80mm" onTemplateChange={vi.fn()} printers={[epson]} /><PortalHost /></>);
+    expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Auto — Print dialog');
+    fireEvent.click(screen.getByTestId('receipt-printer-select'));
+    expect(screen.getAllByTestId(/^receipt-printer-option-/).map((item) => item.textContent)).toEqual(['Auto — Print dialog', 'Counter']);
+  });
+
   it('lists only the print dialog for Standard even with an Epson network printer', () => {
     render(<><ReceiptPickers templateId="standard" onTemplateChange={vi.fn()} printers={[epson, BUILT_IN_PRINTER]} /><PortalHost /></>);
     fireEvent.click(screen.getByTestId('receipt-printer-select'));

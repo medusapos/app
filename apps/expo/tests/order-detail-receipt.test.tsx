@@ -209,6 +209,21 @@ describe('order detail Receipt (row 10.3)', () => {
       expect(dialog).not.toHaveBeenCalled();
     });
 
+    it('prints a 58mm reprint at 32 columns on the saved network printer', async () => {
+      saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-58mm');
+      saveReceiptPrinter(localStorage, 'https://store.test', 'thermal-58mm', 'counter');
+      const requests = vi.fn(async (_url: string, _init?: RequestInit) => ({ ok: true, status: 200, text: async () => '<response success="true"/>' }));
+      vi.stubGlobal('fetch', requests);
+      render(sheet(sale()));
+      fireEvent.click(await screen.findByTestId('order-detail-receipt'));
+      await waitFor(() => expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Counter'));
+      requests.mockClear();
+      fireEvent.click(screen.getByTestId('paid-print'));
+      await waitFor(() => expect(requests).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('/epos/'), expect.anything()));
+      const hex = String(requests.mock.calls[0]![1]?.body).match(/<command>([0-9a-f]+)<\/command>/)?.[1]!;
+      expect(Buffer.from(hex, 'hex').toString('latin1').split('\n')).toContain('-'.repeat(32));
+    });
+
     it("the reprint's Printer select lists Counter for 80mm and saves the choice", async () => {
       saveReceiptTemplate(localStorage, 'https://store.test', 'thermal-80mm');
       render(sheet(sale()));
@@ -247,8 +262,10 @@ describe('order detail Receipt (row 10.3)', () => {
       render(sheet(sale()));
       fireEvent.click(await screen.findByTestId('order-detail-receipt'));
       await waitFor(() => expect(screen.getByTestId('receipt-printer-select').textContent).toBe('Counter'));
+      vi.mocked(fetch).mockClear();
       fireEvent.click(screen.getByTestId('paid-print'));
       expect((await screen.findByTestId('paid-print-status')).textContent).toBe("Couldn't print. Try again.");
+      expect(fetch).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('/epos/'), expect.anything());
       expect(printSalePage).not.toHaveBeenCalled();
       expect(dialog).not.toHaveBeenCalled();
     });

@@ -565,7 +565,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId } : undefined;
   const thermalPage = thermalArgs && thermalPaidPage(thermalArgs);
   const networkPrinter = paper ? chosenNetworkPrinter(receiptTemplateId, printers, receiptPrinterId) : undefined;
-  const printPaidReceipt = thermalArgs && networkPrinter ? () => printReceiptToNetwork(networkPrinter, paidReceiptData(thermalArgs))
+  const printPaidReceipt = thermalArgs && networkPrinter ? () => printReceiptToNetwork(networkPrinter, paidReceiptData(thermalArgs), thermalArgs.paper)
     : thermalPage !== undefined ? () => printSalePage(thermalPage) : printWindow;
   // v2's auto-print: the paid screen prints each finished sale's receipt once, never a reprint from Orders.
   // v2's "Automatically show receipt after checkout" off skips the paid screen; an auto-print still prints from it first.
