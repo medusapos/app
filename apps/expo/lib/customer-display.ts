@@ -18,6 +18,17 @@ export function hasDisplayDeviceKey(storage: SessionStorage | null, baseUrl: str
   return !!readKey(storage, baseUrl);
 }
 
+const pairedKey = (baseUrl: string) => `medusapos.display-paired.${baseUrl}`;
+export function loadDisplayPaired(storage: SessionStorage | null, baseUrl: string): boolean | null {
+  try {
+    const value = storage?.getItem(pairedKey(baseUrl));
+    return value === '1' ? true : value === '0' ? false : null;
+  } catch { return null; }
+}
+export function saveDisplayPaired(storage: SessionStorage | null, baseUrl: string, paired: boolean): void {
+  try { storage?.setItem(pairedKey(baseUrl), paired ? '1' : '0'); } catch {}
+}
+
 export const DISPLAY_STORE_KEY = 'medusapos.display-store';
 export function loadDisplayStore(storage: SessionStorage | null): string | null {
   try {

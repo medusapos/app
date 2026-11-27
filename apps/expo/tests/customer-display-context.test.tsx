@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { webcrypto } from 'node:crypto';
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
+import { DisplaySignallingError } from '@tallyui/core';
 import { createMemoryDisplaySignalling } from '@tallyui/core/server';
 import { useTillDisplays, useTillPairing } from '@tallyui/pos';
 import type { ReactNode } from 'react';
@@ -77,4 +78,155 @@ it('C-8: the default context is inert', () => {
   const { result } = renderHook(useCustomerDisplay);
   expect(result.current).toEqual({ available: false, service: null, pairing: null, startPairing: expect.any(Function) });
   expect(result.current.startPairing()).toBeUndefined();
+});
+
+const hint = `medusapos.display-paired.${baseUrl}`;
+class NeverConnects {
+  createDataChannel() { return { readyState: 'connecting', close() {} }; }
+  createOffer() { return new Promise<never>(() => {}); }
+  close() {}
+}
+
+async function storeDevice(deviceId = 'register-1') {
+  const { deviceKey } = await memory.signalling.registerDevice({ connectorId: 'medusa', baseUrl, headers }, deviceId);
+  localStorage.setItem(REGISTER_ID_KEY, deviceId);
+  localStorage.setItem(key, deviceKey);
+}
+
+async function firstList() {
+  const list = vi.mocked(memory.signalling.list);
+  await act(async () => {
+    await vi.waitFor(() => expect(list).toHaveBeenCalled());
+    await list.mock.results[0].value;
+  });
+}
+
+async function startWithCode() {
+  const { result } = mount();
+  act(() => result.current.startPairing());
+  const pairing = result.current.pairing!;
+  await act(async () => { await vi.waitFor(() => expect(pairing.phase.phase).toBe('code')); });
+  return { result, pairing };
+}
+
+async function confirmDisplay() {
+  vi.useFakeTimers();
+  vi.stubGlobal('RTCPeerConnection', NeverConnects);
+  const { result, pairing } = await startWithCode();
+  const service = result.current.service!;
+  const phase = pairing.phase;
+  if (phase.phase !== 'code') throw Error('Expected pairing code');
+  await memory.signalling.claim(memory.harness.display('counter'), { code: phase.code, displayName: 'Counter' });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(2000);
+    await vi.mocked(memory.signalling.pending).mock.results[0].value;
+  });
+  const claims = pairing.phase;
+  if (claims.phase !== 'code') throw Error('Expected pending claims');
+  await act(() => pairing.confirm(claims.claims[0].claimId));
+  return { result, pairing, service };
+}
+
+it('IT-1: an unpaired hint overrides the device key', async () => {
+  vi.useFakeTimers();
+  localStorage.setItem(key, 'stored-key'); localStorage.setItem(hint, '0');
+  const { result, spies } = mount();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(result.current).toMatchObject({ service: null, pairing: null });
+  for (const spy of spies) expect(spy).not.toHaveBeenCalled();
+});
+
+it('IT-2: an empty first list closes the service and pairing exactly once', async () => {
+  vi.useFakeTimers();
+  await storeDevice(); localStorage.setItem(hint, '1');
+  const { result } = mount();
+  const closeService = vi.spyOn(result.current.service!, 'close');
+  const closePairing = vi.spyOn(result.current.pairing!, 'close');
+  await firstList();
+  expect(result.current).toMatchObject({ service: null, pairing: null });
+  expect(localStorage.getItem(hint)).toBe('0');
+  expect(closeService).toHaveBeenCalledOnce(); expect(closePairing).toHaveBeenCalledOnce();
+  vi.mocked(memory.signalling.list).mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(memory.signalling.list).not.toHaveBeenCalled();
+});
+
+it('IT-3: cancelling an empty pairing stops polling', async () => {
+  vi.useFakeTimers();
+  const { result, pairing } = await startWithCode();
+  await firstList();
+  act(() => pairing.cancel());
+  expect(result.current).toMatchObject({ service: null, pairing: null });
+  expect(localStorage.getItem(hint)).toBe('0');
+  vi.mocked(memory.signalling.list).mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(memory.signalling.list).not.toHaveBeenCalled();
+});
+
+it('IT-4: confirming a display keeps the same service polling', async () => {
+  const { result, service } = await confirmDisplay();
+  expect(localStorage.getItem(hint)).toBe('1');
+  vi.mocked(memory.signalling.list).mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(memory.signalling.list).toHaveBeenCalled();
+  expect(result.current.service).toBe(service);
+});
+
+it('IT-5: forgetting the last display returns the till to idle', async () => {
+  const { result, pairing, service } = await confirmDisplay();
+  await act(() => pairing.forget(service.displays[0].display.displayId));
+  expect(result.current).toMatchObject({ service: null, pairing: null });
+  expect(localStorage.getItem(hint)).toBe('0');
+});
+
+it('IT-6: a session render during key replacement keeps the paired service', async () => {
+  vi.stubGlobal('RTCPeerConnection', NeverConnects);
+  await memory.harness.seedLegacyDevice('paired-till');
+  await storeDevice('paired-till'); localStorage.setItem(hint, '1');
+  const { result } = mount();
+  await firstList();
+  const service = result.current.service!;
+  expect(service.displays).toHaveLength(1);
+  const close = vi.spyOn(service, 'close');
+  localStorage.removeItem(key);
+  act(() => result.current.session.mergeCapabilities({ ...result.current.session.session?.capabilities, orderCreate: 6 }));
+  expect(result.current.session.session?.capabilities?.orderCreate).toBe(6);
+  expect(result.current.service).toBe(service);
+  expect(close).not.toHaveBeenCalled();
+});
+
+it('IT-7: failed lists keep the hint and service active', async () => {
+  vi.useFakeTimers();
+  await storeDevice(); localStorage.setItem(hint, '1');
+  const { result } = mount();
+  vi.mocked(memory.signalling.list).mockRejectedValue(new DisplaySignallingError('network'));
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(memory.signalling.list).toHaveBeenCalled();
+  expect(result.current.service?.status).toBe('offline');
+  expect(localStorage.getItem(hint)).toBe('1');
+});
+
+it('IT-8: a refused start leaves its pairing error visible', async () => {
+  const { result, pairing } = await startWithCode();
+  await firstList();
+  headers = (await memory.harness.till({ cashierId: 'viewer', canPair: false })).headers;
+  act(() => result.current.startPairing());
+  await waitFor(() => expect(result.current.pairingView.phase).toEqual({ phase: 'idle', error: 'forbidden' }));
+  expect(result.current.pairing).toBe(pairing);
+  expect(localStorage.getItem(hint)).toBeNull();
+});
+
+it('IT-9: cancelling before the first list resolves preserves the paired hint', async () => {
+  await storeDevice(); localStorage.setItem(hint, '1');
+  const { result } = mount();
+  let finishList!: (empty: []) => void;
+  vi.mocked(memory.signalling.list).mockReturnValueOnce(new Promise((resolve) => { finishList = resolve; }));
+  await waitFor(() => expect(memory.signalling.list).toHaveBeenCalledOnce());
+  const service = result.current.service!;
+  act(() => result.current.startPairing());
+  act(() => result.current.pairing!.cancel());
+  expect(result.current.service).toBe(service);
+  expect(localStorage.getItem(hint)).toBe('1');
+  await act(async () => finishList([]));
+  expect(result.current.service).toBeNull();
 });
