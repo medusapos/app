@@ -72,7 +72,7 @@ import { isStoredOpensDrawer, printReceiptToNetwork, useCashDrawerOnSale } from 
 import { useProductSettings } from '../lib/product-settings';
 import { useProductCollections } from '../lib/product-collections';
 import { listProductCollections, listProductTags, productCollectionIds } from '../lib/products-area';
-import { isOnSale, loadSaleFilters, saleFilterItems, saveSaleFilters, type SaleFilters } from '../lib/sale-filters';
+import { isOnSale, loadSaleFilters, loadSaleInStock, saleFilterItems, saveSaleFilters, saveSaleInStock, type SaleFilters } from '../lib/sale-filters';
 import { printSalePage, RECEIPT_TEMPLATES, useReceiptPrinter, useReceiptTemplate } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
@@ -193,7 +193,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
-  const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
+  const [filters, setFilters] = useState<ProductFilters>(() => ({ ...DEFAULT_PRODUCT_FILTERS, inStock: loadSaleInStock(defaultStorage(), session.baseUrl) }));
+  const setInStock = (on: boolean) => {
+    setFilters({ ...filters, inStock: on });
+    saveSaleInStock(defaultStorage(), session.baseUrl, on);
+  };
   // Clear and Refresh (v2): the search is Catalogue's own state, so a new key empties it; the filters go back to the start.
   const [catalogueKey, setCatalogueKey] = useState(0);
   // Catalogue's search text, tracked so the app's own pick filtering keeps it (Catalogue does not report a cleared box).
@@ -202,8 +206,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const clearCatalogue = useCallback(() => {
     clearAndRefresh();
     setFilters({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
+    saveSaleInStock(defaultStorage(), session.baseUrl, false);
     setCatalogueKey((key) => key + 1);
-  }, [clearAndRefresh]);
+  }, [clearAndRefresh, session.baseUrl]);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
   token.current = session.token;
@@ -376,7 +381,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   };
   useWedgeScan(wedgeActive, scannerSettings, onScan);
   // A directly connected scanner (Settings > Scanner) types nothing, so it adds in every layout without a double add.
-  useDeviceScans(sale.stage.kind === 'cart', onScan);
+  // Products takes its own device scans into its search box.
+  useDeviceScans(sale.stage.kind === 'cart' && pathname !== '/products', onScan);
   // v2: on web, Escape in the tender does what its ✕ / Back does (not while saving, as the ✕ is disabled).
   useEscapeBack(sale.stage.kind === 'tender', () => { if (sale.saving) return; sale.cancelTender(); if (phone) setCartOpen(true); });
   const sellableCount = sorted.length;
@@ -447,7 +453,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const chips: ProductFilterChip[] = ['inStock', ...anyOnSale ? ['onSale' as const] : [], ...tags.length ? ['tag' as const] : []];
   const filterRow = <>
     <ProductFilterBar value={{ ...filters, onSale }} chips={chips} onChange={(next) => {
-      if (next.inStock !== filters.inStock) setFilters({ ...filters, inStock: next.inStock });
+      if (next.inStock !== filters.inStock) setInStock(next.inStock);
       if (next.onSale !== onSale) changeSaleFilters({ onSale: next.onSale });
     }} terms={{ tag: { options: tags.map(({ id, value }) => ({ value: id, label: value })), value: tag ?? undefined,
       onChange: (next) => changeSaleFilters({ tag: toggled(tag, next) }) } }}
@@ -463,7 +469,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     return add(entry);
   };
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
-    showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
+    showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setInStock(!show)}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
   // v2's sync arrow sits right after the count; its product settings end the search row, after the view icon.
   const statusAccessory = <CatalogueSyncButton onSync={syncNow} onClearAndRefresh={clearCatalogue} syncing={pullState === 'syncing' || pullState === 'connecting'} />;
@@ -471,7 +477,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
-    {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
+    {/* In Stock starts off until the cashier turns it on, and is kept per store on this device. */}
     <View testID="catalogue-area" className="flex-1" pointerEvents={dimmed ? 'none' : 'auto'}
       aria-disabled={dimmed} style={{ opacity: dimmed ? 0.5 : 1 }}>
     <Catalogue key={catalogueKey} products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
@@ -563,8 +569,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </RegisterGate>;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
+  const paidLive = recent.find(order => order.id === paid?.id);
+  // The completion snapshot never gains the store's refs; read the outbox row once it is there (#621).
+  const paidPosOrder = paidLive ?? paid;
   // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
-  const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
+  const awaiting = useAwaitingStore(paidLive, online, outboxState);
   useEffect(() => { if (sale.stage.kind === 'receipt') injectPaidScrollPrintStyle(); }, [sale.stage.kind]);
   const wide = width >= ROW_BREAKPOINT;
   const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || changeDueMinor(sale.stage.order) > 0);
@@ -572,12 +581,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const pickers = Platform.OS === 'web';
   const paper = pickers ? RECEIPT_TEMPLATES.find((t) => t.id === receiptTemplateId)?.paper : undefined;
   const emailReceipt = connector.emailReceipt ? <EmailReceipt
-    orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
+    orderId={paidLive?.serverRefs?.orderId}
     online={online} defaultEmail={paid?.customer?.email
       ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
     send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined;
   const thermalArgs = sale.stage.kind === 'receipt' && paper ? { paper, order: sale.stage.order,
-    posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId } : undefined;
+    posOrder: paidPosOrder, store: receiptStore, cashier: session.name || session.email, registerId } : undefined;
   const thermalPage = thermalArgs && thermalPaidPage(thermalArgs);
   const networkPrinter = paper ? chosenNetworkPrinter(receiptTemplateId, printers, receiptPrinterId) : undefined;
   const printPaidReceipt = thermalArgs && networkPrinter ? () => printReceiptToNetwork(networkPrinter, paidReceiptData(thermalArgs), thermalArgs.paper)
@@ -595,13 +604,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <ScrollView testID="paid-scroll" dataSet={{ print: 'scroll' }} className="flex-1">
       {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
       {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-        {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
-          : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
+        {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={paidPosOrder ?? sale.stage.posOrder} />
+          : <PaidChange order={sale.stage.order} posOrder={paidPosOrder ?? sale.stage.posOrder} />}
       </View>}
       {pickers && <ReceiptPickers templateId={receiptTemplateId} onTemplateChange={setReceiptTemplateId} printers={printers}
         printerId={receiptPrinterId} onPrinterChange={setReceiptPrinterId} topInset={paidHeadline ? 0 : leadInset} />}
       {thermalPage !== undefined ? <ThermalPaidReceipt page={thermalPage} />
-        : <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder} store={receiptStore} actions={false}
+        : <Receipt order={sale.stage.order} posOrder={paidPosOrder} store={receiptStore} actions={false}
           topInset={paidHeadline || pickers ? 0 : leadInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
           cashier={session.name || session.email} registerId={registerId} />}
     </ScrollView>
@@ -668,7 +677,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row">
         {paidReceipt}
         <View dataSet={{ print: 'hide' }} className="w-96 self-stretch" style={{ paddingTop: topInset }}>
-          <PaidSummary order={sale.stage.order} posOrder={sale.stage.posOrder} storeName={receiptStore.name}
+          <PaidSummary order={sale.stage.order} posOrder={paidPosOrder ?? sale.stage.posOrder} storeName={receiptStore.name}
             taxLabel={taxLabel} formatDate={(iso) => formatPaidDate(iso)} awaiting={awaiting} />
         </View>
       </View> : paidReceipt :

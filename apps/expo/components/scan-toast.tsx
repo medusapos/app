@@ -1,15 +1,17 @@
-// v2's scan toasts on the Sale screen (DEMO-PARITY row 02f.3): green "Added to cart", amber "Barcode not found".
+// v2's scan toasts: Sale's "Added to cart" and "Barcode not found" (02f.3), and Products' "Barcode scanned" (12.13).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { Circle, Path } from 'react-native-svg';
 import { createSvgIcon, Toast, ToastDescription, ToastTitle } from '@tallyui/components';
 import type { VariantSummary } from '@tallyui/core';
+import { PRODUCTS_SCAN_MATCHES } from '../lib/products-area';
 import { WarningIcon } from './offline-toast';
 
 // How long a scan toast stays; a new scan replaces it and restarts the wait.
 export const SCAN_TOAST_MS = 3_000;
 
-export type ScanToastState = { kind: 'added'; description: string } | { kind: 'not-found'; code: string };
+export type ScanToastState = { kind: 'added'; description: string } | { kind: 'not-found'; code: string }
+  | { kind: 'scanned'; code: string; count: number };
 
 /**
  * The added toast's second line: the product name, then " · " and the variant's label when it has one — its option
@@ -42,16 +44,16 @@ const CheckCircleIcon = createSvgIcon('CheckCircleIcon', () => <>
 </>);
 
 export function ScanToast({ toast }: { toast: ScanToastState }) {
-  const added = toast.kind === 'added';
+  const success = toast.kind === 'added' || (toast.kind === 'scanned' && toast.count > 0);
   // An opaque surface with a tone layer on it, as the offline toast: it floats over the till, which must not show through.
-  return <Toast testID="scan-toast" {...(added ? { accessibilityLiveRegion: 'polite' as const } : { accessibilityRole: 'alert' as const })}
-    className={`max-w-md gap-3 bg-background p-3 ${added ? 'border-success' : 'border-warning'}`}>
-    <View pointerEvents="none" className={`absolute inset-0 ${added ? 'bg-success/15' : 'bg-warning/15'}`} />
-    {added ? <View className="text-success"><CheckCircleIcon size={24} /></View>
+  return <Toast testID="scan-toast" {...(success ? { accessibilityLiveRegion: 'polite' as const } : { accessibilityRole: 'alert' as const })}
+    className={`max-w-md gap-3 bg-background p-3 ${success ? 'border-success' : 'border-warning'}`}>
+    <View pointerEvents="none" className={`absolute inset-0 ${success ? 'bg-success/15' : 'bg-warning/15'}`} />
+    {success ? <View className="text-success"><CheckCircleIcon size={24} /></View>
       : <View className="text-warning"><WarningIcon size={24} /></View>}
     <View className="flex-1">
-      <ToastTitle className="text-foreground">{added ? 'Added to cart' : 'Barcode not found'}</ToastTitle>
-      <ToastDescription className="text-foreground">{added ? toast.description : `${toast.code} — not in this store`}</ToastDescription>
+      <ToastTitle className="text-foreground">{toast.kind === 'scanned' ? `Barcode scanned: ${toast.code}` : success ? 'Added to cart' : 'Barcode not found'}</ToastTitle>
+      <ToastDescription className="text-foreground">{toast.kind === 'scanned' ? PRODUCTS_SCAN_MATCHES(toast.count) : toast.kind === 'added' ? toast.description : `${toast.code} — not in this store`}</ToastDescription>
     </View>
   </Toast>;
 }

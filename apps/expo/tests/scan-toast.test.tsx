@@ -3,6 +3,7 @@ import { act, cleanup, render, renderHook, screen } from '@testing-library/react
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VariantSummary } from '@tallyui/core';
 import { SCAN_TOAST_MS, ScanToast, scanAddedDescription, useScanToast } from '../components/scan-toast';
+import { PRODUCTS_SCAN_MATCHES } from '../lib/products-area';
 
 const variant = (fields: Partial<VariantSummary>): VariantSummary => ({ id: 'v', prices: [], ...fields } as VariantSummary);
 const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
@@ -34,6 +35,28 @@ describe('scanAddedDescription', () => {
 
 describe('ScanToast', () => {
   afterEach(() => { cleanup(); });
+
+  it('describes zero, one and several Products matches', () => {
+    expect(PRODUCTS_SCAN_MATCHES(0)).toBe('No products match');
+    expect(PRODUCTS_SCAN_MATCHES(1)).toBe('1 product matches');
+    expect(PRODUCTS_SCAN_MATCHES(3)).toBe('3 products match');
+  });
+
+  it('announces a matching Products scan politely', () => {
+    render(<ScanToast toast={{ kind: 'scanned', code: 'ABC123', count: 2 }} />);
+    const toast = screen.getByTestId('scan-toast');
+    expect(toast.textContent).toContain('Barcode scanned: ABC123');
+    expect(toast.textContent).toContain('2 products match');
+    expect(toast.getAttribute('aria-live')).toBe('polite');
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('announces a Products scan with no matches as an alert', () => {
+    render(<ScanToast toast={{ kind: 'scanned', code: 'ABC123', count: 0 }} />);
+    const toast = screen.getByRole('alert');
+    expect(toast.textContent).toContain('Barcode scanned: ABC123');
+    expect(toast.textContent).toContain('No products match');
+  });
 
   it('reads Added to cart with the description', () => {
     render(<ScanToast toast={{ kind: 'added', description: 'Jacket · XS, Gray' }} />);

@@ -9,6 +9,7 @@ import { Image } from '@tallyui/primitives';
 import { AreaAccountButton, FrameMenuButton, useFrameMenu } from '../components/app-frame';
 import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { ProductsAreaColumnsButton } from '../components/products-area-columns-settings';
+import { ScanToast, useScanToast } from '../components/scan-toast';
 import { PRODUCTS_COLLECTIONS_COPY, ProductsTagsChip } from '../components/products-tags-chip';
 import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
@@ -31,6 +32,7 @@ import { useSession } from '../lib/session-context';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { playScanBeep } from '../lib/scan-beep';
 import { useScannerSettings } from '../lib/scanner-settings';
+import { useDeviceScans } from '../lib/use-device-scans';
 import { useWedgeScan, useWedgeScanField } from '../lib/use-wedge-scan';
 
 // The row's product thumbnail, or a plain tile of the same size when the product has none.
@@ -180,12 +182,16 @@ export default function ProductsAreaScreen() {
   // v2: "On the Products and Orders screens, a scan goes into that screen's search box": a scan typed into the box,
   // or with nothing editable focused, becomes the search text without its prefix and suffix. It never touches a cart.
   const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session?.baseUrl ?? '');
+  const scanToast = useScanToast();
+  const pathname = usePathname();
   const onScan = (code: string) => {
     if (scannerSettings.playSound) playScanBeep();
     setSearch(code);
+    scanToast.show({ kind: 'scanned', code, count: filterProductAreaRows(chipRows, code).length });
   };
   const onSearchKeyPress = useWedgeScanField(scannerSettings, onScan);
-  useWedgeScan(usePathname() === '/products', scannerSettings, onScan);
+  useWedgeScan(pathname === '/products', scannerSettings, onScan);
+  useDeviceScans(pathname === '/products', onScan);
   const [categoryId, setCategoryId] = useState<string | null>(() =>
     session ? loadProductsAreaCategory(defaultStorage(), session.baseUrl) : null);
   const [tagId, setTagId] = useState<string | null>(() => session ? loadProductsAreaTag(defaultStorage(), session.baseUrl) : null);
@@ -222,10 +228,11 @@ export default function ProductsAreaScreen() {
   const collections = useMemo(() => ready ? listProductCollections(ready.products, collectionTitles) : [], [ready, collectionTitles]);
   const activeCollection = collections.find((collection) => collection.id === collectionId) ?? null;
   const activeCollectionId = activeCollection?.id ?? null;
-  const items = useMemo(() => filterProductAreaRows(filterProductAreaRowsOnSale(filterProductAreaRowsInStock(
+  const chipRows = useMemo(() => filterProductAreaRowsOnSale(filterProductAreaRowsInStock(
     filterProductAreaRowsByCollection(filterProductAreaRowsByTag(filterProductAreaRowsByCategory(rows, activeId), activeTagId),
-      activeCollectionId), inStockOnly), onSaleOnly), search),
-  [rows, activeId, activeTagId, activeCollectionId, inStockOnly, onSaleOnly, search]);
+      activeCollectionId), inStockOnly), onSaleOnly),
+  [rows, activeId, activeTagId, activeCollectionId, inStockOnly, onSaleOnly]);
+  const items = useMemo(() => filterProductAreaRows(chipRows, search), [chipRows, search]);
   // v2's Variations choice is the Sale's own setting: 'list' opens a product in place, 'popover' is Expanded rows here.
   const { settings: productSettings, save: saveProductSettings } = useProductSettings(defaultStorage(), session?.baseUrl ?? '');
   const inPlace = productSettings.variations === 'list';
@@ -256,6 +263,7 @@ export default function ProductsAreaScreen() {
   // Clear and Refresh empties the search and the In stock and On sale chips too, as the Sale's does; the kept category and tag stay.
   const clearAndRefresh = () => {
     ready?.clearAndRefresh?.();
+    scanToast.clear();
     setSearch('');
     setInStockOnly(false);
     setOnSaleOnly(false);
@@ -346,5 +354,8 @@ export default function ProductsAreaScreen() {
       <Text className="text-center text-destructive" testID="products-error">{loaded.error ?? PRODUCTS_LOAD_FAILED}</Text>
       {loaded.retry ? <Button variant="outline" testID="products-retry" onPress={loaded.retry}><Text>Retry</Text></Button> : null}
     </View> : null}
+    <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center gap-2 px-2">
+      {scanToast.toast ? <ScanToast toast={scanToast.toast} /> : null}
+    </View>
   </View></ProductLines.Provider></OpensInPlace.Provider></ToggleVariations.Provider>;
 }

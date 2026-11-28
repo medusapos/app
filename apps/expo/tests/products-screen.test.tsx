@@ -401,6 +401,55 @@ describe('ProductsScreen catalogue', () => {
     expect(screen.getByTestId('product-tile-Zebra')).toBeTruthy();
   });
 
+  describe('kept In Stock choice', () => {
+    const key = 'medusapos.sale-in-stock.https://store.test';
+    beforeEach(() => {
+      vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [
+        { id: 'apple', title: 'Apple', status: 'published', variants: [{ id: 'apple-one', title: 'One size',
+          manage_inventory: true, inventory_quantity: 5, prices: [{ amount: 12.5, currency_code: 'eur' }] }] },
+        { id: 'zebra', title: 'Zebra', status: 'published', variants: [{ id: 'zebra-one', title: 'One size',
+          manage_inventory: true, inventory_quantity: 0, prices: [{ amount: 12.5, currency_code: 'eur' }] }] },
+      ] }));
+    });
+
+    it("keeps In Stock across a remount for the same store, and never takes another store's", async () => {
+      const other = 'medusapos.sale-in-stock.https://other.test';
+      localStorage.setItem(other, 'true');
+      await mount();
+      const chip = screen.getByRole('button', { name: 'In Stock', pressed: false });
+      expect(screen.getByTestId('product-tile-Zebra')).toBeTruthy();
+      fireEvent.click(chip);
+      cleanup();
+      await mount();
+      expect(screen.getByRole('button', { name: 'In Stock', pressed: true })).toBeTruthy();
+      expect(screen.queryByTestId('product-tile-Zebra')).toBeNull();
+      expect(localStorage.getItem(other)).toBe('true');
+      expect(localStorage.getItem(key)).toBe('true');
+    });
+
+    it('Clear and Refresh turns a kept In Stock off, and it stays off after a remount', async () => {
+      localStorage.setItem(key, 'true');
+      await mount();
+      expect(screen.getByRole('button', { name: 'In Stock', pressed: true })).toBeTruthy();
+      fireEvent.contextMenu(screen.getByTestId('catalogue-sync'));
+      fireEvent.click(screen.getByTestId('catalogue-clear-refresh'));
+      expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
+      cleanup();
+      await mount();
+      expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
+    });
+
+    it("Product settings' show out of stock is the same kept choice", async () => {
+      localStorage.setItem(key, 'true');
+      await mount();
+      fireEvent.click(screen.getByTestId('product-settings-button'));
+      fireEvent.click(screen.getByRole('switch', { name: 'Show out-of-stock products', checked: false }));
+      cleanup();
+      await mount();
+      expect(screen.getByRole('button', { name: 'In Stock', pressed: false })).toBeTruthy();
+    });
+  });
+
   it.each([
     [undefined, 'Test shop · Up to date · 0 products'],
     [{ count: 0, stale: false }, 'Test shop · Up to date · 0 products'],
@@ -2368,6 +2417,16 @@ describe('ProductsScreen device scans', () => {
     expect(document.activeElement).not.toBe(screen.getByRole('searchbox'));
     scan('AB123');
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+  });
+
+  it('leaves the cart and Sale toast untouched while Products is open', async () => {
+    vi.mocked(usePathname).mockReturnValue('/products');
+    try {
+      const scan = await mountWithHub();
+      scan('AB123');
+      expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
+      expect(screen.queryByTestId('scan-toast')).toBeNull();
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
   });
 
   it('shows the Barcode not found toast for an unknown code, on the wide window', async () => {
