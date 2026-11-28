@@ -1269,6 +1269,19 @@ describe('the Variations choice', () => {
       expect(screen.getByTestId('products-place-options')).toBeTruthy();
     });
 
+    it('with an option chosen, On sale that leaves the product nothing names On sale, not the options', () => {
+      openHoodie();
+      pick('size', 'M');
+      expect(rowIds()).toEqual(['M-Blue', 'M-Red']);
+      press('products-on-sale');
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NONE_ON_SALE)).toBeTruthy();
+      expect(screen.queryByText(PRODUCTS_NONE_WITH_OPTIONS)).toBeNull();
+      expect(screen.getByTestId('products-place-options')).toBeTruthy();
+      press('products-on-sale');
+      expect(rowIds()).toEqual(['M-Blue', 'M-Red']);
+    });
+
     it('going back or opening the product again starts with no choice; the list, Expanded rows and p4 show no option chips', () => {
       openHoodie();
       pick('size', 'M');

@@ -257,6 +257,11 @@ export default function ProductsAreaScreen() {
   const [sort, setSort] = useState<ProductSort | null>(NAME_SORT);
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
   const narrowed = useMemo(() => place ? filterPlaceRowsByOptions(items, place, placeOptions) : items, [items, place, placeOptions]);
+  const optionsEmptiedPlace = useMemo(() => {
+    if (!place || narrowed === items) return false;
+    const variantIds = new Set(place.variants.map(({ id }) => id));
+    return items.some((row) => variantIds.has(row.id)) && !narrowed.some((row) => variantIds.has(row.id));
+  }, [items, narrowed, place]);
   const phoneItems = useMemo(() => !phone ? [] : place ? productAreaPlaceItems(narrowed, place, NAME_SORT, valueOf)
     : productAreaItems(items, products, NAME_SORT, isOpen, valueOf), [phone, place, narrowed, items, products, isOpen]);
   const tableItems = useMemo(() => phone ? [] : place ? productAreaPlaceItems(narrowed, place, sort, valueOf)
@@ -277,7 +282,7 @@ export default function ProductsAreaScreen() {
     setOnSaleOnly(false);
   };
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
-    : place && narrowed !== items ? PRODUCTS_NONE_WITH_OPTIONS
+    : optionsEmptiedPlace ? PRODUCTS_NONE_WITH_OPTIONS
     : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : activeCollection ? PRODUCTS_NONE_IN_COLLECTION(activeCollection.value)
       : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
       : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
