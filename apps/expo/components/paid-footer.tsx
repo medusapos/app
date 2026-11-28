@@ -19,8 +19,9 @@ export function paidPrintedLabel(networkPrinter: PrinterProfile | undefined, os:
  * settles and says so when it fails; a successful print shows its destination when a label is provided.
  * The latest print decides the status, and an auto-print job's status survives a remount.
  */
-export function PaidFooter({ emailReceipt, print, autoPrint, printedLabel, newSale, doneLabel = 'New sale' }: {
+export function PaidFooter({ emailReceipt, notice, print, autoPrint, printedLabel, newSale, doneLabel = 'New sale' }: {
   emailReceipt?: ReactNode;
+  notice?: ReactNode;
   print: () => void | Promise<void>;
   autoPrint?: Promise<void> | null;
   printedLabel?: string;
@@ -61,6 +62,7 @@ export function PaidFooter({ emailReceipt, print, autoPrint, printedLabel, newSa
       <Text>{printedLabel && printed ? 'Print again' : 'Print receipt'}</Text>
     </Button>
     <Button testID="paid-new-sale" onPress={newSale}><Text>{doneLabel}</Text></Button>
+    {notice}
     {status === 'failed' ? <Text testID="paid-print-status" className="w-full text-sm text-destructive">Couldn't print. Try again.</Text> : null}
     {printedLabel && status === 'done' ? <Text testID="paid-print-done" className="w-full text-sm text-muted-foreground">{printedLabel}</Text> : null}
   </View>;

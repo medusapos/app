@@ -72,6 +72,8 @@ afterEach(async () => {
   await store.close();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  vi.mocked(printSalePage).mockReset();
 });
 async function startSplit() {
   await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });

@@ -122,6 +122,14 @@ describe('PaidFooter', () => {
     expect(within(footer).getByTestId('paid-new-sale').textContent).toBe('New sale');
   });
 
+  it('puts a notice on its own row after New sale, before the print status', async () => {
+    render(<PaidFooter emailReceipt={<button data-testid="email-slot">email slot</button>} notice={<p data-testid="notice">sent</p>}
+      print={() => Promise.reject(new Error('offline'))} newSale={vi.fn()} />);
+    await act(async () => { fireEvent.click(printButton()); });
+    expect(Array.from(screen.getByTestId('paid-footer').children, (child) => child.getAttribute('data-testid')))
+      .toEqual(['email-slot', 'paid-print', 'paid-new-sale', 'notice', 'paid-print-status']);
+  });
+
   it('shows only Print receipt and New sale without an email slot', () => {
     mount({ email: false });
     expect(within(screen.getByTestId('paid-footer')).getAllByRole('button').map((button) => button.textContent))
