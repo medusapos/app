@@ -4,11 +4,12 @@ import { SettingsGroup as BoxedGroup, SettingsRow as BoxedRow, type SettingsGrou
 import { cn } from '@tallyui/theme';
 import { AppText as Text } from '../components/app-text';
 
-// Wide sections have flat groups with optional dividers; phones keep TallyUI's separate boxed groups.
+// True inside the wide Settings section card, where groups are flat and can have dividers.
 export const SettingsFlatContext = createContext(false);
 
 export function SettingsGroup({ title, description, children, className, divider, ...viewProps }: SettingsGroupProps & { divider?: boolean }) {
   const flat = useContext(SettingsFlatContext);
+  // A boxed group ignores divider. It cannot be flattened: TallyUI draws its box on an inner view no className reaches.
   if (!flat) return <BoxedGroup title={title} description={description} className={className} {...viewProps}>{children}</BoxedGroup>;
   // -mx-4 undoes the section card's p-4, so the title, the rows and their notes keep their px-4 and line up under
   // the card's title, as v2's do.
@@ -27,7 +28,7 @@ export function SettingsRow({ label, description, action, aside, divider, classN
   const flat = useContext(SettingsFlatContext);
   if (!flat) return <BoxedRow label={label} description={description} action={aside == null ? action : <View className="flex-row items-center gap-3">{action}{aside}</View>}
     className={cn(divider && 'border-t border-border', className)} {...viewProps} />;
-  // The value starts beside the label; an aside gets its own column at the row's right edge.
+  // The value starts after the w-56 label column (about v2's 200 px); an aside gets its own column at the row's right edge.
   return <View className={cn('flex-row items-center gap-3 px-4 py-3', className)} {...viewProps}>
     <View className="w-56 shrink-0 gap-0.5">
       <Text className="text-sm font-medium text-foreground">{label}</Text>

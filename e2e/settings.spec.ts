@@ -277,6 +277,22 @@ test('Scale: Regular is the default, Auto persists after reload, and Regular res
   expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('regular');
 });
 
+test('at Spacious and 1024 px General keeps only Open and the value keeps its room', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await signIn(page);
+  await openArea(page, 'Settings');
+  await page.getByTestId('settings-nav-theme').click();
+  await page.getByTestId('scale-choice-spacious').click();
+  await page.getByTestId('settings-nav-store').click();
+  await expect(page.getByTestId('settings-store-name-admin-source')).toHaveCount(0);
+  await expect(page.getByTestId('settings-store-name-admin')).toBeVisible();
+  const value = (await page.getByTestId('settings-store-name').boundingBox())!;
+  expect(value.width).toBeGreaterThanOrEqual(80);
+  await page.getByTestId('settings-nav-theme').click();
+  await page.getByTestId('scale-choice-regular').click();
+  expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('regular');
+});
+
 test.describe('at 1280 × 800', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 

@@ -3,7 +3,8 @@ import { Platform, Pressable, ScrollView, TextInput, View, useWindowDimensions, 
 import { AppText as Text } from '../components/app-text';
 import { Redirect, router, Stack, useLocalSearchParams } from 'expo-router';
 import { Path } from 'react-native-svg';
-import { Card, ChevronDownIcon, createSvgIcon, CustomerDisplaySettings, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsLayout, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem } from '@tallyui/components';
+import { Card, ChevronDownIcon, createSvgIcon, CustomerDisplaySettings, CustomerPicker, Dialog, DialogContent, DialogTitle, SettingsLayout, Switch, Text as TallyText, ToggleGroup, ToggleGroupItem, useScale } from '@tallyui/components';
+import type { ScaleStep } from '@tallyui/theme';
 import { useTillDisplays, useTillPairing } from '@tallyui/pos';
 import { useCustomerDisplay } from '../lib/customer-display-context';
 import { ConnectorUnauthorizedError, type SyncContext } from '@tallyui/core';
@@ -47,7 +48,8 @@ const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 const UNKNOWN = '—';
 // v2's nav-and-section layout starts at this width; a phone lists the sections and opens each on its own page.
 const SETTINGS_SPLIT_MIN_WIDTH = 768;
-const ADMIN_SOURCE_MIN_WIDTH = 1024; // below it the wide card has no room for "Set in Medusa Admin" beside a value
+// Below this width the wide card has no room for the note beside a value. At Spacious the label column and note are about 25% wider.
+const ADMIN_SOURCE_MIN_WIDTH: Record<ScaleStep, number> = { compact: 1024, regular: 1024, spacious: 1280 };
 const ChevronRightIcon = createSvgIcon('ChevronRightIcon', () => <Path d="m9 18 6-6-6-6" />);
 const ChevronLeftIcon = createSvgIcon('ChevronLeftIcon', () => <Path d="m15 18-6-6 6-6" />);
 const CheckIcon = createSvgIcon('CheckIcon', () => <Path d="M20 6 9 17l-5-5" />);
@@ -141,12 +143,13 @@ function SettingsBackButton() {
 function AdminLink({ session, label, page, testID }: { session: Session; label: string; page: MedusaAdminPage; testID: string }) {
   const flat = useContext(SettingsFlatContext);
   const { width } = useWindowDimensions();
+  const { step } = useScale();
   const link = <Pressable testID={testID} accessibilityRole="link" accessibilityLabel={`Open ${label} in Medusa Admin`}
     className="-my-3 min-h-11 flex-row items-center gap-1" onPress={() => openMedusaAdmin(medusaAdminUrl(session.baseUrl, page))}>
     <Text className="text-sm text-primary">Open</Text>
     <ExternalLinkIcon size={14} className="text-primary" />
   </Pressable>;
-  if (!flat || width < ADMIN_SOURCE_MIN_WIDTH) return link;
+  if (!flat || width < ADMIN_SOURCE_MIN_WIDTH[step]) return link;
   return <View className="flex-row items-center gap-3">
     <Text testID={`${testID}-source`} className="text-sm text-muted-foreground">Set in Medusa Admin</Text>
     {link}

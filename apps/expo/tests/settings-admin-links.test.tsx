@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { ScaleProvider } from '@tallyui/components';
 import type { StoreSettings as PricingSettings } from '@tallyui/core';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
@@ -92,6 +93,18 @@ describe('Settings › General and Tax: Open in Medusa Admin', () => {
     fireEvent.click(screen.getByTestId('settings-nav-tax'));
     expect(screen.getByTestId('settings-tax-rates-admin-source').textContent).toBe('Set in Medusa Admin');
     expect(screen.getByTestId('settings-tax-rates-admin').textContent).toBe('Open');
+  });
+
+  it('at Spacious the note waits for 1280 px', async () => {
+    setWindowWidth(1024);
+    await act(async () => { render(<ScaleProvider scale="spacious"><SessionProvider><SettingsScreen /></SessionProvider></ScaleProvider>); });
+    const general = within(screen.getByTestId('settings-store'));
+    expect(screen.queryAllByTestId(/-admin-source$/)).toHaveLength(0);
+    expect(general.getAllByRole('link', { name: /in Medusa Admin$/ })).toHaveLength(4);
+    act(() => setWindowWidth(1280));
+    for (const row of ['name', 'currency', 'location', 'sales-channel']) {
+      expect(general.getByTestId(`settings-store-${row}-admin-source`).textContent).toBe('Set in Medusa Admin');
+    }
   });
 
   it('below 1024 px the wide card keeps only Open', async () => {
