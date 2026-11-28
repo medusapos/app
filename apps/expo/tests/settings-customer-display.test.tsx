@@ -167,3 +167,25 @@ it('SX-4: leaving after a lost confirm response preserves the paired hint and po
   await act(() => vi.advanceTimersByTimeAsync(30000));
   expect(list).toHaveBeenCalled();
 });
+
+it('SX-5: an expired code stays visible without polling until the cashier starts again', async () => {
+  vi.useFakeTimers();
+  const mint = vi.spyOn(memory.signalling, 'mint');
+  const list = vi.spyOn(memory.signalling, 'list');
+  await mount(true);
+  fireEvent.click(screen.getByTestId('settings-nav-customer-display'));
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
+  const { expiresAt } = await mint.mock.results[0].value;
+  await act(() => vi.advanceTimersByTimeAsync(Date.parse(expiresAt) - Date.now() + 1));
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-error').textContent).toMatch(/expired/i));
+  list.mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(list).not.toHaveBeenCalled();
+  expect(localStorage.getItem('medusapos.display-paired.https://store.test')).toBe('0');
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
+  fireEvent.click(screen.getByTestId('pairing-cancel'));
+  await vi.waitFor(() => expect(screen.queryByTestId('pairing-code')).toBeNull());
+  expect(screen.queryByTestId('pairing-error')).toBeNull();
+});

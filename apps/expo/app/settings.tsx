@@ -336,12 +336,19 @@ function PrintingSection({ session }: { session: Session }) {
 }
 function CustomerDisplaySection() {
   const { pairing, service, startPairing } = useCustomerDisplay();
+  const pairingView = useTillPairing(pairing);
+  const [expired, setExpired] = useState(false);
+  useEffect(() => pairing?.onChange(() => {
+    const { phase } = pairing;
+    setExpired(phase.phase === 'idle' && phase.error === 'expired');
+  }), [pairing]);
   useEffect(() => () => {
     if (!pairing) return;
     const { phase } = pairing;
     if (phase.phase === 'minting' || phase.phase === 'code' || (phase.phase === 'idle' && phase.error === 'expired')) pairing.cancel();
   }, [pairing]);
-  return <CustomerDisplaySettings pairing={useTillPairing(pairing)} displays={useTillDisplays(service)} onStartPairing={startPairing}
+  return <CustomerDisplaySettings pairing={pairing === null && expired ? { phase: { phase: 'idle', error: 'expired' }, forgetError: null } : pairingView}
+    displays={useTillDisplays(service)} onStartPairing={startPairing}
     onConfirm={(id) => pairing?.confirm(id)} onDecline={(id) => pairing?.decline(id)}
     onCancelPairing={() => pairing?.cancel()} onForget={(id) => pairing?.forget(id)} />;
 }
