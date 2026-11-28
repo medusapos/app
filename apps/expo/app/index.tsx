@@ -35,7 +35,7 @@ import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale
 import { EmailReceipt } from '../components/email-receipt';
 import { PaidAwaiting, useAwaitingStore } from '../components/paid-awaiting';
 import { PaidChange } from '../components/paid-change';
-import { PaidFooter } from '../components/paid-footer';
+import { PaidFooter, paidPrintedLabel } from '../components/paid-footer';
 import { PaidSummary } from '../components/paid-summary';
 import { PhoneTabBar } from '../components/phone-tab-bar';
 import { storeRegisterTitle } from '../lib/store-register-title';
@@ -604,7 +604,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </ScrollView>
     {/* A pending or failed print belongs to this template and printer only. */}
     <PaidFooter key={footerKey} autoPrint={autoPrint} emailReceipt={emailReceipt} newSale={sale.newSale}
-      print={printPaidReceipt} />
+      print={printPaidReceipt} printedLabel={paidPrintedLabel(networkPrinter, Platform.OS)} />
     <View dataSet={{ print: 'hide' }} className="absolute right-2" style={{ top: topInset + 8 }}>
       <IconButton testID="paid-close" accessibilityLabel="Close" className="h-11 w-11" onPress={sale.newSale}>
         <View className="text-foreground"><XIcon size={24} /></View>

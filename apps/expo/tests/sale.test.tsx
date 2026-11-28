@@ -462,6 +462,26 @@ describe('the paid screen network receipt', () => {
     await act(async () => { click('Complete sale'); });
   }
 
+  it('says Printed to Counter after a network print and offers Print again', async () => {
+    saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
+    await completeSale('external');
+    await act(async () => { click('Print receipt'); });
+    expect(screen.getByTestId('paid-print-done').textContent).toBe('Printed to Counter');
+    expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
+  });
+
+  it('says Sent to the print dialog after a Standard print and offers Print again', async () => {
+    saveReceiptTemplate(localStorage, session.baseUrl, 'standard');
+    const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+    await completeSale('external');
+    expect(screen.queryByTestId('paid-print-done')).toBeNull();
+    await act(async () => { click('Print receipt'); });
+    expect(dialog).toHaveBeenCalledTimes(1);
+    expect(eposCalls()).toHaveLength(0);
+    expect(screen.getByTestId('paid-print-done').textContent).toBe('Sent to the print dialog');
+    expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
+  });
+
   it.each(['external', 'cash'] as const)('prints a %s sale directly, with only the cash sale opening the drawer', async (method) => {
     saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
     const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
