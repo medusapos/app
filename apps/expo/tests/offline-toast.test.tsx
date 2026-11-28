@@ -171,6 +171,39 @@ describe('useOfflineToast', () => {
     advance(5_000);
     expect(result.current.restored).toBe(true);
   });
+
+  it('a settled store outage followed by a hanging reconnect shows no restored toast until the pull syncs', () => {
+    const { result, rerender } = mountHook(true, 'offline');
+    advance(5_000);
+    expect(result.current.kind).toBe('store');
+    rerender({ online: true, pull: 'connecting' });
+    advance(5_000);
+    expect(result.current.restored).toBe(false);
+    advance(15_000);
+    expect(result.current.restored).toBe(false);
+    expect(result.current.kind).toBeNull();
+    rerender({ online: true, pull: 'synced' });
+    advance(4_999);
+    expect(result.current.restored).toBe(false);
+    advance(1);
+    expect(result.current.restored).toBe(true);
+    advance(3_000);
+    expect(result.current.restored).toBe(false);
+  });
+
+  it('a settled device outage that comes back to a first pull still syncing waits for synced', () => {
+    const { result, rerender } = mountHook(false);
+    advance(5_000);
+    expect(result.current.kind).toBe('device');
+    rerender({ online: true, pull: 'syncing' });
+    advance(5_000);
+    expect(result.current.restored).toBe(false);
+    advance(5_000);
+    expect(result.current.restored).toBe(false);
+    rerender({ online: true, pull: 'synced' });
+    advance(5_000);
+    expect(result.current.restored).toBe(true);
+  });
 });
 
 describe('OfflineToast', () => {

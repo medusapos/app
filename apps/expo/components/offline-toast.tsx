@@ -21,16 +21,19 @@ const TITLE: Record<OfflineKind, string> = { device: 'Device went offline', stor
  * The toast's state: `kind` once an outage (the device's network gone, or the store not answering the pull) has
  * lasted OFFLINE_TOAST_DELAY_MS, else null. A switch between the two kinds inside one outage keeps the wait; `close()`
  * hides it for the rest of the outage, and the next outage shows it again after a fresh wait.
+ * After a settled outage ends, `restored` shows once the pull stays synced for 5 s and lasts RESTORED_TOAST_MS.
+ * A new outage or a pull that is no longer synced hides it.
  */
 export function useOfflineToast(networkOnline: boolean, pullState: SyncState): { kind: OfflineKind | null; close: () => void; restored: boolean } {
   const now: OfflineKind | null = !networkOnline ? 'device' : pullState === 'offline' ? 'store' : null;
   const outage = now !== null;
+  const phase = outage ? 'outage' : pullState === 'synced' ? 'recovered' : 'pending';
   const [settled, setSettled] = useState(false);
   const [closed, setClosed] = useState(false);
   const [restored, setRestored] = useState(false);
   const hadSettledOutage = useRef(false);
   useEffect(() => {
-    if (outage) {
+    if (phase === 'outage') {
       setRestored(false);
       const timer = setTimeout(() => {
         hadSettledOutage.current = true;
@@ -40,6 +43,10 @@ export function useOfflineToast(networkOnline: boolean, pullState: SyncState): {
     }
     setSettled(false);
     setClosed(false);
+    if (phase === 'pending') {
+      setRestored(false);
+      return;
+    }
     if (!hadSettledOutage.current) return;
     let timer = setTimeout(() => {
       hadSettledOutage.current = false;
@@ -47,9 +54,9 @@ export function useOfflineToast(networkOnline: boolean, pullState: SyncState): {
       timer = setTimeout(() => setRestored(false), RESTORED_TOAST_MS);
     }, OFFLINE_TOAST_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [outage]);
+  }, [phase]);
   const close = useCallback(() => setClosed(true), []);
-  return { kind: outage && settled && !closed ? now : null, close, restored: !outage && restored };
+  return { kind: outage && settled && !closed ? now : null, close, restored: phase === 'recovered' && restored };
 }
 
 export const WarningIcon = createSvgIcon('WarningIcon', () => <>
