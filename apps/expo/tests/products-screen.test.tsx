@@ -2359,6 +2359,16 @@ describe('ProductsScreen device scans', () => {
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   });
 
+  it('leaves the cart and Sale toast untouched while Products is open', async () => {
+    vi.mocked(usePathname).mockReturnValue('/products');
+    try {
+      const scan = await mountWithHub();
+      scan('AB123');
+      expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
+      expect(screen.queryByTestId('scan-toast')).toBeNull();
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
+  });
+
   it('shows the Barcode not found toast for an unknown code, on the wide window', async () => {
     const scan = await mountWithHub();
     scan('NOPE1');

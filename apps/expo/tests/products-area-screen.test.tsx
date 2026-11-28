@@ -5,7 +5,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@te
 import { useState, type ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { StoreSettingsError, type ProductTraits, type StoreSettings as PricingSettings, type VariantSummary } from '@tallyui/core';
-import { DEFAULT_TILE_FIELDS, useStoreSettings } from '@tallyui/pos';
+import { DEFAULT_TILE_FIELDS, ScanHubProvider, useScanHub, useStoreSettings } from '@tallyui/pos';
 import { PortalHost } from '@tallyui/primitives';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
@@ -20,6 +20,7 @@ import { useProductSettings } from '../lib/product-settings';
 import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { capabilities, storeSettings } from './pos-connector-mock';
 import ProductsAreaScreen from '../app/products';
+import { SCAN_TOAST_MS } from '../components/scan-toast';
 import { AppFrame, useFrameAccountPublisher } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
 
@@ -1034,14 +1035,14 @@ describe('a barcode scan', () => {
   const rowIds = () => Array.from(document.querySelectorAll('[data-testid^="product-row-"]'))
     .map((row) => row.getAttribute('data-testid')!.replace('product-row-', ''));
   const box = () => screen.getByTestId('products-search') as HTMLInputElement;
-  const mountWith = (settings: typeof scanner) => {
+  const mountWith = (settings: typeof scanner, renderScreen = mount) => {
     const data = new Map<string, string>();
     vi.stubGlobal('localStorage', { getItem: (key: string) => data.get(key) ?? null,
       setItem: (key: string, value: string) => { data.set(key, value); }, removeItem: (key: string) => { data.delete(key); } });
     saveScannerSettings(localStorage, session.baseUrl, settings);
     sessionState.session = session;
     publishCatalogue(sale());
-    mount();
+    renderScreen();
   };
   // Types `raw` into the focused box `gapMs` apart, the field's value following each key as a real one does, then Enter.
   const typeInBox = (raw: string, gapMs: number) => {
@@ -1069,6 +1070,10 @@ describe('a barcode scan', () => {
     expect(box().value).toBe('E2E-4B');
     expect(rowIds()).toEqual(['p4', 'v4b']);
     expect(playScanBeep).toHaveBeenCalledOnce();
+    const toast = within(screen.getByTestId('scan-toast'));
+    expect(toast.getByText('Barcode scanned: E2E-4B')).toBeTruthy();
+    expect(toast.getByText('1 product matches')).toBeTruthy();
+    expect(screen.getByTestId('products-footer').textContent).toBe('Showing 1 of 3');
   });
 
   it('with nothing focused fills the box the same way', () => {
@@ -1077,6 +1082,32 @@ describe('a barcode scan', () => {
     expect(box().value).toBe('E2E-4B');
     expect(rowIds()).toEqual(['p4', 'v4b']);
     expect(playScanBeep).toHaveBeenCalledOnce();
+    const toast = within(screen.getByTestId('scan-toast'));
+    expect(toast.getByText('Barcode scanned: E2E-4B')).toBeTruthy();
+    expect(toast.getByText('1 product matches')).toBeTruthy();
+    act(() => { vi.advanceTimersByTime(SCAN_TOAST_MS); });
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
+  });
+
+  it('puts a device scan into the box, filters the rows and shows the match count', () => {
+    const hub: { current?: ReturnType<typeof useScanHub> } = {};
+    function HubProbe() { hub.current = useScanHub(); return null; }
+    mountWith(scanner, () => render(<ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
+      settings={{ prefix: '', suffix: '', minChars: 3 }}><HubProbe /><ProductsAreaScreen /></ScanHubProvider>));
+    act(() => { hub.current!.emit({ code: 'E2E-4B', source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
+    expect(box().value).toBe('E2E-4B');
+    expect(rowIds()).toEqual(['p4', 'v4b']);
+    const toast = within(screen.getByTestId('scan-toast'));
+    expect(toast.getByText('Barcode scanned: E2E-4B')).toBeTruthy();
+    expect(toast.getByText('1 product matches')).toBeTruthy();
+  });
+
+  it('announces a scan with no matching products as an alert', () => {
+    mountWith(scanner);
+    scanOnBody('#NOPE1!');
+    const alert = within(screen.getByRole('alert'));
+    expect(alert.getByText('Barcode scanned: NOPE1')).toBeTruthy();
+    expect(alert.getByText('No products match')).toBeTruthy();
   });
 
   it('filters without a beep while Play a sound on scan is off', () => {
@@ -1093,6 +1124,7 @@ describe('a barcode scan', () => {
     expect(box().value).toBe('E2E-4B');
     expect(rowIds()).toEqual(['p4', 'v4b']);
     expect(playScanBeep).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('scan-toast')).toBeNull();
   });
 });
 
