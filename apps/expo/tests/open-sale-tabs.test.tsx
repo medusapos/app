@@ -418,3 +418,16 @@ it("a guest order reopens as a guest, not the tab's default customer", async () 
   const current = saleTabs().getByRole('tab', { selected: true });
   expect(within(current).getByTestId(/-who$/).textContent).toBe('Guest · Shirt');
 });
+
+it("Alt+V's void shortcut is unavailable while the Open orders list is open", async () => {
+  const { runShortcut } = await import('../lib/shortcuts');
+  overflowTabs();
+  await parkTwo();
+  add();
+  await act(async () => { expect(runShortcut('sale.void')).toBe(true); });
+  fireEvent.click(screen.getByTestId('cart-void-keep'));
+  fireEvent.click(screen.getByTestId('open-orders-count'));
+  expect(screen.getByTestId('open-orders-list')).toBeTruthy();
+  await act(async () => { expect(runShortcut('sale.void')).toBe(false); });
+  expect(screen.queryByTestId('cart-void-dialog')).toBeNull();
+});

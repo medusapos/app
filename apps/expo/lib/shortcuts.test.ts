@@ -181,6 +181,22 @@ describe('useShortcutKeys on web', () => {
     expect(next).toHaveBeenCalledTimes(1);
   });
 
+  it('a held Alt+ArrowRight (repeat) runs nothing but is still prevented', () => {
+    const next = vi.fn();
+    renderHook(() => useShortcut('cart.next', next));
+    keys();
+    expect(fire({ code: 'ArrowRight', key: 'ArrowRight', altKey: true, repeat: true }).defaultPrevented).toBe(true);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('a held Alt+KeyN (repeat) still runs sale.new', () => {
+    const newSale = vi.fn();
+    renderHook(() => useShortcut('sale.new', newSale));
+    keys();
+    fire({ code: 'KeyN', key: 'n', altKey: true, repeat: true });
+    expect(newSale).toHaveBeenCalledTimes(1);
+  });
+
   // As TallyUI's Dialog renders the sheet: its scrim holding the aria-modal overlay, then the content.
   const sheetHtml = '<div><div aria-modal="true"></div></div><div role="dialog" data-testid="shortcuts-sheet"></div>';
 

@@ -114,6 +114,8 @@ export function useShortcutKeys(enabled: boolean, onHelp: () => void, helpOpen: 
         return;
       }
       event.preventDefault();
+      // A held arrow switches sales only once, but must still prevent browser navigation.
+      if (event.repeat && (id === 'cart.previous' || id === 'cart.next')) return;
       if (id === 'help.open') { if (helpOpen) closeHelp(); else onHelp(); return; }
       if (!helpOpen) { runShortcut(id); return; }
       const blocked = otherOverlayOpen();

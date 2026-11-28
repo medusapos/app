@@ -3008,6 +3008,20 @@ describe('ProductsScreen keyboard shortcuts', () => {
     expect(cartLine('Shirt')).toBeTruthy();
   });
 
+  it("sale.void is unavailable on the phone layout's Products view and available in its Cart view", async () => {
+    setWindowWidth(360);
+    try {
+      await mount();
+      fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+      await act(async () => { expect(runShortcut('sale.void')).toBe(false); });
+      expect(screen.queryByTestId('cart-void-dialog')).toBeNull();
+      fireEvent.click(screen.getByTestId('phone-tab-cart'));
+      expect(screen.queryByTestId('cart-void-dialog')).toBeNull();
+      await act(async () => { expect(runShortcut('sale.void')).toBe(true); });
+      expect(screen.getByTestId('cart-void-dialog')).toBeTruthy();
+    } finally { act(() => setWindowWidth(1280)); }
+  });
+
   it('discount.open opens the Add Discount sheet with one line', async () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));

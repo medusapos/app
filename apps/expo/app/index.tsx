@@ -503,7 +503,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const previous = stepSale(ids, sale.order.id, -1), next = stepSale(ids, sale.order.id, 1);
   useShortcut('cart.previous', tillKeys && !sale.saving && previous !== null ? () => { setOrdersListOpen(false); switchTo(previous); } : null);
   useShortcut('cart.next', tillKeys && !sale.saving && next !== null ? () => { setOrdersListOpen(false); switchTo(next); } : null);
-  useShortcut('sale.void', tillKeys && voidOffered && !sale.saving ? () => setVoidOpen(true) : null);
+  useShortcut('sale.void', tillKeys && voidOffered && !sale.saving && !ordersListOpen && (!phone || cartOpen) ? () => setVoidOpen(true) : null);
   const noteRow = <CartNoteRow note={sale.order.note ?? ''} onPress={() => setNoteOpen(true)} />;
   const couponField = couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : null;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
