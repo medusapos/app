@@ -33,6 +33,7 @@ import { useReplicatedProducts } from '../lib/use-replicated-products';
 import { playScanBeep } from '../lib/scan-beep';
 import { useScannerSettings } from '../lib/scanner-settings';
 import { useDeviceScans } from '../lib/use-device-scans';
+import { useEscapeBack } from '../lib/use-escape-back';
 import { useWedgeScan, useWedgeScanField } from '../lib/use-wedge-scan';
 
 // The row's product thumbnail, or a plain tile of the same size when the product has none.
@@ -240,6 +241,8 @@ export default function ProductsAreaScreen() {
   const [placeId, setPlaceId] = useState<string | null>(null);
   const place = useMemo(() => inPlace && placeId ? products.find((product) => product.id === placeId) ?? null : null,
     [inPlace, placeId, products]);
+  // On web, v2's Esc goes back as the Products link does.
+  useEscapeBack(pathname === '/products' && place !== null, () => setPlaceId(null));
   // A product row opens on an explicit choice (Expanded rows only), else while the search has text (a typed or scanned SKU
   // shows its sub-row); otherwise it starts closed, as v2's. Kept for this visit only.
   const [openChoices, setOpenChoices] = useState<Record<string, boolean>>({});
