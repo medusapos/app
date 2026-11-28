@@ -382,8 +382,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   useWedgeScan(wedgeActive, scannerSettings, onScan);
   // A device scanner adds only with the Sale cart in front (every layout on `/`), never on an area; Products takes its own scans.
   useDeviceScans(wedgeActive, onScan);
-  // v2: on web, Escape in the tender does what its ✕ / Back does (not while saving, as the ✕ is disabled).
-  useEscapeBack(sale.stage.kind === 'tender', () => { if (sale.saving) return; sale.cancelTender(); if (phone) setCartOpen(true); });
+  // On web, Escape in the tender does what its ✕ / Back does only with the Sale in front (not while saving).
+  useEscapeBack(pathname === '/' && sale.stage.kind === 'tender', () => { if (sale.saving) return; sale.cancelTender(); if (phone) setCartOpen(true); });
   const sellableCount = sorted.length;
   // On a phone the status line shares one line with the sync arrow, so it drops the store name and
   // the unlisted count, and puts an error before the count, where the ellipsis leaves it.
