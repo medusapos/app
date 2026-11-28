@@ -2455,11 +2455,12 @@ async function mountWithHub() {
   function HubProbe() { hub.current = useScanHub(); return null; }
   saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
     token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
-  await act(async () => {
-    render(<SessionProvider><ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
-      settings={{ prefix: '', suffix: '', minChars: 3 }}><HubProbe /><ProductsScreen /></ScanHubProvider><PortalHost /></SessionProvider>);
-  });
-  return (code: string) => act(() => { hub.current!.emit({ code, source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
+  const tree = () => <SessionProvider><ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
+    settings={{ prefix: '', suffix: '', minChars: 3 }}><HubProbe /><ProductsScreen /></ScanHubProvider><PortalHost /></SessionProvider>;
+  let view!: ReturnType<typeof render>;
+  await act(async () => { view = render(tree()); });
+  const scan = (code: string) => act(() => { hub.current!.emit({ code, source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
+  return Object.assign(scan, { rerender: () => act(async () => { view.rerender(tree()); }) });
 }
 
 // Settings > Scanner's direct connection: a device scan reaches the sale through the app's ScanHubProvider, on the
@@ -2484,6 +2485,29 @@ describe('ProductsScreen device scans', () => {
       scan('AB123');
       expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
       expect(screen.queryByTestId('scan-toast')).toBeNull();
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
+  });
+
+  it.each(['/orders', '/customers', '/reports', '/settings'])('leaves the cart and Sale toast untouched while %s is open', async (route) => {
+    vi.mocked(usePathname).mockReturnValue(route);
+    try {
+      const scan = await mountWithHub();
+      scan('AB123');
+      expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
+      expect(screen.queryByTestId('scan-toast')).toBeNull();
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
+  });
+
+  it('hears device scans again after returning to the Sale from an area', async () => {
+    vi.mocked(usePathname).mockReturnValue('/orders');
+    try {
+      const scan = await mountWithHub();
+      scan('AB123');
+      expect(screen.queryByRole('button', { name: 'Edit quantity of Shirt' })).toBeNull();
+      vi.mocked(usePathname).mockReturnValue('/');
+      await scan.rerender();
+      scan('AB123');
+      expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
     } finally { vi.mocked(usePathname).mockReturnValue('/'); }
   });
 
