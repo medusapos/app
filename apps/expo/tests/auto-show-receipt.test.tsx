@@ -130,6 +130,17 @@ it('with auto-show off and auto-print on, prints once from the receipt and then 
   expect(print).toHaveBeenCalledTimes(1);
 }, 15000);
 
+it('with auto-show off and auto-print on, a print that throws still starts the next sale', async () => {
+  saveCartSettings(localStorage, baseUrl, { ...DEFAULT_CART_SETTINGS, autoShowReceipt: false });
+  savePrintingSettings(localStorage, baseUrl, { autoPrintReceipt: true });
+  const print = vi.spyOn(window, 'print').mockImplementation(() => { throw new Error('no printer'); });
+  await mount();
+  await sellShirt();
+  await expectNextSale();
+  expect(print).toHaveBeenCalledOnce();
+  expect(record).toHaveBeenCalledOnce();
+}, 15000);
+
 it('with auto-show off and auto-print off, never prints', async () => {
   saveCartSettings(localStorage, baseUrl, { ...DEFAULT_CART_SETTINGS, autoShowReceipt: false });
   const print = vi.spyOn(window, 'print').mockImplementation(() => {});

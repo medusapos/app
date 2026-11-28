@@ -70,7 +70,12 @@ export function useAutoPrintReceipt(
     seenSaleId = saleId;
     // Not cleared on cleanup: StrictMode's second effect run is then a no-op, not a cancelled print.
     if (enabled) setTimeout(() => {
-      const promise = print() ?? Promise.resolve();
+      let promise: Promise<void>;
+      try {
+        promise = print() ?? Promise.resolve();
+      } catch (error) {
+        promise = Promise.reject(error);
+      }
       promise.catch(() => {});
       setJob({ owner, promise });
       afterRef.current?.();
