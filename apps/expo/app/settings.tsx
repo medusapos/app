@@ -455,7 +455,7 @@ function ScannerSection({ session }: { session: Session }) {
         }} />
       } />
       {cameraSupported ? <SettingsRow label="Use camera" className="border-t border-border px-0"
-        description="Shows a camera button beside the Sale's search box. The browser asks for the camera the first time." action={
+        description={`Shows a camera button beside the Sale's search box. The ${Platform.OS === 'web' ? 'browser' : 'device'} asks for the camera the first time.`} action={
         <Switch accessibilityLabel="Use camera to scan barcodes" testID="settings-scanner-camera" className="flex-row" checked={settings.camera} onCheckedChange={(checked) => {
           try { save({ ...settings, camera: checked }); setError(null); }
           catch (err) { setError(err instanceof Error ? err.message : 'Could not save.'); }

@@ -276,7 +276,7 @@ describe('SettingsScreen', () => {
     expect(loadScannerSettings(localStorage, baseUrl)).toEqual({ ...DEFAULT_SCANNER_SETTINGS, camera: true, minChars: 6 });
   });
 
-  it('off the web the Use camera switch is not drawn', async () => {
+  it('on iOS the Use camera switch is drawn with the device copy', async () => {
     params.section = 'scanner';
     supportedBrowser();
     const original = Platform.OS;
@@ -284,7 +284,8 @@ describe('SettingsScreen', () => {
     try {
       await mount();
       expect(screen.getByTestId('settings-scanner-sound')).toBeTruthy();
-      expect(screen.queryByTestId('settings-scanner-camera')).toBeNull();
+      expect(screen.getByTestId('settings-scanner-camera')).toBeTruthy();
+      expect(screen.getByText("Shows a camera button beside the Sale's search box. The device asks for the camera the first time.")).toBeTruthy();
     } finally { Platform.OS = original; }
   });
 

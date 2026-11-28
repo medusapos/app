@@ -11,7 +11,8 @@
     },
     "plugins": [
       "expo-router",
-      "expo-localization"
+      "expo-localization",
+      ["expo-camera", { "cameraPermission": "MedusaPOS uses the camera to scan product barcodes.", "recordAudioAndroid": false }]
     ],
     "experiments": {
       "typedRoutes": true

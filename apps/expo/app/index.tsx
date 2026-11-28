@@ -26,6 +26,7 @@ import { CatalogueSyncButton } from '../components/catalogue-sync-button';
 import { CouponField, couponDiscountMinor, couponsEnabled } from '../components/coupon-field';
 import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerSavedToast, useCustomerSavedToast } from '../components/customer-saved-toast';
+import { NativeViewfinder, useNativeCameraPermission } from '../components/native-camera';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
 import { OfflineToast, useOfflineToast } from '../components/offline-toast';
 import { OpenOrdersList, OpenOrdersStrip } from '../components/open-orders';
@@ -346,9 +347,10 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Every layout listens in the cart stage, the phone's Products and Cart views alike.
   const wedgeActive = sale.stage.kind === 'cart' && pathname === '/';
   const { settings: scannerSettings, save: saveScannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
-  // v2's camera scan (web): decodes go to the scan hub, which useDeviceScans already hands to onScan, so no second
+  // v2's camera scan (web and native): decodes go to the scan hub, which useDeviceScans already hands to onScan, so no second
   // subscription. A code shorter than minChars is dropped, as the wedge drops one.
   const camera = useCameraScan({ active: wedgeActive, minChars: scannerSettings.minChars });
+  const cameraPermission = useNativeCameraPermission();
   // TU's viewfinder keeps its camera stream while mounted; drawing it only in the Sale's cart stage stops the camera while
   // an area covers the Sale. Hidden where the browser has no BarcodeDetector, as DirectScannerConnection hides.
   const cameraOn = useMemo(() => scannerSettings.camera && cameraScanSupported(), [scannerSettings.camera]);
@@ -484,7 +486,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       showFilterBar filterChips={[]} filters={filters} onFiltersChange={setFilters}
       viewState={viewState} onStateChange={onViewStateChange} variationsStyle={productSettings.variations} tileFields={productSettings.tileFields}
       categoryBrowse={productSettings.browse} onViewStateError={onViewStateError} cameraScan={wedgeActive && cameraOn && !counting}
-      cameraScanner={{ onDetected: camera.offer, onOpen: camera.reset, scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />
+      cameraScanner={{ viewfinder: NativeViewfinder, permission: cameraPermission, onDetected: camera.offer, onOpen: camera.reset,
+        scanCount: camera.scanCount, height: scannerSettings.cameraHeight, onHeightChange: onCameraHeightChange }} />
     <QueryReset key={`query-${catalogueKey}`} setQuery={setQuery} />
     </View>
     <SyncStatus state={outboxState} registerState={registerOutbox.state} pullNotice={pullNotice} pluginName={PLUGIN_NAME} />
