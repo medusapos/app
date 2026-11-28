@@ -242,3 +242,17 @@ it('IT-10: a confirmed display stays active across reload when lists fail', asyn
   cleanup();
   expect(mount().result.current.service).not.toBeNull();
 });
+
+it('IT-11: an expired code with no displays stops polling', async () => {
+  vi.useFakeTimers();
+  const { result, pairing } = await startWithCode();
+  await firstList();
+  const { phase } = pairing;
+  if (phase.phase !== 'code') throw Error('Expected pairing code');
+  await act(() => vi.advanceTimersByTimeAsync(Date.parse(phase.expiresAt) - Date.now() + 1));
+  expect(result.current).toMatchObject({ service: null, pairing: null });
+  expect(localStorage.getItem(hint)).toBe('0');
+  vi.mocked(memory.signalling.list).mockClear();
+  await act(() => vi.advanceTimersByTimeAsync(30000));
+  expect(memory.signalling.list).not.toHaveBeenCalled();
+});

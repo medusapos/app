@@ -54,7 +54,7 @@ export function CustomerDisplayProvider({ children }: { children: ReactNode }) {
       if (serviceChanged) listed = true;
       if (!listed) return;
       const paired = service.displays.length > 0;
-      if (!paired && (pairing.phase.phase !== 'idle' || pairing.phase.error !== undefined)) return;
+      if (!paired && (pairing.phase.phase !== 'idle' || (pairing.phase.error !== undefined && pairing.phase.error !== 'expired'))) return;
       saveDisplayPaired(storage, baseUrl, paired);
       setPairedStore(paired ? baseUrl : undefined);
       if (!paired) setStartedStore(undefined);
