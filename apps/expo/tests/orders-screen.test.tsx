@@ -8,7 +8,9 @@ import { router } from 'expo-router';
 import { orderReference } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
 import { formatMoney } from '@tallyui/core';
-import { createOrderBuilder, finalizeOrder, type PosOrder } from '@tallyui/pos';
+import { createOrderBuilder, finalizeOrder, ScanHubProvider, useScanHub, type PosOrder } from '@tallyui/pos';
+import { playScanBeep } from '../lib/scan-beep';
+import { DEFAULT_SCANNER_SETTINGS, saveScannerSettings } from '../lib/scanner-settings';
 import { saveSession } from '../lib/session';
 import { SessionProvider } from '../lib/session-context';
 import { useOutboxContext } from '../lib/outbox-context';
@@ -17,6 +19,7 @@ import OrdersScreen from '../app/orders';
 import { AppFrame, useFrameAccountPublisher } from '../components/app-frame';
 import { setWindowWidth } from './window-width';
 
+vi.mock('../lib/scan-beep', () => ({ playScanBeep: vi.fn() }));
 vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn(), dismissTo: vi.fn() }, usePathname: () => '/orders',
@@ -64,6 +67,74 @@ async function mount() {
   render(<SessionProvider><OrdersScreen /></SessionProvider>);
   await act(async () => {});
 }
+
+describe('a barcode scan (Orders)', () => {
+  const scanner = { ...DEFAULT_SCANNER_SETTINGS, prefix: '#', suffix: '!', playSound: true };
+  const box = () => screen.getByTestId('orders-search') as HTMLInputElement;
+  const typeInBox = (raw: string, gapMs: number) => {
+    let time = 1_000;
+    box().focus();
+    for (const key of raw) {
+      vi.setSystemTime(time); time += gapMs;
+      fireEvent.keyDown(box(), { key });
+      fireEvent.change(box(), { target: { value: box().value + key } });
+    }
+    vi.setSystemTime(time);
+    fireEvent.keyDown(box(), { key: 'Enter' });
+  };
+  const scanOnBody = (raw: string) => {
+    let time = 1_000;
+    for (const key of [...raw, 'Enter']) {
+      vi.setSystemTime(time); time += 10;
+      fireEvent.keyDown(document.body, { key });
+    }
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    saveScannerSettings(localStorage, 'https://store.test', scanner);
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it('typed into Search Orders puts the bare code in the box and beeps', async () => {
+    await mount();
+    typeInBox('#1042!', 10);
+    expect(box().value).toBe('1042');
+    expect(playScanBeep).toHaveBeenCalledOnce();
+  });
+
+  it('with nothing focused fills Search Orders the same way', async () => {
+    await mount();
+    scanOnBody('#1042!');
+    expect(box().value).toBe('1042');
+    expect(playScanBeep).toHaveBeenCalledOnce();
+  });
+
+  it('a directly connected scanner fills Search Orders', async () => {
+    const hub: { current?: ReturnType<typeof useScanHub> } = {};
+    function HubProbe() { hub.current = useScanHub(); return null; }
+    render(<SessionProvider><ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
+      settings={scanner}><HubProbe /><OrdersScreen /></ScanHubProvider></SessionProvider>);
+    await act(async () => {});
+    act(() => { hub.current!.emit({ code: '1042', source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
+    expect(box().value).toBe('1042');
+  });
+
+  it('no beep while Play a sound on scan is off', async () => {
+    saveScannerSettings(localStorage, 'https://store.test', { ...scanner, playSound: false });
+    await mount();
+    typeInBox('#1042!', 10);
+    expect(box().value).toBe('1042');
+    expect(playScanBeep).not.toHaveBeenCalled();
+  });
+
+  it('slow typing stays as typed, with no beep', async () => {
+    await mount();
+    typeInBox('1042', 200);
+    expect(box().value).toBe('1042');
+    expect(playScanBeep).not.toHaveBeenCalled();
+  });
+});
 
 describe('OrdersScreen', () => {
   it('shows TallyUI\'s single empty state when the till has no sales (#195, TallyUI 3.0.2)', async () => {
