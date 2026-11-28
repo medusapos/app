@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MIN_PLUGIN_CONTRACT, pluginContractStatus, readPluginContract, readPluginContractVersion } from '../lib/plugin-contract';
+import { MIN_PLUGIN_CONTRACT, pluginContractStatus, readPluginContract, readPluginContractVersion, readPluginInfoSummary } from '../lib/plugin-contract';
 import { authHeaders } from '../lib/pos-connector';
 
 const session = { baseUrl: 'https://store.test', token: 'jwt' };
@@ -57,4 +57,25 @@ describe('readPluginContractVersion', () => {
   ])('reads %s', async (_label, makeFetch, expected) => {
     expect(await readPluginContractVersion(session, makeFetch())).toBe(expected);
   });
+});
+
+it('readPluginInfoSummary returns the contract and the trimmed version from one /info read', async () => {
+  const fetchImpl = fetchReturning(json({ contracts: {}, pluginContract: 8, pluginVersion: ' 0.3.0 ' }));
+  expect(await readPluginInfoSummary(session, fetchImpl)).toEqual({ contract: 8, version: '0.3.0' });
+  expect(fetchImpl).toHaveBeenCalledExactlyOnceWith('https://store.test/tally/v1/info', expect.anything());
+});
+
+it.each([
+  { contracts: {}, pluginContract: 8 },
+  { contracts: {}, pluginContract: 8, pluginVersion: null },
+  { contracts: {}, pluginContract: 8, pluginVersion: 3 },
+  { contracts: {}, pluginContract: 8, pluginVersion: '' },
+])('readPluginInfoSummary: a missing, null, numeric or empty pluginVersion is null', async (body) => {
+  expect(await readPluginInfoSummary(session, fetchReturning(json(body)))).toEqual({ contract: 8, version: null });
+});
+
+it.each([
+  json({ contracts: {}, pluginContract: 8, pluginVersion: '0.3.0' }, 500), json({}),
+])('readPluginInfoSummary: a failed read or a non-info body gives both null', async (response) => {
+  expect(await readPluginInfoSummary(session, fetchReturning(response))).toEqual({ contract: null, version: null });
 });
