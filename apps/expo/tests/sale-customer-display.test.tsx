@@ -68,7 +68,7 @@ vi.mock('../lib/customer-display-context', () => ({ useCustomerDisplay: vi.fn() 
 const service = { status: 'online' as const, displays: [], pauseReason: null, showCart: vi.fn(), showPayment: vi.fn(),
   close: vi.fn(), onChange: () => () => {}, refresh: async () => {} };
 async function addShirt(available = true) {
-  vi.mocked(useCustomerDisplay).mockReturnValue({ available, service: available ? service : null, pairing: null, startPairing: () => {} });
+  vi.mocked(useCustomerDisplay).mockReturnValue({ available, service: available ? service : null, paired: false, pairing: null, startPairing: () => {} });
   await act(async () => { render(<><ProductsScreen /><PortalHost /></>); });
   fireEvent.click(await screen.findByTestId('product-tile-Shirt'));
 }

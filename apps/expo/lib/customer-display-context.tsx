@@ -8,7 +8,7 @@ import { defaultStorage, REGISTER_ID_KEY } from './session';
 import { useSession } from './session-context';
 import { loadCachedSettings } from './store-settings';
 
-const CustomerDisplayContext = createContext({ available: false, service: null as TillDisplayService | null,
+const CustomerDisplayContext = createContext({ available: false, paired: false, service: null as TillDisplayService | null,
   pairing: null as TillPairing | null, startPairing: (): void => {} });
 export const useCustomerDisplay = () => useContext(CustomerDisplayContext);
 
@@ -73,7 +73,8 @@ export function CustomerDisplayProvider({ children }: { children: ReactNode }) {
     if (current) void current.pairing.start();
     else pending.current = baseUrl;
   }
-  return <CustomerDisplayContext.Provider value={{ available, service: current?.service ?? null, pairing: current?.pairing ?? null, startPairing }}>
+  const paired = available && baseUrl !== undefined && pairedStore === baseUrl;
+  return <CustomerDisplayContext.Provider value={{ available, paired, service: current?.service ?? null, pairing: current?.pairing ?? null, startPairing }}>
     {children}
   </CustomerDisplayContext.Provider>;
 }

@@ -171,7 +171,7 @@ test('a phone lists the sections, opens each on its own page, and back returns t
   await signIn(page);
   await openSettings(page);
   const list = page.getByTestId('settings-list');
-  await expect(list.getByRole('button')).toHaveText(SECTION_LABELS);
+  await expect(list.getByRole('button')).toHaveText(SECTION_LABELS.map(label => label === 'Customer display' ? 'Customer displayNot paired' : label));
   await list.getByRole('button', { name: 'Tax', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Tax', exact: true })).toBeVisible();
   await expect(page.getByTestId('settings-tax')).toBeVisible();
