@@ -3,7 +3,7 @@ import { catalogueEntries, inCategory, listCategories, productSortValue, searchP
 import { productCollectionId, productTags } from './products-area';
 import type { SessionStorage } from './session';
 
-/** The Sale's stored pills beside In Stock (In Stock itself is never stored): Medusa sale price lists, a product tag
+/** The Sale's stored pills beside In Stock (kept under its own key): Medusa sale price lists, a product tag
  * id and a product collection id. */
 export type SaleFilters = { onSale: boolean; tag: string | null; collection: string | null };
 export const NO_SALE_FILTERS: SaleFilters = { onSale: false, tag: null, collection: null };
@@ -25,6 +25,16 @@ export function saveSaleFilters(storage: SessionStorage | null, baseUrl: string,
   try {
     storage?.setItem(PREFIX + baseUrl, JSON.stringify(filters));
   } catch (error) { console.warn('Could not save the Sale filters:', error); }
+}
+
+export function loadSaleInStock(storage: SessionStorage | null, baseUrl: string): boolean {
+  try { return JSON.parse(storage?.getItem(`medusapos.sale-in-stock.${baseUrl}`) ?? 'false') === true; }
+  catch { return false; }
+}
+
+export function saveSaleInStock(storage: SessionStorage | null, baseUrl: string, on: boolean): void {
+  try { storage?.setItem(`medusapos.sale-in-stock.${baseUrl}`, JSON.stringify(on)); }
+  catch (error) { console.warn('Could not save the Sale In Stock filter:', error); }
 }
 
 /** Some variant's price in `currency` comes from a Medusa sale price list (it has a `was`). */

@@ -71,7 +71,7 @@ import { isStoredOpensDrawer, printReceiptToNetwork, useCashDrawerOnSale } from 
 import { useProductSettings } from '../lib/product-settings';
 import { useProductCollections } from '../lib/product-collections';
 import { listProductCollections, listProductTags, productCollectionIds } from '../lib/products-area';
-import { isOnSale, loadSaleFilters, saleFilterItems, saveSaleFilters, type SaleFilters } from '../lib/sale-filters';
+import { isOnSale, loadSaleFilters, loadSaleInStock, saleFilterItems, saveSaleFilters, saveSaleInStock, type SaleFilters } from '../lib/sale-filters';
 import { printSalePage, RECEIPT_TEMPLATES, useReceiptPrinter, useReceiptTemplate } from '../lib/receipt-templates';
 import { useRegister } from '../lib/register-context';
 import { useScannerSettings } from '../lib/scanner-settings';
@@ -192,7 +192,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const [newCustomerOpen, setNewCustomerOpen] = useState(false);
   const [addressCustomerId, setAddressCustomerId] = useState<string | null>(null);
   const [noteOpen, setNoteOpen] = useState(false);
-  const [filters, setFilters] = useState<ProductFilters>({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
+  const [filters, setFilters] = useState<ProductFilters>(() => ({ ...DEFAULT_PRODUCT_FILTERS, inStock: loadSaleInStock(defaultStorage(), session.baseUrl) }));
+  const setInStock = (on: boolean) => {
+    setFilters({ ...filters, inStock: on });
+    saveSaleInStock(defaultStorage(), session.baseUrl, on);
+  };
   // Clear and Refresh (v2): the search is Catalogue's own state, so a new key empties it; the filters go back to the start.
   const [catalogueKey, setCatalogueKey] = useState(0);
   // Catalogue's search text, tracked so the app's own pick filtering keeps it (Catalogue does not report a cleared box).
@@ -201,8 +205,9 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const clearCatalogue = useCallback(() => {
     clearAndRefresh();
     setFilters({ ...DEFAULT_PRODUCT_FILTERS, inStock: false });
+    saveSaleInStock(defaultStorage(), session.baseUrl, false);
     setCatalogueKey((key) => key + 1);
-  }, [clearAndRefresh]);
+  }, [clearAndRefresh, session.baseUrl]);
   const entriesRef = useRef<ReturnType<typeof catalogueEntries>>([]);
   const token = useRef(session.token);
   token.current = session.token;
@@ -445,7 +450,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const chips: ProductFilterChip[] = ['inStock', ...anyOnSale ? ['onSale' as const] : [], ...tags.length ? ['tag' as const] : []];
   const filterRow = <>
     <ProductFilterBar value={{ ...filters, onSale }} chips={chips} onChange={(next) => {
-      if (next.inStock !== filters.inStock) setFilters({ ...filters, inStock: next.inStock });
+      if (next.inStock !== filters.inStock) setInStock(next.inStock);
       if (next.onSale !== onSale) changeSaleFilters({ onSale: next.onSale });
     }} terms={{ tag: { options: tags.map(({ id, value }) => ({ value: id, label: value })), value: tag ?? undefined,
       onChange: (next) => changeSaleFilters({ tag: toggled(tag, next) }) } }}
@@ -461,7 +466,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     return add(entry);
   };
   const productSettingsButton = <ProductSettingsButton viewState={viewState} onViewStateChange={onViewStateChange}
-    showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setFilters({ ...filters, inStock: !show })}
+    showOutOfStock={!filters.inStock} onShowOutOfStockChange={(show) => setInStock(!show)}
     settings={productSettings} save={saveProductSettings} reset={resetProductSettings} phone={phone} />;
   // v2's sync arrow sits right after the count; its product settings end the search row, after the view icon.
   const statusAccessory = <CatalogueSyncButton onSync={syncNow} onClearAndRefresh={clearCatalogue} syncing={pullState === 'syncing' || pullState === 'connecting'} />;
@@ -469,7 +474,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <PriceCheckBanner />
     {/* minCodeLength: below the till's minimum scan length, Enter in the search stays a search (ADR 0016). */}
     {/* showViewToggle: a phone stays on the grid, a table is unreadable at 360 wide; the view is kept per store on this device. */}
-    {/* The In Stock chip starts off so products that sell out mid-shift stay on the till. */}
+    {/* In Stock starts off until the cashier turns it on, and is kept per store on this device. */}
     <View testID="catalogue-area" className="flex-1" pointerEvents={dimmed ? 'none' : 'auto'}
       aria-disabled={dimmed} style={{ opacity: dimmed ? 0.5 : 1 }}>
     <Catalogue key={catalogueKey} products={sorted} traits={traits} currency={pricing.currency} lastSyncedAt={lastSyncedAt}
