@@ -57,21 +57,30 @@ export function productOptionLines(doc: unknown): string[] {
 /** The variant's option values as "<title>: <value>" joined by ", " in the product's option order; a value resolves to
  * its option by `option_id`, else by its own id among the option's values, and is skipped when neither matches. */
 export function variantAttributes(doc: unknown, variantId: string): string {
+  const options = productOptions(doc);
+  const chosen = variantOptionValues(doc, variantId, options);
+  return options.filter(({ id }) => chosen.has(id)).map(({ id, title }) => `${title}: ${chosen.get(id)}`).join(', ');
+}
+
+function variantOptionValues(doc: unknown, variantId: string, options: ProductOption[]): Map<string, string> {
   const variants = (doc as { variants?: unknown } | null)?.variants;
   const values = Array.isArray(variants) ? variants.find((variant) => variant?.id === variantId)?.options : undefined;
-  if (!Array.isArray(values)) return '';
-  const options = productOptions(doc);
   const chosen = new Map<string, string>();
+  if (!Array.isArray(values)) return chosen;
   for (const value of values) {
     if (typeof value?.value !== 'string' || value.value === '') continue;
     const option = options.find(({ id }) => id === value.option_id)
       ?? (typeof value.id === 'string' ? options.find((candidate) => candidate.values.some(({ id }) => id === value.id)) : undefined);
     if (option && !chosen.has(option.id)) chosen.set(option.id, value.value);
   }
-  return options.filter(({ id }) => chosen.has(id)).map(({ id, title }) => `${title}: ${chosen.get(id)}`).join(', ');
+  return chosen;
 }
 
 export type ProductTag = { id: string; value: string };
+export type ProductOptionFilter = { id: string; title: string; values: ProductTag[] };
+export const PRODUCTS_OPTION_SEARCH = (title: string) => `Search ${title}`;
+export const PRODUCTS_OPTION_NONE = 'No values match.';
+export const PRODUCTS_NONE_WITH_OPTIONS = 'No variations have the chosen options.';
 
 /** The Medusa product's `tags` ({ id, value }), read from the document: TallyUI's product traits have no tag accessor. */
 export function productTags(doc: unknown): ProductTag[] {
@@ -184,6 +193,8 @@ export type ProductAreaProduct = Omit<ProductAreaRow, 'sku' | 'barcode' | 'saleP
   sku: ''; barcode: ''; salePrice: ''; onSale: false; attributes: '';
   // One "<group>: <value>, <value>" line per option group, as v2's "Size: XS, S, M".
   options: string[];
+  optionFilters: ProductOptionFilter[];
+  variantOptions: Record<string, Record<string, string>>;
   // Its variant rows' ids in catalogue order, with the variant's title (its id when it has none).
   variants: { id: string; title: string }[];
 };
@@ -205,6 +216,14 @@ export function productAreaProducts(products: readonly unknown[], traits: Produc
   }
   return [...byProduct].filter(([, entries]) => entries.length > 1).map(([product, entries]) => {
     const variants = entries.map(({ variant }) => variant);
+    const options = productOptions(product);
+    const resolved = variants.map(({ id }) => variantOptionValues(product, id, options));
+    const optionFilters = options.flatMap(({ id, title, values }) => {
+      const carried = new Set(resolved.flatMap((chosen) => chosen.get(id) ?? []));
+      if (carried.size < 2) return [];
+      const ordered = new Set([...values.map(({ value }) => value).filter((value) => carried.has(value)), ...carried]);
+      return [{ id, title, values: [...ordered].map((value) => ({ id: value, value })) }];
+    });
     const categories = productCategories(product, traits);
     const stockStatus = STATUS_ORDER.find((status) => variants.some((variant) => variant.stock.status === status)) ?? 'unknown';
     const quantities = variants.map((variant) => variant.stock.quantity);
@@ -215,6 +234,7 @@ export function productAreaProducts(products: readonly unknown[], traits: Produc
     return {
       id: traits.getId ? traits.getId(product) : (product as { id: string }).id,
       name: traits.getName(product),
+      optionFilters, variantOptions: Object.fromEntries(variants.map(({ id }, index) => [id, Object.fromEntries(resolved[index])])),
       options: groups.length ? groups.map((group) => `${group.name}: ${group.values.join(', ')}`) : productOptionLines(product),
       variants: variants.map((variant) => ({ id: variant.id, title: variant.title || variant.id })),
       sku: '', barcode: '', salePrice: '', onSale: false, attributes: '', type: productTypeValue(product, types),
@@ -230,6 +250,13 @@ export function productAreaProducts(products: readonly unknown[], traits: Produc
       imageUrl: traits.getImageUrl(product),
     };
   });
+}
+
+export function filterPlaceRowsByOptions(rows: ProductAreaRow[], product: ProductAreaProduct,
+  chosen: Readonly<Record<string, string>>): ProductAreaRow[] {
+  const effective = Object.entries(chosen).filter(([id, value]) => product.optionFilters.some((filter) =>
+    filter.id === id && filter.values.some((item) => item.id === value)));
+  return effective.length ? rows.filter((row) => effective.every(([id, value]) => product.variantOptions[row.id]?.[id] === value)) : rows;
 }
 
 /** What the table and the phone list render: a product row (`shown` = its variant rows left after the filters), or a

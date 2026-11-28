@@ -4,7 +4,7 @@ import {
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByCollection, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
   filterProductAreaRowsOnSale, listProductCollections, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaPlaceItems, productAreaProducts, productAreaRows,
   productAreaStockLine, productCollectionIds, productOptionLines, productTags, productTypeIds, productTypeValue, PRODUCTS_VARIATIONS, saveProductsAreaCategory,
-  variantAttributes,
+  filterPlaceRowsByOptions, variantAttributes,
   saveProductsAreaTag, STOCK_STATUS_DOTS, type ProductAreaItem, type ProductAreaRow,
 } from './products-area';
 import type { SessionStorage } from './session';
@@ -395,10 +395,45 @@ describe('productAreaProducts', () => {
       categories: [{ id: 'c1', name: 'Kitchen' }], tags: [{ id: 'tag_a', value: 'A' }] };
     expect(productAreaProducts([shirt], traits, 'EUR')).toEqual([]);
     expect(productAreaProducts([shirt, mug], traits, 'EUR')).toEqual([{ id: 'mug', name: 'Mug', options: [],
+      optionFilters: [], variantOptions: { 'mug-a': {}, 'mug-b': {} },
       variants: [{ id: 'mug-a', title: 'A' }, { id: 'mug-b', title: 'B' }], sku: '', barcode: '', price: '€20.00 – €25.00',
       regularPrice: '€20.00 – €25.00', salePrice: '', onSale: false,
       type: '', attributes: '', stock: '3', stockStatus: 'in_stock', categories: 'Kitchen',
       categoryIds: ['c1'], tagIds: ['tag_a'], collectionId: null, imageUrl: 'https://img.test/mug.png' }]);
+  });
+
+  const hoodie = { id: 'hoodie', title: 'Hoodie', options: [
+    { id: 'size', title: 'Size', values: ['S', 'M', 'L'].map((value) => ({ value })) },
+    { id: 'color', title: 'Color', values: [{ value: 'Blue' }, { id: 'red', value: 'Red' }] },
+    { id: 'fit', title: 'Fit', values: [{ value: 'Regular' }] },
+  ], variants: [['M', 'Red'], ['S', 'Blue'], ['M', 'Blue']].map(([size, color]) => ({
+    id: `${size}-${color}`, prices: eur(500), stock: { status: 'in_stock' }, options: [
+      { option_id: 'size', value: size }, color === 'Red' ? { id: 'red', value: color } : { option_id: 'color', value: color },
+      { option_id: 'fit', value: 'Regular' },
+    ],
+  })) };
+
+  it('gives a product its option filters: options with two or more carried values, in option order', () => {
+    const [product] = productAreaProducts([hoodie], traits, 'EUR');
+    expect(product.optionFilters).toEqual([
+      { id: 'size', title: 'Size', values: [{ id: 'S', value: 'S' }, { id: 'M', value: 'M' }] },
+      { id: 'color', title: 'Color', values: [{ id: 'Blue', value: 'Blue' }, { id: 'Red', value: 'Red' }] },
+    ]);
+    expect(product.variantOptions).toEqual({
+      'S-Blue': { size: 'S', color: 'Blue', fit: 'Regular' }, 'M-Red': { size: 'M', color: 'Red', fit: 'Regular' },
+      'M-Blue': { size: 'M', color: 'Blue', fit: 'Regular' },
+    });
+  });
+
+  it('filterPlaceRowsByOptions narrows by every chosen option and ignores unknown choices', () => {
+    const doc = { ...hoodie, variants: [...hoodie.variants, { ...hoodie.variants[0], id: 'no-options', options: [] }] };
+    const [product] = productAreaProducts([doc], traits, 'EUR');
+    const rows = productAreaRows([doc], traits, 'EUR');
+    const filtered = (chosen: Record<string, string>) => filterPlaceRowsByOptions(rows, product, chosen);
+    expect(filtered({})).toBe(rows);
+    expect(filtered({ missing: 'M', color: 'Green' })).toBe(rows);
+    expect(filtered({ size: 'M' }).map(({ id }) => id)).toEqual(['M-Red', 'M-Blue']);
+    expect(filtered({ size: 'M', color: 'Blue', missing: 'x' }).map(({ id }) => id)).toEqual(['M-Blue']);
   });
 
   it('gives one price when both variants cost the same, and a dash when none resolves', () => {

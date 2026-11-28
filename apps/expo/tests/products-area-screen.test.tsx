@@ -10,6 +10,7 @@ import { PortalHost } from '@tallyui/primitives';
 import type { Session } from '../lib/session';
 import { publishCatalogue, withdrawCatalogue, type CatalogueSnapshot } from '../lib/catalogue-snapshot';
 import {
+  PRODUCTS_NONE_WITH_OPTIONS,
   PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_LOADING, PRODUCTS_NO_MATCH, PRODUCTS_NONE_IN_STOCK, PRODUCTS_NONE_ON_SALE,
   PRODUCTS_NONE_IN_COLLECTION, PRODUCTS_NONE_ON_SALE_IN_STOCK, PRODUCTS_NONE_TAGGED, PRODUCTS_ON_SALE_LABEL, PRODUCTS_TAGS_NONE, PRODUCTS_TAGS_SEARCH, saveProductsAreaCategory, saveProductsAreaTag,
 } from '../lib/products-area';
@@ -1218,11 +1219,86 @@ describe('the Variations choice', () => {
     return data;
   };
   // The sheet renders in a portal.
-  const show = () => {
+  const show = (catalogue: CatalogueSnapshot['products'] = products) => {
     sessionState.session = session;
-    publishCatalogue(sale());
+    publishCatalogue(sale({ products: catalogue }));
     render(<><ProductsAreaScreen /><PortalHost /></>);
   };
+
+  describe("v2's option filters in place", () => {
+    const hoodie = { id: 'p6', title: 'Hoodie', options: [
+      { id: 'size', title: 'Size', values: [{ value: 'S' }, { value: 'M' }] },
+      { id: 'color', title: 'Color', values: [{ value: 'Blue' }, { value: 'Red' }] },
+    ], variants: ['S', 'M'].flatMap((size) => ['Blue', 'Red'].map((color) => ({
+      id: `${size}-${color}`, title: `${size} ${color}`, prices: eur(1000),
+      stock: { status: size === 'S' && color === 'Red' ? 'out_of_stock' as const : 'in_stock' as const },
+      options: [{ option_id: 'size', value: size }, { option_id: 'color', value: color }],
+    }))) };
+    const openHoodie = () => { storage(); show([...products, hoodie]); press('product-variations-p6'); };
+    const pick = (id: string, value: string) => { press(`products-option-${id}`); press(`products-option-${id}-value-${value}`); };
+
+    it('a product in place shows a chip per option; a picked value narrows the variants and reads "Size: M", and its cross takes it off', () => {
+      openHoodie();
+      const slot = within(screen.getByTestId('products-place-options'));
+      const size = slot.getByTestId('products-option-size');
+      expect(size.textContent).toBe('Size');
+      expect(slot.getByTestId('products-option-color').textContent).toBe('Color');
+      press('products-option-size');
+      expect(screen.getByTestId('products-option-size-search').getAttribute('placeholder')).toBe('Search Size');
+      press('products-option-size-value-M');
+      expect(rowIds()).toEqual(['M-Blue', 'M-Red']);
+      expect(footer()).toBe('Showing 2 of 4');
+      expect(size.textContent).toBe('Size: M');
+      expect(size.getAttribute('aria-label')).toBe('Size: M');
+      press('products-option-size-remove');
+      expect(size.textContent).toBe('Size');
+      expect(rowIds()).toHaveLength(4);
+      expect(footer()).toBe('Showing 4 of 4');
+    });
+
+    it('two chips narrow together and with In stock; a combination with no variant says so and keeps the chips', () => {
+      openHoodie();
+      pick('color', 'Red');
+      expect(footer()).toBe('Showing 2 of 4');
+      press('products-in-stock');
+      expect(rowIds()).toEqual(['M-Red']);
+      expect(footer()).toBe('Showing 1 of 4');
+      pick('size', 'S');
+      expect(rowIds()).toEqual([]);
+      expect(screen.getByText(PRODUCTS_NONE_WITH_OPTIONS)).toBeTruthy();
+      expect(screen.getByTestId('products-place-options')).toBeTruthy();
+    });
+
+    it('going back or opening the product again starts with no choice; the list, Expanded rows and p4 show no option chips', () => {
+      openHoodie();
+      pick('size', 'M');
+      press('products-place-back');
+      expect(screen.queryByTestId('products-place-options')).toBeNull();
+      press('product-variations-p6');
+      expect(screen.getByTestId('products-option-size').textContent).toBe('Size');
+      expect(footer()).toBe('Showing 4 of 4');
+      press('products-place-back');
+      press('product-variations-p4');
+      expect(screen.queryByTestId('products-place-options')).toBeNull();
+      press('products-settings-button');
+      press('products-settings-variations-popover');
+      press('products-settings-close');
+      press('product-variations-p6');
+      expect(rowIds()).toContain('M-Red');
+      expect(screen.queryByTestId('products-place-options')).toBeNull();
+    });
+
+    it('on a phone the chips sit above the in-place list and narrow it', () => {
+      setWindowWidth(390, 844);
+      openHoodie();
+      pick('color', 'Blue');
+      const list = screen.getByTestId('products-list');
+      const slot = within(list).getByTestId('products-place-options');
+      const rows = list.querySelectorAll('[data-testid^="product-list-row-"]');
+      expect(Array.from(rows, (row) => row.getAttribute('data-testid'))).toEqual(['product-list-row-M-Blue', 'product-list-row-S-Blue']);
+      expect(slot.compareDocumentPosition(rows[0]) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+  });
 
   it('a new device opens p4 in place: its variants A and B under a Products back link, which returns to the list', () => {
     storage();

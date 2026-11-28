@@ -59,6 +59,27 @@ test('the Products area shows E2E product 4 as one row whose variations toggle o
   await expect(page.getByTestId(`product-row-${bId}`)).toHaveCount(0);
 });
 
+test('the Products area narrows E2E product 4 in place by its Variant option chip, and the cross takes it off', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  const bId = await variantIdBySku(await adminToken(), 'E2E-4B');
+  await signIn(page);
+  await openArea(page, 'Products');
+  await page.getByRole('button', { name: '2 variations, E2E product 4', exact: true }).click();
+  const slot = page.getByTestId('products-place-options');
+  const chip = slot.getByRole('button', { name: 'Variant', exact: true });
+  await expect(chip).toHaveText('Variant');
+  await chip.click();
+  await page.getByTestId(/^products-option-.*-value-B$/).click();
+  const rows = page.locator('[data-testid^="product-row-"]');
+  await expect(rows).toHaveCount(1);
+  await expect(page.getByTestId(`product-row-${bId}`)).toBeVisible();
+  await expect(page.getByTestId('products-footer')).toHaveText('Showing 1 of 2');
+  await expect(slot.getByRole('button', { name: 'Variant: B', exact: true })).toHaveText('Variant: B');
+  await slot.getByRole('button', { name: 'Remove Variant' }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(chip).toHaveText('Variant');
+});
+
 test('the Products area narrows by category chip and shows each row\'s stock status and category', async ({ page }) => {
   await signIn(page);
   await openArea(page, 'Products');
