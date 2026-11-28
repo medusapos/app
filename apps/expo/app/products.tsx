@@ -15,6 +15,7 @@ import { StripHeightContext } from '../components/store-refused';
 import { StoreSettingsGate, type TillCatalogueLeafProps } from '../components/till-catalogue-gate';
 import { catalogueStatus, publishCatalogue, sellableCatalogue, useCatalogueSnapshot, withdrawCatalogue } from '../lib/catalogue-snapshot';
 import {
+  filterPlaceRowsByOptions, PRODUCTS_NONE_WITH_OPTIONS, PRODUCTS_OPTION_NONE, PRODUCTS_OPTION_SEARCH,
   filterProductAreaRows, filterProductAreaRowsByCategory, filterProductAreaRowsByTag, filterProductAreaRowsInStock,
   filterProductAreaRowsOnSale, listProductTags, loadProductsAreaCategory, loadProductsAreaTag, productAreaItems, productAreaPlaceItems, productAreaProducts,
   productAreaRows, productAreaStockLine, productTypeIds, PRODUCTS_ADMIN_NOTE, PRODUCTS_EMPTY, PRODUCTS_IN_STOCK_LABEL, PRODUCTS_LOADING, PRODUCTS_LOAD_FAILED, PRODUCTS_NO_MATCH,
@@ -239,23 +240,27 @@ export default function ProductsAreaScreen() {
   const inPlace = productSettings.variations === 'list';
   // The product open in place, for this visit only; one gone from the catalogue shows the list again.
   const [placeId, setPlaceId] = useState<string | null>(null);
+  // v2's option filters in place belong to this product visit.
+  const [placeOptions, setPlaceOptions] = useState<Record<string, string>>({});
+  const openPlace = useCallback((id: string | null) => { setPlaceId(id); setPlaceOptions({}); }, []);
   const place = useMemo(() => inPlace && placeId ? products.find((product) => product.id === placeId) ?? null : null,
     [inPlace, placeId, products]);
   // On web, v2's Esc goes back as the Products link does.
-  useEscapeBack(pathname === '/products' && place !== null, () => setPlaceId(null));
+  useEscapeBack(pathname === '/products' && place !== null, () => openPlace(null));
   // A product row opens on an explicit choice (Expanded rows only), else while the search has text (a typed or scanned SKU
   // shows its sub-row); otherwise it starts closed, as v2's. Kept for this visit only.
   const [openChoices, setOpenChoices] = useState<Record<string, boolean>>({});
   const searching = search.trim() !== '';
   const isOpen = useCallback((id: string) => (inPlace ? undefined : openChoices[id]) ?? searching, [inPlace, openChoices, searching]);
-  const toggleVariations = useCallback((id: string) => inPlace ? setPlaceId(id)
-    : setOpenChoices((choices) => ({ ...choices, [id]: !isOpen(id) })), [inPlace, isOpen]);
+  const toggleVariations = useCallback((id: string) => inPlace ? openPlace(id)
+    : setOpenChoices((choices) => ({ ...choices, [id]: !isOpen(id) })), [inPlace, isOpen, openPlace]);
   const [sort, setSort] = useState<ProductSort | null>(NAME_SORT);
   const phone = useWindowDimensions().width < PHONE_BREAKPOINT;
-  const phoneItems = useMemo(() => !phone ? [] : place ? productAreaPlaceItems(items, place, NAME_SORT, valueOf)
-    : productAreaItems(items, products, NAME_SORT, isOpen, valueOf), [phone, place, items, products, isOpen]);
-  const tableItems = useMemo(() => phone ? [] : place ? productAreaPlaceItems(items, place, sort, valueOf)
-    : productAreaItems(items, products, sort, isOpen, valueOf), [phone, place, items, products, sort, isOpen]);
+  const narrowed = useMemo(() => place ? filterPlaceRowsByOptions(items, place, placeOptions) : items, [items, place, placeOptions]);
+  const phoneItems = useMemo(() => !phone ? [] : place ? productAreaPlaceItems(narrowed, place, NAME_SORT, valueOf)
+    : productAreaItems(items, products, NAME_SORT, isOpen, valueOf), [phone, place, narrowed, items, products, isOpen]);
+  const tableItems = useMemo(() => phone ? [] : place ? productAreaPlaceItems(narrowed, place, sort, valueOf)
+    : productAreaItems(items, products, sort, isOpen, valueOf), [phone, place, narrowed, items, products, sort, isOpen]);
   // v2's Products has no title bar on a wide window; a phone keeps the header for the drawer's Menu.
   const openMenu = useFrameMenu();
   // Without a header the sign-in / refused strip lies over the top of the screen (as on the Sale screen).
@@ -272,9 +277,20 @@ export default function ProductsAreaScreen() {
     setOnSaleOnly(false);
   };
   const emptyState = <Text className="text-center text-muted-foreground">{search.trim() ? PRODUCTS_NO_MATCH(search)
+    : place && narrowed !== items ? PRODUCTS_NONE_WITH_OPTIONS
     : activeTag ? PRODUCTS_NONE_TAGGED(activeTag.value) : activeCollection ? PRODUCTS_NONE_IN_COLLECTION(activeCollection.value)
       : onSaleOnly ? (inStockOnly ? PRODUCTS_NONE_ON_SALE_IN_STOCK : PRODUCTS_NONE_ON_SALE)
       : inStockOnly ? PRODUCTS_NONE_IN_STOCK : PRODUCTS_EMPTY}</Text>;
+  // v2's option filters in place sit above the rows, including when no variant matches.
+  const filters = place?.optionFilters.length ? { filterSlot: <View testID="products-place-options" className="flex-row flex-wrap gap-2 pt-2">
+    {place.optionFilters.map((filter) => <ProductsTagsChip key={filter.id} tags={filter.values} selectedId={placeOptions[filter.id] ?? null}
+      onSelect={(value) => setPlaceOptions((chosen) => {
+        const next = { ...chosen };
+        if (value === null) delete next[filter.id]; else next[filter.id] = value;
+        return next;
+      })} copy={{ id: `products-option-${filter.id}`, item: `products-option-${filter.id}-value`, label: filter.title,
+        chosen: filter.title, remove: `Remove ${filter.title}`, search: PRODUCTS_OPTION_SEARCH(filter.title), none: PRODUCTS_OPTION_NONE, titled: true }} />)}
+  </View> } : {};
   return <ToggleVariations.Provider value={toggleVariations}><OpensInPlace.Provider value={inPlace}><ProductLines.Provider value={columns.settings}>
   <View className="flex-1 bg-background" role="main" aria-label="Products">
     <Stack.Screen options={{ title: 'Products', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
@@ -282,7 +298,7 @@ export default function ProductsAreaScreen() {
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} onKeyPress={onSearchKeyPress} placeholder="Search Products"
         accessibilityLabel="Search Products" testID="products-search" />
       {!phone && <ProductsAreaColumnsButton {...columns} variations={productSettings.variations} onVariationsChange={(variations) => {
-        setPlaceId(null);
+        openPlace(null);
         saveProductSettings({ ...productSettings, variations });
       }} />}
       {!openMenu && <AreaAccountButton />}
@@ -324,7 +340,7 @@ export default function ProductsAreaScreen() {
     </View>
     {/* v2's Open in place: a Products back link, then the product's name; the search, chips and sort stay as they were. */}
     {ready && place ? <View className="flex-row items-center gap-1 px-4 pb-2" testID="products-place">
-      <Pressable role="button" testID="products-place-back" onPress={() => setPlaceId(null)} className="py-1">
+      <Pressable role="button" testID="products-place-back" onPress={() => openPlace(null)} className="py-1">
         <Text className="text-primary">Products</Text>
       </Pressable>
       <ChevronDownIcon size={14} style={{ transform: [{ rotate: '-90deg' }] }} />
@@ -332,13 +348,13 @@ export default function ProductsAreaScreen() {
     </View> : null}
     {saleHolds ? null : <StoreSettingsGate key={session.baseUrl} session={session} signOut={signOut} onUnauthorized={reportUnauthorized}
       onNoPosAccess={reportNoPosAccess} onCapabilities={mergeCapabilities} Leaf={Leaf} />}
-    {ready && phone ? <ProductList testID="products-list" items={phoneItems} emptyState={emptyState}
+    {ready && phone ? <ProductList testID="products-list" items={phoneItems} emptyState={emptyState} {...filters}
       renderItem={(item: ProductAreaItem) => item.kind === 'product' ? <PhoneProductRow item={item} image={columns.settings.image} />
         : <PhoneRow row={item} image={columns.settings.image} />} /> : null}
     {/* v2's table sits in a bordered box, inset as the search row; its phone rows run full width. */}
     {ready && !phone ? <Card testID="products-table-card" className="mx-4 flex-1 overflow-hidden">
       <ProductTable testID="products-table" items={tableItems} columns={tableColumns as ProductTableColumn[]}
-        sort={sort} onSortChange={setSort} sortItems={false} emptyState={emptyState} />
+        sort={sort} onSortChange={setSort} sortItems={false} emptyState={emptyState} {...filters} />
     </Card> : null}
     {/* v2's "Showing n of m": rows after the search and chips, of the whole sellable catalogue; its sync arrow after it.
       n and m count variants (a product row and its sub-rows count as the sub-rows' variants), as v2 counts rows.
