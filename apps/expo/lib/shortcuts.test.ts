@@ -2,18 +2,34 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { Platform } from 'react-native';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { chordLabel, runShortcut, SHORTCUTS, shortcutFor, useAvailableShortcuts, useShortcut, useShortcutKeys } from './shortcuts';
+import { chordLabel, runShortcut, SHORTCUTS, shortcutFor, stepSale, useAvailableShortcuts, useShortcut, useShortcutKeys } from './shortcuts';
 
 const press = (over: Partial<Parameters<typeof shortcutFor>[0]>) => shortcutFor({
   code: '', key: '', altKey: false, ctrlKey: false, metaKey: false, editable: false, ...over,
 });
-const fire = (init: KeyboardEventInit) => act(() => { document.body.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })); });
+const fire = (init: KeyboardEventInit) => {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
+  act(() => { document.body.dispatchEvent(event); });
+  return event;
+};
 
 afterEach(() => { cleanup(); document.body.innerHTML = ''; vi.useRealTimers(); });
 
 describe('shortcutFor', () => {
   it('maps each chord to its id', () => {
-    expect(SHORTCUTS.map(({ code }) => press({ code, altKey: true }))).toEqual(['search.focus', 'sale.new', 'checkout.open', 'orders.open', 'help.open']);
+    expect(SHORTCUTS.map(({ code }) => press({ code, altKey: true }))).toEqual(['search.focus', 'sale.new', 'checkout.open',
+      'cart.previous', 'cart.next', 'discount.open', 'sale.void', 'orders.open', 'help.open']);
+  });
+  it('maps Alt+ArrowLeft and Alt+ArrowRight outside a field to previous and next sale', () => {
+    expect(press({ code: 'ArrowLeft', key: 'ArrowLeft', altKey: true })).toBe('cart.previous');
+    expect(press({ code: 'ArrowRight', key: 'ArrowRight', altKey: true })).toBe('cart.next');
+  });
+  it('leaves Alt+ArrowLeft and Alt+ArrowRight to the editable field', () => {
+    for (const code of ['ArrowLeft', 'ArrowRight']) expect(press({ code, key: code, altKey: true, editable: true })).toBeNull();
+  });
+  it('maps Alt+D and Alt+V outside a field to discount and void', () => {
+    expect(press({ code: 'KeyD', altKey: true })).toBe('discount.open');
+    expect(press({ code: 'KeyV', altKey: true })).toBe('sale.void');
   });
   it('maps Ctrl+Alt and Meta+Alt to null', () => {
     expect(press({ code: 'KeyP', altKey: true, ctrlKey: true })).toBeNull();
@@ -57,6 +73,32 @@ describe('chordLabel', () => {
     expect(chordLabel('search.focus', false)).toEqual(['Alt', 'F']);
     expect(chordLabel('help.open', false)).toEqual(['Alt', '/']);
     expect(chordLabel('orders.open', true)).toEqual(['⌥', 'O']);
+  });
+  it('shows arrow caps with Option on Mac and Alt elsewhere', () => {
+    expect(chordLabel('cart.previous', true)).toEqual(['⌥', '←']);
+    expect(chordLabel('cart.next', false)).toEqual(['Alt', '→']);
+  });
+});
+
+describe('stepSale', () => {
+  const ids = ['a', 'b', 'c'];
+  it('returns null with no sales or only the current sale', () => {
+    for (const step of [-1, 1] as const) {
+      expect(stepSale([], 'a', step)).toBeNull();
+      expect(stepSale(['a'], 'a', step)).toBeNull();
+    }
+  });
+  it('steps both ways from the middle', () => {
+    expect(stepSale(ids, 'b', -1)).toBe('a');
+    expect(stepSale(ids, 'b', 1)).toBe('c');
+  });
+  it('wraps at both ends', () => {
+    expect(stepSale(ids, 'a', -1)).toBe('c');
+    expect(stepSale(ids, 'c', 1)).toBe('a');
+  });
+  it('steps to the first or last sale from a blank cart', () => {
+    expect(stepSale(ids, 'blank', 1)).toBe('a');
+    expect(stepSale(ids, 'blank', -1)).toBe('c');
   });
 });
 
@@ -118,6 +160,25 @@ describe('useShortcutKeys on web', () => {
     expect(checkout).not.toHaveBeenCalled();
     fire({ code: 'Slash', altKey: true });
     expect(onHelp).toHaveBeenCalledTimes(1);
+  });
+
+  it('an open dialog blocks cart.previous and prevents Alt+ArrowLeft, but not Alt+P, by default', () => {
+    const previous = vi.fn();
+    renderHook(() => useShortcut('cart.previous', previous));
+    const { checkout } = keys();
+    document.body.innerHTML = '<div role="dialog"></div>';
+    expect(fire({ code: 'ArrowLeft', key: 'ArrowLeft', altKey: true }).defaultPrevented).toBe(true);
+    expect(previous).not.toHaveBeenCalled();
+    expect(fire({ code: 'KeyP', altKey: true }).defaultPrevented).toBe(false);
+    expect(checkout).not.toHaveBeenCalled();
+  });
+
+  it('Alt+ArrowRight runs cart.next without a dialog', () => {
+    const next = vi.fn();
+    renderHook(() => useShortcut('cart.next', next));
+    keys();
+    expect(fire({ code: 'ArrowRight', key: 'ArrowRight', altKey: true }).defaultPrevented).toBe(true);
+    expect(next).toHaveBeenCalledTimes(1);
   });
 
   // As TallyUI's Dialog renders the sheet: its scrim holding the aria-modal overlay, then the content.

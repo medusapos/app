@@ -19,17 +19,28 @@ const mount = (newSale: (() => void) | null = null) => {
 afterEach(() => { cleanup(); document.body.innerHTML = ''; vi.useRealTimers(); });
 
 describe('ShortcutsSheet', () => {
-  it('lists the five rows plus Escape, each with its key caps', () => {
+  it('lists the nine rows plus Escape, each with its key caps', () => {
     mount();
     expect(screen.getByTestId('shortcuts-sheet')).toBeTruthy();
     // The title and the help row.
     expect(screen.getAllByText('Keyboard shortcuts')).toHaveLength(2);
     const rows = Array.from(document.querySelectorAll('[data-testid^="shortcuts-row-"]')).map((row) => row.getAttribute('data-testid'));
     expect(rows).toEqual(['shortcuts-row-search.focus', 'shortcuts-row-sale.new', 'shortcuts-row-checkout.open',
+      'shortcuts-row-cart.previous', 'shortcuts-row-cart.next', 'shortcuts-row-discount.open', 'shortcuts-row-sale.void',
       'shortcuts-row-orders.open', 'shortcuts-row-help.open', 'shortcuts-row-escape']);
     expect(screen.getByTestId('shortcuts-row-checkout.open').textContent).toMatch(/Checkout(Alt|⌥)P/);
     expect(screen.getByTestId('shortcuts-row-escape').textContent).toBe('Close a sheetEsc');
     expect(screen.getByTestId('shortcuts-sheet-close')).toBeTruthy();
+  });
+
+  it.each(['Win32', 'Linux x86_64', 'MacIntel'])('shows the Firefox note only off Mac: %s', (platform) => {
+    const stub = vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
+    try {
+      mount();
+      const note = screen.queryByTestId('shortcuts-firefox-note');
+      if (platform === 'MacIntel') expect(note).toBeNull();
+      else expect(note?.textContent).toBe('On Windows, Alt+F and Alt+D may also open the Firefox menu.');
+    } finally { stub.mockRestore(); }
   });
 
   it('an unavailable row is aria-disabled and pressing it runs nothing', () => {
