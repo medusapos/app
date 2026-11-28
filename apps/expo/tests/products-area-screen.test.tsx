@@ -1276,6 +1276,50 @@ describe('the Variations choice', () => {
     expect(screen.getByTestId('products-in-stock').getAttribute('aria-pressed')).toBe('true');
   });
 
+  it('on web Escape in place goes back to the list and keeps the search and the chips', () => {
+    storage();
+    show();
+    fireEvent.change(screen.getByTestId('products-search'), { target: { value: 'E2E-4B' } });
+    fireEvent.click(toggle());
+    press('products-in-stock');
+    expect(screen.getByTestId('products-place')).toBeTruthy();
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    expect(screen.queryByTestId('products-place')).toBeNull();
+    expect((screen.getByTestId('products-search') as HTMLInputElement).value).toBe('E2E-4B');
+    expect(screen.getByTestId('products-in-stock').getAttribute('aria-pressed')).toBe('true');
+    expect(rowIds()).toEqual([]);
+  });
+
+  it('on web Escape typed in the search box keeps the product open in place', () => {
+    storage();
+    show();
+    fireEvent.click(toggle());
+    const search = screen.getByTestId('products-search');
+    act(() => { search.focus(); });
+    act(() => { fireEvent.keyDown(search, { key: 'Escape' }); });
+    expect(screen.getByTestId('products-place')).toBeTruthy();
+  });
+
+  it('on web Escape with the Product Settings sheet open does not go back', () => {
+    storage();
+    show();
+    fireEvent.click(toggle());
+    press('products-settings-button');
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    expect(screen.getByTestId('products-place')).toBeTruthy();
+    if (screen.queryByTestId('products-settings-close')) press('products-settings-close');
+    act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); });
+    expect(screen.queryByTestId('products-place')).toBeNull();
+  });
+
+  it('Escape on the list with nothing open in place changes nothing', () => {
+    storage();
+    show();
+    expect(rowIds()).toEqual(['v1', 'p4']);
+    expect(() => act(() => { fireEvent.keyDown(document.body, { key: 'Escape' }); })).not.toThrow();
+    expect(rowIds()).toEqual(['v1', 'p4']);
+  });
+
   it('sorting the Product column descending in place lists B then A', () => {
     storage();
     show();
