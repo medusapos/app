@@ -1,11 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, View } from 'react-native';
-import { Button, Dialog, DialogContent, DialogTitle, GripIcon, IconButton, Label, Switch, Text, XIcon } from '@tallyui/components';
+import { Circle } from 'react-native-svg';
+import { Button, createSvgIcon, Dialog, DialogContent, DialogTitle, IconButton, Label, Switch, Text, XIcon } from '@tallyui/components';
 import {
   moveProductsAreaColumn, PRODUCTS_AREA_COLUMNS, PRODUCTS_AREA_PRODUCT_LINES, productsAreaDropIndex, type ProductsAreaOrderedColumn,
   type useProductsAreaColumns,
 } from '../lib/products-area-columns';
 import { SlidersIcon } from './product-settings';
+
+// v2's six-dot handle (Tabler grip-vertical); TallyUI's GripIcon is two lines.
+const GripVerticalIcon = createSvgIcon('GripVerticalIcon', () => <>
+  <Circle cx={9} cy={5} r={1} /><Circle cx={15} cy={5} r={1} />
+  <Circle cx={9} cy={12} r={1} /><Circle cx={15} cy={12} r={1} />
+  <Circle cx={9} cy={19} r={1} /><Circle cx={15} cy={19} r={1} />
+</>);
+
+// v2 lifts the moving row above its neighbours during a drag.
+const DRAG_ROW_SHADOW = '0 4px 12px rgba(0, 0, 0, 0.15)';
 
 function SwitchRow({ testID, label, checked, onCheckedChange, className }: {
   testID: string; label: string; checked: boolean; onCheckedChange: (on: boolean) => void; className?: string;
@@ -81,14 +92,14 @@ export function ProductsAreaColumnsButton({ settings, save, reset, order, saveOr
             const moving = drag?.id === id;
             // One draggable unit per column; v2's Product is a label with no switch, its sub-switches indented under it.
             return <View key={id} className={`gap-4${moving ? ' bg-card' : ''}`}
-              style={moving ? { transform: [{ translateY: drag.dy }], zIndex: 1 } : undefined}
+              style={moving ? { transform: [{ translateY: drag.dy }], zIndex: 1, boxShadow: DRAG_ROW_SHADOW } : undefined}
               onLayout={({ nativeEvent }) => { boxes.current[id] = nativeEvent.layout; }}>
               <View className="flex-row items-center gap-2">
                 {/* touch-none: a touch drag on the grip moves the row, not the sheet. */}
                 <View testID={`products-settings-drag-${id}`} accessibilityLabel={`Drag to move ${label}`}
                   className={`self-stretch justify-center text-muted-foreground web:touch-none ${moving ? 'web:cursor-grabbing' : 'web:cursor-grab'}`}
                   onPointerDown={(event) => { event.preventDefault(); startDrag(id, event.nativeEvent.clientY); }}>
-                  <GripIcon size={16} />
+                  <GripVerticalIcon size={16} />
                 </View>
                 {id === 'name' ? <View testID="products-settings-product" className="flex-1"><Label>Product</Label></View>
                   : <SwitchRow className="flex-1" testID={`products-settings-column-${id}`} label={label} checked={settings[id]}
