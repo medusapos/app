@@ -82,6 +82,13 @@ medusaIntegrationTestRunner({
       expect(response.data.contracts).toEqual(expect.any(Object))
     })
 
+    it("GET /tally/v1/info carries pluginVersion from the built plugin's package.json", async () => {
+      const headers = await loginWithRoles(['role_super_admin'])
+      const response = await api.get('/tally/v1/info', { headers })
+      expect(response.status).toBe(200)
+      expect(response.data.pluginVersion).toBe(require('../../package.json').version)
+    })
+
     it('tally-pos-roles creates POS cashier and POS manager once, with their policies', async () => {
       const exitCode = process.exitCode
       try {

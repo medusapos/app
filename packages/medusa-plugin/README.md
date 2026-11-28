@@ -131,6 +131,7 @@ Version 3 (TallyUI ADR-065) adds optional fields:
 `GET /tally/v1/info` returns `{ "contracts": { "order.create": [1, 2, 3, 4, 5], "register": [1] } }`, with the same
 authentication and CORS as the command endpoint.
 It also returns `"taxRounding": { "granularity": "per_order", "mode": "half_away_from_zero" }`: the store rounds tax once per order, half away from zero, so the till computes tax the same way (TallyUI #309).
+`/info` also carries `pluginVersion`, the installed plugin's package version (for example `"0.3.0"`), or `null` if it cannot be read.
 
 ## Order creation workflow
 

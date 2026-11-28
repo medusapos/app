@@ -1,4 +1,6 @@
-import { approvalThresholdMinor, DEFAULT_APPROVAL_THRESHOLD_MINOR, LINE_TAX, PLUGIN_CONTRACT, registerVersionAccepted,
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { approvalThresholdMinor, DEFAULT_APPROVAL_THRESHOLD_MINOR, LINE_TAX, PLUGIN_CONTRACT, PLUGIN_VERSION, registerVersionAccepted,
   SUPPORTED_ORDER_CREATE_VERSIONS, SUPPORTED_ORDER_REFUND_VERSIONS, SUPPORTED_REGISTER_VERSIONS, TAX_ROUNDING } from '../versions'
 import { GET } from '../info/route'
 
@@ -29,6 +31,12 @@ it('accepts supported register versions, subject to the optional minimum', () =>
   expect(registerVersionAccepted(4, { minRegisterContract: 3 })).toBe(false)
 })
 
+it('PLUGIN_VERSION is the package.json version', () => {
+  const manifest = JSON.parse(readFileSync(path.resolve(__dirname, '../../../../../package.json'), 'utf8'))
+  expect(PLUGIN_VERSION).toBe(manifest.version)
+  expect(PLUGIN_VERSION).toMatch(/^\d+\.\d+\.\d+/)
+})
+
 // The connector gates allChannels=true on plugin contract 4 or later; the app gates Refund on 5 (ADR 0026).
 it('V1: advertises plugin contract 8 and order.refund [1] on /info', async () => {
   expect(PLUGIN_CONTRACT).toBe(8)
@@ -36,6 +44,6 @@ it('V1: advertises plugin contract 8 and order.refund [1] on /info', async () =>
   const req = { scope: { resolve: () => ({ getPluginOptions: () => ({}), customerDisplay: () => undefined }) } }
   const res = { json: jest.fn() }
   await GET(req as unknown as Parameters<typeof GET>[0], res as unknown as Parameters<typeof GET>[1])
-  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pluginContract: 8,
+  expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ pluginContract: 8, pluginVersion: PLUGIN_VERSION,
     contracts: { 'order.create': SUPPORTED_ORDER_CREATE_VERSIONS, register: SUPPORTED_REGISTER_VERSIONS, 'order.refund': [1] } }))
 })
