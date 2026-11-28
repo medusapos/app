@@ -94,12 +94,13 @@ describe('useAutoPrintReceipt', () => {
     expect(result.current).toBeNull();
   });
 
-  it('shares no promise when the print returns nothing', () => {
+  it('shares a settled job when the print returns nothing', async () => {
     const id = newId();
     const { result } = renderHook(() => useAutoPrintReceipt(id, true, print));
     act(() => vi.advanceTimersByTime(50));
     expect(print).toHaveBeenCalledTimes(1);
-    expect(result.current).toBeNull();
+    expect(result.current).toBeInstanceOf(Promise);
+    await expect(result.current).resolves.toBeUndefined();
   });
 
   it('prints once after the settle delay, never again for the same sale', () => {
