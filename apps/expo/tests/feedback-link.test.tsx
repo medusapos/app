@@ -16,6 +16,7 @@ vi.mock('expo-router', () => ({
   Redirect: ({ href }: { href: string }) => <span>redirect:{href}</span>,
   router: { replace: vi.fn(), push: vi.fn() },
   useLocalSearchParams: () => params,
+  usePathname: () => '/orders',
   Stack: { Screen: () => null },
 }));
 vi.mock('expo-linking', () => ({ openURL: vi.fn().mockResolvedValue(true) }));
