@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { createOrderBuilder } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { PaidFooter } from '../components/paid-footer';
+import { PaidFooter, paidPrintedLabel } from '../components/paid-footer';
 import { thermalPaidPage } from '../components/receipt-pickers';
 import { printSalePage } from '../lib/receipt-templates';
 
@@ -14,6 +14,22 @@ vi.mock('../lib/receipt-templates', async (importOriginal) => ({
 
 afterEach(cleanup);
 
+describe('paidPrintedLabel', () => {
+  it('names a network printer that confirmed the print', () => {
+    expect(paidPrintedLabel({ id: 'counter', name: 'Counter', connectionType: 'network', address: '10.0.0.5' }, 'web'))
+      .toBe('Printed to Counter');
+  });
+
+  it('says the print dialog on the web without a network printer', () => {
+    expect(paidPrintedLabel(undefined, 'web')).toBe('Sent to the print dialog');
+  });
+
+  it('says nothing on a native build without a printer', () => {
+    expect(paidPrintedLabel(undefined, 'ios')).toBeUndefined();
+    expect(paidPrintedLabel(undefined, 'android')).toBeUndefined();
+  });
+});
+
 describe('PaidFooter', () => {
   const mount = ({ print = vi.fn(), newSale = vi.fn(), email = true }: {
     print?: () => void | Promise<void>; newSale?: () => void; email?: boolean;
@@ -23,6 +39,70 @@ describe('PaidFooter', () => {
   };
   const printButton = () => screen.getByRole('button', { name: 'Print receipt' });
   beforeEach(() => { vi.mocked(printSalePage).mockReset(); });
+
+  it('says where a plain print went and offers Print again', () => {
+    render(<PaidFooter printedLabel="Sent to the print dialog" print={vi.fn()} newSale={vi.fn()} />);
+    expect(screen.queryByTestId('paid-print-done')).toBeNull();
+    fireEvent.click(printButton());
+    expect(screen.getByTestId('paid-print-done').textContent).toBe('Sent to the print dialog');
+    expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
+  });
+
+  it('shows Printed to only after the printer confirms', async () => {
+    let finish!: () => void;
+    const print = () => new Promise<void>((resolve) => { finish = resolve; });
+    render(<PaidFooter printedLabel="Printed to Counter" print={print} newSale={vi.fn()} />);
+    fireEvent.click(printButton());
+    expect(screen.queryByTestId('paid-print-done')).toBeNull();
+    expect(printButton().getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { finish(); });
+    expect(screen.getByTestId('paid-print-done').textContent).toBe('Printed to Counter');
+    expect(screen.getByRole('button', { name: 'Print again' }).getAttribute('aria-disabled')).not.toBe('true');
+  });
+
+  it('a failed print shows no printed line and keeps Print receipt', async () => {
+    render(<PaidFooter printedLabel="Printed to Counter" print={() => Promise.reject(new Error('offline'))} newSale={vi.fn()} />);
+    await act(async () => { fireEvent.click(printButton()); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+    expect(screen.queryByTestId('paid-print-done')).toBeNull();
+    expect(printButton()).toBeTruthy();
+  });
+
+  it('a failure after a success keeps Print again', async () => {
+    let fail!: (error: Error) => void;
+    const print = vi.fn<() => Promise<void>>().mockResolvedValueOnce().mockImplementationOnce(
+      () => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    render(<PaidFooter printedLabel="Printed to Counter" print={print} newSale={vi.fn()} />);
+    await act(async () => { fireEvent.click(printButton()); });
+    expect(screen.getByTestId('paid-print-done').textContent).toBe('Printed to Counter');
+    fireEvent.click(screen.getByRole('button', { name: 'Print again' }));
+    expect(screen.getByRole('button', { name: 'Print again' }).getAttribute('aria-disabled')).toBe('true');
+    await act(async () => { fail(new Error('offline')); });
+    expect(screen.getByTestId('paid-print-status').textContent).toBe("Couldn't print. Try again.");
+    expect(screen.queryByTestId('paid-print-done')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
+  });
+
+  it('an auto-print that succeeds says so, and a remount keeps it', async () => {
+    let finish!: () => void;
+    const autoPrint = new Promise<void>((resolve) => { finish = resolve; });
+    const footer = <PaidFooter printedLabel="Printed to Counter" autoPrint={autoPrint} print={vi.fn()} newSale={vi.fn()} />;
+    const view = render(footer);
+    await act(async () => { finish(); });
+    expect(screen.getByTestId('paid-print-done').textContent).toBe('Printed to Counter');
+    expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
+    view.unmount();
+    render(footer);
+    expect(screen.getByTestId('paid-print-done').textContent).toBe('Printed to Counter');
+    expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
+  });
+
+  it('without printedLabel a successful print shows no line', async () => {
+    mount({ print: () => Promise.resolve() });
+    await act(async () => { fireEvent.click(printButton()); });
+    expect(screen.queryByTestId('paid-print-done')).toBeNull();
+    expect(printButton()).toBeTruthy();
+  });
 
   it('the done button reads doneLabel when given, New sale otherwise', () => {
     const props = { print: vi.fn(), newSale: vi.fn() };
