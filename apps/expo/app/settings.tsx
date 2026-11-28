@@ -338,10 +338,11 @@ function CustomerDisplaySection() {
   const { pairing, service, startPairing } = useCustomerDisplay();
   const pairingView = useTillPairing(pairing);
   const [expired, setExpired] = useState(false);
-  useEffect(() => pairing?.onChange(() => {
+  useEffect(() => { if (!pairing) return;
     const { phase } = pairing;
     setExpired(phase.phase === 'idle' && phase.error === 'expired');
-  }), [pairing]);
+    return pairing.onChange(() => setExpired(pairing.phase.phase === 'idle' && pairing.phase.error === 'expired'));
+  }, [pairing]);
   useEffect(() => () => {
     if (!pairing) return;
     const { phase } = pairing;

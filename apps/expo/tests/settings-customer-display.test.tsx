@@ -3,12 +3,13 @@ import { webcrypto } from 'node:crypto';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { DisplaySignallingError } from '@tallyui/core';
 import { createMemoryDisplaySignalling } from '@tallyui/core/server';
+import { PortalHost } from '@tallyui/primitives';
 import { Platform } from 'react-native';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import SettingsScreen from '../app/settings';
 import { CustomerDisplayProvider } from '../lib/customer-display-context';
 import { saveSession } from '../lib/session';
-import { SessionProvider } from '../lib/session-context';
+import { SessionProvider, useSession } from '../lib/session-context';
 import { setWindowWidth } from './window-width';
 
 let memory: ReturnType<typeof createMemoryDisplaySignalling>;
@@ -187,5 +188,46 @@ it('SX-5: an expired code stays visible without polling until the cashier starts
   await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
   fireEvent.click(screen.getByTestId('pairing-cancel'));
   await vi.waitFor(() => expect(screen.queryByTestId('pairing-code')).toBeNull());
+  expect(screen.queryByTestId('pairing-error')).toBeNull();
+});
+
+it('SX-6: an expired code from before an advertisement change does not reappear after the last display is forgotten', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('RTCPeerConnection', class {
+    createDataChannel() { return { readyState: 'connecting', close() {} }; }
+    createOffer() { return new Promise<never>(() => {}); }
+    close() {}
+  });
+  const mint = vi.spyOn(memory.signalling, 'mint');
+  let mergeCapabilities!: ReturnType<typeof useSession>['mergeCapabilities'];
+  function Probe() {
+    mergeCapabilities = useSession().mergeCapabilities;
+    return null;
+  }
+  saveSession(localStorage, { baseUrl: 'https://store.test', email: 'staff@example.test', token: 'jwt', tokenExpiresAt: Date.now() + 86400000,
+    capabilities: { orderCreate: 7, customerDisplay: { iceServers: [], snapshot: true } } });
+  await act(async () => { render(<SessionProvider><Probe /><CustomerDisplayProvider><SettingsScreen /></CustomerDisplayProvider><PortalHost /></SessionProvider>); });
+  fireEvent.click(screen.getByTestId('settings-nav-customer-display'));
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
+  const { code } = await mint.mock.results[0].value;
+  await memory.signalling.claim(memory.harness.display('counter'), { code, displayName: 'Counter' });
+  await act(() => vi.advanceTimersByTimeAsync(2000));
+  await vi.waitFor(() => expect(screen.getByText('Confirm')).toBeTruthy());
+  fireEvent.click(screen.getByText('Confirm'));
+  await vi.waitFor(() => expect(screen.getByText('Counter')).toBeTruthy());
+
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
+  const { expiresAt } = await mint.mock.results[1].value;
+  await act(() => vi.advanceTimersByTimeAsync(Date.parse(expiresAt) - Date.now() + 1));
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-error').textContent).toMatch(/expired/i));
+
+  act(() => mergeCapabilities({ orderCreate: 7, customerDisplay: { iceServers: [], snapshot: false } }));
+  await vi.waitFor(() => expect(screen.queryByTestId('pairing-error')).toBeNull());
+  await vi.waitFor(() => expect(screen.getByText('Forget')).toBeTruthy());
+  fireEvent.click(screen.getByText('Forget'));
+  fireEvent.click(screen.getByTestId(/^forget-confirm-/));
+  await vi.waitFor(() => expect(localStorage.getItem('medusapos.display-paired.https://store.test')).toBe('0'));
   expect(screen.queryByTestId('pairing-error')).toBeNull();
 });
