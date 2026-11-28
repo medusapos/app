@@ -28,7 +28,7 @@ import { CustomerAddressDialog } from '../components/customer-address-dialog';
 import { CustomerSavedToast, useCustomerSavedToast } from '../components/customer-saved-toast';
 import { NativeViewfinder, useNativeCameraPermission } from '../components/native-camera';
 import { NewCustomerDialog } from '../components/new-customer-dialog';
-import { OfflineToast, useOfflineToast } from '../components/offline-toast';
+import { OfflineToast, RestoredToast, useOfflineToast } from '../components/offline-toast';
 import { OpenOrdersList, OpenOrdersStrip } from '../components/open-orders';
 import { OrderDiscountRow, orderDiscountInRowMinor } from '../components/order-discount-row';
 import { ScanToast, scanAddedDescription, useScanToast } from '../components/scan-toast';
@@ -624,6 +624,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </View> : null;
   const phoneTender = phone && sale.stage.kind === 'tender';
   const offlineShown = offline.kind !== null && sale.stage.kind === 'cart' && (!phone || !cartOpen);
+  const restoredShown = offline.restored && sale.stage.kind === 'cart' && (!phone || !cartOpen);
   const scanToastShown = scanToast.toast !== null && sale.stage.kind === 'cart';
   const customerSavedShown = customerSaved.name !== null && sale.stage.kind === 'cart';
   return (
@@ -701,10 +702,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
                 onSelect={(tab) => setCartOpen(tab === 'cart')} />
             </>}
           {/* The till's one toast host, floating over the top of the screen in every layout; the empty sides stay tappable.
-              v2's "Device went offline" toast shows over the products only, the scan toasts and the "<name> saved" message
-              in the whole cart stage. */}
-          {(offlineShown || scanToastShown || customerSavedShown) && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center gap-2 px-2">
+              v2's "Device went offline" and "Connection restored" toasts show over the products only, the scan toasts
+              and the "<name> saved" message in the whole cart stage. */}
+          {(offlineShown || restoredShown || scanToastShown || customerSavedShown) && <View pointerEvents="box-none" className="absolute inset-x-0 top-2 items-center gap-2 px-2">
             {offlineShown && <OfflineToast kind={offline.kind!} onClose={offline.close} />}
+            {restoredShown && <RestoredToast />}
             {scanToastShown && <ScanToast toast={scanToast.toast!} />}
             {customerSavedShown && <CustomerSavedToast name={customerSaved.name!} />}
           </View>}

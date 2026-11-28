@@ -1639,6 +1639,26 @@ describe('ProductsScreen network offline header', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('wide: back online after a shown outage, Connection restored shows after 5 s and goes 3 s later', async () => {
+    await mount();
+    vi.useFakeTimers();
+    try {
+      goNetwork(false);
+      act(() => { vi.advanceTimersByTime(5_000); });
+      expect(toast()?.textContent).toContain('Device went offline');
+      goNetwork(true);
+      act(() => { vi.advanceTimersByTime(4_999); });
+      expect(screen.queryByTestId('connection-restored-toast')).toBeNull();
+      act(() => { vi.advanceTimersByTime(1); });
+      expect(screen.getByTestId('connection-restored-toast').textContent).toBe('Connection restored');
+      expect(toast()).toBeNull();
+      act(() => { vi.advanceTimersByTime(3_000); });
+      expect(screen.queryByTestId('connection-restored-toast')).toBeNull();
+      expect(toast()).toBeNull();
+      cleanup();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('phone: the offline toast shows over Products only, not over the Cart view', async () => {
     setWindowWidth(390, 844);
     await mount();
