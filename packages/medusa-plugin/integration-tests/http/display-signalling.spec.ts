@@ -269,17 +269,18 @@ medusaIntegrationTestRunner({
       const opened_at = new Date(service().now()), request = { code: 'made-up', displayName: 'Counter' }
       await knex()('tally_display_claim_failure').insert({ id: 'source:192.0.2.9', opened_at, failures: 10 })
       await withDisplayLock(() => expectPromptRefusal(service().claim('192.0.2.9', request), 'claim_refused'))
-      await knex()('tally_display_claim_failure').insert({ id: 'store', opened_at, failures: 100 })
+      await knex()('tally_display_claim_failure').insert({ id: 'store', opened_at: new Date(service().now() - 5 * 60_000), failures: 100 })
       await withDisplayLock(() => expectPromptRefusal(service().claim('192.0.2.10', request), 'claim_refused'))
     })
 
-    it('H11: claims under the limit, or with an ended window, still wait for the lock', async () => {
+    it('H11: claims under the limit, or whose window ended (exactly now included), still wait for the lock', async () => {
       await makeHarness()
+      service().advanceClock(0)
       const now = new Date(service().now()), sources = ['192.0.2.11', '192.0.2.12', '192.0.2.13']
       await knex()('tally_display_claim_failure').insert([
         { id: `source:${sources[0]}`, opened_at: now, failures: 9 },
-        { id: `source:${sources[1]}`, opened_at: new Date(now.getTime() - 61_000), failures: 10 },
-        { id: 'store', opened_at: new Date(now.getTime() - 11 * 60_000), failures: 100 },
+        { id: `source:${sources[1]}`, opened_at: new Date(now.getTime() - 60_000), failures: 10 },
+        { id: 'store', opened_at: new Date(now.getTime() - 600_000), failures: 100 },
       ])
       const calls = await withDisplayLock(async () => {
         const claims = sources.map(source => service().claim(source, { code: 'made-up', displayName: 'Counter' }))
@@ -324,16 +325,36 @@ medusaIntegrationTestRunner({
       await expect(s.readSnapshot(display(source), token)).rejects.toMatchObject({ code: 'server' })
     })
 
-    it('H14: the cap tracks at most 10 000 sources and drops the oldest window', async () => {
+    it('H14: the cap tracks at most 10 000 sources and drops only the oldest window', async () => {
       await makeHarness()
       const module = service(), refused = { code: 'token_refused' }
       module.advanceClock(0)
       for (let attempt = 0; attempt < 20; attempt++) await expect(module.readSnapshot('', '10.0.0.1')).rejects.toMatchObject(refused)
       module.advanceClock(1)
-      for (let index = 0; index < DISPLAY_REFUSAL_SOURCES_MAX; index++) {
+      for (let attempt = 0; attempt < 20; attempt++) await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject(refused)
+      module.advanceClock(1)
+      for (let index = 0; index < DISPLAY_REFUSAL_SOURCES_MAX - 1; index++) {
         await expect(module.readSnapshot('', `10.1.${index >> 8}.${index & 255}`)).rejects.toMatchObject(refused)
       }
+      await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject({ code: 'rate_limited' })
       await expect(module.readSnapshot('', '10.0.0.1')).rejects.toMatchObject(refused)
+    })
+
+    it('H15: a full cap drops ended windows before the oldest open one', async () => {
+      await makeHarness()
+      const module = service(), refused = { code: 'token_refused' }
+      module.advanceClock(0)
+      for (let index = 0; index < 10; index++) {
+        await expect(module.readSnapshot('', `10.2.0.${index}`)).rejects.toMatchObject(refused)
+      }
+      module.advanceClock(60_000)
+      for (let attempt = 0; attempt < 20; attempt++) await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject(refused)
+      module.advanceClock(1)
+      for (let index = 0; index < DISPLAY_REFUSAL_SOURCES_MAX - 11; index++) {
+        await expect(module.readSnapshot('', `10.3.${index >> 8}.${index & 255}`)).rejects.toMatchObject(refused)
+      }
+      await expect(module.readSnapshot('', '10.4.0.0')).rejects.toMatchObject(refused)
+      await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject({ code: 'rate_limited' })
     })
   },
 })
