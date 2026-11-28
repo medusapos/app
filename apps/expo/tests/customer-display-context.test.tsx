@@ -77,7 +77,7 @@ it.each(['C-6: advertisement loss', 'C-7: sign-out'])('C-5: a stored key activat
 
 it('C-8: the default context is inert', () => {
   const { result } = renderHook(useCustomerDisplay);
-  expect(result.current).toEqual({ available: false, service: null, pairing: null, startPairing: expect.any(Function) });
+  expect(result.current).toEqual({ available: false, service: null, pairing: null, paired: false, startPairing: expect.any(Function) });
   expect(result.current.startPairing()).toBeUndefined();
 });
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { webcrypto } from 'node:crypto';
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { DisplaySignallingError } from '@tallyui/core';
 import { createMemoryDisplaySignalling } from '@tallyui/core/server';
 import { PortalHost } from '@tallyui/primitives';
@@ -42,7 +42,8 @@ async function mount(advertised: boolean) {
 it('SC-1: Customer display follows Card readers and one press shows a pairing code', async () => {
   await mount(true);
   const nav = screen.getByTestId('settings-nav-customer-display');
-  expect(nav.textContent).toBe('Customer display');
+  expect(within(nav).getByText('Customer display')).toBeTruthy();
+  expect(within(nav).getByTestId('settings-nav-customer-display-detail').textContent).toBe('Not paired');
   expect(screen.getByTestId('settings-nav-card-readers').nextElementSibling).toBe(nav);
   fireEvent.click(nav);
   fireEvent.click(screen.getByTestId('pairing-start'));
@@ -54,6 +55,49 @@ it.each([['SC-2', 'web', false], ['SC-3', 'ios', true]] as const)('%s: no Custom
   await mount(advertised);
   expect(screen.getByTestId('settings-nav-card-readers')).toBeTruthy();
   expect(screen.queryByText('Customer display')).toBeNull();
+});
+
+it('SC-4: the wide row shows the saved pairing state before the display list returns', async () => {
+  localStorage.setItem('medusapos.display-paired.https://store.test', '1');
+  vi.spyOn(memory.signalling, 'list').mockReturnValueOnce(new Promise(() => {}));
+  await mount(true);
+  expect(screen.getByTestId('settings-nav-customer-display-detail').textContent).toBe('Paired');
+});
+
+it('SC-5: the phone row shows Not paired beside its chevron', async () => {
+  setWindowWidth(390, 844);
+  await mount(true);
+  const row = within(screen.getByTestId('settings-list-customer-display'));
+  expect(row.getByTestId('settings-list-customer-display-detail').textContent).toBe('Not paired');
+  expect(row.getByTestId('settings-list-chevron')).toBeTruthy();
+  expect(screen.queryByTestId('settings-list-store-detail')).toBeNull();
+  expect(screen.getAllByTestId(/^settings-list-.*-detail$/)).toHaveLength(1);
+});
+
+it('SC-6: the wide row updates after confirming and forgetting a display', async () => {
+  vi.useFakeTimers();
+  vi.stubGlobal('RTCPeerConnection', class {
+    createDataChannel() { return { readyState: 'connecting', close() {} }; }
+    createOffer() { return new Promise<never>(() => {}); }
+    close() {}
+  });
+  await mount(true);
+  render(<PortalHost />);
+  const detail = screen.getByTestId('settings-nav-customer-display-detail');
+  expect(detail.textContent).toBe('Not paired');
+  fireEvent.click(screen.getByTestId('settings-nav-customer-display'));
+  fireEvent.click(screen.getByTestId('pairing-start'));
+  await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
+  const code = screen.getByTestId('pairing-code').textContent!;
+  await memory.signalling.claim(memory.harness.display('counter'), { code, displayName: 'Counter' });
+  await act(() => vi.advanceTimersByTimeAsync(2000));
+  await vi.waitFor(() => expect(screen.getByText('Confirm')).toBeTruthy());
+  fireEvent.click(screen.getByText('Confirm'));
+  await vi.waitFor(() => expect(detail.textContent).toBe('Paired'));
+  await vi.waitFor(() => expect(screen.getByText('Forget')).toBeTruthy());
+  fireEvent.click(screen.getByText('Forget'));
+  fireEvent.click(screen.getByTestId(/^forget-confirm-/));
+  await vi.waitFor(() => expect(detail.textContent).toBe('Not paired'));
 });
 
 it.each(['SX-1: live code', 'SX-2: expired code'])('%s stops polling after leaving the section and receiving an empty list', async (scenario) => {

@@ -63,7 +63,7 @@ function Field({ label, help, ...input }: { label: string; help?: string } & Com
 }
 export default function SettingsScreen() {
   const { session } = useSession();
-  const { available } = useCustomerDisplay();
+  const { available, paired } = useCustomerDisplay();
   const { width } = useWindowDimensions();
   const [chosenSection, setChosenSection] = useState('store');
   // A phone's section page is /settings?section=<id>, its own router entry, so browser and hardware back return to the list.
@@ -78,7 +78,7 @@ export default function SettingsScreen() {
     { id: 'tax', label: 'Tax', element: <TaxSection session={session} /> },
     { id: 'printing', label: 'Printing', element: <PrintingSection session={session} /> },
     { id: 'card-readers', label: 'Card readers', element: <CardReadersSection session={session} /> },
-    ...(available ? [{ id: 'customer-display', label: 'Customer display', element: <CustomerDisplaySection /> }] : []),
+    ...(available ? [{ id: 'customer-display', label: 'Customer display', detail: paired ? 'Paired' : 'Not paired', element: <CustomerDisplaySection /> }] : []),
     { id: 'scanner', label: 'Barcode Scanning', element: <ScannerSection session={session} /> },
     { id: 'theme', label: 'Theme', element: <ThemeSection /> },
     { id: 'register', label: 'Register', element: <RegisterSection session={session} /> },
@@ -90,11 +90,12 @@ export default function SettingsScreen() {
     <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton /> }} />
     <SettingsLayout layout="split" role="main" aria-label="Settings" navSlot={
       <View testID="settings-nav" className="gap-1 px-2 pb-2" style={{ paddingTop: 8 + topInset }}>
-        {sections.map(({ id, label }) => <Pressable key={id} testID={`settings-nav-${id}`} accessibilityRole="button"
+        {sections.map(({ id, label, detail }) => <Pressable key={id} testID={`settings-nav-${id}`} accessibilityRole="button"
           aria-selected={chosenSection === id}
           accessibilityState={{ selected: chosenSection === id }} onPress={() => setChosenSection(id)}
-          className={`min-h-11 justify-center rounded-md border px-4 ${chosenSection === id ? 'border-border bg-card shadow-sm' : 'border-transparent'}`}>
+          className={`min-h-11 ${detail ? 'flex-row items-center justify-between' : 'justify-center'} rounded-md border px-4 ${chosenSection === id ? 'border-border bg-card shadow-sm' : 'border-transparent'}`}>
           <Text className="text-foreground">{label}</Text>
+          {detail ? <Text testID={`settings-nav-${id}-detail`} className="text-sm text-muted-foreground">{detail}</Text> : null}
         </Pressable>)}
       </View>
     } contentSlot={
@@ -113,13 +114,16 @@ export default function SettingsScreen() {
     } />
   </>;
   const opened = sections.find(({ id }) => id === section);
+  const chevron = <View testID="settings-list-chevron" className="text-muted-foreground"><ChevronRightIcon size={20} /></View>;
   // v2's phone Settings: a plain list of the section names, each with a chevron, opening that section's page.
   if (!opened) return <ScrollView className="flex-1 bg-background" role="main" aria-label="Settings" testID="settings-list"
     contentContainerClassName="pb-6" contentContainerStyle={{ paddingTop: 8 + topInset }}>
     <Stack.Screen options={{ title: 'Settings', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
-    {sections.map(({ id, label }) => <Pressable key={id} testID={`settings-list-${id}`} accessibilityRole="button" accessibilityLabel={label}
+    {sections.map(({ id, label, detail }) => <Pressable key={id} testID={`settings-list-${id}`} accessibilityRole="button" accessibilityLabel={label}
       onPress={() => router.push({ pathname: '/settings', params: { section: id } })} className="min-h-11 justify-center px-2">
-      <SettingsRow label={label} action={<View testID="settings-list-chevron" className="text-muted-foreground"><ChevronRightIcon size={20} /></View>} />
+      <SettingsRow label={label} action={detail ? <View className="flex-row items-center gap-2">
+        <Text testID={`settings-list-${id}-detail`} className="text-sm text-muted-foreground">{detail}</Text>{chevron}
+      </View> : chevron} />
     </Pressable>)}
   </ScrollView>;
   return <ScrollView className="flex-1 bg-background" role="main" aria-label="Settings" contentContainerClassName="px-6 pb-6"
