@@ -582,6 +582,7 @@ export const rows: CaptureRow[] = [
   { id: '15g', title: 'Settings, theme', state: 'Settings › Theme', reach: (page, size) => settings(page, size, 'theme') },
   { id: '15h', title: 'Settings, health', state: 'Settings › Health', reach: async (page, size) => {
     await settings(page, size, 'health');
+    await expect(page.getByTestId('settings-health-ready-title')).toHaveText('Ready to sell');
     await expect(page.getByTestId('settings-health-plugin-contract')).toHaveText(/^\d+$/);
     await expect(page.getByTestId('settings-health-plugin-version')).toHaveText(/^\d+\.\d+\.\d+/);
   } },
