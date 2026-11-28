@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
 import { BehaviorSubject } from 'rxjs';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
@@ -2017,6 +2018,16 @@ describe('ProductsScreen camera scan', () => {
     cameraOn();
     await mount();
     expect(screen.getByTestId('camera-scan-button')).toBeTruthy();
+  });
+
+  it('with it on, on iOS, the camera button shows without a BarcodeDetector', async () => {
+    const original = Platform.OS;
+    Platform.OS = 'ios';
+    try {
+      cameraOn();
+      await mount();
+      expect(screen.getByTestId('camera-scan-button')).toBeTruthy();
+    } finally { Platform.OS = original; }
   });
 
   it('with it on but no BarcodeDetector in the browser, no camera button', async () => {
