@@ -10,7 +10,7 @@ import type { SyncContext } from '@tallyui/core' with { 'resolution-mode': 'impo
 import { TALLY_DISPLAY_MODULE } from '../../src/modules/tally-display'
 import { DEFAULT_ICE_SERVERS, displayAdvertisement } from '../../src/modules/tally-display/ice-servers'
 import type TallyDisplayModuleService from '../../src/modules/tally-display/service'
-import { sha256Hex } from '../../src/modules/tally-display/service'
+import { DISPLAY_REFUSAL_SOURCES_MAX, sha256Hex } from '../../src/modules/tally-display/service'
 import tallyDisplayReset from '../../src/scripts/tally-display-reset'
 import { createHttpDisplaySignalling } from './display-signalling-client'
 
@@ -85,6 +85,7 @@ medusaIntegrationTestRunner({
     async function makeHarness(): Promise<DisplaySignallingHarness> {
       await knex().raw(`truncate ${TABLES.join(', ')}`)
       service().resetClock()
+      service().resetDisplayRefusals()
       const rows = async (table: string) => knex().select('*').from(table).orderBy(table === 'tally_display_signal' ? 'seq' : 'id')
       return {
         signalling: createHttpDisplaySignalling(),
@@ -232,19 +233,22 @@ medusaIntegrationTestRunner({
     const expectPromptRefusal = (call: Promise<unknown>, code: string) =>
       expect(Promise.race([call, delay(2000, 'timed out')])).rejects.toMatchObject({ code })
 
-    it('H7: an unknown token is refused by all three display calls without waiting for the lock', async () => {
-      const token = 'x'.repeat(22)
+    it('H7: with a paired display, unknown and empty tokens are refused by all three calls without waiting for the lock', async () => {
+      await pairedDisplay(await makeHarness())
+      const source = '192.0.2.1'
       await withDisplayLock(async () => {
-        await Promise.all([
-          expectPromptRefusal(service().readSnapshot(token), 'token_refused'),
-          expectPromptRefusal(service().displayReceiveSignals(token), 'token_refused'),
-          expectPromptRefusal(service().displaySendSignal(token, { type: 'ice', payload: 'test' }), 'token_refused'),
-        ])
+        for (const token of ['x'.repeat(22), '']) {
+          await Promise.all([
+            expectPromptRefusal(service().readSnapshot(token, source), 'token_refused'),
+            expectPromptRefusal(service().displayReceiveSignals(token, source), 'token_refused'),
+            expectPromptRefusal(service().displaySendSignal(token, { type: 'ice', payload: 'test' }, source), 'token_refused'),
+          ])
+        }
       })
     })
 
     it('H8: an unknown claim secret is refused without waiting for the lock', async () => {
-      await withDisplayLock(() => expectPromptRefusal(service().collect('x'.repeat(22)), 'collect_refused'))
+      await withDisplayLock(() => expectPromptRefusal(service().collect('x'.repeat(22), '192.0.2.1'), 'collect_refused'))
     })
 
     it('H9: a paired token and a pending claim secret both wait for the lock', async () => {
@@ -252,12 +256,105 @@ medusaIntegrationTestRunner({
       const { code } = await service().mint(device)
       const { claimSecret } = await service().claim('192.0.2.1', { code, displayName: 'Pending' })
       const { snapshot, collection } = await withDisplayLock(async () => {
-        const snapshot = service().readSnapshot(token), collection = service().collect(claimSecret)
+        const snapshot = service().readSnapshot(token, '192.0.2.1'), collection = service().collect(claimSecret, '192.0.2.1')
         expect(await Promise.race([snapshot, collection, delay(500, 'waiting')])).toBe('waiting')
         return { snapshot, collection }
       })
       await expect(snapshot).resolves.toBeNull()
       await expect(collection).resolves.toMatchObject({ status: 'pending' })
+    })
+
+    it('H10: over-limit claims are refused without waiting for the lock', async () => {
+      await makeHarness()
+      const opened_at = new Date(service().now()), request = { code: 'made-up', displayName: 'Counter' }
+      await knex()('tally_display_claim_failure').insert({ id: 'source:192.0.2.9', opened_at, failures: 10 })
+      await withDisplayLock(() => expectPromptRefusal(service().claim('192.0.2.9', request), 'claim_refused'))
+      await knex()('tally_display_claim_failure').insert({ id: 'store', opened_at: new Date(service().now() - 5 * 60_000), failures: 100 })
+      await withDisplayLock(() => expectPromptRefusal(service().claim('192.0.2.10', request), 'claim_refused'))
+    })
+
+    it('H11: claims under the limit, or whose window ended (exactly now included), still wait for the lock', async () => {
+      await makeHarness()
+      service().advanceClock(0)
+      const now = new Date(service().now()), sources = ['192.0.2.11', '192.0.2.12', '192.0.2.13']
+      await knex()('tally_display_claim_failure').insert([
+        { id: `source:${sources[0]}`, opened_at: now, failures: 9 },
+        { id: `source:${sources[1]}`, opened_at: new Date(now.getTime() - 60_000), failures: 10 },
+        { id: 'store', opened_at: new Date(now.getTime() - 600_000), failures: 100 },
+      ])
+      const calls = await withDisplayLock(async () => {
+        const claims = sources.map(source => service().claim(source, { code: 'made-up', displayName: 'Counter' }))
+        expect(await Promise.race([...claims, delay(500, 'waiting')])).toBe('waiting')
+        return claims
+      })
+      await Promise.all(calls.map(call => expect(call).rejects.toMatchObject({ code: 'claim_refused' })))
+    })
+
+    it('H12: 20 refused token and collect calls cap a source, even for a valid token, until the window ends', async () => {
+      const { token } = await pairedDisplay(await makeHarness())
+      const source = '198.51.100.7', unknown = 'x'.repeat(22), refused = { code: 'token_refused' }
+      service().advanceClock(0)
+      for (let attempt = 0; attempt < 4; attempt++) {
+        await expect(service().readSnapshot(unknown, source)).rejects.toMatchObject(refused)
+        await expect(service().readSnapshot(unknown, source)).rejects.toMatchObject(refused)
+        await expect(service().displayReceiveSignals('', source)).rejects.toMatchObject(refused)
+        await expect(service().displaySendSignal(unknown, { type: 'ice', payload: 'test' }, source)).rejects.toMatchObject(refused)
+        await expect(service().collect(unknown, source)).rejects.toMatchObject({ code: 'collect_refused' })
+      }
+      await withDisplayLock(async () => {
+        await expectPromptRefusal(service().readSnapshot(token, source), 'rate_limited')
+        await expectPromptRefusal(service().collect(unknown, source), 'rate_limited')
+      })
+      await expect(service().readSnapshot(token, '198.51.100.8')).resolves.toBeNull()
+      service().advanceClock(60_000)
+      await expect(service().readSnapshot(token, source)).resolves.toBeNull()
+    })
+
+    it('H13: a capped source gets HTTP 429 rate_limited, and the connector reads it as server', async () => {
+      const { s, token } = await pairedDisplay(await makeHarness())
+      const source = '198.51.100.7', headers = { 'X-Forwarded-For': source, 'x-tally-display-token': 'x'.repeat(22) }
+      const snapshot = () => raw('GET', '/tally/v1/display/snapshot', headers)
+      for (let attempt = 0; attempt < 20; attempt++) {
+        const response = await snapshot()
+        expect(response.status).toBe(403)
+        expect(await response.json()).toMatchObject({ code: 'token_refused' })
+      }
+      const limited = await snapshot()
+      expect(limited.status).toBe(429)
+      expect(await limited.json()).toEqual({ code: 'rate_limited', message: 'Too many refused display requests from this address. Try again in a minute.' })
+      await expect(s.readSnapshot(display(source), token)).rejects.toMatchObject({ code: 'server' })
+    })
+
+    it('H14: the cap tracks at most 10 000 sources and drops only the oldest window', async () => {
+      await makeHarness()
+      const module = service(), refused = { code: 'token_refused' }
+      module.advanceClock(0)
+      for (let attempt = 0; attempt < 20; attempt++) await expect(module.readSnapshot('', '10.0.0.1')).rejects.toMatchObject(refused)
+      module.advanceClock(1)
+      for (let attempt = 0; attempt < 20; attempt++) await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject(refused)
+      module.advanceClock(1)
+      for (let index = 0; index < DISPLAY_REFUSAL_SOURCES_MAX - 1; index++) {
+        await expect(module.readSnapshot('', `10.1.${index >> 8}.${index & 255}`)).rejects.toMatchObject(refused)
+      }
+      await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject({ code: 'rate_limited' })
+      await expect(module.readSnapshot('', '10.0.0.1')).rejects.toMatchObject(refused)
+    })
+
+    it('H15: a full cap drops ended windows before the oldest open one', async () => {
+      await makeHarness()
+      const module = service(), refused = { code: 'token_refused' }
+      module.advanceClock(0)
+      for (let index = 0; index < 10; index++) {
+        await expect(module.readSnapshot('', `10.2.0.${index}`)).rejects.toMatchObject(refused)
+      }
+      module.advanceClock(60_000)
+      for (let attempt = 0; attempt < 20; attempt++) await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject(refused)
+      module.advanceClock(1)
+      for (let index = 0; index < DISPLAY_REFUSAL_SOURCES_MAX - 11; index++) {
+        await expect(module.readSnapshot('', `10.3.${index >> 8}.${index & 255}`)).rejects.toMatchObject(refused)
+      }
+      await expect(module.readSnapshot('', '10.4.0.0')).rejects.toMatchObject(refused)
+      await expect(module.readSnapshot('', '10.0.0.2')).rejects.toMatchObject({ code: 'rate_limited' })
     })
   },
 })

@@ -15,6 +15,7 @@ const REFUSALS: Record<DisplayRefusalCode, [status: number, message: string]> = 
   token_refused: [403, 'This display is not paired with the store.'],
   not_found: [404, 'Not found on this till device.'],
   limit: [429, 'This till device already holds 5 unused pairing codes.'],
+  rate_limited: [429, 'Too many refused display requests from this address. Try again in a minute.'],
   claim_refused: [403, 'The pairing code was not accepted.'],
   collect_refused: [403, 'This pairing cannot be collected.'],
   too_large: [413, 'The snapshot is over 204800 bytes.'],
