@@ -55,6 +55,10 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
   const attention = useMemo(() => needsAttention(orders, { stuckCommandIds: state.stuck?.commandIds }), [orders, state.stuck]);
   // Without the store, the table is this till's own sales, as before Orders went store-wide.
   const fallback = store.failure !== null;
+  const attentionRows = useMemo<OrdersRow[]>(() => attention.map((order) => ({
+    kind: 'local', key: order.id, order,
+    storeId: fallback ? undefined : store.orders.find((listed) => listed.clientOrderId === order.id)?.id,
+  })), [attention, store.orders, fallback]);
   const rows = useMemo<OrdersRow[]>(() => {
     if (fallback) return orders.map((order) => ({ kind: 'local', key: order.id, order }));
     const attended = new Set(attention.map((order) => order.id));
@@ -85,7 +89,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
     <ScrollView className="flex-1" contentContainerClassName="gap-3 p-4">
       {attention.length > 0 ? <>
         <Text accessibilityRole="header" className="text-xl font-semibold text-foreground">Needs attention</Text>
-        <OrdersTable testID="orders-attention" orders={attention} onRetry={requeue} stuck={state.stuck}
+        <OrdersTable testID="orders-attention" rows={attentionRows} billing={store.billing} onRetry={requeue} stuck={state.stuck}
           formatDate={formatDate} onOpen={setOpenId} days />
       </> : null}
       {fallback ? <View className="flex-row items-center gap-3">
