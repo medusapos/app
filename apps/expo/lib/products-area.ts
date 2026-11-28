@@ -131,6 +131,8 @@ export const PRODUCTS_COLLECTIONS_NONE = 'No collections match.';
 export const PRODUCTS_NONE_IN_COLLECTION = (title: string) => `No products in “${title}” match.`;
 // The footer under the list: rows shown after the search and chips, of the sellable catalogue's rows.
 export const PRODUCTS_SHOWING = (shown: number, total: number) => `Showing ${shown} of ${total}`;
+export const PRODUCTS_SCAN_MATCHES = (count: number): string =>
+  count === 0 ? 'No products match' : count === 1 ? '1 product matches' : `${count} products match`;
 
 export const STOCK_STATUS_LABELS: Record<StockLevel['status'], string> = {
   in_stock: 'In stock', out_of_stock: 'Out of stock', backorder: 'On backorder', unknown: '—',

@@ -379,7 +379,8 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   };
   useWedgeScan(wedgeActive, scannerSettings, onScan);
   // A directly connected scanner (Settings > Scanner) types nothing, so it adds in every layout without a double add.
-  useDeviceScans(sale.stage.kind === 'cart', onScan);
+  // Products takes its own device scans into its search box.
+  useDeviceScans(sale.stage.kind === 'cart' && pathname !== '/products', onScan);
   // v2: on web, Escape in the tender does what its ✕ / Back does (not while saving, as the ✕ is disabled).
   useEscapeBack(sale.stage.kind === 'tender', () => { if (sale.saving) return; sale.cancelTender(); if (phone) setCartOpen(true); });
   const sellableCount = sorted.length;
