@@ -23,7 +23,18 @@ export const DEFAULT_APPROVAL_THRESHOLD_MINOR = 500
 // Contract 6 adds region_id and terminal on GET /tally/v1/payment-providers, and ids= with refunds[].lines on GET /tally/v1/orders (TallyUI#1324)
 // Contract 7 adds soldTotalMinor, soldTaxMinor and returnedQuantity on each GET /tally/v1/orders line (medusapos/app#636)
 // Contract 8 adds GET /tally/v1/promotions, the till's usable coupon codes (item 44 step 2)
+// `pluginVersion` (row 36) is informational and needs no bump.
 export const PLUGIN_CONTRACT = 8
+
+// Both src and .medusa/server are inside the package, so its self-reference resolves the root manifest.
+export const PLUGIN_VERSION: string | null = (() => {
+  try {
+    const { version } = require('@medusapos/medusa-plugin/package.json')
+    return typeof version === 'string' && version.length > 0 ? version : null
+  } catch {
+    return null
+  }
+})()
 
 export function approvalThresholdMinor(options: { approvalThresholdMinor?: number }): number {
   const value = options.approvalThresholdMinor

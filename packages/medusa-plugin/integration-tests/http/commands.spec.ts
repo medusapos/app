@@ -146,6 +146,7 @@ medusaIntegrationTestRunner({
           coupons: true,
           registerApproval: { thresholdMinor: 500 },
           pluginContract: 8,
+          pluginVersion: require('../../package.json').version,
           customerDisplay: { v: 1, iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 },
         }])
       }
@@ -170,6 +171,7 @@ medusaIntegrationTestRunner({
         coupons: true,
         registerApproval: { thresholdMinor: 500 },
         pluginContract: 8,
+        pluginVersion: require('../../package.json').version,
         customerDisplay: { v: 1, iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }], snapshot: 1 },
       })
     })
