@@ -33,7 +33,7 @@ import { OpenOrdersList, OpenOrdersStrip } from '../components/open-orders';
 import { OrderDiscountRow, orderDiscountInRowMinor } from '../components/order-discount-row';
 import { ScanToast, scanAddedDescription, useScanToast } from '../components/scan-toast';
 import { EarlierSaleNote, EARLIER_SALE_SAVING } from '../components/earlier-sale-note';
-import { EmailReceipt } from '../components/email-receipt';
+import { EmailReceipt, EmailReceiptSent } from '../components/email-receipt';
 import { PaidAwaiting, useAwaitingStore } from '../components/paid-awaiting';
 import { PaidChange } from '../components/paid-change';
 import { PaidFooter, paidPrintedLabel } from '../components/paid-footer';
@@ -579,7 +579,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   // Settings shows printers only in a browser, so the paid screen's pickers are there alone (and a thermal choice with them).
   const pickers = Platform.OS === 'web';
   const paper = pickers ? RECEIPT_TEMPLATES.find((t) => t.id === receiptTemplateId)?.paper : undefined;
+  const [sentReceipt, setSentReceipt] = useState<{ saleId: string; email: string } | null>(null);
+  const saleId = sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined;
+  const sentTo = sentReceipt && sentReceipt.saleId === saleId ? sentReceipt.email : null;
   const emailReceipt = connector.emailReceipt ? <EmailReceipt
+    sentTo={sentTo} onSentChange={(email) => setSentReceipt(email !== null && saleId !== undefined ? { saleId, email } : null)}
     orderId={paidLive?.serverRefs?.orderId}
     online={online} defaultEmail={paid?.customer?.email
       ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
@@ -615,6 +619,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     </ScrollView>
     {/* A pending or failed print belongs to this template and printer only. */}
     <PaidFooter key={footerKey} autoPrint={autoPrint} emailReceipt={emailReceipt} newSale={sale.newSale}
+      notice={sentTo ? <EmailReceiptSent email={sentTo} /> : undefined}
       print={printPaidReceipt} printedLabel={paidPrintedLabel(networkPrinter, Platform.OS)} />
     <View dataSet={{ print: 'hide' }} className="absolute right-2" style={{ top: topInset + 8 }}>
       <IconButton testID="paid-close" accessibilityLabel="Close" className="h-11 w-11" onPress={sale.newSale}>

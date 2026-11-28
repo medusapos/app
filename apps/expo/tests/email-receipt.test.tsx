@@ -3,8 +3,8 @@ import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConnectorUnauthorizedError, CustomerServiceError } from '@tallyui/core';
 import { PortalHost } from '@tallyui/primitives';
-import type { ReactNode } from 'react';
-import { EmailReceipt } from '../components/email-receipt';
+import { useState, type ComponentProps, type ReactNode } from 'react';
+import { EmailReceipt, EmailReceiptSent } from '../components/email-receipt';
 import { RECEIPT_EMAIL_FAILED } from '../lib/receipt-email';
 
 vi.mock('expo-localization', () => ({ getCalendars: () => [{ uses24hourClock: null }] }));
@@ -21,9 +21,15 @@ const Host = ({ children }: { children: ReactNode }) => <>{children}<PortalHost 
 const field = () => screen.getByLabelText('Email Address') as HTMLInputElement;
 const sendButton = () => screen.getByTestId('receipt-email-send');
 
+function Harness(props: Omit<ComponentProps<typeof EmailReceipt>, 'sentTo' | 'onSentChange'>) {
+  const [sentTo, setSentTo] = useState<string | null>(null);
+  return <><EmailReceipt {...props} sentTo={sentTo} onSentChange={setSentTo} />
+    {sentTo ? <EmailReceiptSent email={sentTo} /> : null}</>;
+}
+
 describe('EmailReceipt', () => {
   it('starts as a button hidden from print, then opens the prefilled Email Receipt dialog without sending', () => {
-    const { container } = render(<EmailReceipt {...props} />, { wrapper: Host });
+    const { container } = render(<Harness {...props} />, { wrapper: Host });
     expect(container.firstElementChild?.getAttribute('data-print')).toBe('hide');
     expect(screen.getByTestId('receipt-email-open')).toBeTruthy();
     expect(screen.queryByTestId('receipt-email-dialog')).toBeNull();
@@ -37,7 +43,7 @@ describe('EmailReceipt', () => {
   });
 
   it('opens with an empty field and Send disabled when there is no email, also for whitespace', () => {
-    render(<EmailReceipt {...props} defaultEmail={undefined} />, { wrapper: Host });
+    render(<Harness {...props} defaultEmail={undefined} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     expect(field().value).toBe('');
     expect(sendButton().getAttribute('aria-disabled')).toBe('true');
@@ -50,7 +56,7 @@ describe('EmailReceipt', () => {
   it('sends the trimmed address once, closes on success and confirms under the button', async () => {
     let resolve!: () => void;
     send.mockReturnValueOnce(new Promise<void>((done) => { resolve = done; }));
-    render(<EmailReceipt {...props} />, { wrapper: Host });
+    render(<Harness {...props} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     fireEvent.change(field(), { target: { value: '  other@example.com  ' } });
     expect(send).not.toHaveBeenCalled();
@@ -74,7 +80,7 @@ describe('EmailReceipt', () => {
   it('keeps the dialog, address and store error, retrying only on another press', async () => {
     const message = "This store has no email provider set up, so it can't email receipts.";
     send.mockRejectedValueOnce(new CustomerServiceError('server', message, { status: 503 }));
-    render(<EmailReceipt {...props} />, { wrapper: Host });
+    render(<Harness {...props} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     // act, not findBy: findBy resumes on the DOM change, but react-native-web's Pressable re-reads
     // disabled/onPress in a passive effect, so on a stalled runner the retry press hit the stale handler.
@@ -93,7 +99,7 @@ describe('EmailReceipt', () => {
 
   it.each([401, 403] as const)('handles HTTP %s in the open dialog without signing out for forbidden access', async (status) => {
     send.mockRejectedValue(new ConnectorUnauthorizedError('Credentials refused', status));
-    render(<EmailReceipt {...props} />, { wrapper: Host });
+    render(<Harness {...props} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     await act(async () => { fireEvent.click(sendButton()); });
     expect(screen.getByRole('alert').textContent).toBe(RECEIPT_EMAIL_FAILED);
@@ -105,7 +111,7 @@ describe('EmailReceipt', () => {
 
   it('shows fallback copy in the dialog for an unexpected failure without retrying', async () => {
     send.mockRejectedValue(new Error('Unexpected failure'));
-    render(<EmailReceipt {...props} />, { wrapper: Host });
+    render(<Harness {...props} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     await act(async () => { fireEvent.click(sendButton()); });
     expect(screen.getByRole('alert').textContent).toBe(RECEIPT_EMAIL_FAILED);
@@ -114,7 +120,7 @@ describe('EmailReceipt', () => {
   });
 
   it.each(['receipt-email-cancel', 'receipt-email-x'])('closes on %s without sending', (testID) => {
-    render(<EmailReceipt {...props} />, { wrapper: Host });
+    render(<Harness {...props} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     fireEvent.change(field(), { target: { value: 'other@example.com' } });
     fireEvent.click(screen.getByTestId(testID));
@@ -124,25 +130,25 @@ describe('EmailReceipt', () => {
   });
 
   it('waits for the store id in the dialog and enables after rerender without sending', () => {
-    const { rerender } = render(<EmailReceipt {...props} orderId={undefined} />, { wrapper: Host });
+    const { rerender } = render(<Harness {...props} orderId={undefined} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     expect(screen.getByText('You can email the receipt once this sale reaches the store.')).toBeTruthy();
     expect(sendButton().getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(sendButton());
-    rerender(<EmailReceipt {...props} />);
+    rerender(<Harness {...props} />);
     expect(sendButton().getAttribute('aria-disabled')).not.toBe('true');
     expect(screen.queryByText('You can email the receipt once this sale reaches the store.')).toBeNull();
     expect(send).not.toHaveBeenCalled();
   });
 
   it('prioritizes the offline hint in the dialog and never sends on reconnect', () => {
-    const { rerender } = render(<EmailReceipt {...props} online={false} orderId={undefined} />, { wrapper: Host });
+    const { rerender } = render(<Harness {...props} online={false} orderId={undefined} />, { wrapper: Host });
     fireEvent.click(screen.getByTestId('receipt-email-open'));
     expect(screen.getByText('Connect to the store to email this receipt.')).toBeTruthy();
     expect(screen.queryByText('You can email the receipt once this sale reaches the store.')).toBeNull();
     expect(sendButton().getAttribute('aria-disabled')).toBe('true');
     fireEvent.click(sendButton());
-    rerender(<EmailReceipt {...props} />);
+    rerender(<Harness {...props} />);
     expect(sendButton().getAttribute('aria-disabled')).not.toBe('true');
     expect(send).not.toHaveBeenCalled();
   });

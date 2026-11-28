@@ -114,10 +114,30 @@ test('a receipt sent to a long address stays inside the phone', async ({ page })
   await page.getByTestId('receipt-email-field').fill(address);
   await page.getByTestId('receipt-email-send').click();
   // The sent line wraps inside the bar, and the Email receipt button keeps its own width.
-  await expect(page.getByTestId('paid-footer').getByText(`Receipt sent to ${address}.`)).toBeVisible();
+  const footer = page.getByTestId('paid-footer');
+  const sent = footer.getByText(`Receipt sent to ${address}.`);
+  await expect(sent).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   const email = await box(page, 'receipt-email-open');
   expect(email.x + email.width).toBeLessThanOrEqual(390);
+  const print = await box(page, 'paid-print');
+  const next = await box(page, 'paid-new-sale');
+  expect(Math.max(email.y, print.y, next.y) - Math.min(email.y, print.y, next.y)).toBeLessThanOrEqual(1);
+  expect((await sent.boundingBox())!.y).toBeGreaterThanOrEqual(print.y + print.height);
+
+  await page.getByTestId('receipt-template-select').click();
+  await page.getByTestId('receipt-template-option-thermal-80mm').click();
+  await expect(sent).toBeVisible();
+  await page.getByTestId('paid-new-sale').click();
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await addE2E1(page);
+  await startTender(page, 'cash');
+  await tenderCash(page, 5);
+  const applied = appliedResponse(page);
+  await page.getByTestId('tender-complete').click();
+  await expect(page.getByTestId('paid-change-due')).toBeVisible();
+  await expect(footer.getByText(/Receipt sent to/)).toHaveCount(0);
+  await applied;
 });
 
 // #658: the paid screen's thermal frame at a viewport size, once its page has loaded and the frame has fitted it.

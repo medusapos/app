@@ -4,23 +4,28 @@ import { Button, Dialog, DialogContent, DialogFooter, DialogTitle, IconButton, I
 import { ConnectorUnauthorizedError, CustomerServiceError } from '@tallyui/core';
 import { RECEIPT_EMAIL_FAILED } from '../lib/receipt-email';
 
+export function EmailReceiptSent({ email }: { email: string }) {
+  return <Text accessibilityRole="alert" className="w-full">{`Receipt sent to ${email}.`}</Text>;
+}
+
 /** The paid screen's "Email receipt" button, opening v2's Email Receipt dialog; a sent receipt is confirmed under it. */
-export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthorized }: {
+export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthorized, onSentChange }: {
   orderId: string | undefined;
   online: boolean;
   defaultEmail?: string;
+  sentTo: string | null;
+  onSentChange: (email: string | null) => void;
   send: (orderId: string, email: string) => Promise<void>;
   onUnauthorized: () => void;
 }): JSX.Element {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState(defaultEmail ?? '');
   const [sending, setSending] = useState(false);
-  const [sentTo, setSentTo] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   function openDialog() {
     setText(defaultEmail ?? '');
     setMessage(null);
-    setSentTo(null);
+    onSentChange(null);
     setOpen(true);
   }
   // While a send is in flight the dialog stays open, so its result always lands.
@@ -34,7 +39,7 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
     setMessage(null);
     try {
       await send(orderId, email);
-      setSentTo(email);
+      onSentChange(email);
       setOpen(false);
     } catch (error) {
       if (error instanceof ConnectorUnauthorizedError && error.code === 'unauthorized') onUnauthorized();
@@ -47,7 +52,6 @@ export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthoriz
     <Button variant="outline" testID="receipt-email-open" onPress={openDialog}>
       <Text>Email receipt</Text>
     </Button>
-    {sentTo !== null ? <Text accessibilityRole="alert">{`Receipt sent to ${sentTo}.`}</Text> : null}
     <Dialog open={open} onOpenChange={(next) => { if (!next) close(); }}>
       <DialogContent testID="receipt-email-dialog" className="gap-4">
         <View className="flex-row items-center justify-between">
