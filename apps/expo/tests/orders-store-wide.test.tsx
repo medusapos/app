@@ -604,6 +604,26 @@ describe('Billing Address column and day headers (row 10.1)', () => {
     expect(within(attention).getByRole('heading')).toBeTruthy();
   });
 
+  it('an applied sale with a store warning shows its store order\'s billing address in Needs attention', async () => {
+    const warned: PosOrder = { ...sale('Red hat', 'applied'), warnings: [{ code: 'insufficient_stock', variantId: 'Red hat', quantity: 1 }] };
+    withSales(warned);
+    listOrders.mockResolvedValue(page([storeOrder(9, { clientOrderId: warned.id })]));
+    billingFetch.mockImplementation(async () => billingAnswer([address('order_9', 'Shop St 1')]));
+    await mount();
+    await settle();
+    expect(screen.getByTestId(`orders-attention-row-${warned.id}-billing`).textContent).toBe('Shop St 1, Copenhagen, DK');
+  });
+
+  it('a warned sale whose store order is not listed reads — in Needs attention', async () => {
+    const warned: PosOrder = { ...sale('Red hat', 'applied'), warnings: [{ code: 'insufficient_stock', variantId: 'Red hat', quantity: 1 }] };
+    withSales(warned);
+    listOrders.mockResolvedValue(page([storeOrder(9)]));
+    billingFetch.mockImplementation(async () => billingAnswer([address('order_9', 'Shop St 1')]));
+    await mount();
+    await settle();
+    expect(screen.getByTestId(`orders-attention-row-${warned.id}-billing`).textContent).toBe('—');
+  });
+
   it('the Billing Address head and its cells take the same double width', async () => {
     listOrders.mockResolvedValue(page([storeOrder(1)]));
     await mount();
