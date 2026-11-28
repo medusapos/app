@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import { Platform, Share, View } from 'react-native';
+import { Path } from 'react-native-svg';
 import { summarizeOutboxHealth, type LogEntry } from '@tallyui/pos';
-import { Button, Text as TallyText } from '@tallyui/components';
+import { Button, Text as TallyText, createSvgIcon } from '@tallyui/components';
 import { AppText as Text } from './app-text';
+import { WarningIcon } from './warning-icon';
 import { version as appVersion } from '../package.json';
+import { healthReadiness } from '../lib/health-readiness';
 import { formatLogLine, recentLogs, subscribeRecentLogs } from '../lib/logging';
 import { useOutboxContext } from '../lib/outbox-context';
 import { readPluginInfoSummary } from '../lib/plugin-contract';
@@ -11,6 +14,13 @@ import { useRegister } from '../lib/register-context';
 import type { Session } from '../lib/session';
 import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
 import { formatBytes, storageUsageBytes } from '../lib/storage-usage';
+
+const TickIcon = createSvgIcon('TickIcon', () => <Path d="M5 12l5 5l10 -10" />);
+const banner = {
+  checking: { title: 'Checking the store…', strip: 'border-border bg-muted', text: 'text-muted-foreground' },
+  ready: { title: 'Ready to sell', strip: 'border-success bg-success/15', text: 'text-success' },
+  warning: { title: 'Needs a look', strip: 'border-warning bg-warning/15', text: 'text-foreground' },
+};
 
 function Value({ testID, children }: { testID: string; children: string | number }) {
   return <Text testID={testID} className="text-sm text-foreground">{String(children)}</Text>;
@@ -34,6 +44,8 @@ export function HealthSection({ session }: { session: Session }) {
   const { registerOutbox } = useRegister();
   const health = summarizeOutboxHealth(sales, registerOutbox.state);
   const [plugin, setPlugin] = useState<Awaited<ReturnType<typeof readPluginInfoSummary>> | null>(null);
+  const readiness = healthReadiness(plugin, health);
+  const { title, strip, text } = banner[readiness.state];
   const [storage, setStorage] = useState<number | null>(null);
   const [logs, setLogs] = useState(recentLogs);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
@@ -52,6 +64,19 @@ export function HealthSection({ session }: { session: Session }) {
     copyText(logs.map(formatLogLine).join('\n')).then(() => setCopyStatus('Copied'), () => setCopyStatus('Could not copy'));
   };
   return <>
+    <View testID="settings-health-ready" accessibilityLiveRegion="polite" aria-live="polite"
+      className={`gap-1 rounded-md border px-3 py-2 ${strip}`}>
+      <View className="flex-row items-center gap-2">
+        {readiness.state === 'ready' && <TickIcon size={16} />}
+        {readiness.state === 'warning' && <WarningIcon size={16} />}
+        <Text testID="settings-health-ready-title" className={`text-sm font-semibold ${text}`}>{title}</Text>
+      </View>
+      {readiness.state === 'ready' && <Text testID="settings-health-ready-detail" className="text-sm text-muted-foreground">
+        The store answers, its plugin is current and nothing is waiting to send.
+      </Text>}
+      {readiness.state === 'warning' && readiness.reasons.map((reason) =>
+        <Text key={reason} testID="settings-health-ready-reason" className="text-sm text-foreground">{reason}</Text>)}
+    </View>
     <SettingsGroup title="Store connection" description="Read-only." testID="settings-health">
       <SettingsRow label="Store URL" action={<Value testID="settings-health-store-url">{session.baseUrl}</Value>} />
       <SettingsRow label="Plugin contract" divider

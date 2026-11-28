@@ -18,6 +18,12 @@ export const REFUND_LINES_PLUGIN_CONTRACT = 6;
 export const PARTIAL_REFUND_PLUGIN_CONTRACT = 7;
 // GET /tally/v1/promotions lists coupon codes for the till's Coupon tab.
 export const COUPON_LIST_PLUGIN_CONTRACT = 8;
+// the newest contract any feature here uses; Settings › Health calls a plugin below it out of date.
+// Add each new feature constant to this list.
+export const CURRENT_PLUGIN_CONTRACT = Math.max(
+  DEVICE_CLEAR_PLUGIN_CONTRACT, REFUND_PLUGIN_CONTRACT, CARD_READERS_PLUGIN_CONTRACT,
+  REFUND_LINES_PLUGIN_CONTRACT, PARTIAL_REFUND_PLUGIN_CONTRACT, COUPON_LIST_PLUGIN_CONTRACT,
+);
 
 /** `unknown`: the read was inconclusive (offline, a timeout, a non-2xx, not an info body) and never latches. */
 export type PluginContractStatus = 'ok' | 'too_old' | 'unknown';

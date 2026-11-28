@@ -4,6 +4,7 @@ import { saleLogger } from '@tallyui/pos';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { HealthSection } from '../components/health-section';
 import { clearRecentLogs, installLogSinks } from '../lib/logging';
+import { CURRENT_PLUGIN_CONTRACT } from '../lib/plugin-contract';
 import { version as appVersion } from '../package.json';
 
 // The outbox and register hooks give the two outboxes' states; each test sets them.
@@ -42,6 +43,31 @@ async function mount() {
 const text = (testID: string) => screen.getByTestId(testID).textContent;
 
 describe('Settings › Health', () => {
+  it('Ready to sell when the store answers with the current contract and nothing waits', async () => {
+    vi.stubGlobal('fetch', info({ pluginContract: CURRENT_PLUGIN_CONTRACT, contracts: {} }));
+    await mount();
+    await waitFor(() => expect(text('settings-health-ready-title')).toBe('Ready to sell'));
+    expect(text('settings-health-ready-detail')).toBe('The store answers, its plugin is current and nothing is waiting to send.');
+    expect(screen.queryAllByTestId('settings-health-ready-reason')).toHaveLength(0);
+  });
+
+  it('the banner lists why the till is not ready', async () => {
+    outboxes.sales = { pending: 2, sending: false, rejected: 1 };
+    outboxes.till = { pending: 1, sending: false };
+    await mount();
+    await waitFor(() => expect(text('settings-health-ready-title')).toBe('Needs a look'));
+    expect(screen.getAllByTestId('settings-health-ready-reason').map((line) => line.textContent)).toEqual([
+      "The store's plugin is older than this app expects. Update it to use every feature.",
+      '1 change needs attention.', '3 changes waiting to send.',
+    ]);
+  });
+
+  it('checking while /info is still being read', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockReturnValue(new Promise<Response>(() => {})));
+    await mount();
+    expect(text('settings-health-ready-title')).toBe('Checking the store…');
+  });
+
   it('shows the store URL, the plugin contract from /info, the app version and the storage used', async () => {
     await mount();
     expect(text('settings-health-store-url')).toBe('https://store.test');
@@ -73,6 +99,7 @@ describe('Settings › Health', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(text('settings-health-plugin-contract')).toBe('Unknown');
     expect(text('settings-health-plugin-version')).toBe('Unknown');
+    expect(text('settings-health-ready-reason')).toBe('The store did not answer. Sales are kept on this device and send when it does.');
   });
 
   it('shows the sales and till updates waiting to send, and those that need attention', async () => {

@@ -354,6 +354,7 @@ test.describe('at 1280 × 800', () => {
 test('Health shows the store URL, plugin contract, storage used, waiting sales and the log view', async ({ page }) => {
   await signIn(page);
   await openSettings(page, 'Health');
+  await expect(page.getByTestId('settings-health-ready-title')).toHaveText('Ready to sell');
   await expect(page.getByTestId('settings-health-store-url')).toHaveText(backend);
   await expect(page.getByTestId('settings-health-plugin-contract')).toHaveText(/^\d+$/);
   await expect(page.getByTestId('settings-health-plugin-version')).toHaveText(/^\d+\.\d+\.\d+/);

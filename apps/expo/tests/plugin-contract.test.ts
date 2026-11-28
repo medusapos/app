@@ -1,10 +1,22 @@
 import { describe, expect, it, vi } from 'vitest';
-import { MIN_PLUGIN_CONTRACT, pluginContractStatus, readPluginContract, readPluginContractVersion, readPluginInfoSummary } from '../lib/plugin-contract';
+import {
+  CARD_READERS_PLUGIN_CONTRACT, COUPON_LIST_PLUGIN_CONTRACT, CURRENT_PLUGIN_CONTRACT, DEVICE_CLEAR_PLUGIN_CONTRACT,
+  MIN_PLUGIN_CONTRACT, PARTIAL_REFUND_PLUGIN_CONTRACT, REFUND_LINES_PLUGIN_CONTRACT, REFUND_PLUGIN_CONTRACT,
+  pluginContractStatus, readPluginContract, readPluginContractVersion, readPluginInfoSummary,
+} from '../lib/plugin-contract';
 import { authHeaders } from '../lib/pos-connector';
 
 const session = { baseUrl: 'https://store.test', token: 'jwt' };
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 const fetchReturning = (response: Response) => vi.fn<typeof fetch>().mockResolvedValue(response);
+
+it('CURRENT_PLUGIN_CONTRACT is the newest contract a feature uses', () => {
+  expect(CURRENT_PLUGIN_CONTRACT).toBe(8);
+  for (const contract of [DEVICE_CLEAR_PLUGIN_CONTRACT, REFUND_PLUGIN_CONTRACT, CARD_READERS_PLUGIN_CONTRACT,
+    REFUND_LINES_PLUGIN_CONTRACT, PARTIAL_REFUND_PLUGIN_CONTRACT, COUPON_LIST_PLUGIN_CONTRACT]) {
+    expect(CURRENT_PLUGIN_CONTRACT).toBeGreaterThanOrEqual(contract);
+  }
+});
 
 describe('pluginContractStatus', () => {
   it.each([
