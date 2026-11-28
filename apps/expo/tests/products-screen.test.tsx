@@ -1554,6 +1554,45 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     } finally { vi.mocked(usePathname).mockReturnValue('/'); }
   });
 
+  it.each(['/products', '/orders', '/customers', '/reports', '/settings'])('at 390 wide Escape on %s keeps the tender open under it', async (route) => {
+    setWindowWidth(390, 844);
+    const view = await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
+    await checkout();
+    expect(button('Complete sale')).toBeTruthy();
+    try {
+      vi.mocked(usePathname).mockReturnValue(route);
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      escape();
+      vi.mocked(usePathname).mockReturnValue('/');
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      expect(button('Complete sale')).toBeTruthy();
+      expect(screen.getByTestId('tender-close')).toBeTruthy();
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
+  });
+
+  it('at 390 wide Escape back on the Sale after an area leaves the tender for the cart', async () => {
+    setWindowWidth(390, 844);
+    const view = await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    fireEvent.click(screen.getByRole('tab', { name: /^Cart, / }));
+    await checkout();
+    expect(button('Complete sale')).toBeTruthy();
+    try {
+      vi.mocked(usePathname).mockReturnValue('/orders');
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      escape();
+      vi.mocked(usePathname).mockReturnValue('/');
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      expect(button('Complete sale')).toBeTruthy();
+      escape();
+      expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+      expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00']);
+      expect(screen.getByRole('tab', { name: /^Cart, / }).getAttribute('aria-selected')).toBe('true');
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
+  });
+
   it('at 1280 wide an Escape typed in the Terminal reference field keeps the tender', async () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
