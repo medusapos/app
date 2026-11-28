@@ -253,6 +253,27 @@ it('draws a stored order in the table heads and in the sheet\'s Columns rows, ea
   expect(subSwitch('attributes').compareDocumentPosition(column('type')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
+it("each Columns handle draws v2's six-dot grip", () => {
+  openSheet();
+  for (const handle of screen.getAllByTestId(/^products-settings-drag-/)) {
+    expect(handle.querySelectorAll('circle')).toHaveLength(6);
+    expect(handle.querySelector('line')).toBeNull();
+  }
+});
+
+it('the row being dragged lifts with a shadow; the others and the dropped row have none', () => {
+  openSheet();
+  const priceHandle = screen.getByTestId('products-settings-drag-price');
+  const priceRow = priceHandle.parentElement!.parentElement!;
+  const skuRow = screen.getByTestId('products-settings-drag-sku').parentElement!.parentElement!;
+  fireEvent.pointerDown(priceHandle, { clientY: 100 });
+  fireEvent.pointerMove(window, { clientY: 130 });
+  expect(priceRow.style.boxShadow).not.toBe('');
+  expect(skuRow.style.boxShadow).toBe('');
+  fireEvent.pointerUp(window);
+  expect(priceRow.style.boxShadow).toBe('');
+});
+
 it('Restore Default Settings brings back the default head order and the default row order', () => {
   localStorage.setItem(ORDER_KEY, JSON.stringify(['price', 'stock', 'image', 'id', 'name', 'type', 'sku', 'barcode', 'stockStatus', 'category',
     'regularPrice', 'salePrice']));
