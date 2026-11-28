@@ -67,7 +67,7 @@ export function HealthSection({ session }: { session: Session }) {
     <View testID="settings-health-ready" accessibilityLiveRegion="polite" aria-live="polite"
       className={`gap-1 rounded-md border px-3 py-2 ${strip}`}>
       <View className="flex-row items-center gap-2">
-        {readiness.state === 'ready' && <TickIcon size={16} />}
+        {readiness.state === 'ready' && <TickIcon size={16} className="text-success" />}
         {readiness.state === 'warning' && <WarningIcon size={16} />}
         <Text testID="settings-health-ready-title" className={`text-sm font-semibold ${text}`}>{title}</Text>
       </View>
