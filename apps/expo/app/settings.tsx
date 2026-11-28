@@ -47,6 +47,7 @@ const buttonClass = 'min-h-11 items-center justify-center rounded-md px-4';
 const UNKNOWN = '—';
 // v2's nav-and-section layout starts at this width; a phone lists the sections and opens each on its own page.
 const SETTINGS_SPLIT_MIN_WIDTH = 768;
+const ADMIN_SOURCE_MIN_WIDTH = 1024; // below it the wide card has no room for "Set in Medusa Admin" beside a value
 const ChevronRightIcon = createSvgIcon('ChevronRightIcon', () => <Path d="m9 18 6-6-6-6" />);
 const ChevronLeftIcon = createSvgIcon('ChevronLeftIcon', () => <Path d="m15 18-6-6 6-6" />);
 const CheckIcon = createSvgIcon('CheckIcon', () => <Path d="M20 6 9 17l-5-5" />);
@@ -138,11 +139,18 @@ function SettingsBackButton() {
 }
 // v2's "Set in WooCommerce · Open ↗" beside each read-only store value: opens the Medusa Admin page that sets it.
 function AdminLink({ session, label, page, testID }: { session: Session; label: string; page: MedusaAdminPage; testID: string }) {
-  return <Pressable testID={testID} accessibilityRole="link" accessibilityLabel={`Open ${label} in Medusa Admin`}
+  const flat = useContext(SettingsFlatContext);
+  const { width } = useWindowDimensions();
+  const link = <Pressable testID={testID} accessibilityRole="link" accessibilityLabel={`Open ${label} in Medusa Admin`}
     className="-my-3 min-h-11 flex-row items-center gap-1" onPress={() => openMedusaAdmin(medusaAdminUrl(session.baseUrl, page))}>
     <Text className="text-sm text-primary">Open</Text>
     <ExternalLinkIcon size={14} className="text-primary" />
   </Pressable>;
+  if (!flat || width < ADMIN_SOURCE_MIN_WIDTH) return link;
+  return <View className="flex-row items-center gap-3">
+    <Text testID={`${testID}-source`} className="text-sm text-muted-foreground">Set in Medusa Admin</Text>
+    {link}
+  </View>;
 }
 function StoreSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
@@ -151,30 +159,26 @@ function StoreSection({ session }: { session: Session }) {
   const flat = useContext(SettingsFlatContext);
   return <>
   <SettingsGroup title="Store" description="Read-only. Set in Medusa Admin." testID="settings-store">
-    <SettingsRow label="Store name" action={<View className="flex-row items-center gap-3">
+    <SettingsRow label="Store name" action={
       <Text testID="settings-store-name" className="max-w-40 text-right text-sm text-foreground">{held.settings?.storeName || UNKNOWN}</Text>
-      <AdminLink session={session} label="Store name" page="store" testID="settings-store-name-admin" />
-    </View>} />
+    } aside={<AdminLink session={session} label="Store name" page="store" testID="settings-store-name-admin" />} />
     {/* The till's currency follows its region. */}
-    <SettingsRow label="Currency" divider action={<View className="flex-row items-center gap-3">
+    <SettingsRow label="Currency" divider action={
       <Text testID="settings-store-currency" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.currency || UNKNOWN}</Text>
-      <AdminLink session={session} label="Currency" page="regions" testID="settings-store-currency-admin" />
-    </View>} />
-    <SettingsRow label="Stock location" divider action={<View className="flex-row items-center gap-3">
+    } aside={<AdminLink session={session} label="Currency" page="regions" testID="settings-store-currency-admin" />} />
+    <SettingsRow label="Stock location" divider action={
       <View className={`max-w-40 ${flat ? 'items-start' : 'items-end'}`}>
         <Text testID="settings-store-location" className={`max-w-40 ${flat ? '' : 'text-right '}text-sm text-foreground`}>{held.settings?.location.name || UNKNOWN}</Text>
         {held.settings?.location.addressLine ? <Text testID="settings-store-location-address" className={`${flat ? '' : 'text-right '}text-xs text-muted-foreground`}>{held.settings.location.addressLine}</Text> : null}
       </View>
-      <AdminLink session={session} label="Stock location" page="locations" testID="settings-store-location-admin" />
-    </View>} />
-    <SettingsRow label="Sales channel" divider action={<View className="flex-row items-center gap-3">
+    } aside={<AdminLink session={session} label="Stock location" page="locations" testID="settings-store-location-admin" />} />
+    <SettingsRow label="Sales channel" divider action={
       <Text testID="settings-store-sales-channel" className="max-w-40 text-right text-sm text-foreground">{held.settings?.salesChannel?.name || UNKNOWN}</Text>
-      <AdminLink session={session} label="Sales channel" page="salesChannels" testID="settings-store-sales-channel-admin" />
-    </View>} />
+    } aside={<AdminLink session={session} label="Sales channel" page="salesChannels" testID="settings-store-sales-channel-admin" />} />
   </SettingsGroup>
   {/* v2's General holds the default customer between Store and Currency & numbers. */}
   <DefaultCustomerSection session={session} />
-  <SettingsGroup title="Currency & numbers" description="Read-only. The currency follows the till's region, set in Medusa Admin; separators follow this device's language." testID="settings-currency">
+  <SettingsGroup divider title="Currency & numbers" description="Read-only. The currency follows the till's region, set in Medusa Admin; separators follow this device's language." testID="settings-currency">
     <SettingsRow label="Symbol" action={
       <Text testID="settings-currency-symbol" className="max-w-40 text-right text-sm text-foreground">{format ? format.symbol : UNKNOWN}</Text>
     } />
@@ -194,7 +198,7 @@ function StoreSection({ session }: { session: Session }) {
       <Text testID="settings-currency-example" className="max-w-40 text-right text-sm text-foreground">{format ? format.example : UNKNOWN}</Text>
     } />
   </SettingsGroup>
-  <SettingsGroup title="Feedback" description="Report a problem or suggest a change. Opens the tester feedback form on GitHub." testID="settings-feedback">
+  <SettingsGroup divider title="Feedback" description="Report a problem or suggest a change. Opens the tester feedback form on GitHub." testID="settings-feedback">
     <SettingsRow label="Send feedback" action={
       <Pressable testID="settings-feedback-link" accessibilityRole="link" accessibilityLabel="Send feedback"
         className="min-h-11 flex-row items-center gap-1" onPress={() => { openFeedbackUrl(feedbackUrl({
@@ -213,21 +217,17 @@ function TaxSection({ session }: { session: Session }) {
   const [held] = useState(() => ({ settings: loadCachedSettings(defaultStorage(), session.baseUrl), pricing: loadCachedPricing(defaultStorage(), session.baseUrl) }));
   const taxRates = held.settings?.taxRates;
   return <SettingsGroup title="Tax" description="Read-only. Set per region in Medusa Admin." testID="settings-tax">
-    <SettingsRow label="Region" action={<View className="flex-row items-center gap-3">
+    <SettingsRow label="Region" action={
       <Text testID="settings-store-region" className="max-w-40 text-right text-sm text-foreground">{held.settings?.regions?.find((region) => region.id === held.pricing?.pricingContext?.region_id)?.name || UNKNOWN}</Text>
-      <AdminLink session={session} label="Region" page="regions" testID="settings-store-region-admin" />
-    </View>} />
-    <SettingsRow label="Prices include tax" divider action={<View className="flex-row items-center gap-3">
+    } aside={<AdminLink session={session} label="Region" page="regions" testID="settings-store-region-admin" />} />
+    <SettingsRow label="Prices include tax" divider action={
       <Text testID="settings-store-prices-include-tax" className="max-w-40 text-right text-sm text-foreground">{held.pricing?.pricesIncludeTax === true ? 'Yes' : held.pricing?.pricesIncludeTax === false ? 'No' : UNKNOWN}</Text>
-      <AdminLink session={session} label="Prices include tax" page="regions" testID="settings-store-prices-include-tax-admin" />
-    </View>} />
-    {taxRates?.length ? taxRates.map((taxRate, index) => <SettingsRow key={index} label={taxRate.name} divider action={<View className="flex-row items-center gap-3">
+    } aside={<AdminLink session={session} label="Prices include tax" page="regions" testID="settings-store-prices-include-tax-admin" />} />
+    {taxRates?.length ? taxRates.map((taxRate, index) => <SettingsRow key={index} label={taxRate.name} divider action={
       <Text testID={`settings-tax-rate-${index}`} className="max-w-40 text-right text-sm text-foreground">{`${taxRate.rate !== undefined ? `${taxRate.rate}%` : UNKNOWN}${taxRate.isDefault ? ' · Default' : ''}`}</Text>
-      <AdminLink session={session} label={taxRate.name} page="taxRegions" testID={`settings-tax-rate-${index}-admin`} />
-    </View>} />) : <SettingsRow label="Tax rates" divider action={<View className="flex-row items-center gap-3">
+    } aside={<AdminLink session={session} label={taxRate.name} page="taxRegions" testID={`settings-tax-rate-${index}-admin`} />} />) : <SettingsRow label="Tax rates" divider action={
       <Text testID="settings-tax-rates-none" className="max-w-40 text-right text-sm text-foreground">{taxRates ? 'None' : UNKNOWN}</Text>
-      <AdminLink session={session} label="Tax rates" page="taxRegions" testID="settings-tax-rates-admin" />
-    </View>} />}
+    } aside={<AdminLink session={session} label="Tax rates" page="taxRegions" testID="settings-tax-rates-admin" />} />}
   </SettingsGroup>;
 }
 function RegisterSection({ session }: { session: Session }) {
@@ -269,7 +269,7 @@ function DefaultCustomerSection({ session }: { session: Session }) {
   const available = !!connector.searchCustomers;
   const wide = useWindowDimensions().width >= SETTINGS_SPLIT_MIN_WIDTH;
   // v2's one select-style field: the current default, opening a dialog to choose Guest or a customer.
-  return <SettingsGroup title="Customer" testID="settings-default-customer">
+  return <SettingsGroup divider title="Customer" testID="settings-default-customer">
     <SettingsRow label="Default customer" description="Pre-selected on every new cart." action={
       <Pressable testID="settings-default-customer-field" accessibilityRole="button" accessibilityLabel={`Default customer: ${name}`}
         disabled={!available} accessibilityState={{ disabled: !available }} onPress={() => setOpen(true)}

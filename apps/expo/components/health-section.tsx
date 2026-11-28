@@ -85,7 +85,7 @@ export function HealthSection({ session }: { session: Session }) {
         action={<Value testID="settings-health-plugin-version">{plugin?.version ?? 'Unknown'}</Value>} />
       <SettingsRow label="App version" divider action={<Value testID="settings-health-app-version">{appVersion}</Value>} />
     </SettingsGroup>
-    <SettingsGroup title="This device"
+    <SettingsGroup divider title="This device"
       description="Sales keep working when the store cannot be reached; waiting changes send when it can.">
       <SettingsRow label="Storage used" action={<Value testID="settings-health-storage">{formatBytes(storage)}</Value>} />
       <SettingsRow label="Sales waiting to send" divider
@@ -94,7 +94,7 @@ export function HealthSection({ session }: { session: Session }) {
         action={<Value testID="settings-health-till-pending">{health.tillUpdates.pending}</Value>} />
       <SettingsRow label="Need attention" divider action={<Value testID="settings-health-attention">{health.attention}</Value>} />
     </SettingsGroup>
-    <SettingsGroup title="Logs" description="Warnings and errors since the app started. Kept in memory on this device only.">
+    <SettingsGroup divider title="Logs" description="Warnings and errors since the app started. Kept in memory on this device only.">
       <View className="gap-3 px-4 py-3">
         {logs.length === 0
           ? <Text testID="settings-health-logs-empty" className="text-sm text-muted-foreground">No warnings or errors since the app started.</Text>

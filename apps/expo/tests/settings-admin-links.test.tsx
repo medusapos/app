@@ -74,6 +74,56 @@ function expectOpens(link: HTMLElement, url: string) {
 }
 
 describe('Settings › General and Tax: Open in Medusa Admin', () => {
+  it('at 1024 px each admin row names Medusa Admin as its source', async () => {
+    setWindowWidth(1024);
+    await mount();
+    for (const row of ['store-name', 'store-currency', 'store-location', 'store-sales-channel']) {
+      expect(screen.getByTestId(`settings-${row}-admin-source`).textContent).toBe('Set in Medusa Admin');
+      expect(screen.getByTestId(`settings-${row}-admin`).textContent).toBe('Open');
+    }
+    fireEvent.click(screen.getByTestId('settings-nav-tax'));
+    for (const row of ['store-region', 'store-prices-include-tax', 'tax-rate-0', 'tax-rate-1']) {
+      expect(screen.getByTestId(`settings-${row}-admin-source`).textContent).toBe('Set in Medusa Admin');
+      expect(screen.getByTestId(`settings-${row}-admin`).textContent).toBe('Open');
+    }
+    cleanup();
+    saveCachedSettings(localStorage, baseUrl, { ...held, taxRates: [] });
+    await mount();
+    fireEvent.click(screen.getByTestId('settings-nav-tax'));
+    expect(screen.getByTestId('settings-tax-rates-admin-source').textContent).toBe('Set in Medusa Admin');
+    expect(screen.getByTestId('settings-tax-rates-admin').textContent).toBe('Open');
+  });
+
+  it('below 1024 px the wide card keeps only Open', async () => {
+    setWindowWidth(800);
+    await mount();
+    expect(screen.queryAllByTestId(/-admin-source$/)).toHaveLength(0);
+    const card = within(screen.getByTestId('settings-section-card'));
+    expect(card.getAllByRole('link', { name: /in Medusa Admin$/ }).map((link) => link.textContent))
+      .toEqual(['Open', 'Open', 'Open', 'Open']);
+  });
+
+  it('a phone shows no source notes and no group dividers', async () => {
+    setWindowWidth(390);
+    params.section = 'store';
+    await mount();
+    expect(screen.getByTestId('settings-store-name-admin').textContent).toBe('Open');
+    expect(screen.queryAllByTestId(/-admin-source$/)).toHaveLength(0);
+    expect(screen.queryAllByTestId('settings-group-divider')).toHaveLength(0);
+  });
+
+  it('General draws a divider above every group after Store', async () => {
+    setWindowWidth(1024);
+    await mount();
+    expect(screen.getAllByTestId('settings-group-divider')).toHaveLength(3);
+    for (const group of ['settings-default-customer', 'settings-currency', 'settings-feedback']) {
+      expect(within(screen.getByTestId(group)).getAllByTestId('settings-group-divider')).toHaveLength(1);
+    }
+    expect(within(screen.getByTestId('settings-store')).queryByTestId('settings-group-divider')).toBeNull();
+    fireEvent.click(screen.getByTestId('settings-nav-tax'));
+    expect(within(screen.getByTestId('settings-tax')).queryByTestId('settings-group-divider')).toBeNull();
+  });
+
   it.each([
     ['Store name', 'settings-store-name-admin', `${admin}/store`],
     ['Currency', 'settings-store-currency-admin', `${admin}/regions`],
