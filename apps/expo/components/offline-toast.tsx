@@ -1,12 +1,15 @@
 // v2's amber "Device went offline" toast on the Sale screen (DEMO-PARITY row 19).
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Platform, View } from 'react-native';
 import { Path } from 'react-native-svg';
 import { Button, createSvgIcon, Text, Toast, ToastClose, ToastDescription, ToastTitle } from '@tallyui/components';
 import type { SyncState } from '../lib/use-replicated-products';
+import { CheckCircleIcon } from './customer-saved-toast';
 
 // v2's CONNECTIVITY_SETTLE_MS: an outage must last this long before the toast shows, so a blip shows nothing.
 export const OFFLINE_TOAST_DELAY_MS = 5_000;
+// Matches how long the app's other passing toasts stay visible.
+export const RESTORED_TOAST_MS = 3_000;
 // The offline section of MedusaPOS's own docs, which the toast's Help button opens.
 export const OFFLINE_HELP_URL = 'https://medusapos.com/docs/troubleshooting#sell-offline';
 
@@ -18,19 +21,42 @@ const TITLE: Record<OfflineKind, string> = { device: 'Device went offline', stor
  * The toast's state: `kind` once an outage (the device's network gone, or the store not answering the pull) has
  * lasted OFFLINE_TOAST_DELAY_MS, else null. A switch between the two kinds inside one outage keeps the wait; `close()`
  * hides it for the rest of the outage, and the next outage shows it again after a fresh wait.
+ * After a settled outage ends, `restored` shows once the pull stays synced for 5 s and lasts RESTORED_TOAST_MS.
+ * A new outage or a pull that is no longer synced hides it.
  */
-export function useOfflineToast(networkOnline: boolean, pullState: SyncState): { kind: OfflineKind | null; close: () => void } {
+export function useOfflineToast(networkOnline: boolean, pullState: SyncState): { kind: OfflineKind | null; close: () => void; restored: boolean } {
   const now: OfflineKind | null = !networkOnline ? 'device' : pullState === 'offline' ? 'store' : null;
   const outage = now !== null;
+  const phase = outage ? 'outage' : pullState === 'synced' ? 'recovered' : 'pending';
   const [settled, setSettled] = useState(false);
   const [closed, setClosed] = useState(false);
+  const [restored, setRestored] = useState(false);
+  const hadSettledOutage = useRef(false);
   useEffect(() => {
-    if (!outage) { setSettled(false); setClosed(false); return; }
-    const timer = setTimeout(() => setSettled(true), OFFLINE_TOAST_DELAY_MS);
+    if (phase === 'outage') {
+      setRestored(false);
+      const timer = setTimeout(() => {
+        hadSettledOutage.current = true;
+        setSettled(true);
+      }, OFFLINE_TOAST_DELAY_MS);
+      return () => clearTimeout(timer);
+    }
+    setSettled(false);
+    setClosed(false);
+    if (phase === 'pending') {
+      setRestored(false);
+      return;
+    }
+    if (!hadSettledOutage.current) return;
+    let timer = setTimeout(() => {
+      hadSettledOutage.current = false;
+      setRestored(true);
+      timer = setTimeout(() => setRestored(false), RESTORED_TOAST_MS);
+    }, OFFLINE_TOAST_DELAY_MS);
     return () => clearTimeout(timer);
-  }, [outage]);
+  }, [phase]);
   const close = useCallback(() => setClosed(true), []);
-  return { kind: outage && settled && !closed ? now : null, close };
+  return { kind: outage && settled && !closed ? now : null, close, restored: phase === 'recovered' && restored };
 }
 
 export const WarningIcon = createSvgIcon('WarningIcon', () => <>
@@ -57,5 +83,16 @@ export function OfflineToast({ kind, onClose }: { kind: OfflineKind; onClose: ()
     </View>
     <Button size="sm" variant="default" testID="offline-toast-help" onPress={openHelp}><Text>Help</Text></Button>
     <ToastClose className="opacity-100" accessibilityLabel="Close" testID="offline-toast-close" onPress={onClose} />
+  </Toast>;
+}
+
+export function RestoredToast() {
+  return <Toast testID="connection-restored-toast" accessibilityLiveRegion="polite"
+    className="max-w-md gap-3 border-success bg-background p-3">
+    <View pointerEvents="none" className="absolute inset-0 bg-success/15" />
+    <View className="text-success"><CheckCircleIcon size={24} /></View>
+    <View className="flex-1">
+      <ToastTitle className="text-foreground">Connection restored</ToastTitle>
+    </View>
   </Toast>;
 }
