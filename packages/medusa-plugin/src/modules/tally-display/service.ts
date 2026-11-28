@@ -64,7 +64,8 @@ export default class TallyDisplayModuleService extends MedusaService({
   resetClock(): void { this.frozenAt = undefined }
 
   /**
-   * Every call: one transaction under one store-wide advisory lock, which prunes first and then acts. A refusal is
+   * Display calls whose credential matches no row are refused before the lock. Calls reaching the store-wide
+   * advisory lock prune first and then act in one transaction. A refusal is
    * returned by `work` and thrown after the commit, so what it recorded (the prune, a failed claim) stays.
    */
   @InjectManager()
@@ -116,6 +117,21 @@ export default class TallyDisplayModuleService extends MedusaService({
 
   private async owned(em: EntityManager, table: 'tally_display' | 'tally_display_pending', id: string, deviceId: string): Promise<Row | undefined> {
     return (await em.execute(`select * from ${table} where id = ? and device_id = ?`, [id, deviceId]))[0]
+  }
+
+  @InjectManager()
+  private async checkToken(token: string, @MedusaContext() sharedContext: Context = {}): Promise<void> {
+    if (!token) throw refusal('token_refused')
+    const [found] = await (sharedContext.manager as EntityManager).execute('select 1 from tally_display where token_hash = ?', [sha256Hex(token)])
+    if (!found) throw refusal('token_refused')
+  }
+
+  @InjectManager()
+  private async checkClaimSecret(secretHash: string, @MedusaContext() sharedContext: Context = {}): Promise<void> {
+    const [{ known }] = await (sharedContext.manager as EntityManager).execute<{ known: boolean }[]>(
+      `select exists(select 1 from tally_display_pending where secret_hash = ?) or
+        exists(select 1 from tally_display where secret_hash = ? and token_hash is null) as known`, [secretHash, secretHash])
+    if (!known) throw refusal('collect_refused')
   }
 
   /** The display a token names, marked seen; `token_refused` otherwise. */
@@ -271,6 +287,7 @@ export default class TallyDisplayModuleService extends MedusaService({
 
   async collect(claimSecret: string): Promise<{ status: 'pending'; checkCode: string } | { status: 'paired'; displayId: string; token: string }> {
     const secretHash = sha256Hex(claimSecret)
+    await this.checkClaimSecret(secretHash)
     // The token exists in plaintext only here and in this call's answer.
     const token = newSecret()
     const tokenHash = sha256Hex(token)
@@ -285,6 +302,7 @@ export default class TallyDisplayModuleService extends MedusaService({
   }
 
   async displaySendSignal(token: string, message: SignalMessage): Promise<void> {
+    await this.checkToken(token)
     return this.locked(async (em, now) => {
       const display = await this.byToken(em, token, now)
       if (display instanceof DisplayRefusal) return display
@@ -295,6 +313,7 @@ export default class TallyDisplayModuleService extends MedusaService({
   }
 
   async displayReceiveSignals(token: string): Promise<SignalMessage[]> {
+    await this.checkToken(token)
     return this.locked(async (em, now) => {
       const display = await this.byToken(em, token, now)
       if (display instanceof DisplayRefusal) return display
@@ -305,6 +324,7 @@ export default class TallyDisplayModuleService extends MedusaService({
   }
 
   async readSnapshot(token: string): Promise<unknown | null> {
+    await this.checkToken(token)
     return this.locked(async (em, now) => {
       const display = await this.byToken(em, token, now)
       if (display instanceof DisplayRefusal) return display

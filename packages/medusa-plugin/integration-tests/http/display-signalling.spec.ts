@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import path from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import type { MedusaContainer } from '@medusajs/framework/types'
 import { ContainerRegistrationKeys, FeatureFlag, Modules } from '@medusajs/framework/utils'
 import { medusaIntegrationTestRunner } from '@medusajs/test-utils'
@@ -216,6 +217,47 @@ medusaIntegrationTestRunner({
         Array.from({ length: 100 }, (_, i) => ({ type: 'ice', payload: String(i + 1) })),
       )
       expect(await s.receiveSignals(ctx, device)).toEqual([{ type: 'ice', payload: 'late', displayId }])
+    })
+
+    async function withDisplayLock<T>(work: () => Promise<T>): Promise<T> {
+      const transaction = await knex().transaction()
+      try {
+        await transaction.raw('select pg_advisory_xact_lock(hashtextextended(?, 0))', ['tally_display'])
+        return await work()
+      } finally {
+        await transaction.rollback()
+      }
+    }
+
+    const expectPromptRefusal = (call: Promise<unknown>, code: string) =>
+      expect(Promise.race([call, delay(2000, 'timed out')])).rejects.toMatchObject({ code })
+
+    it('H7: an unknown token is refused by all three display calls without waiting for the lock', async () => {
+      const token = 'x'.repeat(22)
+      await withDisplayLock(async () => {
+        await Promise.all([
+          expectPromptRefusal(service().readSnapshot(token), 'token_refused'),
+          expectPromptRefusal(service().displayReceiveSignals(token), 'token_refused'),
+          expectPromptRefusal(service().displaySendSignal(token, { type: 'ice', payload: 'test' }), 'token_refused'),
+        ])
+      })
+    })
+
+    it('H8: an unknown claim secret is refused without waiting for the lock', async () => {
+      await withDisplayLock(() => expectPromptRefusal(service().collect('x'.repeat(22)), 'collect_refused'))
+    })
+
+    it('H9: a paired token and a pending claim secret both wait for the lock', async () => {
+      const { device, token } = await pairedDisplay(await makeHarness())
+      const { code } = await service().mint(device)
+      const { claimSecret } = await service().claim('192.0.2.1', { code, displayName: 'Pending' })
+      const { snapshot, collection } = await withDisplayLock(async () => {
+        const snapshot = service().readSnapshot(token), collection = service().collect(claimSecret)
+        expect(await Promise.race([snapshot, collection, delay(500, 'waiting')])).toBe('waiting')
+        return { snapshot, collection }
+      })
+      await expect(snapshot).resolves.toBeNull()
+      await expect(collection).resolves.toMatchObject({ status: 'pending' })
     })
   },
 })
