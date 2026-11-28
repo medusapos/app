@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, renderHook, screen, within } from '@testing-library/react';
 import { useState, type ReactNode } from 'react';
-import { Platform } from 'react-native';
+import { Platform, View } from 'react-native';
 import { BehaviorSubject } from 'rxjs';
 import { formatStockSyncTime, SyncStatus } from '@tallyui/components';
 import { PortalHost } from '@tallyui/primitives';
@@ -42,6 +42,28 @@ import { cartLine, cartLineCells, pickMethod, take, tenderBalance, tenderEntry }
 // tile then takes the whole balance, as the cart's old Card terminal button did.
 const checkout = () => act(async () => { fireEvent.click(screen.getByTestId('cart-checkout')); });
 async function payByCard() { await checkout(); pickMethod('external'); take(); }
+
+type CameraProps = { testID: string; onBarcodeScanned: (result: { data: string; type: string }) => void };
+const { nativeCamera, recordCamera, permissions } = vi.hoisted(() => ({
+  nativeCamera: { on: false },
+  recordCamera: vi.fn<(props: CameraProps) => void>(),
+  permissions: vi.fn<() => [{ granted: boolean; canAskAgain: boolean }, () => Promise<void>]>(),
+}));
+vi.mock('expo-camera', () => ({
+  CameraView: (props: CameraProps) => {
+    recordCamera(props);
+    return <View testID={props.testID} />;
+  },
+  useCameraPermissions: permissions,
+}));
+vi.mock('../components/native-camera', async (importOriginal) => {
+  const web = await importOriginal<typeof import('../components/native-camera')>();
+  const native = await import('../components/native-camera.native');
+  return {
+    get NativeViewfinder() { return nativeCamera.on ? native.NativeViewfinder : web.NativeViewfinder; },
+    get useNativeCameraPermission() { return nativeCamera.on ? native.useNativeCameraPermission : web.useNativeCameraPermission; },
+  };
+});
 
 // Orders lists the store's orders; the store has none here unless a test says otherwise.
 const { listOrders } = vi.hoisted(() => ({ listOrders: vi.fn(async () => ({ orders: [], hasMore: false })) }));
@@ -915,6 +937,7 @@ describe('Product settings sheet', () => {
 
 afterEach(() => {
   cleanup();
+  nativeCamera.on = false;
   localStorage.removeItem('medusapos.cart.https://store.test');
   storeConfig.demo = originalDemoMode;
   vi.unstubAllGlobals();
@@ -2055,6 +2078,41 @@ describe('ProductsScreen camera scan', () => {
   const cameraOn = () => saveScannerSettings(localStorage, 'https://store.test', { ...DEFAULT_SCANNER_SETTINGS, camera: true });
   afterEach(() => { Reflect.deleteProperty(navigator, 'mediaDevices'); vi.mocked(usePathname).mockReturnValue('/'); });
 
+  describe('native (iOS)', () => {
+    const original = Platform.OS;
+    beforeEach(() => {
+      Platform.OS = 'ios';
+      nativeCamera.on = true;
+      cameraOn();
+      vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
+        status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] }));
+    });
+    afterEach(() => { Platform.OS = original; });
+
+    it('on iOS a native camera decode adds the line through the scan handler, with the scan toast', async () => {
+      permissions.mockReturnValue([{ granted: true, canAskAgain: true }, vi.fn()]);
+      await mountWithHub();
+      fireEvent.click(screen.getByTestId('camera-scan-button'));
+      expect(screen.getByTestId('scanner-viewfinder')).toBeTruthy();
+      act(() => { recordCamera.mock.lastCall![0].onBarcodeScanned({ data: 'AB123', type: 'ean13' }); });
+      expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+      const toast = screen.getByTestId('scan-toast');
+      expect(toast.textContent).toContain('Added to cart');
+      expect(toast.textContent).toContain('Shirt');
+    });
+
+    it('on iOS the scanner asks for the camera until permission is granted', async () => {
+      const requestPermission = vi.fn().mockResolvedValue(undefined);
+      permissions.mockReturnValue([{ granted: false, canAskAgain: true }, requestPermission]);
+      await mountWithHub();
+      fireEvent.click(screen.getByTestId('camera-scan-button'));
+      expect(screen.getByTestId('camera-permission-request')).toBeTruthy();
+      expect(screen.queryByTestId('scanner-viewfinder')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Allow camera' }));
+      expect(requestPermission).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('with the camera setting off (the default) the Sale draws no camera button', async () => {
     supportedBrowser();
     await mount();
@@ -2391,24 +2449,24 @@ describe('ProductsScreen tender gated on the order store opening', () => {
   });
 });
 
+async function mountWithHub() {
+  const { ScanHubProvider, useScanHub } = await import('@tallyui/pos');
+  const hub: { current?: ReturnType<typeof useScanHub> } = {};
+  function HubProbe() { hub.current = useScanHub(); return null; }
+  saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
+    token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
+  await act(async () => {
+    render(<SessionProvider><ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
+      settings={{ prefix: '', suffix: '', minChars: 3 }}><HubProbe /><ProductsScreen /></ScanHubProvider><PortalHost /></SessionProvider>);
+  });
+  return (code: string) => act(() => { hub.current!.emit({ code, source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
+}
+
 // Settings > Scanner's direct connection: a device scan reaches the sale through the app's ScanHubProvider, on the
 // wide window too, with no search-box focus.
 describe('ProductsScreen device scans', () => {
   beforeEach(() => { vi.mocked(useReplicatedProducts).mockReturnValue(replicated({ products: [{ id: 'shirt', title: 'Shirt',
     status: 'published', variants: [{ id: 'blue', title: 'Blue', sku: 'AB123', prices: [{ amount: 12, currency_code: 'eur' }] }] }] })); });
-
-  async function mountWithHub() {
-    const { ScanHubProvider, useScanHub } = await import('@tallyui/pos');
-    const hub: { current?: ReturnType<typeof useScanHub> } = {};
-    function HubProbe() { hub.current = useScanHub(); return null; }
-    saveSession(localStorage, { baseUrl: 'https://store.test', email: 'admin@store.test',
-      token: `header.${btoa(JSON.stringify({ exp: Date.now() / 1000 + 86400 }))}.signature` });
-    await act(async () => {
-      render(<SessionProvider><ScanHubProvider profiles={{ read: async () => [], save: async () => {} }}
-        settings={{ prefix: '', suffix: '', minChars: 3 }}><HubProbe /><ProductsScreen /></ScanHubProvider><PortalHost /></SessionProvider>);
-    });
-    return (code: string) => act(() => { hub.current!.emit({ code, source: { kind: 'hid-pos' }, timestamp: Date.now() }); });
-  }
 
   it('adds the product a device scan names, on the wide window', async () => {
     const scan = await mountWithHub();
