@@ -3,6 +3,6 @@ import { answered, displaySide } from '../../display-errors'
 
 /** readSnapshot: gated by the token like every display call. */
 export const GET = (req: Req, res: Res) => answered(res, 200, async () => {
-  const { service, token } = displaySide(req)
-  return { snapshot: await service.readSnapshot(token) }
+  const { service, token, source } = displaySide(req)
+  return { snapshot: await service.readSnapshot(token, source) }
 })

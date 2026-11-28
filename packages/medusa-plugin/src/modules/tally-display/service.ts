@@ -16,6 +16,8 @@ export const CODE_TTL_MS = 10 * MINUTE, MAX_UNSPENT_CODES = 5, SNAPSHOT_TTL_MS =
 // Bound the storage used by an inbox that is never drained.
 export const SIGNAL_INBOX_MAX = 100
 const SOURCE_WINDOW_MS = MINUTE, SOURCE_MAX = 10, STORE_WINDOW_MS = 10 * MINUTE, STORE_MAX = 100
+const DISPLAY_REFUSAL_MAX = 20 // Stop repeated refused credentials from consuming database connections.
+export const DISPLAY_REFUSAL_SOURCES_MAX = 10_000 // Bound per-process memory even when source addresses churn.
 const CONNECTED_MS = 30_000, ROW_TTL_MS = 30 * DAY
 const STORE_KEY = 'store'
 
@@ -41,6 +43,7 @@ export default class TallyDisplayModuleService extends MedusaService({
   TallyDisplayClaimFailure, TallyDisplayAdoption,
 }) {
   private frozenAt: number | undefined
+  private readonly displayRefusals = new Map<string, { openedAt: number; count: number }>()
   private readonly advertisement: DisplayAdvertisementWire
 
   constructor(container: Record<string, unknown>, options: { customerDisplay?: { iceServers?: unknown } } = {}) {
@@ -62,6 +65,29 @@ export default class TallyDisplayModuleService extends MedusaService({
   now(): number { return this.frozenAt ?? Date.now() }
   advanceClock(ms: number): void { this.frozenAt = (this.frozenAt ?? Date.now()) + ms }
   resetClock(): void { this.frozenAt = undefined }
+  /** Tests clear the per-process cap through the service; no route reaches this. */
+  resetDisplayRefusals(): void { this.displayRefusals.clear() }
+
+  private async displayAttempt<T>(source: string, work: () => Promise<T>): Promise<T> {
+    const windows = this.displayRefusals, key = rateLimitSource(source), held = windows.get(key)
+    if (held && held.count >= DISPLAY_REFUSAL_MAX && this.now() < held.openedAt + SOURCE_WINDOW_MS) throw refusal('rate_limited')
+    try { return await work() } catch (error) {
+      if (!(error instanceof DisplayRefusal) || (error.code !== 'token_refused' && error.code !== 'collect_refused')) throw error
+      const now = this.now(), current = windows.get(key)
+      if (!current || now >= current.openedAt + SOURCE_WINDOW_MS) {
+        if (!current && windows.size >= DISPLAY_REFUSAL_SOURCES_MAX) {
+          let oldest = key, earliest = Infinity
+          for (const [id, { openedAt }] of windows) {
+            if (now >= openedAt + SOURCE_WINDOW_MS) windows.delete(id)
+            else if (openedAt < earliest) { oldest = id; earliest = openedAt }
+          }
+          if (windows.size >= DISPLAY_REFUSAL_SOURCES_MAX) windows.delete(oldest)
+        }
+        windows.set(key, { openedAt: now, count: 1 })
+      } else current.count++
+      throw error
+    }
+  }
 
   /**
    * Display calls whose credential matches no row are refused before the lock. Calls reaching the store-wide
@@ -255,11 +281,21 @@ export default class TallyDisplayModuleService extends MedusaService({
     })
   }
 
+  @InjectManager()
+  private async checkClaimLimit(key: string, @MedusaContext() sharedContext: Context = {}): Promise<void> {
+    const now = new Date(this.now())
+    const [blocked] = await (sharedContext.manager as EntityManager).execute(`select 1 from tally_display_claim_failure where
+      (id = ? and opened_at > ? and failures >= ?) or (id = ? and opened_at > ? and failures >= ?)`,
+      [STORE_KEY, ago(now, STORE_WINDOW_MS), STORE_MAX, key, ago(now, SOURCE_WINDOW_MS), SOURCE_MAX])
+    if (blocked) throw refusal('claim_refused')
+  }
+
   async claim(source: string, request: { code: string; displayName: string; token?: string }): Promise<{ claimSecret: string; checkCode: string }> {
     const claimSecret = newSecret()
     const secretHash = sha256Hex(claimSecret)
     const tokenHash = request.token ? sha256Hex(request.token) : null
     const key = `source:${rateLimitSource(source)}`
+    await this.checkClaimLimit(key)
     return this.locked(async (em, now) => {
       const windows = await em.execute('select id, failures from tally_display_claim_failure where id in (?, ?)', [STORE_KEY, key])
       const failures = (id: string): number => windows.find((w: Row) => w.id === id)?.failures ?? 0
@@ -285,7 +321,8 @@ export default class TallyDisplayModuleService extends MedusaService({
     })
   }
 
-  async collect(claimSecret: string): Promise<{ status: 'pending'; checkCode: string } | { status: 'paired'; displayId: string; token: string }> {
+  collect(claimSecret: string, source: string) { return this.displayAttempt(source, () => this.collectPairing(claimSecret)) }
+  private async collectPairing(claimSecret: string): Promise<{ status: 'pending'; checkCode: string } | { status: 'paired'; displayId: string; token: string }> {
     const secretHash = sha256Hex(claimSecret)
     await this.checkClaimSecret(secretHash)
     // The token exists in plaintext only here and in this call's answer.
@@ -301,7 +338,8 @@ export default class TallyDisplayModuleService extends MedusaService({
     })
   }
 
-  async displaySendSignal(token: string, message: SignalMessage): Promise<void> {
+  displaySendSignal(token: string, message: SignalMessage, source: string) { return this.displayAttempt(source, () => this.sendByToken(token, message)) }
+  private async sendByToken(token: string, message: SignalMessage): Promise<void> {
     await this.checkToken(token)
     return this.locked(async (em, now) => {
       const display = await this.byToken(em, token, now)
@@ -312,7 +350,8 @@ export default class TallyDisplayModuleService extends MedusaService({
     })
   }
 
-  async displayReceiveSignals(token: string): Promise<SignalMessage[]> {
+  displayReceiveSignals(token: string, source: string) { return this.displayAttempt(source, () => this.receiveByToken(token)) }
+  private async receiveByToken(token: string): Promise<SignalMessage[]> {
     await this.checkToken(token)
     return this.locked(async (em, now) => {
       const display = await this.byToken(em, token, now)
@@ -323,7 +362,8 @@ export default class TallyDisplayModuleService extends MedusaService({
     })
   }
 
-  async readSnapshot(token: string): Promise<unknown | null> {
+  readSnapshot(token: string, source: string) { return this.displayAttempt(source, () => this.snapshotByToken(token)) }
+  private async snapshotByToken(token: string): Promise<unknown | null> {
     await this.checkToken(token)
     return this.locked(async (em, now) => {
       const display = await this.byToken(em, token, now)

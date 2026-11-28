@@ -3,6 +3,6 @@ import { answered, displaySide, signal } from '../../display-errors'
 
 /** displaySendSignal */
 export const POST = (req: Req, res: Res) => answered(res, 204, async () => {
-  const { service, token } = displaySide(req)
-  await service.displaySendSignal(token, signal(req))
+  const { service, token, source } = displaySide(req)
+  await service.displaySendSignal(token, signal(req), source)
 })
