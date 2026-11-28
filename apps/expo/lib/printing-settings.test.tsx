@@ -94,6 +94,21 @@ describe('useAutoPrintReceipt', () => {
     expect(result.current).toBeNull();
   });
 
+  it('calls after and shares a rejected job when the print throws at once', async () => {
+    const id = newId();
+    const throwingPrint = vi.fn(() => { throw new Error('no printer'); });
+    const after = vi.fn();
+    const { result } = renderHook(() => useAutoPrintReceipt(id, true, throwingPrint, after));
+    act(() => vi.advanceTimersByTime(50));
+    expect(throwingPrint).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+    expect(result.current).toBeInstanceOf(Promise);
+    await expect(result.current).rejects.toThrow('no printer');
+    act(() => vi.advanceTimersByTime(100));
+    expect(throwingPrint).toHaveBeenCalledOnce();
+    expect(after).toHaveBeenCalledOnce();
+  });
+
   it('shares a settled job when the print returns nothing', async () => {
     const id = newId();
     const { result } = renderHook(() => useAutoPrintReceipt(id, true, print));
