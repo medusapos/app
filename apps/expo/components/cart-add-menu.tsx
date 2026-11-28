@@ -10,6 +10,7 @@ import {
 } from '@tallyui/components';
 import { CouponCodeInput, couponsEnabled, useCouponEntry } from './coupon-field';
 import type { StoreCoupon } from '../lib/store-coupons';
+import { useShortcut } from '../lib/shortcuts';
 
 const PlusIcon = createSvgIcon('PlusIcon', () => <><Line x1={12} y1={5} x2={12} y2={19} /><Line x1={5} y1={12} x2={19} y2={12} /></>);
 // lucide user-plus
@@ -38,7 +39,7 @@ function CouponDialogBody({ sale, onClose }: { sale: ReturnType<typeof useSale>;
 }
 
 /** v2's cart "+" menu: Add new customer, then the charges and the order discount (offered on an empty cart too). */
-export function CartAddMenu({ sale, onAddCustomer, readCoupons }: { sale: ReturnType<typeof useSale>; onAddCustomer?: () => void;
+export function CartAddMenu({ sale, onAddCustomer, readCoupons, discountShortcut }: { sale: ReturnType<typeof useSale>; onAddCustomer?: () => void; discountShortcut?: boolean;
   readCoupons?: () => Promise<{ coupons: StoreCoupon[]; truncated: boolean } | null> }) {
   const [kind, setKind] = useState<'custom' | 'fee' | 'discount' | 'coupon' | 'shipping' | null>(null);
   const [open, setOpen] = useState(false);
@@ -56,6 +57,7 @@ export function CartAddMenu({ sale, onAddCustomer, readCoupons }: { sale: Return
     });
   };
   const title = kind === 'fee' ? 'Add fee' : kind === 'shipping' ? 'Add shipping' : 'Add custom item';
+  useShortcut('discount.open', discountShortcut ? openDiscount : null);
   return <>
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>

@@ -2994,6 +2994,48 @@ describe('ProductsScreen keyboard shortcuts', () => {
     expect(offered('search.focus')).toBe(true);
   });
 
+  it('sale.void and discount.open are unavailable with an empty cart', async () => {
+    await mount();
+    expect(offered('sale.void')).toBe(false);
+    expect(offered('discount.open')).toBe(false);
+  });
+
+  it('sale.void opens the Void confirm and keeps the line in the cart', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await act(async () => { expect(runShortcut('sale.void')).toBe(true); });
+    expect(screen.getByTestId('cart-void-dialog')).toBeTruthy();
+    expect(cartLine('Shirt')).toBeTruthy();
+  });
+
+  it("sale.void is unavailable on the phone layout's Products view and available in its Cart view", async () => {
+    setWindowWidth(360);
+    try {
+      await mount();
+      fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+      await act(async () => { expect(runShortcut('sale.void')).toBe(false); });
+      expect(screen.queryByTestId('cart-void-dialog')).toBeNull();
+      fireEvent.click(screen.getByTestId('phone-tab-cart'));
+      expect(screen.queryByTestId('cart-void-dialog')).toBeNull();
+      await act(async () => { expect(runShortcut('sale.void')).toBe(true); });
+      expect(screen.getByTestId('cart-void-dialog')).toBeTruthy();
+    } finally { act(() => setWindowWidth(1280)); }
+  });
+
+  it('discount.open opens the Add Discount sheet with one line', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await act(async () => { expect(runShortcut('discount.open')).toBe(true); });
+    expect(screen.getByTestId('cart-add-discount-sheet')).toBeTruthy();
+  });
+
+  it('cart.previous and cart.next are unavailable with one sale', async () => {
+    await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    expect(offered('cart.previous')).toBe(false);
+    expect(offered('cart.next')).toBe(false);
+  });
+
   it('checkout.open is available with one line, and opens the tender as the cart\'s Checkout does', async () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));

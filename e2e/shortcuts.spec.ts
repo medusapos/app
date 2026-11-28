@@ -1,5 +1,5 @@
 import { expect, type Page } from '@playwright/test';
-import { addE2E1, signIn, test } from './helpers';
+import { addE2E1, cartLine, signIn, test } from './helpers';
 
 // v2's hotkeys on the web (lib/shortcuts.ts): Alt+F, Alt+P, Alt+O and the help sheet behind `?` / Alt+/. No sale is
 // completed here, so E2E-1's shared stock is untouched.
@@ -14,7 +14,8 @@ test.describe('at 1280 × 800', () => {
     await page.keyboard.press('?');
     await expect(sheet(page)).toBeVisible();
     await expect(sheet(page).getByText('Keyboard shortcuts', { exact: true }).first()).toBeVisible();
-    for (const id of ['search.focus', 'sale.new', 'checkout.open', 'orders.open', 'help.open', 'escape']) {
+    for (const id of ['search.focus', 'sale.new', 'checkout.open', 'cart.previous', 'cart.next', 'discount.open',
+      'sale.void', 'orders.open', 'help.open', 'escape']) {
       await expect(page.getByTestId(`shortcuts-row-${id}`)).toBeVisible();
     }
     // An empty cart cannot check out.
@@ -48,6 +49,47 @@ test.describe('at 1280 × 800', () => {
     await page.keyboard.press('Alt+KeyF');
     await expect(search(page)).toBeFocused();
     await expect(coupon).toHaveValue('');
+  });
+
+  test('Alt+← and Alt+→ step through the open sales', async ({ page }) => {
+    await signIn(page);
+    const tabs = page.getByTestId(/^open-sale-tab-.*-who$/);
+    const checkout = page.getByTestId('cart-checkout');
+    for (const quantity of [1, 2, 3]) {
+      for (let count = 0; count < quantity; count++) await addE2E1(page);
+      await expect(tabs).toHaveCount(quantity);
+      await expect(checkout).toContainText((quantity * 2.5).toFixed(2));
+      await search(page).blur();
+      if (quantity < 3) {
+        await page.keyboard.press('Alt+KeyN');
+        await expect(page.getByTestId('cart-empty')).toBeVisible();
+      }
+    }
+    for (const [key, total] of [['ArrowLeft', '5.00'], ['ArrowLeft', '2.50'], ['ArrowLeft', '7.50'], ['ArrowRight', '2.50']]) {
+      await search(page).blur();
+      await page.keyboard.press(`Alt+${key}`);
+      await expect(checkout).toContainText(total);
+    }
+  });
+
+  test('Alt+V opens the Void confirm and Alt+D the discount sheet', async ({ page }) => {
+    await signIn(page);
+    await page.keyboard.press('Alt+Slash');
+    for (const id of ['sale.void', 'discount.open']) {
+      await expect(page.getByTestId(`shortcuts-row-${id}`)).toHaveAttribute('aria-disabled', 'true');
+    }
+    await page.keyboard.press('Escape');
+    await expect(sheet(page)).toHaveCount(0);
+    await addE2E1(page);
+    await search(page).blur();
+    await page.keyboard.press('Alt+KeyV');
+    await expect(page.getByTestId('cart-void-dialog')).toBeVisible();
+    await page.getByTestId('cart-void-keep').click();
+    await expect(page.getByTestId('cart-void-dialog')).toHaveCount(0);
+    await expect(cartLine(page, 'E2E product 1')).toBeVisible();
+    await search(page).blur();
+    await page.keyboard.press('Alt+KeyD');
+    await expect(page.getByTestId('cart-add-discount-sheet')).toBeVisible();
   });
 
   test('with one product added, Alt+P opens the tender; not under the Void confirm', async ({ page }) => {

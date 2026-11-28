@@ -40,6 +40,7 @@ export function ShortcutsSheet({ open, onOpenChange }: { open: boolean; onOpenCh
           <KeyCaps keys={['Esc']} />
         </View>
       </View>
+      {!mac && <Text testID="shortcuts-firefox-note" className="text-xs text-muted-foreground">On Windows, Alt+F and Alt+D may also open the Firefox menu.</Text>}
     </DialogContent>
   </Dialog>;
 }

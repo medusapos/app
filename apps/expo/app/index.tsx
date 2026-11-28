@@ -87,7 +87,7 @@ import { buildReopenCart, takeReopen, useReopenRequest } from '../lib/reopen-ord
 import { useDeviceScans } from '../lib/use-device-scans';
 import { useNetworkOnline } from '../lib/use-network-online';
 import { useEscapeBack } from '../lib/use-escape-back';
-import { useShortcut } from '../lib/shortcuts';
+import { stepSale, useShortcut } from '../lib/shortcuts';
 import { useWedgeScan } from '../lib/use-wedge-scan';
 
 const STATE_LABEL: Record<SyncState, string> = {
@@ -499,6 +499,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     ? () => document.querySelector<HTMLInputElement>('[data-testid="catalogue-search"] input')?.focus() : null);
   useShortcut('sale.new', tillKeys && !sale.saving ? () => { setOrdersListOpen(false); switchTo(null); } : null);
   useShortcut('checkout.open', tillKeys && hasLines ? checkout.onCheckout : null);
+  const ids = tillSales.map(({ id }) => id);
+  const previous = stepSale(ids, sale.order.id, -1), next = stepSale(ids, sale.order.id, 1);
+  useShortcut('cart.previous', tillKeys && !sale.saving && previous !== null ? () => { setOrdersListOpen(false); switchTo(previous); } : null);
+  useShortcut('cart.next', tillKeys && !sale.saving && next !== null ? () => { setOrdersListOpen(false); switchTo(next); } : null);
+  useShortcut('sale.void', tillKeys && voidOffered && !sale.saving && !ordersListOpen && (!phone || cartOpen) ? () => setVoidOpen(true) : null);
   const noteRow = <CartNoteRow note={sale.order.note ?? ''} onPress={() => setNoteOpen(true)} />;
   const couponField = couponsEnabled(session.capabilities) ? <CouponField key={sale.order.id} sale={cartSale} /> : null;
   // The register's picker or open card above the cart, the cart still usable below it (ADR 0017).
@@ -521,7 +526,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
         hasAddress={Object.values(sale.order.customer?.billing ?? {}).some(Boolean)} />}
       {/* ml-auto keeps this group at the right with or without the chip; shrink-0 so a long name never pushes it off. */}
       <View className="ml-auto shrink-0 flex-row items-center gap-4">
-        <CartAddMenu sale={cartSale} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined}
+        <CartAddMenu sale={cartSale} discountShortcut={tillKeys && hasLines} onAddCustomer={connector.createCustomer && online ? () => setNewCustomerOpen(true) : undefined}
           readCoupons={() => readStoreCoupons(session, session.capabilities?.pluginContract ?? 0, pricing.currency)} />
         <CartSettingsButton {...cartSettings} phone={phone} />
       </View>

@@ -2,14 +2,19 @@ import { useEffect, useRef, useSyncExternalStore } from 'react';
 import { Platform } from 'react-native';
 import { escapeBlocked } from './use-escape-back';
 
-// WCPOS v2's hotkeys extension (packages/core/src/extensions/hotkeys/bindings.ts l.9-16): Alt+F, Alt+P, Alt+N and
-// Alt+/, matched on `event.code` because Option on a Mac changes `key` (Option+F types "ƒ"). Web only.
-export type ShortcutId = 'search.focus' | 'sale.new' | 'checkout.open' | 'orders.open' | 'help.open';
+// WCPOS v2's hotkeys extension (packages/core/src/extensions/hotkeys/bindings.ts l.9-16): Alt+F, Alt+P, Alt+N,
+// Alt+←, Alt+→, Alt+D, Alt+V and Alt+/, matched on `event.code` because Option on a Mac changes `key`. Web only.
+export type ShortcutId = 'search.focus' | 'sale.new' | 'checkout.open' | 'cart.previous' | 'cart.next'
+  | 'discount.open' | 'sale.void' | 'orders.open' | 'help.open';
 
 export const SHORTCUTS: readonly { id: ShortcutId; label: string; code: string }[] = [
   { id: 'search.focus', label: 'Search products', code: 'KeyF' },
   { id: 'sale.new', label: 'New sale', code: 'KeyN' },
   { id: 'checkout.open', label: 'Checkout', code: 'KeyP' },
+  { id: 'cart.previous', label: 'Previous sale', code: 'ArrowLeft' },
+  { id: 'cart.next', label: 'Next sale', code: 'ArrowRight' },
+  { id: 'discount.open', label: 'Add discount', code: 'KeyD' },
+  { id: 'sale.void', label: 'Void sale', code: 'KeyV' },
   // Not in v2, which has no chord for an area: added for the Orders area (ready item 21).
   { id: 'orders.open', label: 'Open Orders', code: 'KeyO' },
   { id: 'help.open', label: 'Keyboard shortcuts', code: 'Slash' },
@@ -22,13 +27,25 @@ export function shortcutFor(event: { code: string; key: string; altKey: boolean;
   if (!event.altKey) return event.key === '?' && !event.editable ? 'help.open' : null;
   const id = SHORTCUTS.find((shortcut) => shortcut.code === event.code)?.id ?? null;
   if (!id || !event.editable || id === 'search.focus' || id === 'help.open') return id;
+  if (id === 'cart.previous' || id === 'cart.next') return null;
   return event.key.toLowerCase() === event.code.slice(3).toLowerCase() ? id : null;
 }
 
 /** The key caps: Option (⌥) on a Mac, Alt elsewhere. */
 export function chordLabel(id: ShortcutId, mac: boolean): string[] {
   const code = SHORTCUTS.find((shortcut) => shortcut.id === id)!.code;
-  return [mac ? '⌥' : 'Alt', code === 'Slash' ? '/' : code.slice(3)];
+  const cap = code === 'ArrowLeft' ? '←' : code === 'ArrowRight' ? '→' : code === 'Slash' ? '/' : code.slice(3);
+  return [mac ? '⌥' : 'Alt', cap];
+}
+
+export function stepSale(ids: readonly string[], current: string, step: 1 | -1): string | null {
+  const index = ids.indexOf(current);
+  if (index === -1) return ids[step === 1 ? 0 : ids.length - 1] ?? null;
+  for (let offset = 1; offset < ids.length; offset++) {
+    const neighbour = ids[(index + step * offset + ids.length) % ids.length];
+    if (neighbour !== current) return neighbour;
+  }
+  return null;
 }
 
 // One handler per id, from whichever screen offers it now; listeners re-read the available set.
@@ -92,8 +109,13 @@ export function useShortcutKeys(enabled: boolean, onHelp: () => void, helpOpen: 
         metaKey: event.metaKey, editable: isEditable(event.target) || isEditable(document.activeElement) });
       if (!id) return;
       const { onHelp, helpOpen, closeHelp } = latest.current;
-      if (!helpOpen && escapeBlocked() && (id !== 'help.open' || document.querySelector('[role="alertdialog"]'))) return;
+      if (!helpOpen && escapeBlocked() && (id !== 'help.open' || document.querySelector('[role="alertdialog"]'))) {
+        if (id === 'cart.previous' || id === 'cart.next') event.preventDefault();
+        return;
+      }
       event.preventDefault();
+      // A held arrow switches sales only once, but must still prevent browser navigation.
+      if (event.repeat && (id === 'cart.previous' || id === 'cart.next')) return;
       if (id === 'help.open') { if (helpOpen) closeHelp(); else onHelp(); return; }
       if (!helpOpen) { runShortcut(id); return; }
       const blocked = otherOverlayOpen();
