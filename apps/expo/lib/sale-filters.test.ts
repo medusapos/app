@@ -1,7 +1,7 @@
 import { medusaProductTraits } from '@tallyui/connector-medusa';
 import type { ProductTraits } from '@tallyui/core';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isOnSale, loadSaleFilters, NO_SALE_FILTERS, saleFilterItems, saveSaleFilters, type SaleFilters } from './sale-filters';
+import { isOnSale, loadSaleFilters, loadSaleInStock, NO_SALE_FILTERS, saleFilterItems, saveSaleFilters, saveSaleInStock, type SaleFilters } from './sale-filters';
 import type { SessionStorage } from './session';
 
 const traits = medusaProductTraits as ProductTraits<unknown>;
@@ -59,6 +59,43 @@ describe('saveSaleFilters', () => {
     expect(() => saveSaleFilters(storage, store, { onSale: true, tag: null, collection: null })).not.toThrow();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(() => saveSaleFilters(null, store, NO_SALE_FILTERS)).not.toThrow();
+  });
+});
+
+describe('loadSaleInStock / saveSaleInStock', () => {
+  const stockKey = `medusapos.sale-in-stock.${store}`;
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  it('starts off for missing storage, missing values, corrupt JSON and non-booleans', () => {
+    expect(loadSaleInStock(null, store)).toBe(false);
+    expect(loadSaleInStock(memory(), store)).toBe(false);
+    for (const raw of ['{not json', '"true"', '1']) {
+      expect(loadSaleInStock(memory([[stockKey, raw]]), store)).toBe(false);
+    }
+  });
+
+  it('keeps true and false per store without changing the other Sale pills', () => {
+    const picks = JSON.stringify({ onSale: true, tag: 't1', collection: null });
+    const storage = memory([[key, picks]]);
+    const other = 'https://other.test';
+    saveSaleInStock(storage, store, true);
+    expect(loadSaleInStock(storage, store)).toBe(true);
+    expect(loadSaleInStock(storage, other)).toBe(false);
+    saveSaleInStock(storage, other, true);
+    saveSaleInStock(storage, store, false);
+    expect(storage.getItem(stockKey)).toBe('false');
+    expect(loadSaleInStock(storage, store)).toBe(false);
+    expect(loadSaleInStock(storage, other)).toBe(true);
+    expect(storage.getItem(key)).toBe(picks);
+  });
+
+  it('does nothing without storage and warns once when writing fails', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(() => saveSaleInStock(null, store, true)).not.toThrow();
+    expect(warn).not.toHaveBeenCalled();
+    const storage = { ...memory(), setItem: () => { throw new Error('QuotaExceededError'); } };
+    expect(() => saveSaleInStock(storage, store, true)).not.toThrow();
+    expect(warn).toHaveBeenCalledTimes(1);
   });
 });
 
