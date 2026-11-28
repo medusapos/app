@@ -76,7 +76,7 @@ export function PrintersGroup({ session }: { session: Session }) {
     if (collection) deletePrinter(collection, profile.id).catch((error: unknown) => console.warn('Could not delete the printer:', error));
   };
   const networkRows = profiles.filter((profile) => !profile.isBuiltIn && profile.connectionType === 'network');
-  return <SettingsGroup title="Printers" testID="settings-printers" description="Devices receipts can be sent to.">
+  return <SettingsGroup divider title="Printers" testID="settings-printers" description="Devices receipts can be sent to.">
     {profiles.map((profile, index) => {
       const id = `settings-printer-${profile.id}`;
       const network = web && !profile.isBuiltIn && profile.connectionType === 'network';

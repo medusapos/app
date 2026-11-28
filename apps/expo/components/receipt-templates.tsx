@@ -70,7 +70,7 @@ export function ReceiptTemplatesGroup({ session }: { session: Session }) {
       () => { if (opening.current === mine) setStatus('failed'); },
     );
   };
-  return <SettingsGroup title="Receipt templates" testID="settings-receipt-templates"
+  return <SettingsGroup divider title="Receipt templates" testID="settings-receipt-templates"
     description="Choose which printer each template prints to.">
     {RECEIPT_TEMPLATES.map((template, index) => {
       const actions = <>

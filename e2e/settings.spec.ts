@@ -277,6 +277,22 @@ test('Scale: Regular is the default, Auto persists after reload, and Regular res
   expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('regular');
 });
 
+test('at Spacious and 1024 px General keeps only Open and the value keeps its room', async ({ page }) => {
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await signIn(page);
+  await openArea(page, 'Settings');
+  await page.getByTestId('settings-nav-theme').click();
+  await page.getByTestId('scale-choice-spacious').click();
+  await page.getByTestId('settings-nav-store').click();
+  await expect(page.getByTestId('settings-store-name-admin-source')).toHaveCount(0);
+  await expect(page.getByTestId('settings-store-name-admin')).toBeVisible();
+  const value = (await page.getByTestId('settings-store-name').boundingBox())!;
+  expect(value.width).toBeGreaterThanOrEqual(80);
+  await page.getByTestId('settings-nav-theme').click();
+  await page.getByTestId('scale-choice-regular').click();
+  expect(await page.evaluate(() => localStorage.getItem('medusapos.scale'))).toBe('regular');
+});
+
 test.describe('at 1280 × 800', () => {
   test.use({ viewport: { width: 1280, height: 800 } });
 
@@ -317,11 +333,23 @@ test.describe('at 1280 × 800', () => {
       expect(valueBox.x, `${label}: the value starts after its label`).toBeGreaterThanOrEqual(labelBox.x + labelBox.width);
       expect(valueBox.x - labelBox.x, `${label}: the value sits beside its label`).toBeLessThanOrEqual(320);
     }
-    // The "Open ↗" follows its value on the same line.
-    const value = (await card.getByTestId('settings-store-name').boundingBox())!;
-    const open = (await card.getByTestId('settings-store-name-admin').boundingBox())!;
-    expect(open.x).toBeGreaterThanOrEqual(value.x + value.width);
-    expect(Math.abs((open.y + open.height / 2) - (value.y + value.height / 2))).toBeLessThan(4);
+    const cardBox = (await card.boundingBox())!;
+    const rightEdge = cardBox.x + cardBox.width - 16;
+    for (const row of ['name', 'currency', 'location', 'sales-channel']) {
+      const open = (await card.getByTestId(`settings-store-${row}-admin`).boundingBox())!;
+      const source = (await card.getByTestId(`settings-store-${row}-admin-source`).boundingBox())!;
+      expect(Math.abs(open.x + open.width - rightEdge), row).toBeLessThanOrEqual(24);
+      expect(source.x + source.width, row).toBeLessThanOrEqual(open.x);
+      expect(Math.abs((open.y + open.height / 2) - (source.y + source.height / 2)), row).toBeLessThanOrEqual(4);
+    }
+    await expect(card.getByTestId('settings-group-divider')).toHaveCount(3);
+    for (const [group, title] of [['settings-default-customer', 'Customer'], ['settings-currency', 'Currency & numbers'], ['settings-feedback', 'Feedback']]) {
+      const section = card.getByTestId(group);
+      const divider = (await section.getByTestId('settings-group-divider').boundingBox())!;
+      const heading = (await section.getByText(title, { exact: true }).boundingBox())!;
+      expect(Math.abs(divider.height - 1), title).toBeLessThanOrEqual(0.5);
+      expect(divider.y, title).toBeLessThan(heading.y);
+    }
     // No box inside the card: nothing in it but an input or button draws a border (TallyUI's box is an inner View).
     const bordered = await card.evaluate((root) => Array.from(root.querySelectorAll('*')).filter((el) => {
       if (el.closest('input, textarea, button, [role="button"], [role="switch"]')) return false;

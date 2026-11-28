@@ -6,7 +6,7 @@ import type { PaymentProvider } from '../lib/payment-providers';
 export function PaymentProvidersGroup({ providers }: { providers: PaymentProvider[] }) {
   const listed = providers.filter((provider) => provider.terminal === false);
   if (!listed.length) return null;
-  return <SettingsGroup title="Payment providers" testID="settings-payment-providers" description="The store's payment providers in Medusa. Read-only.">
+  return <SettingsGroup divider title="Payment providers" testID="settings-payment-providers" description="The store's payment providers in Medusa. Read-only.">
     {listed.map((provider, index) => <SettingsRow key={provider.id} label={provider.name} testID={`settings-payment-provider-${provider.id}`}
       divider={index > 0} action={
         <Text testID={`settings-payment-provider-${provider.id}-state`}
