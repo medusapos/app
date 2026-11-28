@@ -583,7 +583,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const saleId = sale.stage.kind === 'receipt' ? sale.stage.order.id : undefined;
   const sentTo = sentReceipt && sentReceipt.saleId === saleId ? sentReceipt.email : null;
   const emailReceipt = connector.emailReceipt ? <EmailReceipt
-    sentTo={sentTo} onSentChange={(email) => setSentReceipt(email !== null && saleId !== undefined ? { saleId, email } : null)}
+    onSentChange={(email) => setSentReceipt(email !== null && saleId !== undefined ? { saleId, email } : null)}
     orderId={paidLive?.serverRefs?.orderId}
     online={online} defaultEmail={paid?.customer?.email
       ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}

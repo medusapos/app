@@ -4,16 +4,17 @@ import { Button, Dialog, DialogContent, DialogFooter, DialogTitle, IconButton, I
 import { ConnectorUnauthorizedError, CustomerServiceError } from '@tallyui/core';
 import { RECEIPT_EMAIL_FAILED } from '../lib/receipt-email';
 
+/** Full-width “Receipt sent to …” confirmation for the paid footer's `notice` row. */
 export function EmailReceiptSent({ email }: { email: string }) {
   return <Text accessibilityRole="alert" className="w-full">{`Receipt sent to ${email}.`}</Text>;
 }
 
-/** The paid screen's "Email receipt" button, opening v2's Email Receipt dialog; a sent receipt is confirmed under it. */
+/** Opens the paid screen's Email Receipt dialog. A successful send reports the address through `onSentChange`;
+ * the caller shows it with `EmailReceiptSent`. */
 export function EmailReceipt({ orderId, online, defaultEmail, send, onUnauthorized, onSentChange }: {
   orderId: string | undefined;
   online: boolean;
   defaultEmail?: string;
-  sentTo: string | null;
   onSentChange: (email: string | null) => void;
   send: (orderId: string, email: string) => Promise<void>;
   onUnauthorized: () => void;

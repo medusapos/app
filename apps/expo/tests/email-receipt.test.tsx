@@ -21,9 +21,9 @@ const Host = ({ children }: { children: ReactNode }) => <>{children}<PortalHost 
 const field = () => screen.getByLabelText('Email Address') as HTMLInputElement;
 const sendButton = () => screen.getByTestId('receipt-email-send');
 
-function Harness(props: Omit<ComponentProps<typeof EmailReceipt>, 'sentTo' | 'onSentChange'>) {
+function Harness(props: Omit<ComponentProps<typeof EmailReceipt>, 'onSentChange'>) {
   const [sentTo, setSentTo] = useState<string | null>(null);
-  return <><EmailReceipt {...props} sentTo={sentTo} onSentChange={setSentTo} />
+  return <><EmailReceipt {...props} onSentChange={setSentTo} />
     {sentTo ? <EmailReceiptSent email={sentTo} /> : null}</>;
 }
 
