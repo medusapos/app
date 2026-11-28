@@ -482,6 +482,16 @@ describe('the paid screen network receipt', () => {
     expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
   });
 
+  it('says Sent to the print dialog after a Standard auto-print and offers Print again', async () => {
+    saveReceiptTemplate(localStorage, session.baseUrl, 'standard');
+    savePrintingSettings(localStorage, session.baseUrl, { autoPrintReceipt: true });
+    const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});
+    await completeSale('external');
+    expect((await screen.findByTestId('paid-print-done')).textContent).toBe('Sent to the print dialog');
+    expect(screen.getByRole('button', { name: 'Print again' })).toBeTruthy();
+    expect(dialog).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['external', 'cash'] as const)('prints a %s sale directly, with only the cash sale opening the drawer', async (method) => {
     saveReceiptPrinter(localStorage, session.baseUrl, 'thermal-80mm', 'counter');
     const dialog = vi.spyOn(window, 'print').mockImplementation(() => {});

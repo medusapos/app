@@ -59,7 +59,7 @@ let seenSaleId: string | undefined;
 export function useAutoPrintReceipt(
   saleId: string | undefined, enabled: boolean, print: () => void | Promise<void> = printWindow, after?: () => void, destination?: string,
 ) {
-  // Returns the original print promise for this sale and destination, or null when there is none.
+  // Returns the auto-print job for this sale and destination, or null when there is none.
   const owner = useMemo(() => ({ saleId, destination }), [saleId, destination]);
   const [job, setJob] = useState<{ owner: typeof owner; promise: Promise<void> }>();
   // The latest `after`, so the call never uses one from an earlier render.
@@ -70,8 +70,9 @@ export function useAutoPrintReceipt(
     seenSaleId = saleId;
     // Not cleared on cleanup: StrictMode's second effect run is then a no-op, not a cancelled print.
     if (enabled) setTimeout(() => {
-      const promise = print();
-      if (promise) { promise.catch(() => {}); setJob({ owner, promise }); }
+      const promise = print() ?? Promise.resolve();
+      promise.catch(() => {});
+      setJob({ owner, promise });
       afterRef.current?.();
     }, AUTO_PRINT_SETTLE_MS);
     else afterRef.current?.();
