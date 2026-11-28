@@ -226,3 +226,23 @@ it('marks each payment of an awaiting split sale Recorded offline', async () => 
     expect(summary.getByTestId(`summary-recorded-offline-${id}`).textContent).toBe('Recorded offline');
   }
 }, 15000);
+
+it("the paid receipt and summary gain the store's display number once the store applies the sale", async () => {
+  await startTender();
+  takeLeg('cash', '24.00');
+  const order = await complete();
+  const shortId = order.id.slice(-8);
+  await outboxNow(order, 'pending');
+  expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${shortId}`);
+  await outboxNow({ ...order, serverRefs: { orderId: 'order_1', displayId: '42', totalMinor: order.totalMinor } }, 'applied');
+  const reference = `${shortId} · #42`;
+  expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${reference}`);
+  expect(within(screen.getByTestId('paid-summary')).getByText(reference, { exact: false })).toBeTruthy();
+}, 15000);
+
+it('before the outbox has the sale, the paid screen still shows the snapshot', async () => {
+  await startTender();
+  takeLeg('cash', '24.00');
+  const order = await complete();
+  expect(screen.getByTestId('receipt-order').textContent).toBe(`Order ${order.id.slice(-8)}`);
+}, 15000);

@@ -560,8 +560,11 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   </RegisterGate>;
 
   const paid = sale.stage.kind === 'receipt' ? sale.stage.posOrder : undefined;
+  const paidLive = recent.find(order => order.id === paid?.id);
+  // The completion snapshot never gains the store's refs; read the outbox row once it is there (#621).
+  const paidPosOrder = paidLive ?? paid;
   // v2's "Awaiting store" headline while the paid sale's outbox entry is unsent (offline, or a send failed).
-  const awaiting = useAwaitingStore(recent.find(order => order.id === paid?.id), online, outboxState);
+  const awaiting = useAwaitingStore(paidLive, online, outboxState);
   useEffect(() => { if (sale.stage.kind === 'receipt') injectPaidScrollPrintStyle(); }, [sale.stage.kind]);
   const wide = width >= ROW_BREAKPOINT;
   const paidHeadline = sale.stage.kind === 'receipt' && (awaiting || changeDueMinor(sale.stage.order) > 0);
@@ -569,12 +572,12 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
   const pickers = Platform.OS === 'web';
   const paper = pickers ? RECEIPT_TEMPLATES.find((t) => t.id === receiptTemplateId)?.paper : undefined;
   const emailReceipt = connector.emailReceipt ? <EmailReceipt
-    orderId={recent.find(order => order.id === paid?.id)?.serverRefs?.orderId}
+    orderId={paidLive?.serverRefs?.orderId}
     online={online} defaultEmail={paid?.customer?.email
       ?? (paid?.customer && paid.customer.id === defaultCustomer?.id ? defaultCustomer?.email : undefined)}
     send={(orderId, email) => connector.emailReceipt!(syncContext, orderId, email)} onUnauthorized={onUnauthorized} /> : undefined;
   const thermalArgs = sale.stage.kind === 'receipt' && paper ? { paper, order: sale.stage.order,
-    posOrder: sale.stage.posOrder, store: receiptStore, cashier: session.name || session.email, registerId } : undefined;
+    posOrder: paidPosOrder, store: receiptStore, cashier: session.name || session.email, registerId } : undefined;
   const thermalPage = thermalArgs && thermalPaidPage(thermalArgs);
   const networkPrinter = paper ? chosenNetworkPrinter(receiptTemplateId, printers, receiptPrinterId) : undefined;
   const printPaidReceipt = thermalArgs && networkPrinter ? () => printReceiptToNetwork(networkPrinter, paidReceiptData(thermalArgs), thermalArgs.paper)
@@ -592,13 +595,13 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
     <ScrollView testID="paid-scroll" dataSet={{ print: 'scroll' }} className="flex-1">
       {/* v2 leads the paid screen with the change, or an unsent sale with "Awaiting store"; screen only, not printed. */}
       {paidHeadline && <View dataSet={{ print: 'hide' }} style={{ paddingTop: topInset + 16 }} className="w-full max-w-md self-center px-4">
-        {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={sale.stage.posOrder} />
-          : <PaidChange order={sale.stage.order} posOrder={sale.stage.posOrder} />}
+        {awaiting ? <PaidAwaiting order={sale.stage.order} posOrder={paidPosOrder ?? sale.stage.posOrder} />
+          : <PaidChange order={sale.stage.order} posOrder={paidPosOrder ?? sale.stage.posOrder} />}
       </View>}
       {pickers && <ReceiptPickers templateId={receiptTemplateId} onTemplateChange={setReceiptTemplateId} printers={printers}
         printerId={receiptPrinterId} onPrinterChange={setReceiptPrinterId} topInset={paidHeadline ? 0 : leadInset} />}
       {thermalPage !== undefined ? <ThermalPaidReceipt page={thermalPage} />
-        : <Receipt order={sale.stage.order} posOrder={sale.stage.posOrder} store={receiptStore} actions={false}
+        : <Receipt order={sale.stage.order} posOrder={paidPosOrder} store={receiptStore} actions={false}
           topInset={paidHeadline || pickers ? 0 : leadInset} formatDate={formatReceiptDate} taxLabel={taxLabel}
           cashier={session.name || session.email} registerId={registerId} />}
     </ScrollView>
@@ -665,7 +668,7 @@ function SignedInProducts({ session, signOut, onUnauthorized, settings, settings
       {sale.stage.kind === 'receipt' ? wide ? <View testID="paid-layout" className="flex-1 flex-row">
         {paidReceipt}
         <View dataSet={{ print: 'hide' }} className="w-96 self-stretch" style={{ paddingTop: topInset }}>
-          <PaidSummary order={sale.stage.order} posOrder={sale.stage.posOrder} storeName={receiptStore.name}
+          <PaidSummary order={sale.stage.order} posOrder={paidPosOrder ?? sale.stage.posOrder} storeName={receiptStore.name}
             taxLabel={taxLabel} formatDate={(iso) => formatPaidDate(iso)} awaiting={awaiting} />
         </View>
       </View> : paidReceipt :
