@@ -10,6 +10,7 @@ import SettingsScreen from '../app/settings';
 import { CustomerDisplayProvider } from '../lib/customer-display-context';
 import { saveSession } from '../lib/session';
 import { SessionProvider, useSession } from '../lib/session-context';
+import { advancePastExpiry } from './pairing-clock';
 import { setWindowWidth } from './window-width';
 
 let memory: ReturnType<typeof createMemoryDisplaySignalling>;
@@ -58,6 +59,7 @@ it.each([['SC-2', 'web', false], ['SC-3', 'ios', true]] as const)('%s: no Custom
 it.each(['SX-1: live code', 'SX-2: expired code'])('%s stops polling after leaving the section and receiving an empty list', async (scenario) => {
   vi.useFakeTimers();
   const mint = vi.spyOn(memory.signalling, 'mint');
+  const pending = vi.spyOn(memory.signalling, 'pending');
   let finishList!: (empty: []) => void;
   const list = vi.spyOn(memory.signalling, 'list').mockReturnValueOnce(new Promise((resolve) => { finishList = resolve; }));
   await mount(true);
@@ -70,7 +72,7 @@ it.each(['SX-1: live code', 'SX-2: expired code'])('%s stops polling after leavi
   const { code, expiresAt } = await mint.mock.results[0].value;
   expect(screen.getByTestId('pairing-code').textContent).toBe(code);
   if (scenario.startsWith('SX-2')) {
-    await act(() => vi.advanceTimersByTimeAsync(Date.parse(expiresAt) - Date.now() + 1));
+    await advancePastExpiry(expiresAt, pending);
     await vi.waitFor(() => expect(screen.getByTestId('pairing-error').textContent).toMatch(/expired/i));
   }
   fireEvent.click(screen.getByTestId('settings-nav-store'));
@@ -172,13 +174,14 @@ it('SX-4: leaving after a lost confirm response preserves the paired hint and po
 it('SX-5: an expired code stays visible without polling until the cashier starts again', async () => {
   vi.useFakeTimers();
   const mint = vi.spyOn(memory.signalling, 'mint');
+  const pending = vi.spyOn(memory.signalling, 'pending');
   const list = vi.spyOn(memory.signalling, 'list');
   await mount(true);
   fireEvent.click(screen.getByTestId('settings-nav-customer-display'));
   fireEvent.click(screen.getByTestId('pairing-start'));
   await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
   const { expiresAt } = await mint.mock.results[0].value;
-  await act(() => vi.advanceTimersByTimeAsync(Date.parse(expiresAt) - Date.now() + 1));
+  await advancePastExpiry(expiresAt, pending);
   await vi.waitFor(() => expect(screen.getByTestId('pairing-error').textContent).toMatch(/expired/i));
   list.mockClear();
   await act(() => vi.advanceTimersByTimeAsync(30000));
@@ -199,6 +202,7 @@ it('SX-6: an expired code from before an advertisement change does not reappear 
     close() {}
   });
   const mint = vi.spyOn(memory.signalling, 'mint');
+  const pending = vi.spyOn(memory.signalling, 'pending');
   let mergeCapabilities!: ReturnType<typeof useSession>['mergeCapabilities'];
   function Probe() {
     mergeCapabilities = useSession().mergeCapabilities;
@@ -220,7 +224,7 @@ it('SX-6: an expired code from before an advertisement change does not reappear 
   fireEvent.click(screen.getByTestId('pairing-start'));
   await vi.waitFor(() => expect(screen.getByTestId('pairing-code')).toBeTruthy());
   const { expiresAt } = await mint.mock.results[1].value;
-  await act(() => vi.advanceTimersByTimeAsync(Date.parse(expiresAt) - Date.now() + 1));
+  await advancePastExpiry(expiresAt, pending);
   await vi.waitFor(() => expect(screen.getByTestId('pairing-error').textContent).toMatch(/expired/i));
 
   act(() => mergeCapabilities({ orderCreate: 7, customerDisplay: { iceServers: [], snapshot: false } }));

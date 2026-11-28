@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { CustomerDisplayProvider, useCustomerDisplay } from '../lib/customer-display-context';
 import { REGISTER_ID_KEY, saveSession } from '../lib/session';
 import { SessionProvider, useSession } from '../lib/session-context';
+import { advancePastExpiry } from './pairing-clock';
 
 let memory: ReturnType<typeof createMemoryDisplaySignalling>;
 let headers: Record<string, string>;
@@ -249,7 +250,7 @@ it('IT-11: an expired code with no displays stops polling', async () => {
   await firstList();
   const { phase } = pairing;
   if (phase.phase !== 'code') throw Error('Expected pairing code');
-  await act(() => vi.advanceTimersByTimeAsync(Date.parse(phase.expiresAt) - Date.now() + 1));
+  await advancePastExpiry(phase.expiresAt, vi.mocked(memory.signalling.pending));
   expect(result.current).toMatchObject({ service: null, pairing: null });
   expect(localStorage.getItem(hint)).toBe('0');
   vi.mocked(memory.signalling.list).mockClear();
