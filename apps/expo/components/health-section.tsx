@@ -6,7 +6,7 @@ import { AppText as Text } from './app-text';
 import { version as appVersion } from '../package.json';
 import { formatLogLine, recentLogs, subscribeRecentLogs } from '../lib/logging';
 import { useOutboxContext } from '../lib/outbox-context';
-import { readPluginContractVersion } from '../lib/plugin-contract';
+import { readPluginInfoSummary } from '../lib/plugin-contract';
 import { useRegister } from '../lib/register-context';
 import type { Session } from '../lib/session';
 import { SettingsGroup, SettingsRow } from '../lib/settings-layout';
@@ -33,13 +33,13 @@ export function HealthSection({ session }: { session: Session }) {
   const { state: sales } = useOutboxContext();
   const { registerOutbox } = useRegister();
   const health = summarizeOutboxHealth(sales, registerOutbox.state);
-  const [contract, setContract] = useState<number | null>(null);
+  const [plugin, setPlugin] = useState<Awaited<ReturnType<typeof readPluginInfoSummary>> | null>(null);
   const [storage, setStorage] = useState<number | null>(null);
   const [logs, setLogs] = useState(recentLogs);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   useEffect(() => {
     let live = true;
-    void readPluginContractVersion(session).then((version) => { if (live) setContract(version); });
+    void readPluginInfoSummary(session).then((summary) => { if (live) setPlugin(summary); });
     void storageUsageBytes().then((bytes) => { if (live) setStorage(bytes); });
     return () => { live = false; };
   }, [session]);
@@ -55,7 +55,9 @@ export function HealthSection({ session }: { session: Session }) {
     <SettingsGroup title="Store connection" description="Read-only." testID="settings-health">
       <SettingsRow label="Store URL" action={<Value testID="settings-health-store-url">{session.baseUrl}</Value>} />
       <SettingsRow label="Plugin contract" divider
-        action={<Value testID="settings-health-plugin-contract">{contract ?? 'Unknown'}</Value>} />
+        action={<Value testID="settings-health-plugin-contract">{plugin?.contract ?? 'Unknown'}</Value>} />
+      <SettingsRow label="Plugin version" divider
+        action={<Value testID="settings-health-plugin-version">{plugin?.version ?? 'Unknown'}</Value>} />
       <SettingsRow label="App version" divider action={<Value testID="settings-health-app-version">{appVersion}</Value>} />
     </SettingsGroup>
     <SettingsGroup title="This device"

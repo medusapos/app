@@ -30,7 +30,7 @@ beforeEach(() => {
   clearRecentLogs();
   outboxes.sales = { pending: 0, sending: false };
   outboxes.till = { pending: 0, sending: false };
-  vi.stubGlobal('fetch', info({ pluginContract: 5, contracts: {} }));
+  vi.stubGlobal('fetch', info({ pluginContract: 5, pluginVersion: '0.3.0', contracts: {} }));
   Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
   Object.defineProperty(navigator, 'storage', { value: { estimate: async () => ({ usage: 25165824 }) }, configurable: true });
 });
@@ -46,9 +46,24 @@ describe('Settings › Health', () => {
     await mount();
     expect(text('settings-health-store-url')).toBe('https://store.test');
     await waitFor(() => expect(text('settings-health-plugin-contract')).toBe('5'));
-    expect(vi.mocked(fetch)).toHaveBeenCalledWith('https://store.test/tally/v1/info', expect.anything());
+    expect(text('settings-health-plugin-version')).toBe('0.3.0');
+    expect(vi.mocked(fetch)).toHaveBeenCalledExactlyOnceWith('https://store.test/tally/v1/info', expect.anything());
     expect(text('settings-health-app-version')).toBe(appVersion);
     expect(text('settings-health-storage')).toBe('24 MB');
+  });
+
+  it('shows Unknown plugin version for a plugin from before the field', async () => {
+    vi.stubGlobal('fetch', info({ contracts: {}, pluginContract: 5 }));
+    await mount();
+    await waitFor(() => expect(text('settings-health-plugin-contract')).toBe('5'));
+    expect(text('settings-health-plugin-version')).toBe('Unknown');
+  });
+
+  it('shows Unknown plugin version when /info sends null', async () => {
+    vi.stubGlobal('fetch', info({ contracts: {}, pluginContract: 5, pluginVersion: null }));
+    await mount();
+    await waitFor(() => expect(text('settings-health-plugin-contract')).toBe('5'));
+    expect(text('settings-health-plugin-version')).toBe('Unknown');
   });
 
   it('shows Unknown when /info fails', async () => {
@@ -57,6 +72,7 @@ describe('Settings › Health', () => {
     await waitFor(() => expect(vi.mocked(fetch)).toHaveBeenCalledOnce());
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(text('settings-health-plugin-contract')).toBe('Unknown');
+    expect(text('settings-health-plugin-version')).toBe('Unknown');
   });
 
   it('shows the sales and till updates waiting to send, and those that need attention', async () => {

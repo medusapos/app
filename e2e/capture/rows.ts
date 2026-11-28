@@ -583,6 +583,7 @@ export const rows: CaptureRow[] = [
   { id: '15h', title: 'Settings, health', state: 'Settings › Health', reach: async (page, size) => {
     await settings(page, size, 'health');
     await expect(page.getByTestId('settings-health-plugin-contract')).toHaveText(/^\d+$/);
+    await expect(page.getByTestId('settings-health-plugin-version')).toHaveText(/^\d+\.\d+\.\d+/);
   } },
   { id: '16', title: 'Sign-in / connect', state: 'Sign-in screen after Sign out', reach: signOut },
   { id: '17a', title: 'Phone, POS', state: 'The Sale with a line in the cart', only: ['phone'], reach: async (page) => {

@@ -356,6 +356,7 @@ test('Health shows the store URL, plugin contract, storage used, waiting sales a
   await openSettings(page, 'Health');
   await expect(page.getByTestId('settings-health-store-url')).toHaveText(backend);
   await expect(page.getByTestId('settings-health-plugin-contract')).toHaveText(/^\d+$/);
+  await expect(page.getByTestId('settings-health-plugin-version')).toHaveText(/^\d+\.\d+\.\d+/);
   // Chromium has navigator.storage.estimate.
   await expect(page.getByTestId('settings-health-storage')).toHaveText(/^\d+(\.\d)? (B|KB|MB|GB)$/);
   await expect(page.getByTestId('settings-health-sales-pending')).toHaveText('0');

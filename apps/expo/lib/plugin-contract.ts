@@ -46,9 +46,18 @@ export async function readPluginContract(session: Pick<Session, 'baseUrl' | 'tok
  */
 export async function readPluginContractVersion(session: Pick<Session, 'baseUrl' | 'token'>, fetchImpl = globalThis.fetch,
   timeoutMs = 5000): Promise<number | null> {
+  return (await readPluginInfoSummary(session, fetchImpl, timeoutMs)).contract;
+}
+
+/** Reads both facts from one /info response. A missing `pluginVersion` means a plugin from before the field. */
+export async function readPluginInfoSummary(session: Pick<Session, 'baseUrl' | 'token'>, fetchImpl = globalThis.fetch,
+  timeoutMs = 5000): Promise<{ contract: number | null; version: string | null }> {
   const body = await readInfo(session, fetchImpl, timeoutMs);
-  if (!isRecord(body) || !isRecord(body.contracts)) return null;
-  return typeof body.pluginContract === 'number' && Number.isSafeInteger(body.pluginContract) ? body.pluginContract : 0;
+  if (!isRecord(body) || !isRecord(body.contracts)) return { contract: null, version: null };
+  return {
+    contract: typeof body.pluginContract === 'number' && Number.isSafeInteger(body.pluginContract) ? body.pluginContract : 0,
+    version: typeof body.pluginVersion === 'string' ? body.pluginVersion.trim() || null : null,
+  };
 }
 
 // The /info body of a 2xx answer, or undefined when the read failed or timed out.
