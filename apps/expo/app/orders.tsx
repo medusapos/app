@@ -1,6 +1,6 @@
 import { useContext, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { Redirect, router, Stack, type Href } from 'expo-router';
+import { Redirect, router, Stack, usePathname, type Href } from 'expo-router';
 import { Button, OrderFilterBar, SearchInput, Text as ButtonText } from '@tallyui/components';
 import { getDeviceId, needsAttention, type OrderFilterValue } from '@tallyui/pos';
 import { AreaAccountButton, FrameMenuButton, frameStep, useFrameMenu } from '../components/app-frame';
@@ -19,6 +19,10 @@ import { filterOrders, orderFilterOptions } from '../lib/order-filters';
 import { mergeOrderRows, useStoreOrders, useStoreOrderWithRefundLines, type OrdersRow } from '../lib/store-orders';
 import { orderBillingCell } from '../lib/orders-table';
 import { requestReopen } from '../lib/reopen-order';
+import { playScanBeep } from '../lib/scan-beep';
+import { useScannerSettings } from '../lib/scanner-settings';
+import { useDeviceScans } from '../lib/use-device-scans';
+import { useWedgeScan, useWedgeScanField } from '../lib/use-wedge-scan';
 
 export const ORDERS_LOADING_TEXT = 'Loading orders…';
 export const ORDERS_EMPTY_TEXT = 'No orders yet.';
@@ -36,6 +40,13 @@ export default function OrdersScreen() {
 function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnauthorized: () => void }) {
   const { recent, requeue, flush, state, orders: localOrders } = useOutboxContext();
   const [search, setSearch] = useState('');
+  // v2: "On the Products and Orders screens, a scan goes into that screen's search box".
+  const { settings: scannerSettings } = useScannerSettings(defaultStorage(), session.baseUrl);
+  const pathname = usePathname();
+  const onScan = (code: string) => { if (scannerSettings.playSound) playScanBeep(); setSearch(code); };
+  const onSearchKeyPress = useWedgeScanField(scannerSettings, onScan);
+  useWedgeScan(pathname === '/orders', scannerSettings, onScan);
+  useDeviceScans(pathname === '/orders', onScan);
   const [filters, setFilters] = useState<OrderFilterValue>({});
   const [openId, setOpenId] = useState<string | null>(null);
   const [openStoreId, setOpenStoreId] = useState<string | null>(null);
@@ -79,7 +90,7 @@ function StoreWideOrders({ session, onUnauthorized }: { session: Session; onUnau
     <Stack.Screen options={{ title: 'Orders', headerShown: !!openMenu, headerLeft: () => <FrameMenuButton />, headerRight: () => <View className="pr-4"><AreaAccountButton /></View> }} />
     <View className="flex-row items-center gap-2 px-4 pb-2" style={{ paddingTop: 16 + topInset }}>
       <SearchInput className="flex-1" value={search} onChangeText={setSearch} placeholder="Search Orders"
-        accessibilityLabel="Search Orders" testID="orders-search" />
+        accessibilityLabel="Search Orders" testID="orders-search" onKeyPress={onSearchKeyPress} />
       {!openMenu && <AreaAccountButton />}
     </View>
     <View className="px-4 pb-2">
