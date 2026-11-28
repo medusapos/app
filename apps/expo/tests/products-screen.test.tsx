@@ -1520,6 +1520,40 @@ describe('ProductsScreen sale layout (ADR 0009)', () => {
     expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
   });
 
+  it.each(['/products', '/orders', '/customers', '/reports', '/settings'])('at 1280 wide Escape on %s keeps the tender open under it', async (route) => {
+    const view = await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    expect(button('Complete sale')).toBeTruthy();
+    try {
+      vi.mocked(usePathname).mockReturnValue(route);
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      escape();
+      vi.mocked(usePathname).mockReturnValue('/');
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      expect(button('Complete sale')).toBeTruthy();
+      expect(screen.queryByTestId('cart-checkout')).toBeNull();
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
+  });
+
+  it('at 1280 wide Escape back on the Sale after an area leaves the tender', async () => {
+    const view = await mount();
+    fireEvent.click(screen.getByTestId('product-tile-Shirt'));
+    await checkout();
+    expect(button('Complete sale')).toBeTruthy();
+    try {
+      vi.mocked(usePathname).mockReturnValue('/orders');
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      escape();
+      vi.mocked(usePathname).mockReturnValue('/');
+      await act(async () => { view.rerender(<SessionProvider><ProductsScreen /><PortalHost /></SessionProvider>); });
+      expect(button('Complete sale')).toBeTruthy();
+      escape();
+      expect(screen.queryByRole('button', { name: 'Complete sale' })).toBeNull();
+      expect(cartLineCells('Shirt')).toEqual(['1', 'Shirt', '€12.00', '€12.00']);
+    } finally { vi.mocked(usePathname).mockReturnValue('/'); }
+  });
+
   it('at 1280 wide an Escape typed in the Terminal reference field keeps the tender', async () => {
     await mount();
     fireEvent.click(screen.getByTestId('product-tile-Shirt'));
